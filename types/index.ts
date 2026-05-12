@@ -18,6 +18,7 @@ export interface User {
   role: UserRole
   status: UserStatus
   department?: string | null
+  department_id?: string | null
   phone?: string | null
   created_at?: string
   updated_at?: string

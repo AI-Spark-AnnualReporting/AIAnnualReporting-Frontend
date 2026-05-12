@@ -59,7 +59,6 @@ export default function CycleDetailPage({
   const { data: cycleData, isLoading: cycleLoading } = useCycle(id)
   const { data: overview, isLoading: overviewLoading } = useCycleOverview(id)
   const { data: deptsData } = useDepartments()
-  const { data: usersData } = useUsers()
   const uploadMutation = useUploadKickoffDocs()
   const assignMutation = useAssignDepartments()
   const updateMutation = useUpdateCycle()
@@ -136,9 +135,6 @@ export default function CycleDetailPage({
   const isActiveWithNoSessions = !isDraft && (overview?.departments?.length ?? 0) === 0
 
   const departments = deptsData?.departments || []
-  const users = usersData?.users || []
-  const deptUsers = users.filter((u) => u.role === "department_user")
-  const pmUsers = users.filter((u) => u.role === "project_manager")
 
   // Helper: stable identifier for a department (backend may use id or department_id)
   const getDeptKey = (d: Department) => d.department_id ?? d.id ?? d.department_code
@@ -164,8 +160,7 @@ export default function CycleDetailPage({
     setSavedAt(null)
   }
 
-  const setAssignmentUser = (deptId: string, userId: string) => {
-    const user = users.find((u) => u.user_id === userId) || null
+  const setAssignmentUser = (deptId: string, user: User | null) => {
     setAssignments((prev) =>
       prev.map((a) => (getDeptKey(a.department) === deptId ? { ...a, user } : a))
     )
@@ -329,21 +324,13 @@ export default function CycleDetailPage({
                     <p className="text-sm font-medium truncate">{a.department.department_name}</p>
                     <p className="text-xs text-muted-foreground font-mono">{a.department.department_code}</p>
                   </div>
-                  <Select
-                    value={a.user?.user_id || ""}
-                    onValueChange={(val) => setAssignmentUser((a.department.department_id ?? a.department.id)!, val)}
-                  >
-                    <SelectTrigger className="w-44 h-8 text-xs">
-                      <SelectValue placeholder="Assign user…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {deptUsers.map((u) => (
-                        <SelectItem key={u.user_id} value={u.user_id}>
-                          {u.full_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <DeptUserSelect
+                    department={a.department}
+                    selectedUser={a.user}
+                    onChange={(user) =>
+                      setAssignmentUser((a.department.department_id ?? a.department.id)!, user)
+                    }
+                  />
                   {a.user ? (
                     <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
                   ) : (
@@ -563,5 +550,51 @@ export default function CycleDetailPage({
         )}
       </div>
     </div>
+  )
+}
+
+function DeptUserSelect({
+  department,
+  selectedUser,
+  onChange,
+}: {
+  department: Department
+  selectedUser: User | null
+  onChange: (user: User | null) => void
+}) {
+  const departmentId = department.department_id ?? department.id
+  const { data, isLoading } = useUsers({
+    department_id: departmentId,
+    role: "department_user",
+    page_size: 100,
+  })
+  const users = data?.users ?? []
+  const isEmpty = !isLoading && users.length === 0
+
+  return (
+    <Select
+      value={selectedUser?.user_id || ""}
+      onValueChange={(val) => onChange(users.find((u) => u.user_id === val) ?? null)}
+      disabled={isLoading || isEmpty}
+    >
+      <SelectTrigger className="w-44 h-8 text-xs">
+        <SelectValue
+          placeholder={
+            isLoading
+              ? "Loading…"
+              : isEmpty
+                ? "No users in department"
+                : "Assign user…"
+          }
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {users.map((u) => (
+          <SelectItem key={u.user_id} value={u.user_id}>
+            {u.full_name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }

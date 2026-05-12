@@ -23,6 +23,7 @@ export interface UsersFilters {
   role?: string
   status?: string
   department?: string
+  department_id?: string
 }
 
 export interface UsersResponse {
