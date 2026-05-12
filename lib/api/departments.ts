@@ -5,8 +5,6 @@ export interface CreateDepartmentPayload {
   department_code: string
   department_name: string
   description?: string
-  initial_prompt?: string
-  system_prompt?: string
 }
 
 export interface UpdateDepartmentPayload {
@@ -31,7 +29,11 @@ export const departmentsApi = {
 
   get: async (deptId: string): Promise<{ success: boolean; department: Department }> => {
     const { data } = await apiClient.get(`/admin/departments/${deptId}`)
-    return data
+    // Backend may return either { success, department } or the bare Department object.
+    if (data && typeof data === "object" && "department" in data) {
+      return data
+    }
+    return { success: true, department: data as Department }
   },
 
   create: async (payload: CreateDepartmentPayload) => {

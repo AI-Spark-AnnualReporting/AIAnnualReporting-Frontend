@@ -267,6 +267,7 @@ export default function CycleDetailPage({
           </Button>
         </Link>
         <PageHeader
+          className="flex-1"
           title={cycle?.cycle_name || "Cycle Detail"}
           description={
             cycle
@@ -274,36 +275,10 @@ export default function CycleDetailPage({
               : ""
           }
           action={
-            <div className="flex gap-2">
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                accept=".pdf,.docx,.doc,.txt"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-              <Button
-                variant="outline"
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading}
-              >
-                <FileUp className="mr-2 h-4 w-4" />
-                {uploading ? "Uploading..." : "Upload Docs"}
-              </Button>
-              <Button variant="outline" onClick={() => setEditOpen(true)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
-              {isDraft && (
-                <Link href={`/admin/cycles/${id}/activate`}>
-                  <Button>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Activate Cycle
-                  </Button>
-                </Link>
-              )}
-            </div>
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
           }
         />
       </div>
@@ -449,9 +424,7 @@ export default function CycleDetailPage({
               <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
               <p className="text-xs text-green-700">
                 Assignments saved at {savedAt.toLocaleTimeString()}.
-                {isDraft
-                  ? <> You can now <Link href={`/admin/cycles/${id}/activate`} className="font-semibold underline">activate the cycle</Link>.</>
-                  : " Click \"Re-generate Sessions\" below to create sessions for newly assigned departments."}
+                {!isDraft && " Click \"Re-generate Sessions\" below to create sessions for newly assigned departments."}
               </p>
             </div>
           )}
@@ -520,33 +493,9 @@ export default function CycleDetailPage({
               <Label>Cycle Name</Label>
               <Input {...editRegister("cycle_name")} placeholder="Annual Report 2025" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Fiscal Year</Label>
-                <Input type="number" {...editRegister("fiscal_year", { valueAsNumber: true })} placeholder="2025" />
-              </div>
-              <div className="space-y-2">
-                <Label>Project Manager</Label>
-                <Controller
-                  name="project_manager_id"
-                  control={editControl}
-                  render={({ field }) => (
-                    <Select value={field.value || "__none__"} onValueChange={(v) => field.onChange(v === "__none__" ? "" : v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select PM" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {pmUsers.map((u) => (
-                          <SelectItem key={u.user_id} value={u.user_id}>
-                            {u.full_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Fiscal Year</Label>
+              <Input type="number" {...editRegister("fiscal_year", { valueAsNumber: true })} placeholder="2025" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -603,13 +552,6 @@ export default function CycleDetailPage({
             icon={Building2}
             title="No sessions yet"
             description="Assign departments above, save, then activate the cycle to generate sessions."
-            action={
-              <Link href={`/admin/cycles/${id}/activate`}>
-                <Button>
-                  <Zap className="mr-2 h-4 w-4" /> Activate Cycle
-                </Button>
-              </Link>
-            }
           />
         ) : (
           <DataTable
