@@ -56,22 +56,14 @@ export const pmApi = {
   },
 
   /**
-   * Fetch PM cycle dashboard via our Next.js server-side proxy.
-   * The real backend GET /pm/dashboard/{cycle_id} always returns departments:[]
-   * due to a confirmed backend bug.  Our proxy aggregates department sessions
-   * by logging in as each dept user server-side, giving the PM real data.
+   * Fetch PM cycle dashboard directly from the backend.
+   * The previous departments:[] backend bug has been fixed — we now get full
+   * cycle metadata + per-status stats + an array of department session summaries
+   * straight from GET /pm/dashboard/{cycle_id}.
    */
   cycleDashboard: async (cycleId: string) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const res = await fetch(`/api/pm/cycles/${cycleId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      cache: "no-store",
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw { status: res.status, message: err.error ?? "Failed to load cycle dashboard" }
-    }
-    return res.json()
+    const { data } = await apiClient.get(`/pm/dashboard/${cycleId}`)
+    return data
   },
 
   // Submit a text-based kickoff brief to generate AI questions for all sessions
@@ -81,7 +73,8 @@ export const pmApi = {
   },
 
   // Upload a document as the kickoff brief (alternative to text)
-  // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint)
+  // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint).
+  // Field name MUST be "files" — the FastAPI handler is typed `files: List[UploadFile]`.
   uploadKickoffDoc: async (
     file: File,
     cycleId: string,
@@ -89,7 +82,7 @@ export const pmApi = {
     numQuestions?: number,
   ): Promise<KickoffBriefResponse> => {
     const formData = new FormData()
-    formData.append("file", file)
+    formData.append("files", file)
     formData.append("cycle_id", cycleId)
     formData.append("strategic_brief", strategicBrief || "Please refer to the attached document for strategic context.")
     if (typeof numQuestions === "number") {

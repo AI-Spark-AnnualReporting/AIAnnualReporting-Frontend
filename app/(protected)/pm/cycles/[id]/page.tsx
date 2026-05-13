@@ -89,7 +89,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [briefOpen, setBriefOpen] = useState(false)
   const [briefText, setBriefText] = useState("")
   const [additionalContext, setAdditionalContext] = useState("")
-  const [docBriefText, setDocBriefText] = useState("")
   const [submittingKickoff, setSubmittingKickoff] = useState(false)
   // Module 1-6 additions
   const [numQuestions, setNumQuestions] = useState(12)
@@ -97,6 +96,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     suggestion: string
     missing: string[]
   } | null>(null)
+  // Locally selected kickoff document — NOT uploaded until the PM clicks Submit
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   // ── Generate Report dialog ──────────────────────────────────────────────────
   // Shows approved sessions; PM can choose all-approved or pick specific ones
@@ -108,9 +109,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const pmDashRaw = pmData as PMCycleDashboardData | undefined
   const cycleStatusRaw = pmDashRaw?.cycle?.status as string | undefined
   const hasKickoffRaw = !!(pmDashRaw?.cycle?.kickoff_brief)
-  // Draft cycles MUST have a kickoff brief before the PM can do anything else.
-  // The kickoff dialog auto-opens and cannot be dismissed until submitted.
-  const isForceKickoff = cycleStatusRaw === "draft" && !hasKickoffRaw
+  // Cycle MUST have a kickoff brief before the PM can do anything else.
+  // The dialog auto-opens and cannot be dismissed until submitted for any cycle that
+  // is loaded and still in draft/active state without a brief.
+  const isForceKickoff =
+    !hasKickoffRaw &&
+    (cycleStatusRaw === "draft" || cycleStatusRaw === "active")
 
   useEffect(() => {
     if (isForceKickoff) setBriefOpen(true)
@@ -151,9 +155,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const resetKickoffForm = () => {
     setBriefText("")
     setAdditionalContext("")
-    setDocBriefText("")
     setNumQuestions(12)
     setQualityWarning(null)
+    setPendingFile(null)
   }
 
   const handleSubmitKickoff = async () => {
@@ -164,12 +168,22 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setSubmittingKickoff(true)
     setQualityWarning(null)
     try {
-      const result = await submitKickoff.mutateAsync({
-        cycle_id: cycleId,
-        strategic_brief: briefText,
-        additional_context: additionalContext || undefined,
-        num_questions: numQuestions,
-      })
+      // One endpoint per submit. Backend converges both on the same pipeline.
+      //   file picked    → POST /pm/kickoff/upload (multipart with `files`)
+      //   no file picked → POST /pm/kickoff        (JSON)
+      const result = pendingFile
+        ? await uploadKickoffDoc.mutateAsync({
+            file: pendingFile,
+            cycleId,
+            strategicBrief: briefText,
+            numQuestions,
+          })
+        : await submitKickoff.mutateAsync({
+            cycle_id: cycleId,
+            strategic_brief: briefText,
+            additional_context: additionalContext || undefined,
+            num_questions: numQuestions,
+          })
 
       // Optional info toast when the backend enriched the brief with AI context
       if (result?.enrichment_applied) {
@@ -185,7 +199,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         return
       }
 
-      // good / acceptable → close + clear as before
+      // good / acceptable → close + clear
       setBriefOpen(false)
       resetKickoffForm()
       refetchPM()
@@ -194,19 +208,14 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Picking a file now only stores it locally. The actual upload is deferred
+  // until the PM clicks "Submit & Generate Questions" — see handleSubmitKickoff.
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    try {
-      await uploadKickoffDoc.mutateAsync({ file, cycleId, strategicBrief: docBriefText || undefined })
-      setBriefOpen(false)
-      setDocBriefText("")
-      refetchPM()
-    } catch {
-      // Error toast already shown by hook
-    } finally {
-      if (fileRef.current) fileRef.current.value = ""
-    }
+    setPendingFile(file)
+    // Clear the input so the same filename can be picked again later
+    if (fileRef.current) fileRef.current.value = ""
   }
 
   const handleSendReminder = async () => {
@@ -473,9 +482,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <Button variant="ghost" size="icon" onClick={() => refetchPM()} disabled={isFetching} title="Refresh">
                 <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
               </Button>
-              <Button variant="outline" onClick={() => setBriefOpen(true)}>
-                <BookOpen className="mr-2 h-4 w-4" />
-                {hasKickoff ? "Update Kickoff Brief" : "Submit Kickoff Brief"}
+              <Button
+                variant="outline"
+                onClick={() => setBriefOpen(true)}
+                disabled={hasKickoff}
+                title={hasKickoff ? "Kickoff brief already submitted for this cycle" : undefined}
+              >
+                {hasKickoff
+                  ? <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                  : <BookOpen className="mr-2 h-4 w-4" />}
+                {hasKickoff ? "Kickoff Submitted" : "Submit Kickoff Brief"}
               </Button>
               {(notStarted.length > 0 || inProgress.length > 0) && (
                 <Button variant="outline" onClick={() => setBulkOpen(true)}>
@@ -1027,7 +1043,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         }}
       >
         <DialogContent
-          className="max-w-2xl"
+          className="max-w-2xl max-h-[85vh] overflow-y-auto"
           hideClose={isForceKickoff}
           onEscapeKeyDown={(e) => { if (isForceKickoff) e.preventDefault() }}
           onInteractOutside={(e) => { if (isForceKickoff) e.preventDefault() }}
@@ -1041,7 +1057,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
           {isForceKickoff && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              This cycle is in <strong>Draft</strong>. A kickoff brief is required before you can manage the cycle.
+              A kickoff brief is required before you can manage this cycle. Submit one below to generate AI questions for each department.
             </div>
           )}
 
@@ -1057,7 +1073,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 value={briefText}
                 onChange={(e) => setBriefText(e.target.value)}
                 placeholder="e.g. This fiscal year we focused on digital transformation, market expansion…"
-                rows={5}
+                rows={4}
                 className="text-sm"
               />
               {(() => {
@@ -1079,7 +1095,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 value={additionalContext}
                 onChange={(e) => setAdditionalContext(e.target.value)}
                 placeholder="Any specific themes, KPIs, or focus areas for this cycle..."
-                rows={3}
+                rows={2}
                 className="text-sm"
               />
             </div>
@@ -1125,31 +1141,47 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               type="file"
               accept=".pdf,.docx,.doc,.txt"
               className="hidden"
-              onChange={handleDocUpload}
+              onChange={handleFilePick}
             />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploadKickoffDoc.isPending}
-              className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-6 text-center hover:border-primary/50 hover:bg-accent transition-colors"
-            >
-              {uploadKickoffDoc.isPending
-                ? <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-muted-foreground" />
-                : <FileUp className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />}
-              <p className="text-sm font-medium">
-                {uploadKickoffDoc.isPending ? "Uploading…" : "Click to upload a document"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT</p>
-            </button>
-            <div className="space-y-2">
-              <Label>Document Summary <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
-              <Textarea
-                value={docBriefText}
-                onChange={(e) => setDocBriefText(e.target.value)}
-                placeholder="Summarise the document to help the AI understand its context…"
-                rows={2}
-                className="text-sm"
-              />
-            </div>
+            {pendingFile ? (
+              <div className="w-full rounded-lg border border-blue-300 bg-blue-50 p-3 flex items-center gap-3">
+                <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-blue-900 truncate">{pendingFile.name}</p>
+                  <p className="text-xs text-blue-700">
+                    Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-blue-700 hover:text-blue-900 hover:bg-blue-100"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={submittingKickoff}
+                >
+                  Replace
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => setPendingFile(null)}
+                  disabled={submittingKickoff}
+                >
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={submittingKickoff}
+                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 text-center hover:border-primary/50 hover:bg-accent transition-colors"
+              >
+                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
+                <p className="text-sm font-medium">Click to attach a document</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT</p>
+              </button>
+            )}
           </div>
 
           {qualityWarning && (
