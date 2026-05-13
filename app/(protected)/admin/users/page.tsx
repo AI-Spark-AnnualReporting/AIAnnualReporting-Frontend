@@ -52,8 +52,6 @@ type CreateForm = z.infer<typeof createSchema>
 
 const editSchema = z.object({
   full_name: z.string().min(2, "Required"),
-  role: z.enum(["admin", "project_manager", "department_user"]),
-  department: z.string().optional(),
 })
 type EditForm = z.infer<typeof editSchema>
 
@@ -97,15 +95,11 @@ export default function UsersPage() {
   const {
     register: editRegister,
     handleSubmit: editHandleSubmit,
-    control: editControl,
     reset: editReset,
-    watch: editWatch,
-    setValue: editSetValue,
   } = useForm<EditForm>({ resolver: zodResolver(editSchema) })
-  const editWatchedRole = editWatch("role")
 
   const openEdit = (user: User) => {
-    editReset({ full_name: user.full_name, role: user.role as EditForm["role"], department: user.department || "" })
+    editReset({ full_name: user.full_name })
     setEditTarget(user)
   }
 
@@ -113,11 +107,7 @@ export default function UsersPage() {
     if (!editTarget) return
     await updateMutation.mutateAsync({
       userId: editTarget.user_id,
-      data: {
-        full_name: formData.full_name,
-        role: formData.role,
-        department: formData.department || undefined,
-      },
+      data: { full_name: formData.full_name },
     })
     setEditTarget(null)
   }
@@ -413,48 +403,6 @@ export default function UsersPage() {
                 placeholder="Full name"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Controller
-                name="role"
-                control={editControl}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); if (v !== "department_user") editSetValue("department", "") }}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="project_manager">Project Manager</SelectItem>
-                      <SelectItem value="department_user">Department User</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-            {editWatchedRole === "department_user" && (
-              <div className="space-y-2">
-                <Label>Department</Label>
-                <Controller
-                  name="department"
-                  control={editControl}
-                  render={({ field }) => (
-                    <Select value={field.value || ""} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {depts?.departments.map((d) => (
-                          <SelectItem key={d.id} value={d.department_name}>
-                            {d.department_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-            )}
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setEditTarget(null)}>
                 Cancel
