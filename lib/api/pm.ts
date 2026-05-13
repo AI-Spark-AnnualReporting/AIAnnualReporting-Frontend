@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import { PMDashboard, Session } from "@/types"
+import { PMDashboard, Session, KickoffBriefResponse } from "@/types"
 
 export interface ReviewPayload {
   // "reviewed" = PM has read the submission (intermediate step before approve/reject)
@@ -32,6 +32,8 @@ export interface KickoffBriefPayload {
   cycle_id: string
   strategic_brief: string
   additional_context?: string
+  // Optional — backend default is 12, accepted range 5-20
+  num_questions?: number
 }
 
 export const pmApi = {
@@ -73,21 +75,29 @@ export const pmApi = {
   },
 
   // Submit a text-based kickoff brief to generate AI questions for all sessions
-  submitKickoff: async (payload: KickoffBriefPayload) => {
-    const { data } = await apiClient.post("/pm/kickoff", payload)
+  submitKickoff: async (payload: KickoffBriefPayload): Promise<KickoffBriefResponse> => {
+    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff", payload)
     return data
   },
 
   // Upload a document as the kickoff brief (alternative to text)
   // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint)
-  uploadKickoffDoc: async (file: File, cycleId: string, strategicBrief?: string) => {
+  uploadKickoffDoc: async (
+    file: File,
+    cycleId: string,
+    strategicBrief?: string,
+    numQuestions?: number,
+  ): Promise<KickoffBriefResponse> => {
     const formData = new FormData()
     formData.append("file", file)
     formData.append("cycle_id", cycleId)
     formData.append("strategic_brief", strategicBrief || "Please refer to the attached document for strategic context.")
+    if (typeof numQuestions === "number") {
+      formData.append("num_questions", String(numQuestions))
+    }
     // Must delete the instance-level "Content-Type: application/json" default so axios can
     // auto-set "multipart/form-data; boundary=..." from the FormData object.
-    const { data } = await apiClient.post("/pm/kickoff/upload", formData, {
+    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff/upload", formData, {
       headers: { "Content-Type": undefined },
       timeout: 120000, // 2 min — backend extracts + vectorises the kickoff document
     })

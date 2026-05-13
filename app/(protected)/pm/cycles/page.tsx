@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { usePMDashboard } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { StatsCard } from "@/components/ui/stats-card"
@@ -7,35 +8,56 @@ import { Progress } from "@/components/ui/progress"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
+import { CYCLE_STATUSES } from "@/lib/constants"
+import { CycleStatus } from "@/types"
+import { cn } from "@/lib/utils"
 import { RefreshCw, Clock, ArrowRight, CheckCircle2, AlertCircle, Info } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 
+type StatusFilter = "all" | CycleStatus
+
+interface PMCycle {
+  id: string
+  cycle_name: string
+  submission_deadline: string
+  status?: CycleStatus
+  total_departments?: number
+  submitted_count?: number
+  completion_rate?: number
+}
+
+const FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "draft", label: CYCLE_STATUSES.draft.label },
+  { value: "active", label: CYCLE_STATUSES.active.label },
+  { value: "completed", label: CYCLE_STATUSES.completed.label },
+  { value: "archived", label: CYCLE_STATUSES.archived.label },
+  { value: "closed", label: CYCLE_STATUSES.closed.label },
+]
+
 export default function PMCyclesPage() {
   const { data, isLoading, isError, error } = usePMDashboard()
+  const [filter, setFilter] = useState<StatusFilter>("all")
 
   if (isLoading) return <PageSkeleton />
 
   // Support both active_cycles (standard) and cycles (alternate key some backends use)
   const rawData = data as Record<string, unknown> | undefined
-  const cycles = (
-    rawData?.active_cycles ||
-    rawData?.cycles ||
-    []
-  ) as {
-    id: string
-    cycle_name: string
-    submission_deadline: string
-    total_departments?: number
-    submitted_count?: number
-    completion_rate?: number
-  }[]
+  const allCycles = ((rawData?.active_cycles || rawData?.cycles || []) as PMCycle[])
+
+  const visibleCycles =
+    filter === "all" ? allCycles : allCycles.filter((c) => c.status === filter)
+
+  // Counts per status for the filter chips
+  const countFor = (f: StatusFilter) =>
+    f === "all" ? allCycles.length : allCycles.filter((c) => c.status === f).length
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Active Cycles"
-        description="Monitor all active reporting cycles and their progress"
+        title="All Cycles"
+        description="Every reporting cycle assigned to you — filter by status"
       />
 
       {/* API error banner */}
@@ -53,9 +75,9 @@ export default function PMCyclesPage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatsCard
-          title="Total Active"
-          value={cycles.length}
-          description="Cycles currently in progress"
+          title="Total Cycles"
+          value={allCycles.length}
+          description="All cycles assigned to you"
           icon={RefreshCw}
         />
         <StatsCard
@@ -66,39 +88,68 @@ export default function PMCyclesPage() {
         />
         <StatsCard
           title="Departments on Track"
-          value={cycles.reduce((sum, c) => sum + (c.submitted_count ?? 0), 0)}
+          value={allCycles.reduce((sum, c) => sum + (c.submitted_count ?? 0), 0)}
           description="Total submissions across all cycles"
           icon={CheckCircle2}
         />
       </div>
 
-      {cycles.length === 0 ? (
+      {/* Status filter tabs */}
+      <div className="flex flex-wrap gap-2 border-b pb-3">
+        {FILTERS.map((f) => {
+          const active = filter === f.value
+          const count = countFor(f.value)
+          return (
+            <button
+              key={f.value}
+              onClick={() => setFilter(f.value)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors border",
+                active
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent border-border"
+              )}
+            >
+              <span>{f.label}</span>
+              <span
+                className={cn(
+                  "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold min-w-5",
+                  active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {allCycles.length === 0 ? (
         <div className="space-y-4">
-          {/* Helpful explanation for why cycles might not appear */}
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
             <div className="flex items-start gap-3">
               <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
               <div className="text-sm text-blue-700 space-y-1">
-                <p className="font-semibold text-blue-800">No active cycles assigned to you</p>
+                <p className="font-semibold text-blue-800">No cycles assigned to you</p>
                 <p>Cycles appear here once an <strong>admin</strong> has:</p>
                 <ol className="list-decimal ml-4 space-y-0.5 text-blue-700">
                   <li>Created a cycle and assigned you as Project Manager</li>
                   <li>Assigned departments &amp; responsible users to the cycle</li>
                   <li>Clicked <strong>Activate</strong> — this creates department sessions</li>
                 </ol>
-                <p className="mt-2">
-                  If you have been assigned to a cycle but still see this page, the cycle may still
-                  be in <strong>Draft</strong> status. Ask your admin to complete the activation.
-                </p>
               </div>
             </div>
           </div>
         </div>
+      ) : visibleCycles.length === 0 ? (
+        <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
+          No cycles in the <span className="font-medium">{FILTERS.find((f) => f.value === filter)?.label}</span> status.
+        </div>
       ) : (
         <div className="space-y-4">
-          {cycles.map((cycle) => {
+          {visibleCycles.map((cycle) => {
             const completionRate = cycle.completion_rate ?? 0
-            const isLate = completionRate < 50
+            const isLate = (cycle.status === "active") && completionRate < 50
 
             return (
               <div
@@ -109,7 +160,7 @@ export default function PMCyclesPage() {
                   <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold truncate">{cycle.cycle_name}</h3>
-                      <StatusBadge status="active" variant="cycle" />
+                      <StatusBadge status={cycle.status ?? "draft"} variant="cycle" />
                     </div>
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1">

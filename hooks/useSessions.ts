@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload } from "@/lib/api/department"
 import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload } from "@/lib/api/pm"
+import { KickoffBriefResponse } from "@/types"
 import { toast } from "sonner"
 
 export function useDepartmentDashboard() {
@@ -124,14 +125,18 @@ export function usePMCycleDashboard(cycleId: string) {
 
 export function useSubmitKickoff() {
   const qc = useQueryClient()
-  return useMutation({
+  return useMutation<KickoffBriefResponse, { message?: string; response?: { data?: { detail?: string } } }, KickoffBriefPayload>({
     mutationFn: (payload: KickoffBriefPayload) => pmApi.submitKickoff(payload),
-    onSuccess: (_, vars) => {
+    onSuccess: (data, vars) => {
       qc.invalidateQueries({ queryKey: ["pm", "cycle", vars.cycle_id] })
       qc.invalidateQueries({ queryKey: ["pm", "dashboard"] })
-      toast.success("Kickoff brief submitted! AI questions are being generated.")
+      // Suppress generic success toast when the backend flags a low-quality brief —
+      // the component renders its own warning panel in that case.
+      if (!data?.warning) {
+        toast.success("Kickoff brief submitted! AI questions are being generated.")
+      }
     },
-    onError: (err: { message?: string; response?: { data?: { detail?: string } } }) => {
+    onError: (err) => {
       const detail = err?.response?.data?.detail
       toast.error(detail || err?.message || "Failed to submit kickoff brief")
     },
@@ -140,16 +145,22 @@ export function useSubmitKickoff() {
 
 export function useUploadKickoffDoc() {
   const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ file, cycleId, strategicBrief }: { file: File; cycleId: string; strategicBrief?: string }) =>
-      pmApi.uploadKickoffDoc(file, cycleId, strategicBrief),
-    onSuccess: (_, vars) => {
+  return useMutation<
+    KickoffBriefResponse,
+    { message?: string; response?: { data?: { detail?: string } } },
+    { file: File; cycleId: string; strategicBrief?: string; numQuestions?: number }
+  >({
+    mutationFn: ({ file, cycleId, strategicBrief, numQuestions }) =>
+      pmApi.uploadKickoffDoc(file, cycleId, strategicBrief, numQuestions),
+    onSuccess: (data, vars) => {
       // Bust PM cycle cache so the page reflects kickoff_submitted=true immediately
       qc.invalidateQueries({ queryKey: ["pm", "cycle", vars.cycleId] })
       qc.invalidateQueries({ queryKey: ["pm", "dashboard"] })
-      toast.success("Kickoff document uploaded! AI questions are being generated.")
+      if (!data?.warning) {
+        toast.success("Kickoff document uploaded! AI questions are being generated.")
+      }
     },
-    onError: (err: { message?: string; response?: { data?: { detail?: string } } }) => {
+    onError: (err) => {
       const detail = err?.response?.data?.detail
       toast.error(detail || err?.message || "Failed to upload kickoff document")
     },

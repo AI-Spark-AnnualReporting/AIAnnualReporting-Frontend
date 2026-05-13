@@ -74,7 +74,10 @@ export default function PMDashboard() {
               const total = cycle.total_departments ?? 0
               const pct = cycle.completion_rate ?? 0
               const approved = Math.round(pct)
-              const notStarted = total - submitted
+              // Real counts from the proxy. Fall back to derivation only if older payloads
+              // are still cached without these fields.
+              const notStarted = cycle.not_started_count ?? Math.max(0, total - submitted)
+              const inProgress = cycle.in_progress_count ?? Math.max(0, total - submitted - notStarted)
               const isLow = pct < 30
               const isMid = pct >= 30 && pct < 70
 
@@ -131,7 +134,7 @@ export default function PMDashboard() {
                       <RefreshCw className="h-4 w-4 text-blue-500" />
                       <div>
                         <p className="text-xs text-muted-foreground">In Progress</p>
-                        <p className="text-sm font-semibold">{Math.max(0, total - submitted - notStarted)}</p>
+                        <p className="text-sm font-semibold">{inProgress}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
