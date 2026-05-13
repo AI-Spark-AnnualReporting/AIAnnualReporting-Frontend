@@ -53,7 +53,7 @@ type CreateForm = z.infer<typeof createSchema>
 const editSchema = z.object({
   full_name: z.string().min(2, "Required"),
   role: z.enum(["admin", "project_manager", "department_user"]),
-  department: z.string().optional(),
+  department_id: z.string().optional(),
 })
 type EditForm = z.infer<typeof editSchema>
 
@@ -86,6 +86,7 @@ export default function UsersPage() {
     control,
     reset,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
@@ -105,18 +106,22 @@ export default function UsersPage() {
   const editWatchedRole = editWatch("role")
 
   const openEdit = (user: User) => {
-    editReset({ full_name: user.full_name, role: user.role as EditForm["role"], department: user.department || "" })
+    editReset({ full_name: user.full_name, role: user.role as EditForm["role"], department_id: user.department_id || "" })
     setEditTarget(user)
   }
 
   const onEditSubmit = async (formData: EditForm) => {
     if (!editTarget) return
+    const dept = formData.role === "department_user"
+      ? depts?.departments.find((d) => d.id === formData.department_id)
+      : undefined
     await updateMutation.mutateAsync({
       userId: editTarget.user_id,
       data: {
         full_name: formData.full_name,
         role: formData.role,
-        department: formData.department || undefined,
+        department_id: dept ? formData.department_id : null,
+        department: dept?.department_name ?? null,
       },
     })
     setEditTarget(null)
@@ -125,9 +130,12 @@ export default function UsersPage() {
   const onCreateSubmit = async (formData: CreateForm) => {
     setCreateError(null)
     try {
-      const dept = depts?.departments.find((d) => d.id === formData.department_id)
+      const dept = formData.role === "department_user"
+        ? depts?.departments.find((d) => d.id === formData.department_id)
+        : undefined
       await createMutation.mutateAsync({
         ...formData,
+        department_id: dept ? formData.department_id : undefined,
         department: dept?.department_name,
       })
       reset()
@@ -346,7 +354,7 @@ export default function UsersPage() {
                 name="role"
                 control={control}
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); if (v !== "department_user") setValue("department_id", "") }}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -423,7 +431,7 @@ export default function UsersPage() {
                 name="role"
                 control={editControl}
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); if (v !== "department_user") editSetValue("department", "") }}>
+                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); if (v !== "department_user") editSetValue("department_id", "") }}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -440,7 +448,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Department</Label>
                 <Controller
-                  name="department"
+                  name="department_id"
                   control={editControl}
                   render={({ field }) => (
                     <Select value={field.value || ""} onValueChange={field.onChange}>
@@ -449,7 +457,7 @@ export default function UsersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {depts?.departments.map((d) => (
-                          <SelectItem key={d.id} value={d.department_name}>
+                          <SelectItem key={d.id} value={d.id || ""}>
                             {d.department_name}
                           </SelectItem>
                         ))}

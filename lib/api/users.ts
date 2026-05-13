@@ -13,7 +13,8 @@ export interface CreateUserPayload {
 
 export interface UpdateUserPayload {
   full_name?: string
-  department?: string
+  department_id?: string | null
+  department?: string | null
   status?: string
   role?: string
 }
