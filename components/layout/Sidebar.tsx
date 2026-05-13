@@ -30,7 +30,7 @@ const ADMIN_NAV = [
 
 const PM_NAV = [
   { href: "/pm", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/pm/cycles", label: "Active Cycles", icon: RefreshCw },
+  { href: "/pm/cycles", label: "All Cycles", icon: RefreshCw },
   { href: "/pm/reviews", label: "Pending Reviews", icon: ClipboardCheck },
   { type: "divider" as const },
   { href: "/pm/documents", label: "Knowledge Base", icon: BookOpen },

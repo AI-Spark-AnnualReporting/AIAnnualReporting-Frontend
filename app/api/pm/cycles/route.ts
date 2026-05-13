@@ -41,9 +41,10 @@ export async function GET(req: NextRequest) {
     const serviceToken = await getServiceToken()
     const allCycles: CycleRecord[] = await getAdminCycles(serviceToken)
 
-    // 4. Filter to active cycles where this PM is the project manager
+    // 4. Filter to every cycle where this PM is the project manager
+    //    (status is no longer filtered — the UI handles status tabs client-side)
     const myCycles = allCycles.filter(
-      (c) => c.project_manager_id === pmUserId && c.status === "active"
+      (c) => c.project_manager_id === pmUserId
     )
 
     // 5. Fetch ALL dept sessions in one pass (6 HTTP calls total, not 6×N).
@@ -92,6 +93,8 @@ export async function GET(req: NextRequest) {
         const submitted = sessions.filter((s) => s.status === "submitted").length
         const reviewed = sessions.filter((s) => s.status === "reviewed").length
         const approved = sessions.filter((s) => s.status === "approved").length
+        const inProgress = sessions.filter((s) => s.status === "in_progress").length
+        const notStarted = sessions.filter((s) => s.status === "not_started").length
         const total = sessions.length
         const completionRate = total > 0 ? Math.round(((submitted + reviewed + approved) / total) * 100) : 0
         return {
@@ -103,6 +106,8 @@ export async function GET(req: NextRequest) {
           end_date: cycle.end_date,
           status: cycle.status,
           submitted_count: submitted + reviewed + approved,
+          in_progress_count: inProgress,
+          not_started_count: notStarted,
           total_departments: total,
           completion_rate: completionRate,
           kickoff_brief: cycle.kickoff_brief,

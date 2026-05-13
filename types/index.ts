@@ -18,6 +18,7 @@ export interface User {
   role: UserRole
   status: UserStatus
   department?: string | null
+  department_id?: string | null
   phone?: string | null
   created_at?: string
   updated_at?: string
@@ -67,9 +68,31 @@ export interface Cycle {
   project_manager_id?: string
   pm_name?: string
   kickoff_brief?: string
+  enriched_context?: string
   total_departments?: number
   submitted_count?: number
   created_at: string
+}
+
+export interface BriefQuality {
+  quality: "low" | "acceptable" | "good"
+  total: number
+  length_score?: number
+  specificity_score?: number
+  cycle_relevance_score?: number
+  missing: string[]
+  suggestion: string
+}
+
+export interface KickoffBriefResponse {
+  success: boolean
+  message: string
+  cycle_id: string
+  departments_processed: number
+  used_document_context?: boolean
+  brief_quality?: BriefQuality
+  warning?: string
+  enrichment_applied?: boolean
 }
 
 export interface CycleOverview {
@@ -172,6 +195,9 @@ export interface PMDashboard {
     submission_deadline: string
     total_departments: number
     submitted_count: number
+    /** Real per-status counts emitted by the /api/pm/cycles proxy */
+    in_progress_count?: number
+    not_started_count?: number
     completion_rate: number
   }[]
   pending_reviews: number

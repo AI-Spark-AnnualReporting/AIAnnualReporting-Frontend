@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useDepartmentDashboard } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { StatusBadge } from "@/components/ui/status-badge"
@@ -7,12 +8,28 @@ import { Progress } from "@/components/ui/progress"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
+import { SESSION_STATUSES } from "@/lib/constants"
+import { SessionStatus } from "@/types"
 import { ClipboardList, ArrowRight, Bell, Calendar, CheckCircle2, RotateCcw, Clock } from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
 
+type StatusFilter = "all" | SessionStatus
+
+const FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "not_started", label: SESSION_STATUSES.not_started.label },
+  { value: "in_progress", label: SESSION_STATUSES.in_progress.label },
+  { value: "submitted", label: SESSION_STATUSES.submitted.label },
+  { value: "reviewed", label: SESSION_STATUSES.reviewed.label },
+  { value: "approved", label: SESSION_STATUSES.approved.label },
+  { value: "reopened", label: SESSION_STATUSES.reopened.label },
+  { value: "rejected", label: SESSION_STATUSES.rejected.label },
+]
+
 export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
+  const [filter, setFilter] = useState<StatusFilter>("all")
 
   if (isLoading) return <PageSkeleton />
 
@@ -21,6 +38,11 @@ export default function DepartmentDashboard() {
   // Use the first assignment's department_name if available (most users have one dept)
   const departmentLabel =
     sessions.length > 0 ? sessions[0].department_name : "Your"
+
+  const visibleSessions =
+    filter === "all" ? sessions : sessions.filter((s) => s.status === filter)
+  const countFor = (f: StatusFilter) =>
+    f === "all" ? sessions.length : sessions.filter((s) => s.status === f).length
 
   return (
     <div className="space-y-8">
@@ -46,7 +68,46 @@ export default function DepartmentDashboard() {
 
       {/* Sessions */}
       <div>
-        <h2 className="font-semibold text-lg mb-4">My Report Sessions</h2>
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="font-semibold text-lg">My Report Sessions</h2>
+          <span className="text-xs text-muted-foreground">
+            {visibleSessions.length} of {sessions.length}
+          </span>
+        </div>
+
+        {/* Status filter chips */}
+        {sessions.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-b pb-3 mb-4">
+            {FILTERS.map((f) => {
+              const active = filter === f.value
+              const count = countFor(f.value)
+              return (
+                <button
+                  key={f.value}
+                  onClick={() => setFilter(f.value)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors border",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent border-border"
+                  )}
+                >
+                  <span>{f.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold min-w-5",
+                      active
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {sessions.length === 0 ? (
           <EmptyState
@@ -54,9 +115,13 @@ export default function DepartmentDashboard() {
             title="No active sessions"
             description="You don't have any active reporting sessions. An admin will assign one when a cycle is activated."
           />
+        ) : visibleSessions.length === 0 ? (
+          <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
+            No sessions in the <span className="font-medium">{FILTERS.find((f) => f.value === filter)?.label}</span> status.
+          </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {sessions.map((session) => {
+            {visibleSessions.map((session) => {
               const isApproved = session.status === "approved"
               const isReopened = session.status === "reopened"
               const isSubmittedPending = session.status === "submitted"

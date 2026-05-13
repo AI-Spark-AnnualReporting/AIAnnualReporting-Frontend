@@ -27,7 +27,7 @@ const schema = z.object({
   start_date: z.string().min(1, "Required"),
   end_date: z.string().min(1, "Required"),
   submission_deadline: z.string().min(1, "Required"),
-  project_manager_id: z.string().optional(),
+  project_manager_id: z.string().min(1, "Project Manager is required"),
   kickoff_brief: z.string().optional(),
 })
 type Form = z.infer<typeof schema>
@@ -123,14 +123,14 @@ export default function NewCyclePage() {
             The PM will log in to write the kickoff brief, assign teams, and track department progress.
           </p>
           <div className="space-y-2">
-            <Label>Project Manager</Label>
+            <Label>Project Manager <span className="text-destructive">*</span></Label>
             <Controller
               name="project_manager_id"
               control={control}
               render={({ field }) => (
                 <Select value={field.value || ""} onValueChange={field.onChange}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a Project Manager (optional)" />
+                    <SelectValue placeholder="Select a Project Manager" />
                   </SelectTrigger>
                   <SelectContent>
                     {usersData?.users.map((u) => (
@@ -142,6 +142,9 @@ export default function NewCyclePage() {
                 </Select>
               )}
             />
+            {errors.project_manager_id && (
+              <p className="text-xs text-destructive">{errors.project_manager_id.message}</p>
+            )}
             {usersData?.users.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 No active project managers found.{" "}
@@ -184,25 +187,6 @@ export default function NewCyclePage() {
               {errors.submission_deadline && <p className="text-xs text-destructive">{errors.submission_deadline.message}</p>}
             </div>
           </div>
-        </div>
-
-        {/* Section 4: Optional Kickoff Brief */}
-        <div className="rounded-xl border bg-card p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <h2 className="font-semibold">Kickoff Brief <span className="text-muted-foreground font-normal text-sm">(optional)</span></h2>
-            </div>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Provide strategic context for this reporting period — year highlights, priorities, and themes.
-            The assigned PM can also write or refine this after the cycle is created.
-          </p>
-          <Textarea
-            {...register("kickoff_brief")}
-            placeholder="e.g. This year we focused on digital transformation, expanding to 3 new markets, and achieving carbon-neutral operations. Departments should highlight contributions to these pillars..."
-            rows={5}
-          />
         </div>
 
         <div className="flex justify-end gap-3 pt-2">

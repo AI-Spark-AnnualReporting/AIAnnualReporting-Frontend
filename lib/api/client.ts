@@ -125,10 +125,17 @@ apiClient.interceptors.response.use(
       null
 
     // Log full error details for debugging
+    // Includes error.code + error.message so network failures (no response object)
+    // are diagnosable instead of printing as "{}".
+    const fullUrl = error.config?.baseURL && error.config?.url
+      ? `${error.config.baseURL}${error.config.url}`
+      : (error.config?.url ?? "<unknown>")
     console.error("[API Error]", {
-      status: error.response?.status,
-      url: error.config?.url,
+      status: error.response?.status ?? "(no response)",
+      code: error.code,                            // e.g. ERR_NETWORK, ERR_BAD_REQUEST, ECONNABORTED
+      message: error.message,                      // e.g. "Network Error", "timeout of 30000ms exceeded"
       method: error.config?.method,
+      url: fullUrl,
       responseData,
     })
 

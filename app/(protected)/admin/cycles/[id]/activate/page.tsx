@@ -69,7 +69,7 @@ export default function ActivateCyclePage({
   const handleActivate = async () => {
     setActivateError(null)
     try {
-      await activateMutation.mutateAsync({ cycleId: id, generateQuestions: true })
+      await activateMutation.mutateAsync({ cycleId: id, generateQuestions: false })
       setActivated(true)
     } catch (err: unknown) {
       const e = err as { message?: string }

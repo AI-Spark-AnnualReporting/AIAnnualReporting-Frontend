@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import { PMDashboard, Session } from "@/types"
+import { PMDashboard, Session, KickoffBriefResponse } from "@/types"
 
 export interface ReviewPayload {
   // "reviewed" = PM has read the submission (intermediate step before approve/reject)
@@ -32,6 +32,8 @@ export interface KickoffBriefPayload {
   cycle_id: string
   strategic_brief: string
   additional_context?: string
+  // Optional — backend default is 12, accepted range 5-20
+  num_questions?: number
 }
 
 export const pmApi = {
@@ -54,40 +56,41 @@ export const pmApi = {
   },
 
   /**
-   * Fetch PM cycle dashboard via our Next.js server-side proxy.
-   * The real backend GET /pm/dashboard/{cycle_id} always returns departments:[]
-   * due to a confirmed backend bug.  Our proxy aggregates department sessions
-   * by logging in as each dept user server-side, giving the PM real data.
+   * Fetch PM cycle dashboard directly from the backend.
+   * The previous departments:[] backend bug has been fixed — we now get full
+   * cycle metadata + per-status stats + an array of department session summaries
+   * straight from GET /pm/dashboard/{cycle_id}.
    */
   cycleDashboard: async (cycleId: string) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const res = await fetch(`/api/pm/cycles/${cycleId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      cache: "no-store",
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw { status: res.status, message: err.error ?? "Failed to load cycle dashboard" }
-    }
-    return res.json()
+    const { data } = await apiClient.get(`/pm/dashboard/${cycleId}`)
+    return data
   },
 
   // Submit a text-based kickoff brief to generate AI questions for all sessions
-  submitKickoff: async (payload: KickoffBriefPayload) => {
-    const { data } = await apiClient.post("/pm/kickoff", payload)
+  submitKickoff: async (payload: KickoffBriefPayload): Promise<KickoffBriefResponse> => {
+    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff", payload)
     return data
   },
 
   // Upload a document as the kickoff brief (alternative to text)
-  // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint)
-  uploadKickoffDoc: async (file: File, cycleId: string, strategicBrief?: string) => {
+  // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint).
+  // Field name MUST be "files" — the FastAPI handler is typed `files: List[UploadFile]`.
+  uploadKickoffDoc: async (
+    file: File,
+    cycleId: string,
+    strategicBrief?: string,
+    numQuestions?: number,
+  ): Promise<KickoffBriefResponse> => {
     const formData = new FormData()
-    formData.append("file", file)
+    formData.append("files", file)
     formData.append("cycle_id", cycleId)
     formData.append("strategic_brief", strategicBrief || "Please refer to the attached document for strategic context.")
+    if (typeof numQuestions === "number") {
+      formData.append("num_questions", String(numQuestions))
+    }
     // Must delete the instance-level "Content-Type: application/json" default so axios can
     // auto-set "multipart/form-data; boundary=..." from the FormData object.
-    const { data } = await apiClient.post("/pm/kickoff/upload", formData, {
+    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff/upload", formData, {
       headers: { "Content-Type": undefined },
       timeout: 120000, // 2 min — backend extracts + vectorises the kickoff document
     })

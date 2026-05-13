@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useRef, useState } from "react"
+import { use, useRef, useState, useEffect } from "react"
 import {
   usePMCycleDashboard, useSendReminder, useGenerateReport,
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
@@ -89,15 +89,36 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [briefOpen, setBriefOpen] = useState(false)
   const [briefText, setBriefText] = useState("")
   const [additionalContext, setAdditionalContext] = useState("")
-  const [docBriefText, setDocBriefText] = useState("")
-  const [kickoffMode, setKickoffMode] = useState<"text" | "docs">("text")
   const [submittingKickoff, setSubmittingKickoff] = useState(false)
+  // Module 1-6 additions
+  const [numQuestions, setNumQuestions] = useState(12)
+  const [qualityWarning, setQualityWarning] = useState<{
+    suggestion: string
+    missing: string[]
+  } | null>(null)
+  // Locally selected kickoff document — NOT uploaded until the PM clicks Submit
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   // ── Generate Report dialog ──────────────────────────────────────────────────
   // Shows approved sessions; PM can choose all-approved or pick specific ones
   const [reportDialogOpen, setReportDialogOpen] = useState(false)
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState<"all" | "pick">("all")
+
+  // Computed from raw data BEFORE the early return so the effect order is stable
+  const pmDashRaw = pmData as PMCycleDashboardData | undefined
+  const cycleStatusRaw = pmDashRaw?.cycle?.status as string | undefined
+  const hasKickoffRaw = !!(pmDashRaw?.cycle?.kickoff_brief)
+  // Cycle MUST have a kickoff brief before the PM can do anything else.
+  // The dialog auto-opens and cannot be dismissed until submitted for any cycle that
+  // is loaded and still in draft/active state without a brief.
+  const isForceKickoff =
+    !hasKickoffRaw &&
+    (cycleStatusRaw === "draft" || cycleStatusRaw === "active")
+
+  useEffect(() => {
+    if (isForceKickoff) setBriefOpen(true)
+  }, [isForceKickoff])
 
   if (isLoading) return <PageSkeleton />
 
@@ -108,7 +129,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const cycleId = id
 
   const hasKickoff    = !!(pmDash?.cycle?.kickoff_brief)
-  const needsKickoff  = !hasKickoff
   const needsReview   = departments.filter((d) => d.status === "submitted")
   const reviewed      = departments.filter((d) => d.status === "reviewed")
   const approved      = departments.filter((d) => d.status === "approved")
@@ -132,40 +152,70 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       : (escalationsData as { escalations?: unknown[] } | undefined)?.escalations ?? []
 
   /* ── Handlers ─────────────────────────────────────────────────────────────── */
+  const resetKickoffForm = () => {
+    setBriefText("")
+    setAdditionalContext("")
+    setNumQuestions(12)
+    setQualityWarning(null)
+    setPendingFile(null)
+  }
+
   const handleSubmitKickoff = async () => {
     if (!briefText.trim()) {
       toast.error("Please write the strategic brief before submitting")
       return
     }
     setSubmittingKickoff(true)
+    setQualityWarning(null)
     try {
-      await submitKickoff.mutateAsync({
-        cycle_id: cycleId,
-        strategic_brief: briefText,
-        additional_context: additionalContext || undefined,
-      })
+      // One endpoint per submit. Backend converges both on the same pipeline.
+      //   file picked    → POST /pm/kickoff/upload (multipart with `files`)
+      //   no file picked → POST /pm/kickoff        (JSON)
+      const result = pendingFile
+        ? await uploadKickoffDoc.mutateAsync({
+            file: pendingFile,
+            cycleId,
+            strategicBrief: briefText,
+            numQuestions,
+          })
+        : await submitKickoff.mutateAsync({
+            cycle_id: cycleId,
+            strategic_brief: briefText,
+            additional_context: additionalContext || undefined,
+            num_questions: numQuestions,
+          })
+
+      // Optional info toast when the backend enriched the brief with AI context
+      if (result?.enrichment_applied) {
+        toast.info("Brief was expanded with AI context to improve question quality.")
+      }
+
+      // Low quality → keep dialog open so PM can decide
+      if (result?.brief_quality?.quality === "low") {
+        setQualityWarning({
+          suggestion: result.brief_quality.suggestion,
+          missing: result.brief_quality.missing ?? [],
+        })
+        return
+      }
+
+      // good / acceptable → close + clear
       setBriefOpen(false)
-      setBriefText("")
-      setAdditionalContext("")
+      resetKickoffForm()
       refetchPM()
     } finally {
       setSubmittingKickoff(false)
     }
   }
 
-  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Picking a file now only stores it locally. The actual upload is deferred
+  // until the PM clicks "Submit & Generate Questions" — see handleSubmitKickoff.
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    try {
-      await uploadKickoffDoc.mutateAsync({ file, cycleId, strategicBrief: docBriefText || undefined })
-      setBriefOpen(false)
-      setDocBriefText("")
-      refetchPM()
-    } catch {
-      // Error toast already shown by hook
-    } finally {
-      if (fileRef.current) fileRef.current.value = ""
-    }
+    setPendingFile(file)
+    // Clear the input so the same filename can be picked again later
+    if (fileRef.current) fileRef.current.value = ""
   }
 
   const handleSendReminder = async () => {
@@ -300,6 +350,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         <div>
           <p className="font-medium">{row.department_name}</p>
           <p className="text-xs text-muted-foreground font-mono">{row.department_code}</p>
+          {row.status === "not_started" && (
+            <p className="text-xs italic text-muted-foreground mt-0.5">
+              Awaiting kickoff submission
+            </p>
+          )}
         </div>
       ),
     },
@@ -427,9 +482,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <Button variant="ghost" size="icon" onClick={() => refetchPM()} disabled={isFetching} title="Refresh">
                 <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
               </Button>
-              <Button variant="outline" onClick={() => setBriefOpen(true)}>
-                <BookOpen className="mr-2 h-4 w-4" />
-                {hasKickoff ? "Update Kickoff Brief" : "Submit Kickoff Brief"}
+              <Button
+                variant="outline"
+                onClick={() => setBriefOpen(true)}
+                disabled={hasKickoff}
+                title={hasKickoff ? "Kickoff brief already submitted for this cycle" : undefined}
+              >
+                {hasKickoff
+                  ? <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                  : <BookOpen className="mr-2 h-4 w-4" />}
+                {hasKickoff ? "Kickoff Submitted" : "Submit Kickoff Brief"}
               </Button>
               {(notStarted.length > 0 || inProgress.length > 0) && (
                 <Button variant="outline" onClick={() => setBulkOpen(true)}>
@@ -572,35 +634,21 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* ── Kickoff Brief CTA ── */}
-      {needsKickoff && (
-        <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
-              <Sparkles className="h-5 w-5 text-amber-600" />
-            </div>
-            <div className="flex-1">
-              <h2 className="font-semibold text-lg text-amber-900">Submit Kickoff Brief</h2>
-              <p className="text-sm text-amber-800 mt-1">
-                {departments.length > 0
-                  ? `${departments.length} department${departments.length !== 1 ? "s" : ""} enrolled and ready.`
-                  : "Departments will be enrolled by the admin."}
-                {" "}Submit the strategic kickoff brief to generate tailored AI questions for each department.
-              </p>
-            </div>
-            <Button onClick={() => setBriefOpen(true)} className="shrink-0">
-              <Zap className="mr-2 h-4 w-4" /> Submit Brief
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* ── Kickoff Brief CTA removed per request ── */}
 
       {/* ── Stats Cards ── */}
       {departments.length > 0 && stats && (
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-6">
           <div className="rounded-xl border bg-card p-4">
             <p className="text-xs text-muted-foreground">Total</p>
             <p className="text-2xl font-bold mt-1">{stats.total_departments}</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">Not Started</p>
+            </div>
+            <p className="text-2xl font-bold text-muted-foreground">{stats.not_started ?? 0}</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
             <div className="flex items-center gap-1.5 mb-1">
@@ -627,6 +675,79 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             <p className="text-xs text-muted-foreground mb-1">Completion</p>
             <p className="text-2xl font-bold">{stats.completion_rate.toFixed(0)}%</p>
             <Progress value={stats.completion_rate} className="h-1.5 mt-2" />
+          </div>
+        </div>
+      )}
+
+      {/* ── Per-Department Progress (prominent view) ── */}
+      {departments.length > 0 && (
+        <div className="rounded-xl border bg-card">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b">
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-muted-foreground" />
+              <h2 className="font-semibold text-sm">Per-Department Progress</h2>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                {departments.length}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              How much each department has answered
+            </p>
+          </div>
+          <div className="divide-y">
+            {departments.map((d) => {
+              const pct = d.progress_percentage ?? 0
+              const isSubmitted = ["submitted", "reviewed", "approved"].includes(d.status)
+              const overdue = isOverdue(d)
+              const barTone =
+                isSubmitted ? "[&>div]:bg-green-500" :
+                pct < 30 ? "[&>div]:bg-red-400" :
+                pct < 70 ? "[&>div]:bg-amber-400" :
+                "[&>div]:bg-green-500"
+              const pctTone =
+                isSubmitted ? "text-green-600" :
+                pct < 30 ? "text-red-500" :
+                pct < 70 ? "text-amber-600" :
+                "text-green-600"
+
+              return (
+                <div key={d.session_id} className="px-5 py-3.5">
+                  <div className="flex items-start justify-between gap-4 mb-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-sm truncate">{d.department_name}</p>
+                        <span className="text-xs font-mono text-muted-foreground">{d.department_code}</span>
+                        <StatusBadge status={d.status} variant="session" />
+                        {overdue && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                            <AlertOctagon className="h-3 w-3" /> Overdue
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {d.user_name || d.user_email || "Unassigned"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={cn("text-sm font-semibold tabular-nums", pctTone)}>{pct}%</span>
+                      {(d.status === "submitted" || d.status === "reviewed") && (
+                        <Link href={`/pm/sessions/${d.session_id}`}>
+                          <Button size="sm" variant="outline" className="h-7 text-xs">
+                            <Eye className="h-3 w-3 mr-1" /> Review
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                  <Progress value={pct} className={cn("h-2", barTone)} />
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {isSubmitted
+                      ? `Submitted ${d.submitted_at ? `on ${formatDate(d.submitted_at)}` : ""}`
+                      : `${pct}% of questions answered`}
+                  </p>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -912,8 +1033,21 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       </Dialog>
 
       {/* ── Kickoff Brief Dialog ── */}
-      <Dialog open={briefOpen} onOpenChange={(o) => { setBriefOpen(o); if (!o) { setBriefText(""); setAdditionalContext(""); setDocBriefText("") } }}>
-        <DialogContent className="max-w-2xl">
+      <Dialog
+        open={briefOpen}
+        onOpenChange={(o) => {
+          // Draft cycles must complete the kickoff brief before continuing
+          if (!o && isForceKickoff) return
+          setBriefOpen(o)
+          if (!o) resetKickoffForm()
+        }}
+      >
+        <DialogContent
+          className="max-w-2xl max-h-[85vh] overflow-y-auto"
+          hideClose={isForceKickoff}
+          onEscapeKeyDown={(e) => { if (isForceKickoff) e.preventDefault() }}
+          onInteractOutside={(e) => { if (isForceKickoff) e.preventDefault() }}
+        >
           <DialogHeader>
             <DialogTitle>Submit Kickoff Brief</DialogTitle>
             <p className="text-sm text-muted-foreground">
@@ -921,97 +1055,184 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </p>
           </DialogHeader>
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => setKickoffMode("text")}
-              className={cn(
-                "flex-1 rounded-lg border p-3 text-left text-sm transition-colors",
-                kickoffMode === "text" ? "border-primary bg-primary/5" : "border-border hover:bg-accent"
-              )}
-            >
-              <p className="font-medium flex items-center gap-2"><BookOpen className="h-4 w-4" /> Text Brief</p>
-              <p className="text-xs text-muted-foreground mt-1">Write the strategic context directly</p>
-            </button>
-            <button
-              onClick={() => setKickoffMode("docs")}
-              className={cn(
-                "flex-1 rounded-lg border p-3 text-left text-sm transition-colors",
-                kickoffMode === "docs" ? "border-primary bg-primary/5" : "border-border hover:bg-accent"
-              )}
-            >
-              <p className="font-medium flex items-center gap-2"><FileUp className="h-4 w-4" /> Upload Document</p>
-              <p className="text-xs text-muted-foreground mt-1">Upload a strategy doc or previous report</p>
-            </button>
-          </div>
+          {isForceKickoff && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              A kickoff brief is required before you can manage this cycle. Submit one below to generate AI questions for each department.
+            </div>
+          )}
 
-          {kickoffMode === "text" ? (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Strategic Brief <span className="text-destructive">*</span></Label>
-                <Textarea
-                  value={briefText}
-                  onChange={(e) => setBriefText(e.target.value)}
-                  placeholder="e.g. This fiscal year we focused on digital transformation, market expansion…"
-                  rows={6}
-                  className="text-sm"
-                />
+          {/* Text Brief */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+              Text Brief
+            </div>
+            <div className="space-y-2">
+              <Label>Strategic Brief <span className="text-destructive">*</span></Label>
+              <Textarea
+                value={briefText}
+                onChange={(e) => setBriefText(e.target.value)}
+                placeholder="e.g. This fiscal year we focused on digital transformation, market expansion…"
+                rows={4}
+                className="text-sm"
+              />
+              {(() => {
+                const wordCount = briefText.trim() === "" ? 0 : briefText.trim().split(/\s+/).length
+                const tone =
+                  wordCount < 50 ? "text-red-600" :
+                  wordCount < 150 ? "text-amber-600" :
+                  "text-green-600"
+                const msg =
+                  wordCount < 50 ? `${wordCount} words — minimum 50 recommended for good questions` :
+                  wordCount < 150 ? `${wordCount} words — good start, more detail helps` :
+                  `${wordCount} words — good detail`
+                return <p className={cn("text-xs", tone)}>{msg}</p>
+              })()}
+            </div>
+            <div className="space-y-2">
+              <Label>Additional Context <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
+              <Textarea
+                value={additionalContext}
+                onChange={(e) => setAdditionalContext(e.target.value)}
+                placeholder="Any specific themes, KPIs, or focus areas for this cycle..."
+                rows={2}
+                className="text-sm"
+              />
+            </div>
+            {/* num_questions slider (5-20, default 12) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Questions per department: <span className="text-foreground tabular-nums">{numQuestions}</span></Label>
+                {numQuestions === 12 && (
+                  <span className="text-xs text-muted-foreground">(default)</span>
+                )}
               </div>
-              <div className="space-y-2">
-                <Label>Additional Context <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea
-                  value={additionalContext}
-                  onChange={(e) => setAdditionalContext(e.target.value)}
-                  placeholder="Any specific themes, KPIs, or focus areas for this cycle..."
-                  rows={3}
-                  className="text-sm"
-                />
+              <input
+                type="range"
+                min={5}
+                max={20}
+                step={1}
+                value={numQuestions}
+                onChange={(e) => setNumQuestions(parseInt(e.target.value, 10))}
+                className="w-full h-1.5 cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground tabular-nums">
+                <span>5</span>
+                <span>12</span>
+                <span>20</span>
               </div>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt"
-                className="hidden"
-                onChange={handleDocUpload}
-              />
+          </div>
+
+          {/* Divider with OR */}
+          <div className="relative my-1">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+            <div className="relative flex justify-center"><span className="bg-background px-2 text-xs uppercase tracking-wide text-muted-foreground">or also upload</span></div>
+          </div>
+
+          {/* Document Upload */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <FileUp className="h-4 w-4 text-muted-foreground" />
+              Upload Document <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt"
+              className="hidden"
+              onChange={handleFilePick}
+            />
+            {pendingFile ? (
+              <div className="w-full rounded-lg border border-blue-300 bg-blue-50 p-3 flex items-center gap-3">
+                <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-blue-900 truncate">{pendingFile.name}</p>
+                  <p className="text-xs text-blue-700">
+                    Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-blue-700 hover:text-blue-900 hover:bg-blue-100"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={submittingKickoff}
+                >
+                  Replace
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => setPendingFile(null)}
+                  disabled={submittingKickoff}
+                >
+                  Remove
+                </Button>
+              </div>
+            ) : (
               <button
                 onClick={() => fileRef.current?.click()}
-                disabled={uploadKickoffDoc.isPending}
-                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-8 text-center hover:border-primary/50 hover:bg-accent transition-colors"
+                disabled={submittingKickoff}
+                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 text-center hover:border-primary/50 hover:bg-accent transition-colors"
               >
-                {uploadKickoffDoc.isPending
-                  ? <Loader2 className="h-7 w-7 animate-spin mx-auto mb-2 text-muted-foreground" />
-                  : <FileUp className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />}
-                <p className="text-sm font-medium">
-                  {uploadKickoffDoc.isPending ? "Uploading…" : "Click to upload document"}
-                </p>
+                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
+                <p className="text-sm font-medium">Click to attach a document</p>
                 <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT</p>
               </button>
-              <div className="space-y-2">
-                <Label>Brief Summary <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea
-                  value={docBriefText}
-                  onChange={(e) => setDocBriefText(e.target.value)}
-                  placeholder="Summarise the document to help the AI understand its context…"
-                  rows={3}
-                  className="text-sm"
-                />
+            )}
+          </div>
+
+          {qualityWarning && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-900">Brief quality is low</p>
+                  <p className="text-sm text-amber-800">{qualityWarning.suggestion}</p>
+                  {qualityWarning.missing.length > 0 && (
+                    <p className="text-xs text-amber-800">
+                      <span className="font-medium">Missing:</span> {qualityWarning.missing.join(", ")}
+                    </p>
+                  )}
+                  <p className="text-xs text-amber-700 mt-1">
+                    Questions have been generated but may be generic. You can improve your brief and resubmit to regenerate questions.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setBriefOpen(false)
+                    resetKickoffForm()
+                    refetchPM()
+                  }}
+                >
+                  Close anyway
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setQualityWarning(null)}
+                >
+                  Improve brief
+                </Button>
               </div>
             </div>
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBriefOpen(false)}>Cancel</Button>
-            {kickoffMode === "text" && (
-              <Button onClick={handleSubmitKickoff} disabled={submittingKickoff || !briefText.trim()}>
-                {submittingKickoff
-                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  : <Zap className="mr-2 h-4 w-4" />}
-                {submittingKickoff ? "Generating questions…" : "Submit & Generate Questions"}
-              </Button>
+            {!isForceKickoff && (
+              <Button variant="outline" onClick={() => setBriefOpen(false)}>Cancel</Button>
             )}
+            <Button onClick={handleSubmitKickoff} disabled={submittingKickoff || !briefText.trim()}>
+              {submittingKickoff
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Zap className="mr-2 h-4 w-4" />}
+              {submittingKickoff ? "Generating questions…" : "Submit & Generate Questions"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
