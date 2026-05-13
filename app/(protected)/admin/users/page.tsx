@@ -46,7 +46,7 @@ const createSchema = z.object({
   password: z.string().min(8, "At least 8 characters"),
   phone: z.string().optional(),
   role: z.enum(["admin", "project_manager", "department_user"]),
-  department: z.string().optional(),
+  department_id: z.string().optional(),
 })
 type CreateForm = z.infer<typeof createSchema>
 
@@ -125,7 +125,11 @@ export default function UsersPage() {
   const onCreateSubmit = async (formData: CreateForm) => {
     setCreateError(null)
     try {
-      await createMutation.mutateAsync(formData)
+      const dept = depts?.departments.find((d) => d.id === formData.department_id)
+      await createMutation.mutateAsync({
+        ...formData,
+        department: dept?.department_name,
+      })
       reset()
       setCreateOpen(false)
     } catch (err: unknown) {
@@ -359,7 +363,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Department</Label>
                 <Controller
-                  name="department"
+                  name="department_id"
                   control={control}
                   render={({ field }) => (
                     <Select value={field.value || ""} onValueChange={field.onChange}>
@@ -368,7 +372,7 @@ export default function UsersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {depts?.departments.map((d) => (
-                          <SelectItem key={d.id} value={d.department_name}>
+                          <SelectItem key={d.id} value={d.id || ""}>
                             {d.department_name}
                           </SelectItem>
                         ))}

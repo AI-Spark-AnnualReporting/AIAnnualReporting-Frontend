@@ -6,6 +6,7 @@ export interface CreateUserPayload {
   password: string
   full_name: string
   role: string
+  department_id?: string
   department?: string
   phone?: string
 }
@@ -51,17 +52,8 @@ export const usersApi = {
   },
 
   create: async (payload: CreateUserPayload) => {
-    // Step 1: Register via /auth/register (creates user with proper UUID, status=pending)
-    // POST /admin/users has a known backend UUID bug; /auth/register works correctly.
-    const { data: registerData } = await apiClient.post("/auth/register", payload)
-    const userId: string | undefined = registerData?.user_id || registerData?.id
-
-    // Step 2: Auto-activate so the user is ready immediately (admin-created = trusted)
-    if (userId) {
-      const { data: activateData } = await apiClient.post(`/admin/users/${userId}/activate`)
-      return activateData
-    }
-    return registerData
+    const { data } = await apiClient.post("/admin/users", payload)
+    return data
   },
 
   update: async (userId: string, payload: UpdateUserPayload) => {
