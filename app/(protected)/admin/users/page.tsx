@@ -106,9 +106,6 @@ export default function UsersPage() {
 
   const onEditSubmit = async (formData: EditForm) => {
     if (!editTarget) return
-    const dept = formData.role === "department_user"
-      ? depts?.departments.find((d) => d.id === formData.department_id)
-      : undefined
     await updateMutation.mutateAsync({
       userId: editTarget.user_id,
       data: { full_name: formData.full_name },
