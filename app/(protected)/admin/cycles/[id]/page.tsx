@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   useCycle, useCycleOverview, useUploadKickoffDocs, useAssignDepartments, useUpdateCycle,
 } from "@/hooks/useCycles"
@@ -56,6 +57,7 @@ export default function CycleDetailPage({
 }) {
   const { id } = use(params)
   const searchParams = useSearchParams()
+  const qc = useQueryClient()
   const { data: cycleData, isLoading: cycleLoading } = useCycle(id)
   const { data: overview, isLoading: overviewLoading } = useCycleOverview(id)
   const { data: deptsData } = useDepartments()
@@ -192,6 +194,9 @@ export default function CycleDetailPage({
       } catch {
         // DB write likely succeeded; response model bug on backend — continue
       }
+      // Always refresh cycle + overview so sessions appear even when onSuccess didn't fire
+      qc.invalidateQueries({ queryKey: ["cycle", id] })
+      qc.invalidateQueries({ queryKey: ["cycle", id, "overview"] })
       setSavedAt(new Date())
     } catch (err: unknown) {
       setSaveError((err as { message?: string })?.message || "Failed to save assignments")
@@ -279,7 +284,7 @@ export default function CycleDetailPage({
                   disabled={assignMutation.isPending || !allAssigned || assignments.length === 0}
                 >
                   <Save className="mr-2 h-4 w-4" />
-                  {assignMutation.isPending ? "Saving…" : "Save Assignments"}
+                  {assignMutation.isPending ? "Submitting…" : "Submit"}
                 </Button>
               )}
             </div>
@@ -507,7 +512,14 @@ export default function CycleDetailPage({
           )}
         </div>
 
-        {isActiveWithNoSessions ? (
+        {(overview?.departments?.length ?? 0) > 0 ? (
+          <DataTable
+            columns={deptColumns}
+            data={overview.departments}
+            isLoading={overviewLoading}
+            emptyMessage="No sessions yet."
+          />
+        ) : isActiveWithNoSessions ? (
           <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center space-y-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 mx-auto">
               <AlertCircle className="h-5 w-5 text-amber-600" />
@@ -517,18 +529,11 @@ export default function CycleDetailPage({
               Use the <strong>Assign Departments</strong> panel above to add departments and save your assignments.
             </p>
           </div>
-        ) : isDraft ? (
+        ) : (
           <EmptyState
             icon={Building2}
             title="No sessions yet"
             description="Assign departments above and save to generate sessions."
-          />
-        ) : (
-          <DataTable
-            columns={deptColumns}
-            data={overview?.departments || []}
-            isLoading={overviewLoading}
-            emptyMessage="No sessions yet."
           />
         )}
       </div>
