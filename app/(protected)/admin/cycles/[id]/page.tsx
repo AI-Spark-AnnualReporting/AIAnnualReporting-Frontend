@@ -6,7 +6,7 @@ import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import {
-  useCycle, useCycleOverview, useUploadKickoffDocs, useAssignDepartments, useUpdateCycle, useActivateCycle,
+  useCycle, useCycleOverview, useUploadKickoffDocs, useAssignDepartments, useUpdateCycle,
 } from "@/hooks/useCycles"
 import { useDepartments } from "@/hooks/useDepartments"
 import { useUsers } from "@/hooks/useUsers"
@@ -29,7 +29,7 @@ import { Department, SessionSummary, User } from "@/types"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import {
-  FileUp, Zap, ArrowLeft, Building2, Search, Plus, Trash2,
+  FileUp, ArrowLeft, Building2, Search, Plus, Trash2,
   CheckCircle, XCircle, AlertCircle, Save, Info, Pencil, RefreshCw,
 } from "lucide-react"
 import Link from "next/link"
@@ -59,17 +59,14 @@ export default function CycleDetailPage({
   const { data: cycleData, isLoading: cycleLoading } = useCycle(id)
   const { data: overview, isLoading: overviewLoading } = useCycleOverview(id)
   const { data: deptsData } = useDepartments()
-  const { data: usersData } = useUsers()
   const uploadMutation = useUploadKickoffDocs()
   const assignMutation = useAssignDepartments()
   const updateMutation = useUpdateCycle()
-  const activateMutation = useActivateCycle()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [uploading, setUploading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
 
-  // Auto-open edit dialog when redirected from activate page's Fix button
   useEffect(() => {
     if (searchParams.get("editCycle") === "1") {
       setEditOpen(true)
@@ -136,9 +133,6 @@ export default function CycleDetailPage({
   const isActiveWithNoSessions = !isDraft && (overview?.departments?.length ?? 0) === 0
 
   const departments = deptsData?.departments || []
-  const users = usersData?.users || []
-  const deptUsers = users.filter((u) => u.role === "department_user")
-  const pmUsers = users.filter((u) => u.role === "project_manager")
 
   // Helper: stable identifier for a department (backend may use id or department_id)
   const getDeptKey = (d: Department) => d.department_id ?? d.id ?? d.department_code
@@ -164,8 +158,7 @@ export default function CycleDetailPage({
     setSavedAt(null)
   }
 
-  const setAssignmentUser = (deptId: string, userId: string) => {
-    const user = users.find((u) => u.user_id === userId) || null
+  const setAssignmentUser = (deptId: string, user: User | null) => {
     setAssignments((prev) =>
       prev.map((a) => (getDeptKey(a.department) === deptId ? { ...a, user } : a))
     )
@@ -275,10 +268,21 @@ export default function CycleDetailPage({
               : ""
           }
           action={
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <Pencil className="mr-2 h-4 w-4" />
-              Edit
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(true)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit
+              </Button>
+              {(isDraft || isActiveWithNoSessions) && (
+                <Button
+                  onClick={handleSaveAssignments}
+                  disabled={assignMutation.isPending || !allAssigned || assignments.length === 0}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  {assignMutation.isPending ? "Saving…" : "Save Assignments"}
+                </Button>
+              )}
+            </div>
           }
         />
       </div>
@@ -306,7 +310,6 @@ export default function CycleDetailPage({
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Select which departments participate in this cycle and assign one responsible user per department.
-              Save your assignments, then click <strong>Activate Cycle</strong>.
             </p>
           </div>
 
@@ -314,7 +317,7 @@ export default function CycleDetailPage({
           <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
             <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
-              Each department will get an AI-generated questionnaire once the cycle is activated.
+              Each department will get an AI-generated questionnaire after assignments are saved.
               The responsible user will fill in their department&apos;s answers.
             </span>
           </div>
@@ -329,21 +332,13 @@ export default function CycleDetailPage({
                     <p className="text-sm font-medium truncate">{a.department.department_name}</p>
                     <p className="text-xs text-muted-foreground font-mono">{a.department.department_code}</p>
                   </div>
-                  <Select
-                    value={a.user?.user_id || ""}
-                    onValueChange={(val) => setAssignmentUser((a.department.department_id ?? a.department.id)!, val)}
-                  >
-                    <SelectTrigger className="w-44 h-8 text-xs">
-                      <SelectValue placeholder="Assign user…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {deptUsers.map((u) => (
-                        <SelectItem key={u.user_id} value={u.user_id}>
-                          {u.full_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <DeptUserSelect
+                    department={a.department}
+                    selectedUser={a.user}
+                    onChange={(user) =>
+                      setAssignmentUser((a.department.department_id ?? a.department.id)!, user)
+                    }
+                  />
                   {a.user ? (
                     <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
                   ) : (
@@ -424,37 +419,15 @@ export default function CycleDetailPage({
               <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
               <p className="text-xs text-green-700">
                 Assignments saved at {savedAt.toLocaleTimeString()}.
-                {!isDraft && " Click \"Re-generate Sessions\" below to create sessions for newly assigned departments."}
               </p>
             </div>
           )}
 
-          {/* Save button row */}
-          <div className="flex items-center justify-between pt-1">
+          {/* Footer row */}
+          <div className="pt-1">
             <p className="text-xs text-muted-foreground">
               {assignments.length} department{assignments.length !== 1 ? "s" : ""} added
             </p>
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSaveAssignments}
-                disabled={assignMutation.isPending || !allAssigned || assignments.length === 0}
-                size="sm"
-                variant="outline"
-              >
-                <Save className="mr-2 h-3.5 w-3.5" />
-                {assignMutation.isPending ? "Saving…" : "Save Assignments"}
-              </Button>
-              {isActiveWithNoSessions && (
-                <Button
-                  size="sm"
-                  onClick={() => activateMutation.mutate({ cycleId: id })}
-                  disabled={activateMutation.isPending}
-                >
-                  <Zap className="mr-2 h-3.5 w-3.5" />
-                  {activateMutation.isPending ? "Generating…" : "Re-generate Sessions"}
-                </Button>
-              )}
-            </div>
           </div>
         </div>
       )}
@@ -535,23 +508,20 @@ export default function CycleDetailPage({
         </div>
 
         {isActiveWithNoSessions ? (
-          /* Active cycle with no sessions — departments weren't assigned before activation */
           <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center space-y-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 mx-auto">
               <AlertCircle className="h-5 w-5 text-amber-600" />
             </div>
             <p className="font-semibold text-amber-900">No department sessions created</p>
             <p className="text-sm text-amber-800 max-w-sm mx-auto leading-relaxed">
-              Departments must be assigned and saved <strong>before</strong> activation.
-              Use the <strong>Assign Departments</strong> panel above to add departments,
-              then click <strong>Re-generate Sessions</strong>.
+              Use the <strong>Assign Departments</strong> panel above to add departments and save your assignments.
             </p>
           </div>
         ) : isDraft ? (
           <EmptyState
             icon={Building2}
             title="No sessions yet"
-            description="Assign departments above, save, then activate the cycle to generate sessions."
+            description="Assign departments above and save to generate sessions."
           />
         ) : (
           <DataTable
@@ -563,5 +533,51 @@ export default function CycleDetailPage({
         )}
       </div>
     </div>
+  )
+}
+
+function DeptUserSelect({
+  department,
+  selectedUser,
+  onChange,
+}: {
+  department: Department
+  selectedUser: User | null
+  onChange: (user: User | null) => void
+}) {
+  const departmentId = department.department_id ?? department.id
+  const { data, isLoading } = useUsers({
+    department_id: departmentId,
+    role: "department_user",
+    page_size: 100,
+  })
+  const users = data?.users ?? []
+  const isEmpty = !isLoading && users.length === 0
+
+  return (
+    <Select
+      value={selectedUser?.user_id || ""}
+      onValueChange={(val) => onChange(users.find((u) => u.user_id === val) ?? null)}
+      disabled={isLoading || isEmpty}
+    >
+      <SelectTrigger className="w-44 h-8 text-xs">
+        <SelectValue
+          placeholder={
+            isLoading
+              ? "Loading…"
+              : isEmpty
+                ? "No users in department"
+                : "Assign user…"
+          }
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {users.map((u) => (
+          <SelectItem key={u.user_id} value={u.user_id}>
+            {u.full_name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
