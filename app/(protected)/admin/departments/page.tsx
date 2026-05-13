@@ -17,7 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Department } from "@/types"
-import { Building2, Plus, Brain, ChevronRight, Info, Lock, UserCog } from "lucide-react"
+import { Building2, Plus, Brain, ChevronRight, Lock, UserCog } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -32,8 +32,6 @@ const schema = z.object({
     .transform((v) => v.toUpperCase()),
   department_name: z.string().min(2, "Required"),
   description: z.string().optional(),
-  initial_prompt: z.string().min(10, "Please provide an agent introduction (min 10 chars)"),
-  system_prompt: z.string().min(10, "Please provide behavioral instructions (min 10 chars)"),
 })
 type Form = z.infer<typeof schema>
 
@@ -184,16 +182,16 @@ export default function DepartmentsPage() {
 
       {/* Create Department Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create Department</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              Creating a department also configures its AI agent context for report generation.
+              The AI agent context for this department will be configured automatically.
             </p>
           </DialogHeader>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
 
-            {/* Section 1: Basic Info */}
+            {/* Basic Info */}
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Building2 className="h-4 w-4" /> Organizational Info
@@ -228,64 +226,6 @@ export default function DepartmentsPage() {
                   placeholder="Brief description of this department's role..."
                   rows={2}
                 />
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t" />
-
-            {/* Section 2: AI Configuration */}
-            <div className="space-y-4">
-              <div className="flex items-start gap-2">
-                <Brain className="h-4 w-4 text-purple-600 mt-0.5 shrink-0" />
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">AI Agent Configuration</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    These prompts define how the AI behaves for this department during report generation.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1">
-                  Initial Prompt
-                  <span className="text-destructive">*</span>
-                  <span className="text-xs text-muted-foreground font-normal ml-1">(Agent Introduction / Context)</span>
-                </Label>
-                <Textarea
-                  {...register("initial_prompt")}
-                  placeholder="e.g. You are the AI assistant for the Finance Department. Your role is to help the finance team articulate their annual contributions, achievements, and metrics clearly and professionally..."
-                  rows={4}
-                  className="text-sm"
-                />
-                {errors.initial_prompt && (
-                  <p className="text-xs text-destructive">{errors.initial_prompt.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1">
-                  System Prompt
-                  <span className="text-destructive">*</span>
-                  <span className="text-xs text-muted-foreground font-normal ml-1">(Core Instructions / Behavioral Rules)</span>
-                </Label>
-                <Textarea
-                  {...register("system_prompt")}
-                  placeholder="e.g. Always respond in a professional, executive-level tone. Focus on quantifiable results and financial metrics. When generating draft content, structure responses with: Key Achievements, Financial Highlights, Challenges & Learnings, and Outlook for next year..."
-                  rows={4}
-                  className="text-sm"
-                />
-                {errors.system_prompt && (
-                  <p className="text-xs text-destructive">{errors.system_prompt.message}</p>
-                )}
-              </div>
-
-              <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3">
-                <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-                <p className="text-xs text-blue-700">
-                  These prompts can be edited later from the Department Detail page. You can refine them
-                  after seeing how the AI performs in the first reporting cycle.
-                </p>
               </div>
             </div>
 

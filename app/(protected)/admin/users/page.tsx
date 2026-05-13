@@ -46,7 +46,7 @@ const createSchema = z.object({
   password: z.string().min(8, "At least 8 characters"),
   phone: z.string().optional(),
   role: z.enum(["admin", "project_manager", "department_user"]),
-  department: z.string().optional(),
+  department_id: z.string().optional(),
 })
 type CreateForm = z.infer<typeof createSchema>
 
@@ -84,6 +84,7 @@ export default function UsersPage() {
     control,
     reset,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
@@ -105,6 +106,9 @@ export default function UsersPage() {
 
   const onEditSubmit = async (formData: EditForm) => {
     if (!editTarget) return
+    const dept = formData.role === "department_user"
+      ? depts?.departments.find((d) => d.id === formData.department_id)
+      : undefined
     await updateMutation.mutateAsync({
       userId: editTarget.user_id,
       data: { full_name: formData.full_name },
@@ -115,7 +119,14 @@ export default function UsersPage() {
   const onCreateSubmit = async (formData: CreateForm) => {
     setCreateError(null)
     try {
-      await createMutation.mutateAsync(formData)
+      const dept = formData.role === "department_user"
+        ? depts?.departments.find((d) => d.id === formData.department_id)
+        : undefined
+      await createMutation.mutateAsync({
+        ...formData,
+        department_id: dept ? formData.department_id : undefined,
+        department: dept?.department_name,
+      })
       reset()
       setCreateOpen(false)
     } catch (err: unknown) {
@@ -332,7 +343,7 @@ export default function UsersPage() {
                 name="role"
                 control={control}
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select value={field.value} onValueChange={(v) => { field.onChange(v); if (v !== "department_user") setValue("department_id", "") }}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -349,7 +360,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Department</Label>
                 <Controller
-                  name="department"
+                  name="department_id"
                   control={control}
                   render={({ field }) => (
                     <Select value={field.value || ""} onValueChange={field.onChange}>
@@ -358,7 +369,7 @@ export default function UsersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {depts?.departments.map((d) => (
-                          <SelectItem key={d.id} value={d.department_name}>
+                          <SelectItem key={d.id} value={d.id || ""}>
                             {d.department_name}
                           </SelectItem>
                         ))}
