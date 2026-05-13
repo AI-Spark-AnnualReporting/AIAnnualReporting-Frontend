@@ -515,7 +515,7 @@ export default function CycleDetailPage({
         {(overview?.departments?.length ?? 0) > 0 ? (
           <DataTable
             columns={deptColumns}
-            data={overview.departments}
+            data={overview?.departments ?? []}
             isLoading={overviewLoading}
             emptyMessage="No sessions yet."
           />
