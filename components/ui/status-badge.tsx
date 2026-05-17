@@ -4,6 +4,7 @@ import { SESSION_STATUSES, CYCLE_STATUSES, USER_STATUSES } from "@/lib/constants
 type BadgeVariant = "session" | "cycle" | "user"
 
 const colorMap: Record<string, string> = {
+  slate: "bg-slate-100 text-slate-700 border-slate-200",
   gray: "bg-gray-100 text-gray-700 border-gray-200",
   blue: "bg-blue-100 text-blue-700 border-blue-200",
   purple: "bg-purple-100 text-purple-700 border-purple-200",

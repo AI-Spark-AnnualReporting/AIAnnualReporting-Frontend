@@ -128,6 +128,12 @@ export default function SessionWorkspacePage({
   const isSubmitted = session?.status === "submitted" || session?.status === "approved"
   const isReopened = session?.status === "reopened"
   const isApproved = session?.status === "approved"
+  // Editing/AI/upload allowed in active, revision, or not-yet-started states.
+  // (not_started is included because the backend flips status on first save.)
+  const canEdit =
+    session?.status === "in_progress" ||
+    session?.status === "reopened" ||
+    session?.status === "not_started"
 
   // Pre-fill saved answers
   useEffect(() => {
@@ -458,7 +464,7 @@ export default function SessionWorkspacePage({
           <Button
             size="sm" className="h-8 shrink-0"
             onClick={handleGenerateDraft}
-            disabled={answeredCount === 0 || generateDraft.isPending}
+            disabled={!canEdit || answeredCount === 0 || generateDraft.isPending}
           >
             {generateDraft.isPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -580,7 +586,7 @@ export default function SessionWorkspacePage({
                         <Button
                           className="w-full max-w-xs h-11 text-sm mb-5"
                           onClick={() => sendChatMessage(`Suggest an answer for: "${currentQ.question}"`, true)}
-                          disabled={chatLoading}
+                          disabled={!canEdit || chatLoading}
                         >
                           {chatLoading
                             ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -597,7 +603,7 @@ export default function SessionWorkspacePage({
                             <button
                               key={t.label}
                               onClick={() => sendChatMessage(t.prompt, false)}
-                              disabled={chatLoading}
+                              disabled={!canEdit || chatLoading}
                               className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent hover:border-primary/30 transition-colors disabled:opacity-50 font-medium"
                             >
                               {t.label}
@@ -681,7 +687,7 @@ export default function SessionWorkspacePage({
                       <button
                         key={t.label}
                         onClick={() => sendChatMessage(t.prompt, false)}
-                        disabled={chatLoading}
+                        disabled={!canEdit || chatLoading}
                         className="text-xs px-3 py-1 rounded-full border hover:bg-accent hover:border-primary/30 transition-colors disabled:opacity-50 font-medium"
                       >
                         {t.label}
@@ -701,7 +707,7 @@ export default function SessionWorkspacePage({
                         accept=".pdf,.docx,.doc,.txt"
                         className="hidden"
                         onChange={handleDocUpload}
-                        disabled={uploadingDoc}
+                        disabled={!canEdit || uploadingDoc}
                       />
                       <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
                         <span>
@@ -726,7 +732,7 @@ export default function SessionWorkspacePage({
                     <Button
                       size="icon" className="h-8 w-8 shrink-0"
                       onClick={() => { if (chatInput.trim()) { sendChatMessage(chatInput, false); setChatInput("") } }}
-                      disabled={!chatInput.trim() || chatLoading}
+                      disabled={!canEdit || !chatInput.trim() || chatLoading}
                     >
                       <Send className="h-3.5 w-3.5" />
                     </Button>
@@ -744,7 +750,7 @@ export default function SessionWorkspacePage({
                       <Button
                         size="sm" variant="outline" className="h-6 px-2.5 text-xs"
                         onClick={handleSaveAnswer}
-                        disabled={submitAnswers.isPending}
+                        disabled={!canEdit || submitAnswers.isPending}
                       >
                         {submitAnswers.isPending
                           ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -777,7 +783,7 @@ export default function SessionWorkspacePage({
                     placeholder="Type your answer, or generate with AI above…"
                     rows={3}
                     className="w-full resize-y text-sm leading-relaxed min-h-[72px]"
-                    disabled={isSubmitted}
+                    disabled={!canEdit}
                   />
                 </div>
               </div>

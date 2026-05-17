@@ -1,11 +1,10 @@
 export const SESSION_STATUSES = {
+  assigned: { label: "Assigned", color: "slate" },
   not_started: { label: "Not Started", color: "gray" },
   in_progress: { label: "In Progress", color: "blue" },
-  submitted: { label: "Submitted", color: "purple" },
-  reviewed: { label: "Reviewed", color: "indigo" },
+  submitted: { label: "Submitted", color: "yellow" },
   approved: { label: "Approved", color: "green" },
-  rejected: { label: "Rejected", color: "red" },
-  reopened: { label: "Needs Changes", color: "orange" },
+  reopened: { label: "Needs Changes", color: "red" },
 } as const
 
 export const CYCLE_STATUSES = {

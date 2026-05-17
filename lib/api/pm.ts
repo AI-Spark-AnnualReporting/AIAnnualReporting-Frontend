@@ -1,12 +1,8 @@
 import apiClient from "./client"
-import { PMDashboard, Session, KickoffBriefResponse } from "@/types"
+import { PMDashboard, Session, KickoffBriefResponse, PMReviewAction } from "@/types"
 
 export interface ReviewPayload {
-  // "reviewed" = PM has read the submission (intermediate step before approve/reject)
-  // "approved" = PM fully approves, content will be included in the final report
-  // "rejected" = PM rejects (hard reject, rare)
-  // "reopened" = PM sends back to department for revision
-  status: "reviewed" | "approved" | "rejected" | "reopened"
+  action: PMReviewAction
   review_notes?: string
 }
 

@@ -319,20 +319,23 @@ export async function getSessionForPM(
 /** Build PMDashboard-style stats from a list of sessions. */
 export function buildStats(sessions: DeptSession[]) {
   const total = sessions.length
-  const submitted = sessions.filter((s) => s.status === "submitted").length
-  const reviewed = sessions.filter((s) => s.status === "reviewed").length
-  const approved = sessions.filter((s) => s.status === "approved").length
-  const inProgress = sessions.filter((s) => s.status === "in_progress").length
+  const assigned = sessions.filter((s) => s.status === "assigned").length
   const notStarted = sessions.filter((s) => s.status === "not_started").length
+  const inProgress = sessions.filter((s) => s.status === "in_progress").length
+  const submitted = sessions.filter((s) => s.status === "submitted").length
+  const approved = sessions.filter((s) => s.status === "approved").length
+  const reopened = sessions.filter((s) => s.status === "reopened").length
+  // Only `approved` is truly "done" — submitted is awaiting PM, reopened is awaiting dept.
   const completionRate =
-    total > 0 ? Math.round(((submitted + reviewed + approved) / total) * 100) : 0
+    total > 0 ? Math.round((approved / total) * 100) : 0
   return {
     total_departments: total,
-    submitted,
-    reviewed,
-    approved,
-    in_progress: inProgress,
+    assigned,
     not_started: notStarted,
+    in_progress: inProgress,
+    submitted,
+    approved,
+    reopened,
     completion_rate: completionRate,
   }
 }

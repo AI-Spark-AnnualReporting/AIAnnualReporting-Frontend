@@ -2,13 +2,14 @@ export type UserRole = "admin" | "project_manager" | "department_user"
 export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =
+  | "assigned"
   | "not_started"
   | "in_progress"
   | "submitted"
-  | "reviewed"
   | "approved"
-  | "rejected"
   | "reopened"
+
+export type PMReviewAction = "approved" | "rejected" | "reopened"
 
 export interface User {
   id?: string
@@ -103,11 +104,12 @@ export interface CycleOverview {
   }
   stats: {
     total_departments: number
-    submitted: number
-    in_progress: number
+    assigned: number
     not_started: number
-    reviewed: number
+    in_progress: number
+    submitted: number
     approved: number
+    reopened: number
     completion_rate: number
   }
   departments: SessionSummary[]
@@ -174,6 +176,7 @@ export interface DepartmentDashboard {
     status: SessionStatus
     progress_percentage: number
     has_questions: boolean
+    review_notes?: string | null
   }[]
   total_assignments: number
   pending_count: number

@@ -1,35 +1,132 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useDepartmentDashboard } from "@/hooks/useSessions"
+import { departmentApi } from "@/lib/api/department"
 import { PageHeader } from "@/components/ui/page-header"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Progress } from "@/components/ui/progress"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { SESSION_STATUSES } from "@/lib/constants"
 import { SessionStatus } from "@/types"
-import { ClipboardList, ArrowRight, Bell, Calendar, CheckCircle2, RotateCcw, Clock } from "lucide-react"
+import {
+  ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye,
+  FileUp, FileText, X, Loader2,
+} from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 type StatusFilter = "all" | SessionStatus
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "assigned", label: SESSION_STATUSES.assigned.label },
   { value: "not_started", label: SESSION_STATUSES.not_started.label },
   { value: "in_progress", label: SESSION_STATUSES.in_progress.label },
   { value: "submitted", label: SESSION_STATUSES.submitted.label },
-  { value: "reviewed", label: SESSION_STATUSES.reviewed.label },
   { value: "approved", label: SESSION_STATUSES.approved.label },
   { value: "reopened", label: SESSION_STATUSES.reopened.label },
-  { value: "rejected", label: SESSION_STATUSES.rejected.label },
 ]
+
+type SessionCTA = {
+  label: string
+  disabled: boolean
+  variant: "default" | "outline" | "destructive"
+  icon: React.ElementType
+}
+
+function getSessionCTA(status: SessionStatus, progress: number): SessionCTA {
+  switch (status) {
+    case "assigned":
+      return { label: "Waiting for Questions", disabled: true, variant: "outline", icon: Clock }
+    case "not_started":
+      return { label: "Start Session", disabled: false, variant: "default", icon: ArrowRight }
+    case "in_progress":
+      return { label: progress > 0 ? "Continue Session" : "Start Session", disabled: false, variant: "default", icon: ArrowRight }
+    case "submitted":
+      return { label: "Awaiting Review", disabled: true, variant: "outline", icon: Clock }
+    case "approved":
+      return { label: "View Submission", disabled: false, variant: "outline", icon: Eye }
+    case "reopened":
+      return { label: "Revise & Resubmit", disabled: false, variant: "destructive", icon: RotateCcw }
+  }
+}
+
+function getCardBorderColor(status: SessionStatus): string {
+  switch (status) {
+    case "assigned":    return "border-slate-200"
+    case "not_started": return "border-gray-200"
+    case "in_progress": return "border-blue-300"
+    case "submitted":   return "border-yellow-300"
+    case "approved":    return "border-green-400"
+    case "reopened":    return "border-red-400"
+  }
+}
 
 export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
+  const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
+  const [startTarget, setStartTarget] = useState<string | null>(null)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [uploadingStart, setUploadingStart] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || [])
+    const valid: File[] = []
+    const invalid: string[] = []
+    for (const f of picked) {
+      if (/\.(pdf|docx?|txt)$/i.test(f.name)) valid.push(f)
+      else invalid.push(f.name)
+    }
+    if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
+    setPendingFiles((prev) => [...prev, ...valid])
+    e.target.value = ""
+  }
+
+  const removePendingFile = (idx: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const closeStartDialog = () => {
+    if (uploadingStart) return
+    setStartTarget(null)
+    setPendingFiles([])
+  }
+
+  const handleStartSession = async () => {
+    if (!startTarget) return
+    const sessionId = startTarget
+    if (pendingFiles.length === 0) {
+      router.push(`/department/sessions/${sessionId}`)
+      return
+    }
+    setUploadingStart(true)
+    try {
+      for (const file of pendingFiles) {
+        await departmentApi.uploadDocument(sessionId, file)
+      }
+      toast.success(`${pendingFiles.length} document${pendingFiles.length !== 1 ? "s" : ""} uploaded`)
+      router.push(`/department/sessions/${sessionId}`)
+    } catch (err: unknown) {
+      toast.error((err as { message?: string })?.message || "Upload failed")
+    } finally {
+      setUploadingStart(false)
+    }
+  }
 
   if (isLoading) return <PageSkeleton />
 
@@ -122,24 +219,24 @@ export default function DepartmentDashboard() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {visibleSessions.map((session) => {
-              const isApproved = session.status === "approved"
+              const cta = getSessionCTA(session.status, session.progress_percentage)
               const isReopened = session.status === "reopened"
-              const isSubmittedPending = session.status === "submitted"
-              const isComplete = isSubmittedPending || isApproved
+              const isTerminalOrSubmitted =
+                session.status === "submitted" || session.status === "approved"
               const isOverdue =
                 session.submission_deadline &&
                 new Date(session.submission_deadline) < new Date() &&
-                !isComplete &&
+                !isTerminalOrSubmitted &&
                 !isReopened
+              const Icon = cta.icon
 
               return (
                 <div
                   key={session.session_id}
                   className={cn(
                     "rounded-xl border bg-card p-6 space-y-4 transition-shadow hover:shadow-md",
-                    isOverdue && "border-red-200",
-                    isReopened && "border-amber-300 bg-amber-50/20",
-                    isApproved && "border-green-200 bg-green-50/20",
+                    getCardBorderColor(session.status),
+                    isOverdue && "border-red-300",
                   )}
                 >
                   <div className="flex items-start justify-between">
@@ -152,12 +249,17 @@ export default function DepartmentDashboard() {
                     <StatusBadge status={session.status} variant="session" />
                   </div>
 
-                  {/* Reopened notice */}
+                  {/* Reopened — show PM feedback when present, otherwise a generic prompt */}
                   {isReopened && (
-                    <div className="flex items-center gap-2 rounded-md bg-amber-100 border border-amber-200 px-3 py-2">
-                      <RotateCcw className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                      <p className="text-xs font-medium text-amber-800">
-                        PM requested revisions — please update and resubmit
+                    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <RotateCcw className="h-3.5 w-3.5 text-red-600 shrink-0" />
+                        <p className="text-xs font-semibold text-red-800">PM feedback</p>
+                      </div>
+                      <p className="mt-1 text-sm text-red-700">
+                        {session.review_notes
+                          ? session.review_notes
+                          : "PM requested revisions — please update and resubmit."}
                       </p>
                     </div>
                   )}
@@ -182,34 +284,39 @@ export default function DepartmentDashboard() {
 
                   {/* Action */}
                   <div className="flex gap-2 pt-1">
-                    {isApproved ? (
-                      <div className="flex items-center gap-2 text-sm text-green-700 font-medium">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Approved
+                    {session.status === "assigned" ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground italic px-1 py-2">
+                        <Icon className="h-4 w-4 shrink-0" />
+                        Awaiting questions from PM
                       </div>
-                    ) : isSubmittedPending ? (
-                      <div className="flex items-center gap-2 text-sm text-blue-600">
-                        <Clock className="h-4 w-4" />
-                        Submitted — Awaiting Review
-                      </div>
+                    ) : session.status === "not_started" ? (
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        variant={cta.variant}
+                        onClick={() => {
+                          setPendingFiles([])
+                          setStartTarget(session.session_id)
+                        }}
+                      >
+                        <Icon className="mr-2 h-3.5 w-3.5" />
+                        {cta.label}
+                      </Button>
+                    ) : cta.disabled ? (
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        variant={cta.variant}
+                        disabled
+                      >
+                        <Icon className="mr-2 h-3.5 w-3.5" />
+                        {cta.label}
+                      </Button>
                     ) : (
                       <Link href={`/department/sessions/${session.session_id}`} className="w-full">
-                        <Button
-                          className="w-full"
-                          size="sm"
-                          variant={isReopened ? "outline" : "default"}
-                        >
-                          {isReopened ? (
-                            <>
-                              <RotateCcw className="mr-2 h-3.5 w-3.5" />
-                              Revise Submission
-                            </>
-                          ) : (
-                            <>
-                              {session.progress_percentage > 0 ? "Continue" : "Start"} Session
-                              <ArrowRight className="ml-2 h-3.5 w-3.5" />
-                            </>
-                          )}
+                        <Button className="w-full" size="sm" variant={cta.variant}>
+                          <Icon className="mr-2 h-3.5 w-3.5" />
+                          {cta.label}
                         </Button>
                       </Link>
                     )}
@@ -220,6 +327,107 @@ export default function DepartmentDashboard() {
           </div>
         )}
       </div>
+
+      {/* ── Start Session — upload supporting documents ── */}
+      <Dialog open={!!startTarget} onOpenChange={(o) => { if (!o) closeStartDialog() }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Start Session</DialogTitle>
+            <DialogDescription>
+              Upload any supporting documents you&apos;d like the AI assistant to reference while
+              answering questions (financial reports, project summaries, etc.). This step is optional.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt"
+              multiple
+              className="hidden"
+              onChange={handlePickFiles}
+              disabled={uploadingStart}
+            />
+
+            {pendingFiles.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingStart}
+                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
+                <p className="text-sm font-medium">Click to attach documents</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — multiple files allowed</p>
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="rounded-lg border divide-y">
+                  {pendingFiles.map((f, i) => (
+                    <div key={`${f.name}-${i}`} className="flex items-center gap-3 p-2.5">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{f.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(f.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                        onClick={() => removePendingFile(i)}
+                        disabled={uploadingStart}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingStart}
+                >
+                  <FileUp className="mr-2 h-3.5 w-3.5" />
+                  Add more
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={closeStartDialog}
+              disabled={uploadingStart}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleStartSession} disabled={uploadingStart}>
+              {uploadingStart ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Uploading…
+                </>
+              ) : pendingFiles.length === 0 ? (
+                <>
+                  Skip & Start
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </>
+              ) : (
+                <>
+                  Upload & Start
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

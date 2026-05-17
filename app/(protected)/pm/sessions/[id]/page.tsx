@@ -16,26 +16,21 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
-  ArrowLeft, CheckCircle, XCircle, RotateCcw, FileText,
-  Eye, CheckCircle2, Clock, Sparkles,
+  ArrowLeft, CheckCircle, RotateCcw, FileText,
+  CheckCircle2, Clock, Sparkles,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-
-// The backend supports: reviewed → intermediate "PM has read it"
-//                        approved → content included in final report
-//                        rejected → hard reject
-//                        reopened → sent back to department for changes
-type ReviewAction = "reviewed" | "approved" | "rejected" | "reopened"
+import type { PMReviewAction } from "@/types"
 
 export default function SessionReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data, isLoading, refetch } = usePMSession(id)
   const reviewMutation = useReviewSession()
 
-  const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null)
+  const [reviewAction, setReviewAction] = useState<PMReviewAction | null>(null)
   const [reviewNotes, setReviewNotes] = useState("")
   const [activeTab, setActiveTab] = useState<"answers" | "draft">("answers")
 
@@ -49,16 +44,17 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
 
   const handleReview = async () => {
     if (!reviewAction) return
+    // Backend requires non-empty review_notes for "rejected" — block before send.
+    if (reviewAction === "rejected" && !reviewNotes.trim()) return
     try {
       await reviewMutation.mutateAsync({
         sessionId: id,
-        data: { status: reviewAction, review_notes: reviewNotes || undefined },
+        data: { action: reviewAction, review_notes: reviewNotes || undefined },
       })
       toast.success(
-        reviewAction === "reviewed"   ? "Marked as reviewed — ready for final approval" :
-        reviewAction === "approved"   ? "Submission approved — will be included in the final report" :
-        reviewAction === "rejected"   ? "Submission rejected" :
-        "Sent back to department for revision"
+        reviewAction === "approved"
+          ? "Submission approved — will be included in the final report"
+          : "Sent back to department for revision"
       )
     } catch {
       // error toast handled by hook
@@ -69,13 +65,11 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   }
 
   const isSubmitted = session.status === "submitted"
-  const isReviewed  = session.status === "reviewed"
   const isApproved  = session.status === "approved"
-  const isRejected  = session.status === "rejected"
   const isReopened  = session.status === "reopened"
 
-  // PM can act when status is submitted OR reviewed
-  const canAct = isSubmitted || isReviewed
+  // PM can act only when status is submitted (reopened means waiting on dept user).
+  const canAct = isSubmitted
 
   /* ── Status workflow banner ─────────────────────────────────────────────── */
   const WorkflowStep = ({
@@ -130,32 +124,15 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {/* Action buttons — differ by current status */}
+        {/* Action buttons — only when PM can act (status === submitted) */}
         {canAct && (
           <div className="flex gap-2 flex-wrap shrink-0">
-            {isSubmitted && (
-              /* First step: PM reads it and marks it reviewed */
-              <Button
-                variant="outline"
-                onClick={() => setReviewAction("reviewed")}
-                className="text-blue-600 border-blue-200 hover:bg-blue-50"
-              >
-                <Eye className="mr-2 h-4 w-4" /> Mark Reviewed
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => setReviewAction("reopened")}
-              className="text-orange-600 border-orange-200 hover:bg-orange-50"
-            >
-              <RotateCcw className="mr-2 h-4 w-4" /> Request Revision
-            </Button>
             <Button
               variant="outline"
               onClick={() => setReviewAction("rejected")}
               className="text-red-600 border-red-200 hover:bg-red-50"
             >
-              <XCircle className="mr-2 h-4 w-4" /> Reject
+              <RotateCcw className="mr-2 h-4 w-4" /> Request Changes
             </Button>
             <Button
               onClick={() => setReviewAction("approved")}
@@ -174,17 +151,10 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
             </span>
           </div>
         )}
-        {isRejected && (
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700">
-              <XCircle className="h-4 w-4" /> Rejected
-            </span>
-          </div>
-        )}
         {isReopened && (
           <div className="flex items-center gap-2 shrink-0">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1.5 text-sm font-medium text-orange-700">
-              <RotateCcw className="h-4 w-4" /> Revision Requested
+              <Clock className="h-4 w-4" /> Waiting for department to revise and resubmit
             </span>
           </div>
         )}
@@ -196,22 +166,15 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
           Review Workflow
         </p>
         <div className="flex items-center gap-0">
-          <WorkflowStep icon={Sparkles}    label="Submitted"  done={!["not_started","in_progress"].includes(session.status)} />
-          <WorkflowConnector done={isReviewed || isApproved} />
-          <WorkflowStep icon={Eye}         label="Reviewed"   active={isSubmitted} done={isReviewed || isApproved} />
+          <WorkflowStep icon={Sparkles}     label="Submitted" done={isSubmitted || isApproved || isReopened} />
           <WorkflowConnector done={isApproved} />
-          <WorkflowStep icon={CheckCircle2} label="Approved"  active={isReviewed}  done={isApproved} />
-          <WorkflowConnector done={false} />
-          <WorkflowStep icon={FileText}    label="In Report"  done={isApproved} />
+          <WorkflowStep icon={CheckCircle2} label="Approved"  active={isSubmitted} done={isApproved} />
+          <WorkflowConnector done={isApproved} />
+          <WorkflowStep icon={FileText}     label="In Report" done={isApproved} />
         </div>
         {isSubmitted && (
           <p className="text-xs text-muted-foreground mt-3">
-            Click <span className="font-medium text-blue-600">Mark Reviewed</span> once you have read the submission, then <span className="font-medium text-green-600">Approve</span> to include it in the final report.
-          </p>
-        )}
-        {isReviewed && (
-          <p className="text-xs text-muted-foreground mt-3">
-            You have reviewed this submission. Click <span className="font-medium text-green-600">Approve</span> to include it in the final consolidated report.
+            Review the submission, then <span className="font-medium text-green-600">Approve</span> to include it in the final report or <span className="font-medium text-red-600">Request Changes</span> to send it back to the department.
           </p>
         )}
         {isApproved && (
@@ -219,7 +182,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
             This submission is approved and will be included when you generate the final report for this cycle.
           </p>
         )}
-        {(isRejected || isReopened) && session.review_notes && (
+        {isReopened && session.review_notes && (
           <div className="mt-3 rounded-lg bg-orange-50 border border-orange-200 p-3">
             <p className="text-xs font-semibold text-orange-800">Your feedback:</p>
             <p className="text-xs text-orange-700 mt-0.5">{session.review_notes}</p>
@@ -303,36 +266,26 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {reviewAction === "reviewed"  ? "Mark as Reviewed"       :
-               reviewAction === "approved"  ? "Approve Submission"     :
-               reviewAction === "rejected"  ? "Reject Submission"      :
-               "Request Revision"}
+              {reviewAction === "approved" ? "Approve Submission" : "Request Changes"}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Contextual description */}
             <div className={cn(
               "rounded-lg p-3 text-sm",
-              reviewAction === "reviewed"  ? "bg-blue-50 text-blue-800 border border-blue-200"   :
-              reviewAction === "approved"  ? "bg-green-50 text-green-800 border border-green-200" :
-              reviewAction === "rejected"  ? "bg-red-50 text-red-800 border border-red-200"       :
-              "bg-orange-50 text-orange-800 border border-orange-200"
+              reviewAction === "approved"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-800 border border-red-200"
             )}>
-              {reviewAction === "reviewed" &&
-                "This marks the submission as reviewed by you. The department won't be notified yet. Use Approve when you are ready to include this in the final report."}
-              {reviewAction === "approved" &&
-                "This submission will be marked approved and included in the final cycle report when you generate it."}
-              {reviewAction === "rejected" &&
-                "This will reject the submission. Use 'Request Revision' instead if you want the department to make changes."}
-              {reviewAction === "reopened" &&
-                "This will send the submission back to the department with your feedback for revision."}
+              {reviewAction === "approved"
+                ? "This submission will be marked approved and included in the final cycle report when you generate it."
+                : "Tell the department what needs to be revised. This message will be shown to them."}
             </div>
 
             <div className="space-y-2">
               <Label>
-                {reviewAction === "reopened" ? "Revision Notes (required)" : "Notes"}
-                {reviewAction !== "reopened" && (
+                {reviewAction === "approved" ? "Notes" : "Revision Notes (required)"}
+                {reviewAction === "approved" && (
                   <span className="text-xs text-muted-foreground font-normal ml-1">(optional)</span>
                 )}
               </Label>
@@ -340,13 +293,11 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                 value={reviewNotes}
                 onChange={(e) => setReviewNotes(e.target.value)}
                 placeholder={
-                  reviewAction === "reopened"
-                    ? "Explain what needs to be revised or improved..."
-                    : reviewAction === "approved"
+                  reviewAction === "approved"
                     ? "Any notes for the final report (optional)..."
-                    : "Add feedback or notes..."
+                    : "Describe what needs to change..."
                 }
-                rows={3}
+                rows={4}
               />
             </div>
           </div>
@@ -359,20 +310,18 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
               onClick={handleReview}
               disabled={
                 reviewMutation.isPending ||
-                (reviewAction === "reopened" && !reviewNotes.trim())
+                (reviewAction === "rejected" && !reviewNotes.trim())
               }
               className={cn(
-                reviewAction === "reviewed"  && "bg-blue-600 hover:bg-blue-700 text-white",
-                reviewAction === "approved"  && "bg-green-600 hover:bg-green-700 text-white",
-                reviewAction === "rejected"  && "bg-red-600 hover:bg-red-700 text-white",
-                reviewAction === "reopened"  && "bg-orange-500 hover:bg-orange-600 text-white",
+                reviewAction === "approved" && "bg-green-600 hover:bg-green-700 text-white",
+                reviewAction === "rejected" && "bg-red-600 hover:bg-red-700 text-white",
               )}
             >
-              {reviewMutation.isPending ? "Saving…" :
-               reviewAction === "reviewed"  ? "Mark Reviewed"   :
-               reviewAction === "approved"  ? "Approve"         :
-               reviewAction === "rejected"  ? "Reject"          :
-               "Send for Revision"}
+              {reviewMutation.isPending
+                ? "Saving…"
+                : reviewAction === "approved"
+                ? "Approve"
+                : "Send Back"}
             </Button>
           </DialogFooter>
         </DialogContent>

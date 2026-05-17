@@ -64,8 +64,8 @@ export async function GET(req: NextRequest) {
 
     for (const { cycle, sessions } of cycleDetails) {
       for (const s of sessions) {
-        // Both "submitted" and "reviewed" sessions need PM action
-        if (s.status === "submitted" || s.status === "reviewed") {
+        // Only "submitted" sessions are awaiting PM action — reopened is on the dept user.
+        if (s.status === "submitted") {
           pendingReviews++
           recentSubmissions.push({
             session_id: s.session_id,
@@ -90,13 +90,15 @@ export async function GET(req: NextRequest) {
     // 7. Return the full response with real-time data
     return NextResponse.json({
       active_cycles: cycleDetails.map(({ cycle, sessions }) => {
-        const submitted = sessions.filter((s) => s.status === "submitted").length
-        const reviewed = sessions.filter((s) => s.status === "reviewed").length
-        const approved = sessions.filter((s) => s.status === "approved").length
-        const inProgress = sessions.filter((s) => s.status === "in_progress").length
+        const assigned = sessions.filter((s) => s.status === "assigned").length
         const notStarted = sessions.filter((s) => s.status === "not_started").length
+        const inProgress = sessions.filter((s) => s.status === "in_progress").length
+        const submitted = sessions.filter((s) => s.status === "submitted").length
+        const approved = sessions.filter((s) => s.status === "approved").length
+        const reopened = sessions.filter((s) => s.status === "reopened").length
         const total = sessions.length
-        const completionRate = total > 0 ? Math.round(((submitted + reviewed + approved) / total) * 100) : 0
+        // Only `approved` counts as done — submitted is awaiting PM, reopened is awaiting dept.
+        const completionRate = total > 0 ? Math.round((approved / total) * 100) : 0
         return {
           id: cycle.id,
           cycle_name: cycle.cycle_name,
@@ -105,9 +107,11 @@ export async function GET(req: NextRequest) {
           start_date: cycle.start_date,
           end_date: cycle.end_date,
           status: cycle.status,
-          submitted_count: submitted + reviewed + approved,
+          submitted_count: submitted + approved,
           in_progress_count: inProgress,
           not_started_count: notStarted,
+          assigned_count: assigned,
+          reopened_count: reopened,
           total_departments: total,
           completion_rate: completionRate,
           kickoff_brief: cycle.kickoff_brief,
