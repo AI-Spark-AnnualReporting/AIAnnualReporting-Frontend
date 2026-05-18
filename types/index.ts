@@ -267,6 +267,38 @@ export interface Document {
   created_at: string
 }
 
+export interface KBDocument {
+  id: string
+  document_id: string
+  filename: string
+  file_type: string
+  file_size: number
+  document_purpose: string | null
+  user_id: string | null
+  uploader_name: string | null
+  department_id: string | null
+  department_name: string | null
+  cycle_id: string | null
+  cycle_name: string | null
+  created_at: string
+}
+
+export interface KBListResponse {
+  success: boolean
+  documents: KBDocument[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface KBDownloadResponse {
+  success: boolean
+  document_id: string
+  filename: string
+  download_url: string
+  expires_in: number
+}
+
 export interface ApiError {
   error: string
   message: string
