@@ -291,8 +291,7 @@ export function useReviewSession() {
 
 export function useSendReminder() {
   return useMutation({
-    mutationFn: ({ sessionId, data }: { sessionId: string; data: ReminderPayload }) =>
-      pmApi.sendBulkReminders({ session_ids: [sessionId], ...data }),
+    mutationFn: (payload: ReminderPayload) => pmApi.sendBulkReminders(payload),
     onSuccess: () => toast.success("Reminder sent"),
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to send reminder")
@@ -340,8 +339,7 @@ export function useEscalations(cycleId: string) {
 
 export function useBulkReminder() {
   return useMutation({
-    mutationFn: (payload: { cycle_id: string; message: string; priority?: string }) =>
-      pmApi.sendBulkReminders(payload),
+    mutationFn: (payload: ReminderPayload) => pmApi.sendBulkReminders(payload),
     onSuccess: () => toast.success("Reminders sent to all pending departments"),
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to send bulk reminders")
