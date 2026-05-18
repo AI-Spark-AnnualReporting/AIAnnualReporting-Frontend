@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { TONE_OPTIONS } from "@/lib/constants"
+import ReactMarkdown from "react-markdown"
 import {
   ArrowLeft,
   Sparkles,
@@ -251,9 +252,9 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                     dangerouslySetInnerHTML={{ __html: effectiveDraft }}
                   />
                 ) : (
-                  <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed">
-                    {effectiveDraft}
-                  </pre>
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown>{effectiveDraft}</ReactMarkdown>
+                  </div>
                 )
               ) : (
                 <p className="text-sm text-muted-foreground italic">

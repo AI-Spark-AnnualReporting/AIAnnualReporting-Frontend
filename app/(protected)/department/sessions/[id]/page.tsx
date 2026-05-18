@@ -526,12 +526,10 @@ export default function SessionWorkspacePage({
           <LayoutGrid className="h-3.5 w-3.5 mr-1.5" /> Overview
         </Button>
 
-        {/* Draft button hidden for now — submission happens via the
-            "Review & Submit" CTA on the final question.
         {session.ai_generated_draft ? (
           <Link href={`/department/sessions/${id}/draft`}>
             <Button size="sm" variant="outline" className="h-8 shrink-0">
-              <FileText className="mr-1.5 h-3.5 w-3.5" /> Draft
+              <FileText className="mr-1.5 h-3.5 w-3.5" /> Draft Content
             </Button>
           </Link>
         ) : (
@@ -543,10 +541,9 @@ export default function SessionWorkspacePage({
             {generateDraft.isPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-            Generate Draft
+            Generate Draft Content
           </Button>
         )}
-        */}
       </div>
 
       {/* ── Body ──────────────────────────────────────────────────────────────── */}
