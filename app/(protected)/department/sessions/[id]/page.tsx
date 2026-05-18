@@ -132,7 +132,9 @@ export default function SessionWorkspacePage({
   const currentQ = questions[currentIndex]
   const currentIsNA = !!currentQ && naQuestions.has(currentQ.question_id)
 
-  const answeredCount = Object.values(answers).filter((v) => v?.trim()).length
+  // Count only answers tied to a CURRENT question — answers for regenerated/
+  // removed questions stay in session.answers but must not inflate progress.
+  const answeredCount = questions.filter((q) => answers[q.question_id]?.trim()).length
   const progress = questions.length ? Math.round((answeredCount / questions.length) * 100) : 0
   // Every question answered or marked N/A — ready to review & submit.
   const allComplete = questions.length > 0 && answeredCount === questions.length
