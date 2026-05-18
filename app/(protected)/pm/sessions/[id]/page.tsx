@@ -20,6 +20,7 @@ import {
   CheckCircle2, Clock, Sparkles, Info, ChevronDown, CircleSlash,
 } from "lucide-react"
 import Link from "next/link"
+import ReactMarkdown from "react-markdown"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -256,7 +257,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            {tab === "answers" ? "Q&A Answers" : "Draft Report"}
+            {tab === "answers" ? "Q&A Answers" : "Draft Content"}
           </button>
         ))}
       </div>
@@ -364,7 +365,9 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
             return html ? (
               <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: content }} />
             ) : (
-              <pre className="text-sm whitespace-pre-wrap leading-relaxed font-sans">{content}</pre>
+              <div className="prose prose-sm max-w-none">
+                <ReactMarkdown>{content}</ReactMarkdown>
+              </div>
             )
           })() : (
             <EmptyState

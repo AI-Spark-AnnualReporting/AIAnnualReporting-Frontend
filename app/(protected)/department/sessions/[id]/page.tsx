@@ -93,7 +93,6 @@ export default function SessionWorkspacePage({
   const generateDraft = useGenerateDraft()
   const chatEndRef = useRef<HTMLDivElement>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
-  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -114,7 +113,6 @@ export default function SessionWorkspacePage({
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
-  const [autoSaving, setAutoSaving] = useState(false)
   // Questions marked "Not Applicable" — local mirror of N/A answers
   const [naQuestions, setNaQuestions] = useState<Set<string>>(new Set())
 
@@ -175,27 +173,14 @@ export default function SessionWorkspacePage({
     setChatInput("")
   }
 
+  // Typing only updates local state — nothing is persisted until the user
+  // explicitly clicks "Save Answer".
   const handleAnswerChange = useCallback(
     (questionId: string, value: string) => {
       setAnswers((prev) => ({ ...prev, [questionId]: value }))
       setSaved((prev) => ({ ...prev, [questionId]: false }))
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current)
-      autosaveTimer.current = setTimeout(async () => {
-        setAutoSaving(true)
-        try {
-          const updated = { ...answers, [questionId]: value }
-          const payload = questions
-            .filter((q) => updated[q.question_id]?.trim())
-            .map((q) => ({ question_id: q.question_id, question: q.question, answer: updated[q.question_id] }))
-          if (payload.length > 0) {
-            await departmentApi.submitAnswers(id, { answers: payload })
-            setSaved((prev) => ({ ...prev, [questionId]: true }))
-          }
-        } catch { /* silent autosave fail */ }
-        finally { setAutoSaving(false) }
-      }, 2000)
     },
-    [answers, questions, id]
+    []
   )
 
   // Submit the full set of non-empty answers (matches autosave/save behaviour).
@@ -508,11 +493,6 @@ export default function SessionWorkspacePage({
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={session.status} variant="session" />
             <span className="text-xs text-muted-foreground">{answeredCount}/{questions.length} answered</span>
-            {autoSaving && (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Loader2 className="h-2.5 w-2.5 animate-spin" /> Saving…
-              </span>
-            )}
           </div>
         </div>
 
@@ -818,7 +798,6 @@ export default function SessionWorkspacePage({
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Answer</span>
                     {saved[currentQ.question_id] && <CheckCircle2 className="h-3 w-3 text-green-500" />}
-                    {autoSaving && <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />}
                     <div className="flex-1" />
                     {!isSubmitted && !currentIsNA && (
                       <>
