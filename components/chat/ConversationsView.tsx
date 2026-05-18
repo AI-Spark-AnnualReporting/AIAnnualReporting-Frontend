@@ -6,12 +6,34 @@ import {
   useConversation,
   useCreateConversation,
   useSendMessage,
+  useRenameConversation,
+  useDeleteConversation,
+  useClearHistory,
 } from "@/hooks/useConversations"
+import type { ConversationSummary } from "@/lib/api/chat"
 import { ChatMessageBubble } from "./ChatMessageBubble"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/ui/empty-state"
-import { MessageSquare, Plus, Send, Loader2, Bot, FileText } from "lucide-react"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
+import {
+  MessageSquare, Plus, Send, Loader2, Bot, FileText,
+  MoreVertical, Pencil, Trash2, Eraser,
+} from "lucide-react"
 import { cn, formatDate } from "@/lib/utils"
 
 /** Bouncing-dots typing indicator — shown while awaiting the assistant reply. */
@@ -38,6 +60,12 @@ export function ConversationsView() {
   const [input, setInput] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Management dialog state
+  const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+
   const { data: listData, isLoading: listLoading } = useConversations()
   const conversations = listData?.conversations ?? []
 
@@ -49,6 +77,9 @@ export function ConversationsView() {
 
   const createConv = useCreateConversation()
   const sendMsg = useSendMessage()
+  const renameConv = useRenameConversation()
+  const deleteConv = useDeleteConversation()
+  const clearHist = useClearHistory()
 
   // Auto-select the first conversation once the list loads — never clobber a
   // manual pick (only act while nothing is selected).
@@ -77,6 +108,46 @@ export function ConversationsView() {
     if (!text || !selectedId || sendMsg.isPending) return
     sendMsg.mutate({ conversationId: selectedId, message: text, useDocuments })
     setInput("")
+  }
+
+  const openRename = (c: ConversationSummary) => {
+    setRenameTarget(c)
+    setRenameValue(c.title || "")
+  }
+
+  const submitRename = async () => {
+    const title = renameValue.trim()
+    if (!renameTarget || !title) return
+    try {
+      await renameConv.mutateAsync({ conversationId: renameTarget.conversation_id, title })
+      setRenameTarget(null)
+    } catch {
+      /* toast handled in the hook */
+    }
+  }
+
+  const submitDelete = async () => {
+    if (!deleteTarget) return
+    const id = deleteTarget.conversation_id
+    try {
+      await deleteConv.mutateAsync(id)
+      // Drop the selection if the active conversation was deleted — the
+      // auto-select effect then picks the next available one.
+      if (id === selectedId) setSelectedId(null)
+      setDeleteTarget(null)
+    } catch {
+      /* toast handled in the hook */
+    }
+  }
+
+  const submitClear = async () => {
+    if (!selectedId) return
+    try {
+      await clearHist.mutateAsync(selectedId)
+      setConfirmClear(false)
+    } catch {
+      /* toast handled in the hook */
+    }
   }
 
   const messages = detail?.messages ?? []
@@ -123,29 +194,59 @@ export function ConversationsView() {
             conversations.map((c) => {
               const active = c.conversation_id === selectedId
               return (
-                <button
+                <div
                   key={c.conversation_id}
-                  onClick={() => setSelectedId(c.conversation_id)}
                   className={cn(
-                    "w-full text-left px-3 py-2.5 border-b border-border/40 transition-colors",
+                    "group flex items-center border-b border-border/40 transition-colors",
                     active ? "bg-primary text-primary-foreground" : "hover:bg-accent"
                   )}
                 >
-                  <p className="text-sm font-medium truncate">
-                    {c.title || "Untitled conversation"}
-                  </p>
-                  <div
-                    className={cn(
-                      "flex items-center gap-1.5 mt-0.5 text-xs",
-                      active ? "text-primary-foreground/70" : "text-muted-foreground"
-                    )}
+                  <button
+                    onClick={() => setSelectedId(c.conversation_id)}
+                    className="flex-1 min-w-0 text-left px-3 py-2.5"
                   >
-                    <span>{formatDate(c.updated_at ?? c.created_at)}</span>
-                    {c.message_count != null && (
-                      <span>· {c.message_count} msg{c.message_count === 1 ? "" : "s"}</span>
-                    )}
-                  </div>
-                </button>
+                    <p className="text-sm font-medium truncate">
+                      {c.title || "Untitled conversation"}
+                    </p>
+                    <div
+                      className={cn(
+                        "flex items-center gap-1.5 mt-0.5 text-xs",
+                        active ? "text-primary-foreground/70" : "text-muted-foreground"
+                      )}
+                    >
+                      <span>{formatDate(c.updated_at ?? c.created_at)}</span>
+                      {c.message_count != null && (
+                        <span>· {c.message_count} msg{c.message_count === 1 ? "" : "s"}</span>
+                      )}
+                    </div>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        aria-label="Conversation actions"
+                        className={cn(
+                          "shrink-0 rounded-md p-1.5 mr-1.5 transition-colors",
+                          active
+                            ? "text-primary-foreground/80 hover:bg-primary-foreground/15"
+                            : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-background"
+                        )}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => openRename(c)}>
+                        <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setDeleteTarget(c)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               )
             })
           )}
@@ -182,10 +283,20 @@ export function ConversationsView() {
         ) : detail ? (
           <>
             {/* Header */}
-            <div className="px-4 py-3 border-b shrink-0">
-              <h2 className="text-sm font-semibold truncate">
+            <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0">
+              <h2 className="flex-1 min-w-0 text-sm font-semibold truncate">
                 {detail.conversation.title || "Untitled conversation"}
               </h2>
+              {messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => setConfirmClear(true)}
+                >
+                  <Eraser className="h-3.5 w-3.5 mr-1" /> Clear history
+                </Button>
+              )}
             </div>
 
             {/* Messages */}
@@ -258,6 +369,73 @@ export function ConversationsView() {
           </>
         ) : null}
       </div>
+
+      {/* ── Rename dialog ───────────────────────────────────────────────────── */}
+      <Dialog
+        open={!!renameTarget}
+        onOpenChange={(o) => { if (!o) setRenameTarget(null) }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename conversation</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            placeholder="Conversation title"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                submitRename()
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRenameTarget(null)}
+              disabled={renameConv.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitRename}
+              disabled={renameConv.isPending || !renameValue.trim()}
+            >
+              {renameConv.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation ─────────────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}
+        title="Delete conversation?"
+        description={`"${deleteTarget?.title || "Untitled conversation"}" and all of its messages will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={submitDelete}
+        isLoading={deleteConv.isPending}
+      />
+
+      {/* ── Clear-history confirmation ──────────────────────────────────────── */}
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear conversation history?"
+        description="All messages in this conversation will be permanently removed. The conversation itself stays."
+        confirmLabel="Clear history"
+        variant="destructive"
+        onConfirm={submitClear}
+        isLoading={clearHist.isPending}
+      />
     </div>
   )
 }

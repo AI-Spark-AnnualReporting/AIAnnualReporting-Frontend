@@ -147,3 +147,49 @@ export function useSendMessage() {
     },
   })
 }
+
+export function useRenameConversation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ conversationId, title }: { conversationId: string; title: string }) =>
+      chatApi.renameConversation(conversationId, title),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: conversationKeys.list() })
+      qc.invalidateQueries({ queryKey: conversationKeys.detail(vars.conversationId) })
+      toast.success("Conversation renamed")
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to rename conversation")
+    },
+  })
+}
+
+export function useDeleteConversation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (conversationId: string) => chatApi.deleteConversation(conversationId),
+    onSuccess: (_data, conversationId) => {
+      qc.removeQueries({ queryKey: conversationKeys.detail(conversationId) })
+      qc.invalidateQueries({ queryKey: conversationKeys.list() })
+      toast.success("Conversation deleted")
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to delete conversation")
+    },
+  })
+}
+
+export function useClearHistory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (conversationId: string) => chatApi.clearHistory(conversationId),
+    onSuccess: (_data, conversationId) => {
+      qc.invalidateQueries({ queryKey: conversationKeys.detail(conversationId) })
+      qc.invalidateQueries({ queryKey: conversationKeys.list() })
+      toast.success("Conversation history cleared")
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to clear history")
+    },
+  })
+}

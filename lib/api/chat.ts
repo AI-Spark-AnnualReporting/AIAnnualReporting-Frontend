@@ -114,4 +114,22 @@ export const chatApi = {
     const { data } = await apiClient.post(`/chat/${conversationId}/message`, body)
     return data as SendMessageResponse
   },
+
+  /** Rename a conversation. PUT /chat/{id}/title */
+  renameConversation: async (conversationId: string, title: string) => {
+    const { data } = await apiClient.put(`/chat/${conversationId}/title`, { title })
+    return data as { success: boolean; message: string }
+  },
+
+  /** Delete a conversation entirely. DELETE /chat/{id} */
+  deleteConversation: async (conversationId: string) => {
+    const { data } = await apiClient.delete(`/chat/${conversationId}`)
+    return data as { success: boolean; message: string }
+  },
+
+  /** Clear all messages but keep the conversation. DELETE /chat/{id}/history */
+  clearHistory: async (conversationId: string) => {
+    const { data } = await apiClient.delete(`/chat/${conversationId}/history`)
+    return data as { success: boolean; message: string }
+  },
 }
