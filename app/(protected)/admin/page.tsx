@@ -26,8 +26,7 @@ export default function AdminDashboard() {
   const stats = statsData
   const allCycles = cyclesData?.cycles || []
   const activeCycles = allCycles.filter((c) => c.status === "active")
-  const draftCycles = allCycles.filter((c) => c.status === "draft")
-  const pendingUsers = stats?.pending_users ?? 0
+const pendingUsers = stats?.pending_users ?? 0
 
   return (
     <div className="space-y-8">
@@ -42,35 +41,22 @@ export default function AdminDashboard() {
       />
 
       {/* Requires Attention Banner */}
-      {(pendingUsers > 0 || draftCycles.length > 0) && (
+      {pendingUsers > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2 mb-3">
             <AlertCircle className="h-4 w-4 text-amber-600" />
             <p className="text-sm font-semibold text-amber-800">Requires Your Attention</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            {pendingUsers > 0 && (
-              <Link href="/admin/users">
-                <div className="flex items-center gap-2 rounded-lg bg-white border border-amber-200 px-4 py-2.5 hover:bg-amber-50 transition-colors cursor-pointer">
-                  <UserCheck className="h-4 w-4 text-amber-600" />
-                  <span className="text-sm font-medium text-amber-800">
-                    {pendingUsers} user{pendingUsers !== 1 ? "s" : ""} awaiting activation
-                  </span>
-                  <ChevronRight className="h-3.5 w-3.5 text-amber-500" />
-                </div>
-              </Link>
-            )}
-            {draftCycles.map((c) => (
-              <Link key={c.id} href={`/admin/cycles/${c.id}`}>
-                <div className="flex items-center gap-2 rounded-lg bg-white border border-amber-200 px-4 py-2.5 hover:bg-amber-50 transition-colors cursor-pointer">
-                  <RefreshCw className="h-4 w-4 text-amber-600" />
-                  <span className="text-sm font-medium text-amber-800">
-                    &quot;{c.cycle_name}&quot; is in draft — activate to begin
-                  </span>
-                  <ChevronRight className="h-3.5 w-3.5 text-amber-500" />
-                </div>
-              </Link>
-            ))}
+            <Link href="/admin/users">
+              <div className="flex items-center gap-2 rounded-lg bg-white border border-amber-200 px-4 py-2.5 hover:bg-amber-50 transition-colors cursor-pointer">
+                <UserCheck className="h-4 w-4 text-amber-600" />
+                <span className="text-sm font-medium text-amber-800">
+                  {pendingUsers} user{pendingUsers !== 1 ? "s" : ""} awaiting activation
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 text-amber-500" />
+              </div>
+            </Link>
           </div>
         </div>
       )}
