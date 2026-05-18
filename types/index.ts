@@ -275,20 +275,24 @@ export interface KBDocument {
   file_size: number
   document_purpose: string | null
   user_id: string | null
-  uploader_name: string | null
   department_id: string | null
-  department_name: string | null
   cycle_id: string | null
-  cycle_name: string | null
+  word_count?: number | null
   created_at: string
+  // Not returned by GET /documents/ — uploader_name/department_name are
+  // absent; cycle_name is resolved client-side from the cycles endpoint.
+  uploader_name?: string | null
+  department_name?: string | null
+  cycle_name?: string | null
 }
 
 export interface KBListResponse {
   success: boolean
   documents: KBDocument[]
   total: number
-  page: number
-  page_size: number
+  // /documents/ is not paginated — these may be absent.
+  page?: number
+  page_size?: number
 }
 
 export interface KBDownloadResponse {

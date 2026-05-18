@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { useAuth } from "@/contexts/AuthContext"
-import { useKBDocuments } from "@/hooks/useKnowledgeBase"
+import { useKBDocuments, useKBCycleNames } from "@/hooks/useKnowledgeBase"
 import { knowledgeBaseApi } from "@/lib/api/knowledge-base"
 import { KBDocument } from "@/types"
 import { PageHeader } from "@/components/ui/page-header"
@@ -77,37 +77,65 @@ export function KnowledgeBasePage() {
   const [search, setSearch] = useState("")
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
-  const { data, isLoading } = useKBDocuments({
-    document_purpose: purposeFilter !== "all" ? purposeFilter : undefined,
-    page,
-    page_size: PAGE_SIZE,
-  })
+  // GET /documents/ returns every document the user owns in one unpaginated
+  // payload — purpose-filtering, search and pagination are all done below.
+  const { data, isLoading } = useKBDocuments()
+  // cycle_id -> cycle_name, resolved from the role-appropriate cycles endpoint.
+  const { data: cycleNames } = useKBCycleNames()
 
+  const allDocs = useMemo(() => data?.documents ?? [], [data?.documents])
+
+  // Purpose filter — /documents/ has no purpose query param.
+  const purposeFiltered = useMemo(() => {
+    if (purposeFilter === "all") return allDocs
+    return allDocs.filter((doc) => doc.document_purpose === purposeFilter)
+  }, [allDocs, purposeFilter])
+
+  // Search filter — matches filename, cycle name, uploader and department.
   const filteredDocs = useMemo(() => {
-    const docs = data?.documents ?? []
-    if (!search) return docs
+    if (!search) return purposeFiltered
     const q = search.toLowerCase()
-    return docs.filter(
-      (doc) =>
+    return purposeFiltered.filter((doc) => {
+      const cycleName = (doc.cycle_id && cycleNames?.[doc.cycle_id]) || ""
+      return (
         doc.filename.toLowerCase().includes(q) ||
+        cycleName.toLowerCase().includes(q) ||
         (doc.uploader_name?.toLowerCase().includes(q) ?? false) ||
-        (doc.department_name?.toLowerCase().includes(q) ?? false) ||
-        (doc.cycle_name?.toLowerCase().includes(q) ?? false)
-    )
-  }, [data?.documents, search])
+        (doc.department_name?.toLowerCase().includes(q) ?? false)
+      )
+    })
+  }, [purposeFiltered, search, cycleNames])
+
+  const totalPages = Math.max(1, Math.ceil(filteredDocs.length / PAGE_SIZE))
+
+  // Client-side pagination — /documents/ is not paginated server-side.
+  const pagedDocs = useMemo(
+    () => filteredDocs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredDocs, page]
+  )
 
   const cycleGroups = useMemo(() => {
-    const map = new Map<string, { cycleName: string; docs: KBDocument[] }>()
-    for (const doc of filteredDocs) {
+    const map = new Map<
+      string,
+      { cycleId: string; cycleName: string; docs: KBDocument[] }
+    >()
+    for (const doc of pagedDocs) {
       const key = doc.cycle_id ?? "__none__"
-      const name = doc.cycle_name ?? "Uncategorized"
-      if (!map.has(key)) map.set(key, { cycleName: name, docs: [] })
+      if (!map.has(key)) {
+        const name = (doc.cycle_id && cycleNames?.[doc.cycle_id]) || "Uncategorized"
+        map.set(key, { cycleId: key, cycleName: name, docs: [] })
+      }
       map.get(key)!.docs.push(doc)
     }
     return Array.from(map.values())
-  }, [filteredDocs])
+  }, [pagedDocs, cycleNames])
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1
+  // Distinct cycles across the full filtered set (not just the current page).
+  const totalCycleCount = useMemo(
+    () => new Set(filteredDocs.map((doc) => doc.cycle_id ?? "__none__")).size,
+    [filteredDocs]
+  )
+  const totalDocCount = filteredDocs.length
 
   const handleDownload = async (doc: KBDocument) => {
     setDownloadingId(doc.document_id)
@@ -130,13 +158,9 @@ export function KnowledgeBasePage() {
     qc.invalidateQueries({ queryKey: ["kb-documents"] })
   }
 
-  const cycleCount = cycleGroups.length
-  const docCount = filteredDocs.length
-  const totalDocCount = data?.total ?? 0
-
   const subtitle =
     totalDocCount > 0
-      ? `Every uploaded document grouped by the cycle it belongs to · ${cycleCount} ${cycleCount === 1 ? "cycle" : "cycles"} · ${totalDocCount} ${totalDocCount === 1 ? "document" : "documents"}`
+      ? `Every uploaded document grouped by the cycle it belongs to · ${totalCycleCount} ${totalCycleCount === 1 ? "cycle" : "cycles"} · ${totalDocCount} ${totalDocCount === 1 ? "document" : "documents"}`
       : "Browse and download reference documents for your reporting cycles"
 
   const emptyMessage = EMPTY_STATE_MESSAGES[user?.role ?? ""] ?? "No documents found"
@@ -162,7 +186,10 @@ export function KnowledgeBasePage() {
             placeholder="Search documents..."
             className="pl-9"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
           />
         </div>
         <Select
@@ -228,7 +255,7 @@ export function KnowledgeBasePage() {
       {!isLoading && cycleGroups.length > 0 && (
         <div className="space-y-4">
           {cycleGroups.map((group) => (
-            <div key={group.cycleName} className="rounded-lg border bg-card overflow-hidden">
+            <div key={group.cycleId} className="rounded-lg border bg-card overflow-hidden">
               {/* Cycle header */}
               <div className="flex items-center justify-between px-5 py-4 border-b bg-muted/30">
                 <h3 className="font-semibold text-sm text-foreground">{group.cycleName}</h3>
@@ -288,7 +315,7 @@ export function KnowledgeBasePage() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-1">
           <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages} ({data?.total ?? 0} total documents)
+            Page {page} of {totalPages} ({totalDocCount} total documents)
           </p>
           <div className="flex items-center gap-2">
             <Button
