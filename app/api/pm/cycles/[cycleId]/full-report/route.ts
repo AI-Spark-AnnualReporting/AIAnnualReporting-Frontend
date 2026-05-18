@@ -65,8 +65,8 @@ export async function GET(
     // ── Get all sessions for this cycle ───────────────────────────────────────
     const sessions = await fetchSessionsForCycle(cycleId, serviceToken)
 
-    // Only include submitted / reviewed / approved sessions in the report
-    const includedStatuses = new Set(["submitted", "reviewed", "approved"])
+    // Only include submitted / approved sessions in the report
+    const includedStatuses = new Set(["submitted", "approved"])
     const reportSessions = sessions.filter((s) => includedStatuses.has(s.status))
 
     if (reportSessions.length === 0) {

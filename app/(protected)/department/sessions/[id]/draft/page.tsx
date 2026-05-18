@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { TONE_OPTIONS } from "@/lib/constants"
+import ReactMarkdown from "react-markdown"
 import {
   ArrowLeft,
   Sparkles,
@@ -40,6 +41,7 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   const [adjusting, setAdjusting] = useState(false)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [wasResubmit, setWasResubmit] = useState(false)
   const [previewMode, setPreviewMode] = useState(true) // default to rendered preview
 
   const session = data?.session
@@ -58,6 +60,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   const isSubmittedPending = session.status === "submitted"
   const isSubmitted = isApproved || isSubmittedPending
   const isReopened = session.status === "reopened"
+  // Finalize is only meaningful while drafting or revising a returned submission.
+  const canFinalize = session.status === "in_progress" || isReopened
 
   const handleRegenerateDraft = async () => {
     await generateDraft.mutateAsync(id)
@@ -83,15 +87,27 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   }
 
   const handleFinalize = async () => {
+    const isResubmit = isReopened
     await finalizeSession.mutateAsync({
       sessionId: id,
       data: { final_content: effectiveDraft },
     })
+    setWasResubmit(isResubmit)
     setSubmitted(true)
     setConfirmSubmit(false)
   }
 
   if (submitted || isSubmitted) {
+    const heading = isApproved
+      ? "Report Approved!"
+      : wasResubmit
+      ? "Resubmitted!"
+      : "Submission Complete!"
+    const message = isApproved
+      ? "Your report has been approved by the PM. No further action is required."
+      : wasResubmit
+      ? "Resubmitted — your revised report is back with the PM for review."
+      : "Your report has been submitted for PM review. You will be notified when it's approved."
     return (
       <div className="max-w-lg mx-auto text-center space-y-6 py-16">
         <div className={cn(
@@ -101,14 +117,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
           <CheckCircle2 className={cn("h-8 w-8", isApproved ? "text-green-600" : "text-blue-600")} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold">
-            {isApproved ? "Report Approved!" : "Submission Complete!"}
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            {isApproved
-              ? "Your report has been approved by the PM. No further action is required."
-              : "Your report has been submitted for PM review. You will be notified when it's approved."}
-          </p>
+          <h1 className="text-2xl font-bold">{heading}</h1>
+          <p className="mt-2 text-muted-foreground">{message}</p>
         </div>
         <Link href="/department">
           <Button>Back to Dashboard</Button>
@@ -186,14 +196,16 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
             )}
             Regenerate
           </Button>
-          <Button
-            size="sm"
-            onClick={() => setConfirmSubmit(true)}
-            disabled={!effectiveDraft}
-          >
-            <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
-            Finalize & Submit
-          </Button>
+          {canFinalize && (
+            <Button
+              size="sm"
+              onClick={() => setConfirmSubmit(true)}
+              disabled={!effectiveDraft}
+            >
+              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+              {isReopened ? "Resubmit" : "Finalize & Submit"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -240,9 +252,9 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                     dangerouslySetInnerHTML={{ __html: effectiveDraft }}
                   />
                 ) : (
-                  <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed">
-                    {effectiveDraft}
-                  </pre>
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown>{effectiveDraft}</ReactMarkdown>
+                  </div>
                 )
               ) : (
                 <p className="text-sm text-muted-foreground italic">
@@ -318,23 +330,29 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
             </div>
           </div>
 
-          <Button
-            className="w-full"
-            onClick={() => setConfirmSubmit(true)}
-            disabled={!effectiveDraft}
-          >
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Finalize & Submit
-          </Button>
+          {canFinalize && (
+            <Button
+              className="w-full"
+              onClick={() => setConfirmSubmit(true)}
+              disabled={!effectiveDraft}
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              {isReopened ? "Resubmit" : "Finalize & Submit"}
+            </Button>
+          )}
         </div>
       </div>
 
       <ConfirmDialog
         open={confirmSubmit}
         onOpenChange={setConfirmSubmit}
-        title="Finalize Submission"
-        description="This will submit your department report for PM review. You won't be able to edit it after submission unless the PM reopens it."
-        confirmLabel="Yes, Submit"
+        title={isReopened ? "Resubmit for Review?" : "Finalize Submission?"}
+        description={
+          isReopened
+            ? "Your revised submission will be sent back to the PM for review."
+            : "Once submitted, you won't be able to make changes unless the PM requests revisions."
+        }
+        confirmLabel={isReopened ? "Resubmit" : "Submit"}
         cancelLabel="Keep Editing"
         variant="default"
         onConfirm={handleFinalize}

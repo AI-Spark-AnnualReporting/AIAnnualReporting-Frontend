@@ -45,11 +45,12 @@ interface PMCycleDashboardData {
   }
   stats?: {
     total_departments: number
-    submitted: number
-    in_progress: number
+    assigned: number
     not_started: number
-    reviewed: number
+    in_progress: number
+    submitted: number
     approved: number
+    reopened: number
     completion_rate: number
   }
   departments?: SessionSummary[]
@@ -130,7 +131,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
   const hasKickoff    = !!(pmDash?.cycle?.kickoff_brief)
   const needsReview   = departments.filter((d) => d.status === "submitted")
-  const reviewed      = departments.filter((d) => d.status === "reviewed")
+  const reopened      = departments.filter((d) => d.status === "reopened")
   const approved      = departments.filter((d) => d.status === "approved")
   const inProgress    = departments.filter((d) => d.status === "in_progress")
   const notStarted    = departments.filter((d) => d.status === "not_started")
@@ -144,9 +145,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const overdueRows = departments.filter(isOverdue)
   const allDone =
     departments.length > 0 &&
-    departments.every((d) => ["submitted", "reviewed", "approved"].includes(d.status))
+    departments.every((d) => ["submitted", "approved"].includes(d.status))
 
-  const escalations: { id?: string; message: string; priority?: string; created_at?: string; department_name?: string }[] =
+  const escalations: { id?: string; reason?: string; message?: string; priority?: string; created_at?: string; department_name?: string }[] =
     Array.isArray(escalationsData)
       ? escalationsData
       : (escalationsData as { escalations?: unknown[] } | undefined)?.escalations ?? []
@@ -220,9 +221,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
   const handleSendReminder = async () => {
     if (!reminderTarget || !reminderMsg) return
+    if (!reminderTarget.user_id) {
+      toast.error("No user is assigned to this department")
+      return
+    }
     await sendReminder.mutateAsync({
-      sessionId: reminderTarget.session_id,
-      data: { message: reminderMsg, priority: reminderPriority as "low" | "normal" | "high" | "urgent" },
+      user_ids: [reminderTarget.user_id],
+      title: `Reminder: ${reminderTarget.department_name}`,
+      message: reminderMsg,
+      priority: reminderPriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
     })
     setReminderTarget(null)
     setReminderMsg("")
@@ -232,7 +241,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     if (!escalationTarget || !escalationMsg.trim()) return
     await createEscalation.mutateAsync({
       session_id: escalationTarget.session_id,
-      message: escalationMsg,
+      reason: escalationMsg,
       priority: escalationPriority,
     })
     setEscalationTarget(null)
@@ -241,7 +250,21 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
   const handleBulkReminder = async () => {
     if (!bulkMsg.trim()) return
-    await bulkReminder.mutateAsync({ cycle_id: id, message: bulkMsg, priority: bulkPriority })
+    const userIds = [...notStarted, ...inProgress]
+      .map((d) => d.user_id)
+      .filter((u): u is string => !!u)
+    if (userIds.length === 0) {
+      toast.error("No pending departments have a user assigned")
+      return
+    }
+    await bulkReminder.mutateAsync({
+      user_ids: userIds,
+      title: "Annual Report Submission Reminder",
+      message: bulkMsg,
+      priority: bulkPriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
+    })
     setBulkOpen(false)
     setBulkMsg("")
   }
@@ -350,7 +373,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         <div>
           <p className="font-medium">{row.department_name}</p>
           <p className="text-xs text-muted-foreground font-mono">{row.department_code}</p>
-          {row.status === "not_started" && (
+          {row.status === "assigned" && (
             <p className="text-xs italic text-muted-foreground mt-0.5">
               Awaiting kickoff submission
             </p>
@@ -375,7 +398,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         <div className="min-w-32">
           <div className="flex items-center justify-between text-xs mb-1">
             <span className="text-muted-foreground">
-              {["submitted","reviewed","approved"].includes(row.status) ? "Submitted" : `${row.progress_percentage}% answered`}
+              {["submitted","approved"].includes(row.status) ? "Submitted" : `${row.progress_percentage}% answered`}
             </span>
             <span className={cn(
               "font-semibold",
@@ -424,12 +447,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       header: "Actions",
       cell: (row) => (
         <div className="flex gap-2 flex-wrap">
-          {/* Review button for submitted / reviewed sessions */}
-          {(row.status === "submitted" || row.status === "reviewed") && (
+          {/* Review button for submitted sessions */}
+          {row.status === "submitted" && (
             <Link href={`/pm/sessions/${row.session_id}`}>
-              <Button size="sm" variant="outline" className={row.status === "reviewed" ? "text-blue-600 border-blue-200" : ""}>
-                <Eye className="h-3 w-3 mr-1" />
-                {row.status === "reviewed" ? "Reviewed" : "Review"}
+              <Button size="sm" variant="outline">
+                <Eye className="h-3 w-3 mr-1" /> Review
               </Button>
             </Link>
           )}
@@ -440,7 +462,14 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               </Button>
             </Link>
           )}
-          {(row.status === "not_started" || row.status === "in_progress") && (
+          {row.status === "reopened" && (
+            <Link href={`/pm/sessions/${row.session_id}`}>
+              <Button size="sm" variant="outline" className="text-red-600 border-red-200">
+                <Eye className="h-3 w-3 mr-1" /> Awaiting Resubmit
+              </Button>
+            </Link>
+          )}
+          {(row.status === "not_started" || row.status === "in_progress" || row.status === "assigned") && (
             <>
               <Button
                 size="sm" variant="outline"
@@ -546,26 +575,26 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               active={(stats?.in_progress ?? inProgress.length) > 0}
               colorClass="blue"
             />
-            <PipelineConnector done={(stats?.submitted ?? needsReview.length) > 0 || (stats?.reviewed ?? reviewed.length) > 0 || (stats?.approved ?? approved.length) > 0} />
+            <PipelineConnector done={(stats?.submitted ?? needsReview.length) > 0 || (stats?.approved ?? approved.length) > 0 || (stats?.reopened ?? reopened.length) > 0} />
 
             {/* Stage 3 – Submitted (awaiting PM review) */}
             <PipelineStage
               icon={ClipboardCheck}
               label="Submitted"
               count={String(stats?.submitted ?? needsReview.length)}
-              done={(stats?.submitted ?? needsReview.length) === 0 && ((stats?.reviewed ?? reviewed.length) > 0 || (stats?.approved ?? approved.length) > 0)}
+              done={(stats?.submitted ?? needsReview.length) === 0 && (stats?.approved ?? approved.length) > 0}
               active={(stats?.submitted ?? needsReview.length) > 0}
               colorClass="amber"
             />
-            <PipelineConnector done={(stats?.reviewed ?? reviewed.length) > 0 || (stats?.approved ?? approved.length) > 0} />
+            <PipelineConnector done={(stats?.approved ?? approved.length) > 0} />
 
-            {/* Stage 4 – Reviewed by PM */}
+            {/* Stage 4 – Needs Changes (PM sent back to dept) */}
             <PipelineStage
               icon={Eye}
-              label="Reviewed"
-              count={String(stats?.reviewed ?? reviewed.length)}
-              done={(stats?.reviewed ?? reviewed.length) === 0 && (stats?.approved ?? approved.length) > 0}
-              active={(stats?.reviewed ?? reviewed.length) > 0}
+              label="Needs Changes"
+              count={String(stats?.reopened ?? reopened.length)}
+              done={false}
+              active={(stats?.reopened ?? reopened.length) > 0}
               colorClass="indigo"
             />
             <PipelineConnector done={(stats?.approved ?? approved.length) > 0} />
@@ -638,10 +667,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
       {/* ── Stats Cards ── */}
       {departments.length > 0 && stats && (
-        <div className="grid gap-4 md:grid-cols-6">
+        <div className="grid gap-4 md:grid-cols-4">
           <div className="rounded-xl border bg-card p-4">
             <p className="text-xs text-muted-foreground">Total</p>
             <p className="text-2xl font-bold mt-1">{stats.total_departments}</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Clock className="h-3.5 w-3.5 text-slate-500" />
+              <p className="text-xs text-muted-foreground">Assigned</p>
+            </div>
+            <p className="text-2xl font-bold text-slate-600">{stats.assigned ?? 0}</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
             <div className="flex items-center gap-1.5 mb-1">
@@ -663,6 +699,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <p className="text-xs text-muted-foreground">Submitted</p>
             </div>
             <p className="text-2xl font-bold text-amber-600">{stats.submitted}</p>
+          </div>
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Eye className="h-3.5 w-3.5 text-red-500" />
+              <p className="text-xs text-muted-foreground">Needs Changes</p>
+            </div>
+            <p className="text-2xl font-bold text-red-600">{stats.reopened ?? 0}</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
             <div className="flex items-center gap-1.5 mb-1">
@@ -697,7 +740,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           <div className="divide-y">
             {departments.map((d) => {
               const pct = d.progress_percentage ?? 0
-              const isSubmitted = ["submitted", "reviewed", "approved"].includes(d.status)
+              const isSubmitted = ["submitted", "approved"].includes(d.status)
               const overdue = isOverdue(d)
               const barTone =
                 isSubmitted ? "[&>div]:bg-green-500" :
@@ -730,7 +773,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <span className={cn("text-sm font-semibold tabular-nums", pctTone)}>{pct}%</span>
-                      {(d.status === "submitted" || d.status === "reviewed") && (
+                      {d.status === "submitted" && (
                         <Link href={`/pm/sessions/${d.session_id}`}>
                           <Button size="sm" variant="outline" className="h-7 text-xs">
                             <Eye className="h-3 w-3 mr-1" /> Review
@@ -792,16 +835,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* ── Reviewed but not yet approved ── */}
-      {reviewed.length > 0 && (
-        <div className="flex gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <Eye className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+      {/* ── Reopened (waiting on dept) ── */}
+      {reopened.length > 0 && (
+        <div className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+          <Eye className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="text-sm font-semibold text-blue-800">
-              {reviewed.length} submission{reviewed.length !== 1 ? "s" : ""} reviewed — pending approval
+            <p className="text-sm font-semibold text-red-800">
+              {reopened.length} submission{reopened.length !== 1 ? "s" : ""} sent back — waiting on the department
             </p>
-            <p className="text-sm text-blue-700 mt-0.5">
-              {reviewed.map((d) => d.department_name).join(", ")} — open each to approve or request revision
+            <p className="text-sm text-red-700 mt-0.5">
+              {reopened.map((d) => d.department_name).join(", ")} — these will return once revised
             </p>
           </div>
         </div>
@@ -907,7 +950,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   {esc.department_name && (
                     <p className="text-xs text-muted-foreground mb-0.5">{esc.department_name}</p>
                   )}
-                  <p className="text-sm">{esc.message}</p>
+                  <p className="text-sm">{esc.reason ?? esc.message}</p>
                 </div>
                 {esc.created_at && (
                   <p className="text-xs text-muted-foreground shrink-0">{formatDate(esc.created_at)}</p>

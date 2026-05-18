@@ -2,13 +2,14 @@ export type UserRole = "admin" | "project_manager" | "department_user"
 export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =
+  | "assigned"
   | "not_started"
   | "in_progress"
   | "submitted"
-  | "reviewed"
   | "approved"
-  | "rejected"
   | "reopened"
+
+export type PMReviewAction = "approved" | "rejected" | "reopened"
 
 export interface User {
   id?: string
@@ -103,11 +104,12 @@ export interface CycleOverview {
   }
   stats: {
     total_departments: number
-    submitted: number
-    in_progress: number
+    assigned: number
     not_started: number
-    reviewed: number
+    in_progress: number
+    submitted: number
     approved: number
+    reopened: number
     completion_rate: number
   }
   departments: SessionSummary[]
@@ -174,6 +176,7 @@ export interface DepartmentDashboard {
     status: SessionStatus
     progress_percentage: number
     has_questions: boolean
+    review_notes?: string | null
   }[]
   total_assignments: number
   pending_count: number
@@ -188,22 +191,54 @@ export interface DepartmentDashboard {
   }[]
 }
 
+export interface Notification {
+  id: string
+  notification_type: string
+  type?: string
+  title?: string
+  message: string
+  priority?: "normal" | "high" | "urgent" | "critical"
+  related_id?: string
+  created_at: string
+  is_read: boolean
+}
+
+export interface NotificationListResponse {
+  notifications: Notification[]
+  total: number
+  unread_count: number
+}
+
+export interface NotificationUnreadCountResponse {
+  unread_count: number
+}
+
+export interface NotificationMarkReadResponse {
+  success: boolean
+  message: string
+}
+
 export interface PMDashboard {
   active_cycles: {
     id: string
     cycle_name: string
-    submission_deadline: string
+    fiscal_year?: number
+    status?: string
+    submission_deadline?: string
     total_departments: number
     submitted_count: number
-    /** Real per-status counts emitted by the /api/pm/cycles proxy */
+    /** Per-status counts computed from the real GET /pm/cycles/{id}/sessions endpoint */
     in_progress_count?: number
     not_started_count?: number
+    reopened_count?: number
+    /** Average of every department's progress_percentage across the cycle */
     completion_rate: number
   }[]
   pending_reviews: number
   recent_submissions: {
     session_id: string
     department_name: string
+    cycle_name?: string
     submitted_at: string
     status?: SessionStatus
   }[]
@@ -230,6 +265,42 @@ export interface Document {
   file_type: string
   file_size: number
   created_at: string
+}
+
+export interface KBDocument {
+  id: string
+  document_id: string
+  filename: string
+  file_type: string
+  file_size: number
+  document_purpose: string | null
+  user_id: string | null
+  department_id: string | null
+  cycle_id: string | null
+  word_count?: number | null
+  created_at: string
+  // Not returned by GET /documents/ — uploader_name/department_name are
+  // absent; cycle_name is resolved client-side from the cycles endpoint.
+  uploader_name?: string | null
+  department_name?: string | null
+  cycle_name?: string | null
+}
+
+export interface KBListResponse {
+  success: boolean
+  documents: KBDocument[]
+  total: number
+  // /documents/ is not paginated — these may be absent.
+  page?: number
+  page_size?: number
+}
+
+export interface KBDownloadResponse {
+  success: boolean
+  document_id: string
+  filename: string
+  download_url: string
+  expires_in: number
 }
 
 export interface ApiError {

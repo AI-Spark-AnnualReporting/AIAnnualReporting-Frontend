@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --color-background: hsl(0 0% 100%);
@@ -78,3 +79,17 @@ body {
   color: hsl(var(--foreground));
   font-feature-settings: "rlig" 1, "calt" 1;
 }
+
+@keyframes bell-shake {
+  0%,100% { transform: rotate(0deg); }
+  10%,30%,50%,70%,90% { transform: rotate(-12deg); }
+  20%,40%,60%,80% { transform: rotate(12deg); }
+}
+
+@keyframes priority-blink {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.bell-shake { animation: bell-shake 0.8s ease-in-out infinite; }
+.priority-blink { animation: priority-blink 1s ease-in-out infinite; }
