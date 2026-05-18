@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   ArrowLeft, CheckCircle, RotateCcw, FileText,
-  CheckCircle2, Clock, Sparkles, Info,
+  CheckCircle2, Clock, Sparkles, Info, ChevronDown, CircleSlash,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
@@ -37,6 +37,15 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   const [reviewAction, setReviewAction] = useState<PMReviewAction | null>(null)
   const [reviewNotes, setReviewNotes] = useState("")
   const [activeTab, setActiveTab] = useState<"answers" | "draft">("answers")
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const toggleExpanded = (qId: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(qId)) next.delete(qId)
+      else next.add(qId)
+      return next
+    })
 
   if (isLoading) return <PageSkeleton />
 
@@ -254,41 +263,94 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
 
       {/* ── Answers tab ── */}
       {activeTab === "answers" && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {session.questions.length === 0 ? (
             <EmptyState icon={FileText} title="No questions" description="No questions for this session." />
           ) : (
-            session.questions.map((q, idx) => {
-              const answer = session.answers?.find((a) => a.question_id === q.question_id)
-              return (
-                <div key={q.question_id} className="rounded-lg border bg-card p-5 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                      {idx + 1}
-                    </span>
-                    <p className="font-medium text-sm leading-relaxed">{q.question}</p>
-                  </div>
-                  {answer ? (
-                    isNA(answer.answer) ? (
-                      <div className="ml-9 flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-4 py-3 text-sm italic text-muted-foreground">
-                        <Info className="h-4 w-4 shrink-0" />
-                        <span>
-                          Not applicable — {answer.answer.replace(/^N\/A\s*—\s*/, "")}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed">
-                        {answer.answer}
-                      </div>
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {session.questions.length} questions — click a question to view its answer
+                </p>
+                <button
+                  onClick={() =>
+                    setExpanded((prev) =>
+                      prev.size === session.questions.length
+                        ? new Set()
+                        : new Set(session.questions.map((q) => q.question_id))
                     )
-                  ) : (
-                    <div className="ml-9 text-sm text-muted-foreground italic">
-                      Not answered
-                    </div>
-                  )}
-                </div>
-              )
-            })
+                  }
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  {expanded.size === session.questions.length ? "Collapse all" : "Expand all"}
+                </button>
+              </div>
+
+              {session.questions.map((q, idx) => {
+                const answer = session.answers?.find((a) => a.question_id === q.question_id)
+                const answerText = answer?.answer ?? ""
+                const hasAnswer = !!answerText.trim()
+                const na = hasAnswer && isNA(answerText)
+                const isOpen = expanded.has(q.question_id)
+                return (
+                  <div key={q.question_id} className="rounded-lg border bg-card overflow-hidden">
+                    {/* Collapsible header */}
+                    <button
+                      onClick={() => toggleExpanded(q.question_id)}
+                      className="w-full flex items-start gap-3 p-4 text-left transition-colors hover:bg-accent/50"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                        {idx + 1}
+                      </span>
+                      <p className="flex-1 font-medium text-sm leading-relaxed">{q.question}</p>
+                      {/* Answer status pill */}
+                      {na ? (
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          <Info className="h-3 w-3" /> N/A
+                        </span>
+                      ) : hasAnswer ? (
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+                          <CheckCircle2 className="h-3 w-3" /> Answered
+                        </span>
+                      ) : (
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          <CircleSlash className="h-3 w-3" /> Not answered
+                        </span>
+                      )}
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 shrink-0 mt-0.5 text-muted-foreground transition-transform",
+                          isOpen && "rotate-180"
+                        )}
+                      />
+                    </button>
+
+                    {/* Collapsible body */}
+                    {isOpen && (
+                      <div className="px-4 pb-4">
+                        {na ? (
+                          <div className="ml-9 flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-4 py-3 text-sm italic text-muted-foreground">
+                            <Info className="h-4 w-4 shrink-0" />
+                            <span>
+                              Not applicable — {answerText.replace(/^N\/A\s*—\s*/, "")}
+                            </span>
+                          </div>
+                        ) : hasAnswer ? (
+                          <div className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed whitespace-pre-wrap">
+                            {answerText}
+                          </div>
+                        ) : (
+                          <div className="ml-9 flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-4 py-3 text-sm italic text-muted-foreground">
+                            <CircleSlash className="h-4 w-4 shrink-0" />
+                            <span>No answer was provided for this question.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </>
           )}
         </div>
       )}
