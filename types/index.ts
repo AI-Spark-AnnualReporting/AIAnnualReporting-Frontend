@@ -191,6 +191,33 @@ export interface DepartmentDashboard {
   }[]
 }
 
+export interface Notification {
+  id: string
+  notification_type: string
+  type?: string
+  title?: string
+  message: string
+  priority?: "normal" | "high" | "urgent" | "critical"
+  related_id?: string
+  created_at: string
+  is_read: boolean
+}
+
+export interface NotificationListResponse {
+  notifications: Notification[]
+  total: number
+  unread_count: number
+}
+
+export interface NotificationUnreadCountResponse {
+  unread_count: number
+}
+
+export interface NotificationMarkReadResponse {
+  success: boolean
+  message: string
+}
+
 export interface PMDashboard {
   active_cycles: {
     id: string
