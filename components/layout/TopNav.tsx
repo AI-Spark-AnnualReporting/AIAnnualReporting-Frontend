@@ -141,6 +141,11 @@ function RegularCard({
         <p className={`text-sm leading-snug ${!n.is_read ? "font-medium" : "text-muted-foreground"}`}>
           {n.title || n.message}
         </p>
+        {n.title && n.message && (
+          <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            {n.message}
+          </p>
+        )}
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
         </p>

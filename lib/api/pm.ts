@@ -7,13 +7,18 @@ export interface ReviewPayload {
 }
 
 export interface ReminderPayload {
+  user_ids: string[]
+  title: string
   message: string
   priority?: "low" | "normal" | "high" | "urgent"
+  related_type?: string
+  related_id?: string
+  action_url?: string
 }
 
 export interface EscalationPayload {
   session_id: string
-  message: string
+  reason: string
   priority?: string
 }
 
@@ -135,12 +140,7 @@ export const pmApi = {
     return data
   },
 
-  sendBulkReminders: async (payload: {
-    session_ids?: string[]
-    cycle_id?: string
-    message: string
-    priority?: string
-  }) => {
+  sendBulkReminders: async (payload: ReminderPayload) => {
     const { data } = await apiClient.post("/pm/reminders", payload)
     return data
   },

@@ -147,7 +147,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     departments.length > 0 &&
     departments.every((d) => ["submitted", "approved"].includes(d.status))
 
-  const escalations: { id?: string; message: string; priority?: string; created_at?: string; department_name?: string }[] =
+  const escalations: { id?: string; reason?: string; message?: string; priority?: string; created_at?: string; department_name?: string }[] =
     Array.isArray(escalationsData)
       ? escalationsData
       : (escalationsData as { escalations?: unknown[] } | undefined)?.escalations ?? []
@@ -221,9 +221,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
   const handleSendReminder = async () => {
     if (!reminderTarget || !reminderMsg) return
+    if (!reminderTarget.user_id) {
+      toast.error("No user is assigned to this department")
+      return
+    }
     await sendReminder.mutateAsync({
-      sessionId: reminderTarget.session_id,
-      data: { message: reminderMsg, priority: reminderPriority as "low" | "normal" | "high" | "urgent" },
+      user_ids: [reminderTarget.user_id],
+      title: `Reminder: ${reminderTarget.department_name}`,
+      message: reminderMsg,
+      priority: reminderPriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
     })
     setReminderTarget(null)
     setReminderMsg("")
@@ -233,7 +241,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     if (!escalationTarget || !escalationMsg.trim()) return
     await createEscalation.mutateAsync({
       session_id: escalationTarget.session_id,
-      message: escalationMsg,
+      reason: escalationMsg,
       priority: escalationPriority,
     })
     setEscalationTarget(null)
@@ -242,7 +250,21 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
   const handleBulkReminder = async () => {
     if (!bulkMsg.trim()) return
-    await bulkReminder.mutateAsync({ cycle_id: id, message: bulkMsg, priority: bulkPriority })
+    const userIds = [...notStarted, ...inProgress]
+      .map((d) => d.user_id)
+      .filter((u): u is string => !!u)
+    if (userIds.length === 0) {
+      toast.error("No pending departments have a user assigned")
+      return
+    }
+    await bulkReminder.mutateAsync({
+      user_ids: userIds,
+      title: "Annual Report Submission Reminder",
+      message: bulkMsg,
+      priority: bulkPriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
+    })
     setBulkOpen(false)
     setBulkMsg("")
   }
@@ -928,7 +950,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   {esc.department_name && (
                     <p className="text-xs text-muted-foreground mb-0.5">{esc.department_name}</p>
                   )}
-                  <p className="text-sm">{esc.message}</p>
+                  <p className="text-sm">{esc.reason ?? esc.message}</p>
                 </div>
                 {esc.created_at && (
                   <p className="text-xs text-muted-foreground shrink-0">{formatDate(esc.created_at)}</p>
