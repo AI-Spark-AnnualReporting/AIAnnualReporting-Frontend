@@ -15,7 +15,7 @@ import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, ArrowUpRight, LayoutGrid, Send, Bot,
   User as UserIcon, RotateCcw, PanelLeftOpen, Copy,
-  Wand2, Paperclip, PanelLeftClose, List,
+  Wand2, Paperclip, PanelLeftClose, List, Ban, Info, Save,
 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -54,6 +54,7 @@ function extractContent(res: unknown): string | null {
 
   // Explicit answer field names (most-specific first, no ambiguous fallbacks)
   const KEYS = [
+    "assistant_response",
     "suggested_answer", "suggestion", "answer", "result", "ai_suggestion", "ai_response",
     "content", "text", "output", "generated_text", "completion", "reply", "response",
   ]
@@ -73,6 +74,11 @@ const TONE_ACTIONS = [
   { label: "Shorten it", prompt: "Make more concise while keeping every key point" },
   { label: "Formal tone", prompt: "Rewrite in formal language appropriate for a board-level annual report" },
 ]
+
+// Canonical "Not Applicable" answer — submitted verbatim through the normal
+// answers endpoint. A question whose answer starts with "N/A" is treated as N/A.
+const NA_ANSWER = "N/A — This question does not apply to our department."
+const isNAAnswer = (text: string | undefined) => !!text && text.startsWith("N/A")
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function SessionWorkspacePage({
@@ -109,6 +115,8 @@ export default function SessionWorkspacePage({
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [autoSaving, setAutoSaving] = useState(false)
+  // Questions marked "Not Applicable" — local mirror of N/A answers
+  const [naQuestions, setNaQuestions] = useState<Set<string>>(new Set())
 
   // Evidence upload
   const [uploadingDoc, setUploadingDoc] = useState(false)
@@ -122,9 +130,13 @@ export default function SessionWorkspacePage({
   const session = data?.session
   const questions = session?.questions || []
   const currentQ = questions[currentIndex]
+  const currentIsNA = !!currentQ && naQuestions.has(currentQ.question_id)
 
   const answeredCount = Object.values(answers).filter((v) => v?.trim()).length
   const progress = questions.length ? Math.round((answeredCount / questions.length) * 100) : 0
+  // Every question answered or marked N/A — ready to review & submit.
+  const allComplete = questions.length > 0 && answeredCount === questions.length
+  const isLastQuestion = questions.length > 0 && currentIndex === questions.length - 1
   const isSubmitted = session?.status === "submitted" || session?.status === "approved"
   const isReopened = session?.status === "reopened"
   const isApproved = session?.status === "approved"
@@ -135,12 +147,17 @@ export default function SessionWorkspacePage({
     session?.status === "reopened" ||
     session?.status === "not_started"
 
-  // Pre-fill saved answers
+  // Pre-fill saved answers, and mirror any already-saved N/A answers into local state
   useEffect(() => {
     if (session?.answers) {
       const existing: Record<string, string> = {}
-      session.answers.forEach((a) => { existing[a.question_id] = a.answer })
+      const na = new Set<string>()
+      session.answers.forEach((a) => {
+        existing[a.question_id] = a.answer
+        if (isNAAnswer(a.answer)) na.add(a.question_id)
+      })
       setAnswers(existing)
+      setNaQuestions(na)
     }
   }, [session])
 
@@ -179,14 +196,51 @@ export default function SessionWorkspacePage({
     [answers, questions, id]
   )
 
+  // Submit the full set of non-empty answers (matches autosave/save behaviour).
+  const persistAnswers = async (next: Record<string, string>) => {
+    const payload = questions
+      .filter((q) => next[q.question_id]?.trim())
+      .map((q) => ({ question_id: q.question_id, question: q.question, answer: next[q.question_id] }))
+    await submitAnswers.mutateAsync({ sessionId: id, data: { answers: payload } })
+  }
+
   const handleSaveAnswer = async () => {
     if (!currentQ) return
-    const payload = questions
-      .filter((q) => answers[q.question_id]?.trim())
-      .map((q) => ({ question_id: q.question_id, question: q.question, answer: answers[q.question_id] }))
-    await submitAnswers.mutateAsync({ sessionId: id, data: { answers: payload } })
+    await persistAnswers(answers)
     setSaved((prev) => ({ ...prev, [currentQ.question_id]: true }))
     refetch()
+  }
+
+  // Mark a question "Not Applicable" — stores the canonical N/A string and saves immediately.
+  const markAsNA = async (questionId: string) => {
+    const next = { ...answers, [questionId]: NA_ANSWER }
+    setAnswers(next)
+    setNaQuestions((prev) => new Set(prev).add(questionId))
+    setSaved((prev) => ({ ...prev, [questionId]: false }))
+    try {
+      await persistAnswers(next)
+      setSaved((prev) => ({ ...prev, [questionId]: true }))
+      toast.success("Marked as not applicable")
+    } catch {
+      toast.error("Couldn't save — please try again")
+    }
+  }
+
+  // Undo an N/A mark — clears the answer locally so the user can answer normally.
+  const undoNA = async (questionId: string) => {
+    const next = { ...answers, [questionId]: "" }
+    setAnswers(next)
+    setNaQuestions((prev) => {
+      const s = new Set(prev)
+      s.delete(questionId)
+      return s
+    })
+    setSaved((prev) => ({ ...prev, [questionId]: false }))
+    try {
+      await persistAnswers(next)
+    } catch {
+      toast.error("Couldn't update — please try again")
+    }
   }
 
   const getOrCreateConversation = async (): Promise<string> => {
@@ -194,7 +248,7 @@ export default function SessionWorkspacePage({
     const conv = await chatApi.createConversation({
       title: `${session?.department_name || "Annual Report"} – Q&A`,
     })
-    const newId = conv.conversation_id || (conv as Record<string, string>).id
+    const newId = conv.conversation_id || conv.id || ""
     setConversationId(newId)
     return newId
   }
@@ -284,8 +338,16 @@ export default function SessionWorkspacePage({
 
   const applyToAnswer = (content: string) => {
     if (!currentQ) return
-    setAnswers((prev) => ({ ...prev, [currentQ.question_id]: content }))
-    setSaved((prev) => ({ ...prev, [currentQ.question_id]: false }))
+    const qId = currentQ.question_id
+    setAnswers((prev) => ({ ...prev, [qId]: content }))
+    setSaved((prev) => ({ ...prev, [qId]: false }))
+    // Applying an answer un-marks any prior "Not Applicable" state.
+    setNaQuestions((prev) => {
+      if (!prev.has(qId)) return prev
+      const s = new Set(prev)
+      s.delete(qId)
+      return s
+    })
     toast.success("Applied to your answer below")
   }
 
@@ -314,6 +376,16 @@ export default function SessionWorkspacePage({
   const handleGenerateDraft = async () => {
     await generateDraft.mutateAsync(id)
     router.push(`/department/sessions/${id}/draft`)
+  }
+
+  // From the final question: jump to the draft page for review & submission.
+  // Re-uses the existing draft if one has already been generated.
+  const handleProceedToSubmit = async () => {
+    if (session?.ai_generated_draft) {
+      router.push(`/department/sessions/${id}/draft`)
+      return
+    }
+    await handleGenerateDraft()
   }
 
   // ── Early returns ─────────────────────────────────────────────────────────────
@@ -454,6 +526,8 @@ export default function SessionWorkspacePage({
           <LayoutGrid className="h-3.5 w-3.5 mr-1.5" /> Overview
         </Button>
 
+        {/* Draft button hidden for now — submission happens via the
+            "Review & Submit" CTA on the final question.
         {session.ai_generated_draft ? (
           <Link href={`/department/sessions/${id}/draft`}>
             <Button size="sm" variant="outline" className="h-8 shrink-0">
@@ -472,6 +546,7 @@ export default function SessionWorkspacePage({
             Generate Draft
           </Button>
         )}
+        */}
       </div>
 
       {/* ── Body ──────────────────────────────────────────────────────────────── */}
@@ -739,23 +814,40 @@ export default function SessionWorkspacePage({
                   </div>
                 )}
 
-                {/* Answer editor — compact: label + status + save + nav all in one header row */}
-                <div className="px-4 pb-3 border-t pt-2">
+                {/* Answer editor — compact: label + status + actions + nav in one header row */}
+                <div className={cn("px-4 pb-3 border-t pt-2 transition-colors", currentIsNA && "bg-muted/40")}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Answer</span>
                     {saved[currentQ.question_id] && <CheckCircle2 className="h-3 w-3 text-green-500" />}
                     {autoSaving && <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />}
                     <div className="flex-1" />
-                    {!isSubmitted && (
-                      <Button
-                        size="sm" variant="outline" className="h-6 px-2.5 text-xs"
-                        onClick={handleSaveAnswer}
-                        disabled={!canEdit || submitAnswers.isPending}
-                      >
-                        {submitAnswers.isPending
-                          ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                          : "Save"}
-                      </Button>
+                    {!isSubmitted && !currentIsNA && (
+                      <>
+                        <Button
+                          size="sm" variant="outline"
+                          className="h-7 px-2.5 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400"
+                          onClick={() => markAsNA(currentQ.question_id)}
+                          disabled={!canEdit || submitAnswers.isPending}
+                        >
+                          <Ban className="h-3.5 w-3.5 mr-1" /> Mark as N/A
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-7 px-3 text-xs font-medium bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+                          onClick={handleSaveAnswer}
+                          disabled={!canEdit || submitAnswers.isPending}
+                        >
+                          {submitAnswers.isPending ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Saving…
+                            </>
+                          ) : (
+                            <>
+                              <Save className="h-3.5 w-3.5 mr-1" /> Save Answer
+                            </>
+                          )}
+                        </Button>
+                      </>
                     )}
                     <div className="flex items-center gap-0.5 ml-1 border-l pl-2">
                       <Button
@@ -777,15 +869,64 @@ export default function SessionWorkspacePage({
                       </Button>
                     </div>
                   </div>
-                  <Textarea
-                    value={answers[currentQ.question_id] || ""}
-                    onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
-                    placeholder="Type your answer, or generate with AI above…"
-                    rows={3}
-                    className="w-full resize-y text-sm leading-relaxed min-h-[72px]"
-                    disabled={!canEdit}
-                  />
+                  {currentIsNA ? (
+                    <div className="flex items-start gap-3 rounded-md border bg-muted/30 px-4 py-3">
+                      <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          <Ban className="h-3.5 w-3.5" /> Marked as not applicable
+                        </p>
+                        <p className="text-xs italic text-muted-foreground/80 mt-0.5">
+                          &ldquo;This question does not apply to our department.&rdquo;
+                        </p>
+                      </div>
+                      {!isSubmitted && (
+                        <Button
+                          size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                          onClick={() => undoNA(currentQ.question_id)}
+                          disabled={!canEdit || submitAnswers.isPending}
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1" /> Undo
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Textarea
+                      value={answers[currentQ.question_id] || ""}
+                      onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
+                      placeholder="Type your answer, or generate with AI above…"
+                      rows={3}
+                      className="w-full resize-y text-sm leading-relaxed min-h-[72px]"
+                      disabled={!canEdit}
+                    />
+                  )}
                 </div>
+
+                {/* Submit CTA — appears on the last question once every
+                    question is answered or marked N/A */}
+                {isLastQuestion && allComplete && !isSubmitted && (
+                  <div className="px-4 pb-3 pt-1">
+                    <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-green-800">All questions complete</p>
+                        <p className="text-xs text-green-700">
+                          Every question is answered or marked N/A — review your draft and submit.
+                        </p>
+                      </div>
+                      <Button
+                        className="shrink-0 bg-green-600 text-white shadow-sm hover:bg-green-700"
+                        onClick={handleProceedToSubmit}
+                        disabled={!canEdit || generateDraft.isPending}
+                      >
+                        {generateDraft.isPending
+                          ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                          : <Send className="mr-1.5 h-4 w-4" />}
+                        Review &amp; Submit
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
             </div>

@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import { PMDashboard, Session, KickoffBriefResponse, PMReviewAction } from "@/types"
+import { Session, KickoffBriefResponse, PMReviewAction, SessionStatus } from "@/types"
 
 export interface ReviewPayload {
   action: PMReviewAction
@@ -32,25 +32,28 @@ export interface KickoffBriefPayload {
   num_questions?: number
 }
 
-export const pmApi = {
-  /**
-   * The backend has no GET /pm/dashboard list endpoint (only /pm/dashboard/{cycle_id}).
-   * We proxy through a Next.js server-side route that uses an admin service account
-   * to fetch all cycles and filters to the requesting PM's assignments.
-   */
-  dashboard: async (): Promise<PMDashboard> => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const res = await fetch("/api/pm/cycles", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      cache: "no-store",
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw { status: res.status, message: err.error ?? "Failed to load cycles" }
-    }
-    return res.json()
-  },
+// PM-access cycle + session list shapes (real backend endpoints)
+export interface PMCycleListItem {
+  cycle_id: string
+  cycle_name: string
+  fiscal_year: number
+  status: string
+  submission_deadline?: string
+}
 
+export interface PMCycleSession {
+  session_id: string
+  department_id: string
+  department_name: string
+  department_code: string
+  user_id: string
+  user_name: string
+  status: SessionStatus
+  progress_percentage: number
+  submitted_at: string | null
+}
+
+export const pmApi = {
   /**
    * Fetch PM cycle dashboard directly from the backend.
    * The previous departments:[] backend bug has been fixed — we now get full
@@ -93,22 +96,35 @@ export const pmApi = {
     return data
   },
 
+  // GET /pm/cycles — the cycles assigned to this PM.
+  // The cycle id field name varies by backend shape (cycle_id vs id / _id),
+  // so normalise it to a guaranteed `cycle_id` for downstream callers.
+  getCycles: async (): Promise<{ success: boolean; cycles: PMCycleListItem[]; total: number }> => {
+    const { data } = await apiClient.get("/pm/cycles")
+    const raw = (data?.cycles ?? []) as Array<Record<string, unknown>>
+    const cycles: PMCycleListItem[] = raw.map((c) => ({
+      ...(c as unknown as PMCycleListItem),
+      cycle_id: (c.cycle_id ?? c.id ?? c._id) as string,
+    }))
+    return { success: data?.success ?? true, cycles, total: data?.total ?? cycles.length }
+  },
+
+  // GET /pm/cycles/{id}/sessions — every department session in a cycle
+  getCycleSessions: async (
+    cycleId: string
+  ): Promise<{ success: boolean; sessions: PMCycleSession[]; total: number }> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sessions`)
+    return data
+  },
+
   /**
-   * Fetch a session's full detail as PM via server-side impersonation proxy.
-   * The department endpoint GET /department/sessions/{id} requires a dept user token,
-   * so we route through /api/pm/sessions/{id} which impersonates the correct user.
+   * Fetch a session's full Q&A detail as PM. GET /pm/sessions/{id} is the
+   * PM-access endpoint — it works for sessions owned by department users
+   * (the /department/sessions/{id} endpoint rejects non-owners).
    */
   getSession: async (sessionId: string): Promise<{ success: boolean; session: Session }> => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-    const res = await fetch(`/api/pm/sessions/${sessionId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      cache: "no-store",
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw { status: res.status, message: err.error ?? "Failed to load session" }
-    }
-    return res.json()
+    const { data } = await apiClient.get(`/pm/sessions/${sessionId}`)
+    return data
   },
 
   reviewSession: async (sessionId: string, payload: ReviewPayload) => {

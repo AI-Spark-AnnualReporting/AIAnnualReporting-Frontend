@@ -214,7 +214,11 @@ export function decodeUserId(jwt: string): string | null {
  * list of ALL assignments across all users, annotated with user_email.
  * Results are cached 10 s per user, so calling this repeatedly is cheap.
  */
-async function fetchAllAssignments(serviceToken: string): Promise<DeptSession[]> {
+/**
+ * Raw (non-deduplicated) flat list of every dept user's assignments, each
+ * annotated with user_email. fetchAllAssignments deduplicates this by session_id.
+ */
+async function fetchAllAssignmentsRaw(serviceToken: string): Promise<DeptSession[]> {
   const deptUsers = await getDeptUsers(serviceToken)
   if (deptUsers.length === 0) return []
 
@@ -226,16 +230,18 @@ async function fetchAllAssignments(serviceToken: string): Promise<DeptSession[]>
       return assignments.map((a) => ({ ...a, user_email: u.email }))
     })
   )
+  return results.flat()
+}
 
-  // Flatten and deduplicate by session_id
+async function fetchAllAssignments(serviceToken: string): Promise<DeptSession[]> {
+  const raw = await fetchAllAssignmentsRaw(serviceToken)
+  // Deduplicate by session_id
   const seen = new Set<string>()
   const flat: DeptSession[] = []
-  for (const list of results) {
-    for (const s of list) {
-      if (!seen.has(s.session_id)) {
-        seen.add(s.session_id)
-        flat.push(s)
-      }
+  for (const s of raw) {
+    if (!seen.has(s.session_id)) {
+      seen.add(s.session_id)
+      flat.push(s)
     }
   }
   return flat
@@ -271,49 +277,6 @@ export async function fetchAllSessionsByCycle(
     map.set(s.cycle_id, list)
   }
   return map
-}
-
-/**
- * Fetch the full session detail for a PM by impersonating the dept user who owns it.
- * Uses fetchAllAssignments (cached) to find the owner, then calls
- * GET /department/sessions/{sessionId} with the dept user's token.
- */
-export async function getSessionForPM(
-  sessionId: string,
-  serviceToken: string
-): Promise<Record<string, unknown> | null> {
-  const all = await fetchAllAssignments(serviceToken)
-  const meta = all.find((s) => s.session_id === sessionId)
-  if (!meta?.user_email) return null
-
-  const deptToken = await loginAs(meta.user_email, DEPT_PASSWORD)
-  if (!deptToken) return null
-
-  try {
-    const res = await fetch(`${API_BASE}/department/sessions/${sessionId}`, {
-      headers: { Authorization: `Bearer ${deptToken}` },
-      cache: "no-store",
-    })
-    if (!res.ok) return null
-    const data = await res.json() as Record<string, unknown>
-
-    // The backend stores department_name as "Unknown" in the session detail.
-    // Enrich with the correct values from the aggregator (sourced from /department/dashboard).
-    const session = (data.session ?? data) as Record<string, unknown>
-    if (!session.department_name || session.department_name === "Unknown") {
-      session.department_name = meta.department_name
-    }
-    if (!session.department_code) {
-      session.department_code = meta.department_code
-    }
-    if (!session.cycle_name) {
-      session.cycle_name = meta.cycle_name
-    }
-
-    return data
-  } catch {
-    return null
-  }
 }
 
 /** Build PMDashboard-style stats from a list of sessions. */

@@ -195,18 +195,23 @@ export interface PMDashboard {
   active_cycles: {
     id: string
     cycle_name: string
-    submission_deadline: string
+    fiscal_year?: number
+    status?: string
+    submission_deadline?: string
     total_departments: number
     submitted_count: number
-    /** Real per-status counts emitted by the /api/pm/cycles proxy */
+    /** Per-status counts computed from the real GET /pm/cycles/{id}/sessions endpoint */
     in_progress_count?: number
     not_started_count?: number
+    reopened_count?: number
+    /** Average of every department's progress_percentage across the cycle */
     completion_rate: number
   }[]
   pending_reviews: number
   recent_submissions: {
     session_id: string
     department_name: string
+    cycle_name?: string
     submitted_at: string
     status?: SessionStatus
   }[]

@@ -31,6 +31,24 @@ export interface ConversationPromptPayload {
   prompt: string
 }
 
+export interface ExtractedAnswer {
+  question_id: string
+  question: string
+  extracted_answer: string
+  status: "found" | "not_found"
+}
+
+export interface ExtractAnswersResponse {
+  success: boolean
+  session_id: string
+  department: string
+  extracted_answers: ExtractedAnswer[]
+  total_questions: number
+  found_count: number
+  not_found_count: number
+  message: string
+}
+
 export const departmentApi = {
   dashboard: async (): Promise<DepartmentDashboard> => {
     const { data } = await apiClient.get("/department/dashboard")
@@ -78,6 +96,18 @@ export const departmentApi = {
         headers: { "Content-Type": undefined },
         timeout: 120000, // 2 min — allows time for text extraction + vectorisation
       }
+    )
+    return data
+  },
+
+  // Run AI answer-extraction over the session's uploaded documents — drafts an
+  // answer for every question. Slow: the backend reads each document and writes
+  // a per-question answer, so allow a generous timeout.
+  extractAnswers: async (sessionId: string): Promise<ExtractAnswersResponse> => {
+    const { data } = await apiClient.post(
+      `/department/sessions/${sessionId}/extract-answers`,
+      undefined,
+      { timeout: 300000 } // 5 min — AI drafts an answer for each question
     )
     return data
   },

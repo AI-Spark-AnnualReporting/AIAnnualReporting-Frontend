@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload } from "@/lib/api/department"
-import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload } from "@/lib/api/pm"
-import { KickoffBriefResponse } from "@/types"
+import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession } from "@/lib/api/pm"
+import { KickoffBriefResponse, PMDashboard } from "@/types"
 import { toast } from "sonner"
 
 export function useDepartmentDashboard() {
@@ -91,23 +91,128 @@ export function useAdjustTone() {
   })
 }
 
+/**
+ * PM dashboard — cycle cards + review stats, built from the real backend
+ * endpoints (GET /pm/cycles + GET /pm/cycles/{id}/sessions). Per cycle the
+ * department-session statuses are counted client-side, and cycle progress is
+ * the average of every department's own progress_percentage.
+ */
 export function usePMDashboard() {
   return useQuery({
     queryKey: ["pm", "dashboard"],
-    queryFn: async () => {
-      try {
-        return await pmApi.dashboard()
-      } catch (err: unknown) {
-        // Backend returns 404 when PM has no active cycles — treat as empty
-        const status = (err as { status?: number; response?: { status?: number } })?.status
-          ?? (err as { response?: { status?: number } })?.response?.status
-        if (status === 404) return { active_cycles: [], cycles: [], pending_reviews: 0, recent_submissions: [] }
-        throw err
+    queryFn: async (): Promise<PMDashboard> => {
+      const { cycles } = await pmApi.getCycles()
+      const perCycle = await Promise.all(
+        cycles.map(async (c) => {
+          try {
+            const { sessions } = await pmApi.getCycleSessions(c.cycle_id)
+            return { cycle: c, sessions }
+          } catch {
+            // One cycle failing shouldn't take down the whole dashboard
+            return { cycle: c, sessions: [] as PMCycleSession[] }
+          }
+        })
+      )
+
+      const active_cycles = perCycle.map(({ cycle, sessions }) => {
+        const total = sessions.length
+        const submitted = sessions.filter((s) => s.status === "submitted").length
+        const approved = sessions.filter((s) => s.status === "approved").length
+        const inProgress = sessions.filter((s) => s.status === "in_progress").length
+        const notStarted = sessions.filter(
+          (s) => s.status === "not_started" || s.status === "assigned"
+        ).length
+        const reopened = sessions.filter((s) => s.status === "reopened").length
+        // Cycle progress = average of every department's own progress_percentage.
+        const completion_rate =
+          total > 0
+            ? Math.round(
+                sessions.reduce((sum, s) => sum + (s.progress_percentage ?? 0), 0) / total
+              )
+            : 0
+        return {
+          id: cycle.cycle_id,
+          cycle_name: cycle.cycle_name,
+          fiscal_year: cycle.fiscal_year,
+          status: cycle.status,
+          submission_deadline: cycle.submission_deadline,
+          total_departments: total,
+          submitted_count: submitted + approved,
+          in_progress_count: inProgress,
+          not_started_count: notStarted,
+          reopened_count: reopened,
+          completion_rate,
+        }
+      })
+
+      const recent_submissions = perCycle
+        .flatMap(({ cycle, sessions }) =>
+          sessions
+            .filter((s) => s.status === "submitted")
+            .map((s) => ({
+              session_id: s.session_id,
+              department_name: s.department_name,
+              cycle_name: cycle.cycle_name,
+              submitted_at: s.submitted_at ?? "",
+              status: s.status,
+            }))
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.submitted_at || 0).getTime() -
+            new Date(a.submitted_at || 0).getTime()
+        )
+
+      return {
+        active_cycles,
+        pending_reviews: recent_submissions.length,
+        recent_submissions: recent_submissions.slice(0, 10),
       }
     },
     retry: false,
-    staleTime: 0,                // always treat as stale so refocus triggers a fetch
-    refetchInterval: 5_000,      // poll every 5 s — picks up dept submissions quickly
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  })
+}
+
+/** A submitted session in the PM review queue, annotated with its cycle. */
+export type ReviewQueueItem = PMCycleSession & { cycle_id: string; cycle_name: string }
+
+/**
+ * Cross-cycle review queue: every `submitted` session across the PM's cycles.
+ * The backend has no cross-cycle endpoint, so we loop the PM's cycles client-side.
+ */
+export function usePMReviewQueue() {
+  return useQuery({
+    queryKey: ["pm", "reviewQueue"],
+    queryFn: async (): Promise<ReviewQueueItem[]> => {
+      const { cycles } = await pmApi.getCycles()
+      const perCycle = await Promise.all(
+        cycles
+          .filter((c) => c.status !== "draft") // draft cycles have no sessions yet
+          .map(async (c) => {
+            try {
+              const { sessions } = await pmApi.getCycleSessions(c.cycle_id)
+              return sessions
+                .filter((s) => s.status === "submitted")
+                .map((s) => ({ ...s, cycle_id: c.cycle_id, cycle_name: c.cycle_name }))
+            } catch {
+              // One cycle failing shouldn't take down the whole queue
+              return [] as ReviewQueueItem[]
+            }
+          })
+      )
+      return perCycle
+        .flat()
+        .sort(
+          (a, b) =>
+            new Date(b.submitted_at ?? 0).getTime() -
+            new Date(a.submitted_at ?? 0).getTime()
+        )
+    },
+    staleTime: 0,
+    refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   })
 }

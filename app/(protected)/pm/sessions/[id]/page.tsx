@@ -17,13 +17,17 @@ import {
 } from "@/components/ui/dialog"
 import {
   ArrowLeft, CheckCircle, RotateCcw, FileText,
-  CheckCircle2, Clock, Sparkles,
+  CheckCircle2, Clock, Sparkles, Info,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { PMReviewAction } from "@/types"
+
+// A department user can mark a question "Not Applicable" — it's saved as an
+// answer string that starts with "N/A".
+const isNA = (answer: string) => answer.startsWith("N/A")
 
 export default function SessionReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -39,7 +43,23 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
   const session = data?.session
 
   if (!session) {
-    return <EmptyState title="Session not found" description="This session does not exist." />
+    return (
+      <EmptyState
+        icon={FileText}
+        title="Session not found"
+        description="We couldn't load this session — it may be a temporary issue. Try again, or head back to your pending reviews."
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => refetch()}>
+              Retry
+            </Button>
+            <Link href="/pm/reviews">
+              <Button>Back to Pending Reviews</Button>
+            </Link>
+          </div>
+        }
+      />
+    )
   }
 
   const handleReview = async () => {
@@ -190,6 +210,30 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
         )}
       </div>
 
+      {/* ── Resubmission notice — the feedback this PM gave on the previous review.
+           A submitted session that already carries review_notes was rejected once
+           and has now been revised & resubmitted. ── */}
+      {isSubmitted && session.review_notes && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <RotateCcw className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-amber-800">
+                Resubmitted after your requested changes
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                Your previous feedback
+                {session.reviewed_at ? ` (${formatDate(session.reviewed_at)})` : ""} — check it
+                has been addressed:
+              </p>
+              <p className="mt-1.5 text-sm italic text-amber-900">
+                &ldquo;{session.review_notes}&rdquo;
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Content Tabs ── */}
       <div className="flex gap-1 border-b">
         {(["answers", "draft"] as const).map((tab) => (
@@ -225,9 +269,18 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                     <p className="font-medium text-sm leading-relaxed">{q.question}</p>
                   </div>
                   {answer ? (
-                    <div className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed">
-                      {answer.answer}
-                    </div>
+                    isNA(answer.answer) ? (
+                      <div className="ml-9 flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-4 py-3 text-sm italic text-muted-foreground">
+                        <Info className="h-4 w-4 shrink-0" />
+                        <span>
+                          Not applicable — {answer.answer.replace(/^N\/A\s*—\s*/, "")}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed">
+                        {answer.answer}
+                      </div>
+                    )
                   ) : (
                     <div className="ml-9 text-sm text-muted-foreground italic">
                       Not answered

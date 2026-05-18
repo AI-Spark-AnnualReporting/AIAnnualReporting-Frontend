@@ -22,11 +22,12 @@ import { SESSION_STATUSES } from "@/lib/constants"
 import { SessionStatus } from "@/types"
 import {
   ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye,
-  FileUp, FileText, X, Loader2,
+  FileUp, FileText, X,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 
 type StatusFilter = "all" | SessionStatus
 
@@ -81,7 +82,8 @@ export default function DepartmentDashboard() {
   const [filter, setFilter] = useState<StatusFilter>("all")
   const [startTarget, setStartTarget] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [uploadingStart, setUploadingStart] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,33 +104,47 @@ export default function DepartmentDashboard() {
   }
 
   const closeStartDialog = () => {
-    if (uploadingStart) return
     setStartTarget(null)
     setPendingFiles([])
   }
 
+  // Documents are mandatory: upload every file, run AI answer-extraction over
+  // them, then hand the user to the session workspace to review the answers.
   const handleStartSession = async () => {
-    if (!startTarget) return
+    if (!startTarget || pendingFiles.length === 0) return
     const sessionId = startTarget
-    if (pendingFiles.length === 0) {
-      router.push(`/department/sessions/${sessionId}`)
-      return
-    }
-    setUploadingStart(true)
+    const files = [...pendingFiles]
+
+    // Swap the dialog for the full-screen extraction loader.
+    setStartTarget(null)
+    setExtractionResult(null)
+    setStarting(true)
+
     try {
-      for (const file of pendingFiles) {
+      for (const file of files) {
         await departmentApi.uploadDocument(sessionId, file)
       }
-      toast.success(`${pendingFiles.length} document${pendingFiles.length !== 1 ? "s" : ""} uploaded`)
-      router.push(`/department/sessions/${sessionId}`)
+      const result = await departmentApi.extractAnswers(sessionId)
+      setExtractionResult({
+        total_questions: result.total_questions,
+        found_count: result.found_count,
+        not_found_count: result.not_found_count,
+      })
+      // Let the success state breathe before entering the workspace.
+      setTimeout(() => router.push(`/department/sessions/${sessionId}`), 2200)
     } catch (err: unknown) {
-      toast.error((err as { message?: string })?.message || "Upload failed")
+      toast.error(
+        (err as { message?: string })?.message ||
+          "We couldn't extract answers from your documents — you can still answer each question manually."
+      )
+      setTimeout(() => router.push(`/department/sessions/${sessionId}`), 1400)
     } finally {
-      setUploadingStart(false)
+      setPendingFiles([])
     }
   }
 
   if (isLoading) return <PageSkeleton />
+  if (starting) return <ExtractionLoader result={extractionResult} />
 
   const sessions = data?.assignments || []
   const notifications = data?.notifications?.filter((n) => !n.is_read) || []
@@ -334,8 +350,9 @@ export default function DepartmentDashboard() {
           <DialogHeader>
             <DialogTitle>Start Session</DialogTitle>
             <DialogDescription>
-              Upload any supporting documents you&apos;d like the AI assistant to reference while
-              answering questions (financial reports, project summaries, etc.). This step is optional.
+              Upload the supporting documents for this report (financial reports, project
+              summaries, etc.). Our AI will read them and draft an answer for every question —
+              you&apos;ll review and refine each one in the next step. At least one document is required.
             </DialogDescription>
           </DialogHeader>
 
@@ -347,19 +364,17 @@ export default function DepartmentDashboard() {
               multiple
               className="hidden"
               onChange={handlePickFiles}
-              disabled={uploadingStart}
             />
 
             {pendingFiles.length === 0 ? (
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingStart}
-                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors disabled:opacity-50"
+                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors"
               >
                 <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
                 <p className="text-sm font-medium">Click to attach documents</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — multiple files allowed</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — at least one file required</p>
               </button>
             ) : (
               <div className="space-y-2">
@@ -378,7 +393,6 @@ export default function DepartmentDashboard() {
                         variant="ghost"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
                         onClick={() => removePendingFile(i)}
-                        disabled={uploadingStart}
                       >
                         <X className="h-3.5 w-3.5" />
                       </Button>
@@ -390,7 +404,6 @@ export default function DepartmentDashboard() {
                   variant="outline"
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingStart}
                 >
                   <FileUp className="mr-2 h-3.5 w-3.5" />
                   Add more
@@ -400,30 +413,12 @@ export default function DepartmentDashboard() {
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={closeStartDialog}
-              disabled={uploadingStart}
-            >
+            <Button variant="outline" onClick={closeStartDialog}>
               Cancel
             </Button>
-            <Button onClick={handleStartSession} disabled={uploadingStart}>
-              {uploadingStart ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading…
-                </>
-              ) : pendingFiles.length === 0 ? (
-                <>
-                  Skip & Start
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </>
-              ) : (
-                <>
-                  Upload & Start
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </>
-              )}
+            <Button onClick={handleStartSession} disabled={pendingFiles.length === 0}>
+              Extract Answers &amp; Start
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </DialogFooter>
         </DialogContent>

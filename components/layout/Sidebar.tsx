@@ -15,6 +15,7 @@ import {
   Sparkles,
   ClipboardCheck,
   BookOpen,
+  MessageSquare,
   PanelLeftOpen,
 } from "lucide-react"
 import { useState, useEffect } from "react"
@@ -38,6 +39,7 @@ const PM_NAV = [
 
 const DEPT_NAV = [
   { href: "/department", label: "My Sessions", icon: LayoutDashboard, exact: true },
+  { href: "/department/conversations", label: "Conversations", icon: MessageSquare },
   { type: "divider" as const },
   { href: "/department/documents", label: "Knowledge Base", icon: BookOpen },
 ]

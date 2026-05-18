@@ -1,21 +1,22 @@
 "use client"
 
-import { usePMDashboard } from "@/hooks/useSessions"
+import { usePMReviewQueue } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
+import { Progress } from "@/components/ui/progress"
 import { ClipboardCheck, ArrowRight } from "lucide-react"
 import Link from "next/link"
 import { formatDateTime } from "@/lib/utils"
 
 export default function PMReviewsPage() {
-  const { data, isLoading } = usePMDashboard()
+  const { data, isLoading } = usePMReviewQueue()
 
   if (isLoading) return <PageSkeleton />
 
-  const submissions = data?.recent_submissions || []
+  const submissions = data ?? []
 
   return (
     <div className="space-y-6">
@@ -42,16 +43,27 @@ export default function PMReviewsPage() {
           {submissions.map((sub) => (
             <div
               key={sub.session_id}
-              className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+              className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-muted/30 transition-colors"
             >
-              <div className="space-y-1">
-                <p className="font-medium">{sub.department_name}</p>
-                <p className="text-sm text-muted-foreground">
-                  Submitted {formatDateTime(sub.submitted_at)}
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium truncate">{sub.department_name}</p>
+                <p className="text-sm text-muted-foreground truncate">
+                  {sub.cycle_name} · Submitted by {sub.user_name}
                 </p>
+                {sub.submitted_at && (
+                  <p className="text-xs text-muted-foreground">
+                    Submitted {formatDateTime(sub.submitted_at)}
+                  </p>
+                )}
               </div>
-              <div className="flex items-center gap-3">
-                <StatusBadge status={sub.status ?? "submitted"} variant="session" />
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="hidden sm:flex items-center gap-2 w-32">
+                  <Progress value={sub.progress_percentage} className="h-1.5" />
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {sub.progress_percentage}%
+                  </span>
+                </div>
+                <StatusBadge status={sub.status} variant="session" />
                 <Link href={`/pm/sessions/${sub.session_id}`}>
                   <Button size="sm">
                     Review <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
