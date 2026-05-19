@@ -26,7 +26,7 @@ const ADMIN_NAV = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/cycles", label: "Cycles", icon: RefreshCw },
   { type: "divider" as const },
-  { href: "/admin/documents", label: "Knowledge Base", icon: BookOpen },
+  { href: "/admin/documents", label: "Document Bank", icon: BookOpen },
 ]
 
 const PM_NAV = [
@@ -34,14 +34,14 @@ const PM_NAV = [
   { href: "/pm/cycles", label: "All Cycles", icon: RefreshCw },
   { href: "/pm/reviews", label: "Pending Reviews", icon: ClipboardCheck },
   { type: "divider" as const },
-  { href: "/pm/documents", label: "Knowledge Base", icon: BookOpen },
+  { href: "/pm/documents", label: "Document Bank", icon: BookOpen },
 ]
 
 const DEPT_NAV = [
   { href: "/department", label: "My Sessions", icon: LayoutDashboard, exact: true },
   { href: "/department/conversations", label: "Conversations", icon: MessageSquare },
   { type: "divider" as const },
-  { href: "/department/documents", label: "Knowledge Base", icon: BookOpen },
+  { href: "/department/documents", label: "Document Bank", icon: BookOpen },
 ]
 
 type NavItem =
