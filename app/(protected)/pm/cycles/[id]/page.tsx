@@ -7,6 +7,7 @@ import {
   useEscalations, useBulkReminder,
 } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
+import { KickoffLoader } from "@/components/pm/kickoff-loader"
 import { Button } from "@/components/ui/button"
 import { DataTable, Column } from "@/components/ui/data-table"
 import { StatusBadge } from "@/components/ui/status-badge"
@@ -21,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { SessionSummary } from "@/types"
+import { pmApi } from "@/lib/api/pm"
 import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
   AlertTriangle, BookOpen, CheckCircle2, Clock, RefreshCw, Sparkles,
@@ -73,6 +75,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [reminderMsg, setReminderMsg] = useState("")
   const [reminderPriority, setReminderPriority] = useState("normal")
   const [reportResult, setReportResult] = useState<string | null>(null)
+  // ID of the most recently generated report — needed to download the .docx.
+  const [reportId, setReportId] = useState<string | null>(null)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
 
@@ -93,12 +97,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [submittingKickoff, setSubmittingKickoff] = useState(false)
   // Module 1-6 additions
   const [numQuestions, setNumQuestions] = useState(12)
-  const [qualityWarning, setQualityWarning] = useState<{
-    suggestion: string
-    missing: string[]
-  } | null>(null)
   // Locally selected kickoff document — NOT uploaded until the PM clicks Submit
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  // Set when the kickoff request times out. A timeout is a FALSE NEGATIVE — the
+  // backend is slow but likely still generating questions, so resubmitting would
+  // fire a duplicate kickoff. We lock the form until the PM checks the cycle.
+  const [kickoffTimedOut, setKickoffTimedOut] = useState(false)
 
   // ── Generate Report dialog ──────────────────────────────────────────────────
   // Shows approved sessions; PM can choose all-approved or pick specific ones
@@ -136,6 +140,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const inProgress    = departments.filter((d) => d.status === "in_progress")
   const notStarted    = departments.filter((d) => d.status === "not_started")
 
+  // At least one department has moved past "not started". Generating content is
+  // pointless while every department is still untouched — disable the button until
+  // there's actual work to consolidate.
+  const hasActiveWork =
+    departments.length > 0 && departments.some((d) => d.status !== "not_started")
+
   const submissionDeadline = pmDash?.cycle?.submission_deadline
   const isOverdue = (row: SessionSummary) =>
     !!submissionDeadline &&
@@ -157,8 +167,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setBriefText("")
     setAdditionalContext("")
     setNumQuestions(12)
-    setQualityWarning(null)
     setPendingFile(null)
+    setKickoffTimedOut(false)
   }
 
   const handleSubmitKickoff = async () => {
@@ -167,7 +177,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       return
     }
     setSubmittingKickoff(true)
-    setQualityWarning(null)
+    setKickoffTimedOut(false)
     try {
       // One endpoint per submit. Backend converges both on the same pipeline.
       //   file picked    → POST /pm/kickoff/upload (multipart with `files`)
@@ -191,19 +201,20 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         toast.info("Brief was expanded with AI context to improve question quality.")
       }
 
-      // Low quality → keep dialog open so PM can decide
-      if (result?.brief_quality?.quality === "low") {
-        setQualityWarning({
-          suggestion: result.brief_quality.suggestion,
-          missing: result.brief_quality.missing ?? [],
-        })
-        return
-      }
-
-      // good / acceptable → close + clear
+      // Questions are generated regardless of brief quality, so always close the
+      // dialog and land the PM back on the cycle dashboard with the fresh data.
       setBriefOpen(false)
       resetKickoffForm()
       refetchPM()
+    } catch (err) {
+      // A timeout means the request was aborted client-side while the backend was
+      // (very likely) still generating questions. Resubmitting would create a
+      // DUPLICATE kickoff — so on timeout we lock the form and show a warning
+      // panel instead. Non-timeout errors already surface via the hook's onError.
+      const msg = (err as { message?: string })?.message ?? ""
+      if (/timeout|ECONNABORTED/i.test(msg)) {
+        setKickoffTimedOut(true)
+      }
     } finally {
       setSubmittingKickoff(false)
     }
@@ -286,70 +297,74 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           ? { format: "markdown" as const, session_ids: Array.from(selectedSessionIds) }
           : { format: "markdown" as const }          // backend uses all approved when session_ids omitted
       const res = await generateReport.mutateAsync({ cycleId: id, payload })
+      const newReportId = res.report_id ?? res.id ?? null
+      // Keep the report id so the PM can download the .docx afterwards
+      setReportId(newReportId)
       // Show the backend preview immediately so the user sees something fast
       setReportResult(res.report ?? res.report_preview ?? null)
       toast.success(
         `Report generated — ${res.word_count ?? "—"} words` +
         (res.departments_included?.length ? ` from ${res.departments_included.length} department(s)` : "")
       )
-      // Then replace with the full assembled report from our server proxy
-      // (backend report_preview is truncated to ~1000 chars)
-      try {
-        const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-        const fullRes = await fetch(`/api/pm/cycles/${id}/full-report`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        })
-        if (fullRes.ok) {
-          const fullContent = await fullRes.text()
-          if (fullContent.trim()) setReportResult(fullContent)
+      // Replace the truncated preview with the full report content straight
+      // from the backend (GET /pm/reports/{report_id}).
+      if (newReportId) {
+        try {
+          const full = await pmApi.getReport(newReportId)
+          const content =
+            full?.content ??
+            full?.report ??
+            full?.report_content ??
+            full?.full_content ??
+            full?.report_markdown ??
+            null
+          if (typeof content === "string" && content.trim()) {
+            setReportResult(content)
+          }
+        } catch {
+          // Keep the preview if the full fetch fails
         }
-      } catch {
-        // Keep the preview if full fetch fails
       }
     } finally {
       setGeneratingReport(false)
     }
   }
 
+  // Trigger a browser download for a blob.
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Last-resort fallback — save the preview/markdown already on screen.
+  const downloadMarkdownFallback = () => {
+    if (!reportResult) return
+    triggerDownload(
+      new Blob([reportResult], { type: "text/markdown" }),
+      `annual-report-${id.slice(0, 8)}.md`
+    )
+  }
+
+  // Download the generated report as a .docx from the backend
+  // (GET /pm/reports/{report_id}/download). Falls back to Markdown if needed.
   const downloadReport = async () => {
     setDownloadingReport(true)
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
-      const res = await fetch(`/api/pm/cycles/${id}/full-report`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!res.ok) {
-        // Fallback: download the preview content we already have
-        if (reportResult) {
-          const blob = new Blob([reportResult], { type: "text/markdown" })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement("a")
-          a.href = url
-          a.download = `annual-report-${id}.md`
-          a.click()
-          URL.revokeObjectURL(url)
-        }
+      if (reportId) {
+        const blob = await pmApi.downloadReportDocx(reportId)
+        triggerDownload(blob, `annual-report-${id.slice(0, 8)}.docx`)
         return
       }
-      const markdown = await res.text()
-      const blob = new Blob([markdown], { type: "text/markdown" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `annual-report-${id}.md`
-      a.click()
-      URL.revokeObjectURL(url)
+      // No report id available — generate the report first.
+      toast.error("Generate the report first, then download.")
+      downloadMarkdownFallback()
     } catch {
-      // Silent fallback to preview content
-      if (reportResult) {
-        const blob = new Blob([reportResult], { type: "text/markdown" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `annual-report-${id}.md`
-        a.click()
-        URL.revokeObjectURL(url)
-      }
+      toast.error("Couldn't download the .docx — saved a Markdown copy instead.")
+      downloadMarkdownFallback()
     } finally {
       setDownloadingReport(false)
     }
@@ -496,6 +511,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   return (
     <div className="space-y-6">
 
+      {/* Full-screen animated loader while AI generates the question set */}
+      {submittingKickoff && <KickoffLoader />}
+
       {/* ── Header ── */}
       <div className="flex items-center gap-3">
         <Link href="/pm">
@@ -531,12 +549,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <Button
                 variant="outline"
                 onClick={openReportDialog}
-                disabled={generatingReport || departments.length === 0}
+                disabled={generatingReport || departments.length === 0 || !hasActiveWork}
+                title={
+                  !hasActiveWork
+                    ? "Available once at least one department starts working"
+                    : undefined
+                }
               >
                 {generatingReport
                   ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   : <FileText className="mr-2 h-4 w-4" />}
-                Generate Report
+                Generate Content
               </Button>
               {reportResult && (
                 <Button onClick={downloadReport}>
@@ -640,7 +663,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             {generatingReport
               ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
               : <FileText className="h-4 w-4 mr-1" />}
-            Generate Report
+            Generate Content
           </Button>
         </div>
       )}
@@ -886,7 +909,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             {generatingReport
               ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
               : <FileText className="h-3.5 w-3.5 mr-1" />}
-            Generate Report
+            Generate Content
           </Button>
         </div>
       )}
@@ -1227,26 +1250,27 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )}
           </div>
 
-          {qualityWarning && (
+          {/* Timeout warning — the request was aborted client-side but the backend
+              is almost certainly still generating questions. Resubmitting here
+              would create a duplicate kickoff, so the submit button is locked. */}
+          {kickoffTimedOut && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-amber-900">Brief quality is low</p>
-                  <p className="text-sm text-amber-800">{qualityWarning.suggestion}</p>
-                  {qualityWarning.missing.length > 0 && (
-                    <p className="text-xs text-amber-800">
-                      <span className="font-medium">Missing:</span> {qualityWarning.missing.join(", ")}
-                    </p>
-                  )}
+                  <p className="text-sm font-semibold text-amber-900">Still generating questions…</p>
+                  <p className="text-sm text-amber-800">
+                    This is taking longer than expected. Your brief was most likely
+                    received and questions are still being generated on the server.
+                  </p>
                   <p className="text-xs text-amber-700 mt-1">
-                    Questions have been generated but may be generic. You can improve your brief and resubmit to regenerate questions.
+                    <span className="font-medium">Do not resubmit</span> — that would
+                    create a duplicate kickoff. Wait a moment, then check the cycle.
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end">
                 <Button
-                  variant="outline"
                   size="sm"
                   onClick={() => {
                     setBriefOpen(false)
@@ -1254,13 +1278,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                     refetchPM()
                   }}
                 >
-                  Close anyway
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => setQualityWarning(null)}
-                >
-                  Improve brief
+                  Check cycle
                 </Button>
               </div>
             </div>
@@ -1270,7 +1288,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             {!isForceKickoff && (
               <Button variant="outline" onClick={() => setBriefOpen(false)}>Cancel</Button>
             )}
-            <Button onClick={handleSubmitKickoff} disabled={submittingKickoff || !briefText.trim()}>
+            {/* Force-kickoff on a draft cycle: the dialog can't just close (there's
+                nothing behind it yet), so Cancel exits to the PM cycles list. */}
+            {isForceKickoff && cycleStatusRaw === "draft" && (
+              <Link href="/pm/cycles">
+                <Button variant="outline">Cancel</Button>
+              </Link>
+            )}
+            <Button
+              onClick={handleSubmitKickoff}
+              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut}
+            >
               {submittingKickoff
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 : <Zap className="mr-2 h-4 w-4" />}

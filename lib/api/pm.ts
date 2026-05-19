@@ -70,9 +70,14 @@ export const pmApi = {
     return data
   },
 
-  // Submit a text-based kickoff brief to generate AI questions for all sessions
+  // Submit a text-based kickoff brief to generate AI questions for all sessions.
+  // This runs an AI question-generation pipeline for every department, so it needs
+  // a long timeout — the 30s client default would abort mid-generation and tempt
+  // the PM to resubmit, firing a DUPLICATE kickoff.
   submitKickoff: async (payload: KickoffBriefPayload): Promise<KickoffBriefResponse> => {
-    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff", payload)
+    const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff", payload, {
+      timeout: 180000, // 3 min — AI generates questions for every department
+    })
     return data
   },
 
@@ -96,7 +101,7 @@ export const pmApi = {
     // auto-set "multipart/form-data; boundary=..." from the FormData object.
     const { data } = await apiClient.post<KickoffBriefResponse>("/pm/kickoff/upload", formData, {
       headers: { "Content-Type": undefined },
-      timeout: 120000, // 2 min — backend extracts + vectorises the kickoff document
+      timeout: 180000, // 3 min — backend extracts + vectorises the doc AND generates questions
     })
     return data
   },
@@ -160,6 +165,21 @@ export const pmApi = {
       `/pm/cycles/${cycleId}/generate-report`,
       payload
     )
+    return data
+  },
+
+  // Get a generated report's full content by id (GET /pm/reports/{report_id}).
+  getReport: async (reportId: string) => {
+    const { data } = await apiClient.get(`/pm/reports/${reportId}`)
+    return data
+  },
+
+  // Download a previously generated report as a .docx file.
+  // `reportId` comes from the generate-report response.
+  downloadReportDocx: async (reportId: string): Promise<Blob> => {
+    const { data } = await apiClient.get(`/pm/reports/${reportId}/download`, {
+      responseType: "blob",
+    })
     return data
   },
 }

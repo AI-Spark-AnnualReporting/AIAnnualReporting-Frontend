@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/select"
 import { User } from "@/types"
 import { USER_ROLES } from "@/lib/constants"
-import { Users, Plus, Search, UserCheck, UserX, Trash2, AlertCircle, Pencil } from "lucide-react"
+import { Users, Plus, Search, UserCheck, UserX, Trash2, AlertCircle, Pencil, Eye, EyeOff } from "lucide-react"
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -63,6 +63,7 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
   const [editTarget, setEditTarget] = useState<User | null>(null)
 
   const { data, isLoading } = useUsers({
@@ -317,11 +318,23 @@ export default function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label>Password</Label>
-              <Input
-                type="password"
-                {...register("password")}
-                placeholder="Minimum 8 characters"
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  {...register("password")}
+                  placeholder="Minimum 8 characters"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.password && (
                 <p className="text-xs text-destructive">{errors.password.message}</p>
               )}
