@@ -1,7 +1,7 @@
 "use client"
 
 import { use, useRef, useState, useEffect } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -34,6 +34,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Save, Info, Pencil, RefreshCw,
 } from "lucide-react"
 import Link from "next/link"
+import { toast } from "sonner"
 
 const editCycleSchema = z.object({
   cycle_name: z.string().min(2, "Required"),
@@ -56,6 +57,7 @@ export default function CycleDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const router = useRouter()
   const searchParams = useSearchParams()
   const qc = useQueryClient()
   const { data: cycleData, isLoading: cycleLoading } = useCycle(id)
@@ -198,6 +200,9 @@ export default function CycleDetailPage({
       qc.invalidateQueries({ queryKey: ["cycle", id] })
       qc.invalidateQueries({ queryKey: ["cycle", id, "overview"] })
       setSavedAt(new Date())
+      // Submit done — return to the cycles list.
+      toast.success("Departments assigned")
+      router.push("/admin/cycles")
     } catch (err: unknown) {
       setSaveError((err as { message?: string })?.message || "Failed to save assignments")
     }

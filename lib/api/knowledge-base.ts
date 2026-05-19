@@ -1,30 +1,58 @@
 import apiClient from "./client"
-import { KBDocument, KBListResponse, KBDownloadResponse } from "@/types"
+import {
+  KBDocumentDetail,
+  KBDocumentText,
+  KBDownloadResponse,
+  KBListResponse,
+  DocumentPurpose,
+} from "@/types"
+
+// Knowledge Base router is mounted at /api/v1/knowledge-base. apiClient's
+// baseURL already includes /api/v1, so paths here start at /knowledge-base.
+
+export interface KBListParams {
+  document_purpose?: DocumentPurpose
+  page?: number
+  page_size?: number
+}
 
 export const knowledgeBaseApi = {
   /**
-   * GET /documents/ — lists ALL documents owned by the current user.
-   * This endpoint takes no query params and is not paginated, so the
-   * Knowledge Base screen does purpose-filtering, search and pagination
-   * client-side. Response shape: { success, documents, total }.
+   * GET /knowledge-base/documents — server-paginated, server-role-scoped list.
+   * Filter by document_purpose only; pagination is server-side. The response
+   * carries uploader_name/department_name/cycle_name resolved server-side, so
+   * no client-side joins are needed. Use `total` for the pager.
    */
-  list: async (): Promise<KBListResponse> => {
-    const { data } = await apiClient.get("/documents/")
+  list: async (params: KBListParams = {}): Promise<KBListResponse> => {
+    const { data } = await apiClient.get("/knowledge-base/documents", { params })
     return data
   },
 
-  get: async (documentId: string): Promise<KBDocument> => {
-    const { data } = await apiClient.get(`/documents/${documentId}`)
+  // GET /knowledge-base/documents/{id} — single-document metadata (incl. word_count).
+  get: async (documentId: string): Promise<KBDocumentDetail> => {
+    const { data } = await apiClient.get(`/knowledge-base/documents/${documentId}`)
     return data
   },
 
-  // GET /documents/{id}/download — returns a { download_url, filename, ... } payload
+  // GET /knowledge-base/documents/{id}/text — extracted plain text.
+  getText: async (documentId: string): Promise<KBDocumentText> => {
+    const { data } = await apiClient.get(
+      `/knowledge-base/documents/${documentId}/text`
+    )
+    return data
+  },
+
+  /**
+   * GET /knowledge-base/documents/{id}/download — returns a short-lived signed
+   * URL. Fetch it fresh on each download; do not cache (it expires).
+   */
   getDownloadUrl: async (documentId: string): Promise<KBDownloadResponse> => {
-    const { data } = await apiClient.get(`/documents/${documentId}/download`)
+    const { data } = await apiClient.get(
+      `/knowledge-base/documents/${documentId}/download`
+    )
     return data
-  },
-
-  delete: async (documentId: string): Promise<void> => {
-    await apiClient.delete(`/documents/${documentId}`)
   },
 }
+
+// Note: the API exposes DELETE /knowledge-base/documents/{id} (admin only),
+// but document deletion is intentionally not surfaced in the frontend.

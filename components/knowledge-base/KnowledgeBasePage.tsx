@@ -2,12 +2,11 @@
 
 import { useState, useMemo } from "react"
 import { useAuth } from "@/contexts/AuthContext"
-import { useKBDocuments, useKBCycleNames } from "@/hooks/useKnowledgeBase"
+import { useKBDocuments } from "@/hooks/useKnowledgeBase"
 import { knowledgeBaseApi } from "@/lib/api/knowledge-base"
-import { KBDocument } from "@/types"
+import { KBDocument, DocumentPurpose } from "@/types"
 import { PageHeader } from "@/components/ui/page-header"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -15,12 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Download, Search, RefreshCw, FileText } from "lucide-react"
+import { Download, RefreshCw, FileText } from "lucide-react"
 import { formatDate, formatFileSize } from "@/lib/utils"
 import { toast } from "sonner"
 import { useQueryClient } from "@tanstack/react-query"
 
-const PURPOSE_OPTIONS = [
+type PurposeFilter = "all" | DocumentPurpose
+
+const PURPOSE_OPTIONS: { value: PurposeFilter; label: string }[] = [
   { value: "all", label: "All Purposes" },
   { value: "kickoff", label: "Kickoff" },
   { value: "reference", label: "Reference" },
@@ -73,69 +74,41 @@ export function KnowledgeBasePage() {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
-  const [purposeFilter, setPurposeFilter] = useState("all")
-  const [search, setSearch] = useState("")
+  const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all")
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
-  // GET /documents/ returns every document the user owns in one unpaginated
-  // payload — purpose-filtering, search and pagination are all done below.
-  const { data, isLoading } = useKBDocuments()
-  // cycle_id -> cycle_name, resolved from the role-appropriate cycles endpoint.
-  const { data: cycleNames } = useKBCycleNames()
+  // GET /knowledge-base/documents — server-paginated and role-scoped server-side.
+  // The purpose filter is sent as a query param; pagination uses `total` below.
+  const { data, isLoading, isFetching } = useKBDocuments({
+    document_purpose: purposeFilter === "all" ? undefined : purposeFilter,
+    page,
+    page_size: PAGE_SIZE,
+  })
 
-  const allDocs = useMemo(() => data?.documents ?? [], [data?.documents])
+  const docs = useMemo(() => data?.documents ?? [], [data?.documents])
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  // Purpose filter — /documents/ has no purpose query param.
-  const purposeFiltered = useMemo(() => {
-    if (purposeFilter === "all") return allDocs
-    return allDocs.filter((doc) => doc.document_purpose === purposeFilter)
-  }, [allDocs, purposeFilter])
-
-  // Search filter — matches filename, cycle name, uploader and department.
-  const filteredDocs = useMemo(() => {
-    if (!search) return purposeFiltered
-    const q = search.toLowerCase()
-    return purposeFiltered.filter((doc) => {
-      const cycleName = (doc.cycle_id && cycleNames?.[doc.cycle_id]) || ""
-      return (
-        doc.filename.toLowerCase().includes(q) ||
-        cycleName.toLowerCase().includes(q) ||
-        (doc.uploader_name?.toLowerCase().includes(q) ?? false) ||
-        (doc.department_name?.toLowerCase().includes(q) ?? false)
-      )
-    })
-  }, [purposeFiltered, search, cycleNames])
-
-  const totalPages = Math.max(1, Math.ceil(filteredDocs.length / PAGE_SIZE))
-
-  // Client-side pagination — /documents/ is not paginated server-side.
-  const pagedDocs = useMemo(
-    () => filteredDocs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filteredDocs, page]
-  )
-
+  // Group the current page's documents by cycle. cycle_name is resolved
+  // server-side, so groups reflect only what's on this page.
   const cycleGroups = useMemo(() => {
     const map = new Map<
       string,
       { cycleId: string; cycleName: string; docs: KBDocument[] }
     >()
-    for (const doc of pagedDocs) {
+    for (const doc of docs) {
       const key = doc.cycle_id ?? "__none__"
       if (!map.has(key)) {
-        const name = (doc.cycle_id && cycleNames?.[doc.cycle_id]) || "Uncategorized"
-        map.set(key, { cycleId: key, cycleName: name, docs: [] })
+        map.set(key, {
+          cycleId: key,
+          cycleName: doc.cycle_name ?? "Uncategorized",
+          docs: [],
+        })
       }
       map.get(key)!.docs.push(doc)
     }
     return Array.from(map.values())
-  }, [pagedDocs, cycleNames])
-
-  // Distinct cycles across the full filtered set (not just the current page).
-  const totalCycleCount = useMemo(
-    () => new Set(filteredDocs.map((doc) => doc.cycle_id ?? "__none__")).size,
-    [filteredDocs]
-  )
-  const totalDocCount = filteredDocs.length
+  }, [docs])
 
   const handleDownload = async (doc: KBDocument) => {
     setDownloadingId(doc.document_id)
@@ -159,8 +132,8 @@ export function KnowledgeBasePage() {
   }
 
   const subtitle =
-    totalDocCount > 0
-      ? `Every uploaded document grouped by the cycle it belongs to · ${totalCycleCount} ${totalCycleCount === 1 ? "cycle" : "cycles"} · ${totalDocCount} ${totalDocCount === 1 ? "document" : "documents"}`
+    total > 0
+      ? `Every uploaded document grouped by the cycle it belongs to · ${total} ${total === 1 ? "document" : "documents"}`
       : "Browse and download reference documents for your reporting cycles"
 
   const emptyMessage = EMPTY_STATE_MESSAGES[user?.role ?? ""] ?? "No documents found"
@@ -171,31 +144,19 @@ export function KnowledgeBasePage() {
         title="Knowledge Base"
         description={subtitle}
         action={
-          <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+          <Button variant="outline" onClick={handleRefresh} disabled={isFetching}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         }
       />
 
-      {/* Filters */}
+      {/* Filters — purpose is the only server-supported filter. */}
       <div className="flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 min-w-48">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search documents..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setPage(1)
-            }}
-          />
-        </div>
         <Select
           value={purposeFilter}
           onValueChange={(v) => {
-            setPurposeFilter(v)
+            setPurposeFilter(v as PurposeFilter)
             setPage(1)
           }}
         >
@@ -239,7 +200,7 @@ export function KnowledgeBasePage() {
       )}
 
       {/* Empty state */}
-      {!isLoading && filteredDocs.length === 0 && (
+      {!isLoading && docs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="mb-4 rounded-full bg-muted p-4">
             <FileText className="h-8 w-8 text-muted-foreground" />
@@ -311,33 +272,32 @@ export function KnowledgeBasePage() {
         </div>
       )}
 
-      {/* Pagination */}
+      {/* Pagination — driven by the server `total`. */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-1">
           <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages} ({totalDocCount} total documents)
+            Page {page} of {totalPages} ({total} total documents)
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p - 1)}
-              disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || isFetching}
             >
               Previous
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p + 1)}
-              disabled={page === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || isFetching}
             >
               Next
             </Button>
           </div>
         </div>
       )}
-
     </div>
   )
 }

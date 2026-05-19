@@ -86,7 +86,7 @@ spark-ar-studio/
 │   │   ├── department.ts         dept session ops: answer, draft, finalize, AI assist
 │   │   ├── pm.ts                 PM ops: dashboard (proxied), kickoff, review, escalate
 │   │   ├── chat.ts               RAG conversations linked to documents
-│   │   └── documents.ts          knowledge-base upload/list/text/delete
+│   │   └── knowledge-base.ts     KB API: paginated list / get / text / download
 │   ├── constants.ts              Status maps, tone options, structured QUERY_KEYS
 │   └── utils.ts                  cn, formatDate, formatDateTime, getInitials, formatFileSize
 │
@@ -288,8 +288,14 @@ RAG conversations optionally bound to a document:
 - `sendMessage(conversationId, message)`
 - `getConversation(id)`, `listConversations()`
 
-### `documents.ts` — `documentsApi`
-Knowledge-base CRUD: `upload`, `list`, `get`, `getText`, `delete`. Uploads use multipart with a 120 s timeout.
+### `knowledge-base.ts` — `knowledgeBaseApi`
+Knowledge Base API mounted at `/knowledge-base/documents`. Server-paginated and role-scoped server-side:
+- `list({document_purpose?, page?, page_size?})` — paginated list; use the `total` field for the pager.
+- `get(id)` — single-document metadata (incl. `word_count`).
+- `getText(id)` — extracted plain text.
+- `getDownloadUrl(id)` — short-lived signed URL; fetch fresh per download, never cache.
+
+The API also exposes an admin-only `DELETE`, but document deletion is intentionally **not** surfaced in the frontend.
 
 ---
 
