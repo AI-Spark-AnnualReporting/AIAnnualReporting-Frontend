@@ -132,10 +132,25 @@ export default function SessionWorkspacePage({
 
   // Count only answers tied to a CURRENT question — answers for regenerated/
   // removed questions stay in session.answers but must not inflate progress.
+  // Used for the "X/Y answered" label and the submit gate (needs to react instantly).
   const answeredCount = questions.filter((q) => answers[q.question_id]?.trim()).length
-  const progress = questions.length ? Math.round((answeredCount / questions.length) * 100) : 0
+  // Progress % is read from the backend so it stays consistent with the dashboard,
+  // PM, and admin views (single source of truth). It refreshes after each save →
+  // refetch(), reflecting persisted answers rather than unsaved keystrokes.
+  const progress = session?.progress_percentage ?? 0
   // Every question answered or marked N/A — ready to review & submit.
   const allComplete = questions.length > 0 && answeredCount === questions.length
+  // N/A cap: at least half the questions must carry a real answer, so no more
+  // than 50% may be marked "Not Applicable".
+  const maxNA = Math.floor(questions.length / 2)
+  const naLimitReached = naQuestions.size >= maxNA
+  // Draft generation is gated on the same 50% rule: count only REAL answers
+  // (N/A answers don't count), and require them to cover at least half.
+  const realAnsweredCount = questions.filter(
+    (q) => answers[q.question_id]?.trim() && !isNAAnswer(answers[q.question_id])
+  ).length
+  const minRealAnswers = Math.ceil(questions.length / 2)
+  const meetsAnswerMinimum = questions.length > 0 && realAnsweredCount >= minRealAnswers
   const isLastQuestion = questions.length > 0 && currentIndex === questions.length - 1
   const isSubmitted = session?.status === "submitted" || session?.status === "approved"
   const isReopened = session?.status === "reopened"
@@ -200,6 +215,13 @@ export default function SessionWorkspacePage({
 
   // Mark a question "Not Applicable" — stores the canonical N/A string and saves immediately.
   const markAsNA = async (questionId: string) => {
+    // Enforce the 50% rule: at least half the questions must be genuinely answered.
+    if (!naQuestions.has(questionId) && naQuestions.size >= maxNA) {
+      toast.error(
+        `You can mark at most ${maxNA} of ${questions.length} questions as N/A — at least half must be answered.`
+      )
+      return
+    }
     const next = { ...answers, [questionId]: NA_ANSWER }
     setAnswers(next)
     setNaQuestions((prev) => new Set(prev).add(questionId))
@@ -401,25 +423,42 @@ export default function SessionWorkspacePage({
         <div className="flex-1 overflow-y-auto p-6">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {questions.map((q: Question, idx: number) => {
-              const answered = !!answers[q.question_id]?.trim()
+              const isNa = naQuestions.has(q.question_id)
+              // "Answered" means a real answer — N/A is shown distinctly.
+              const answered = !isNa && !!answers[q.question_id]?.trim()
               return (
                 <button
                   key={q.question_id}
                   onClick={() => { switchToQuestion(idx); setViewMode("focused") }}
                   className={cn(
                     "rounded-xl border p-4 text-left transition-all hover:shadow-md",
-                    answered ? "border-green-200 bg-green-50" : "border-border bg-card hover:border-primary/40"
+                    answered
+                      ? "border-green-200 bg-green-50"
+                      : isNa
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-border bg-card hover:border-primary/40"
                   )}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <div className={cn(
                       "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold border",
-                      answered ? "bg-green-500 border-green-500 text-white" : "border-muted-foreground text-muted-foreground"
+                      answered
+                        ? "bg-green-500 border-green-500 text-white"
+                        : isNa
+                          ? "bg-amber-500 border-amber-500 text-white"
+                          : "border-muted-foreground text-muted-foreground"
                     )}>
-                      {answered ? <CheckCircle2 className="h-3.5 w-3.5" /> : idx + 1}
+                      {answered
+                        ? <CheckCircle2 className="h-3.5 w-3.5" />
+                        : isNa
+                          ? <Ban className="h-3.5 w-3.5" />
+                          : idx + 1}
                     </div>
-                    <span className={cn("text-xs font-medium", answered ? "text-green-700" : "text-muted-foreground")}>
-                      {answered ? "Answered" : "Not answered"}
+                    <span className={cn(
+                      "text-xs font-medium",
+                      answered ? "text-green-700" : isNa ? "text-amber-700" : "text-muted-foreground"
+                    )}>
+                      {answered ? "Answered" : isNa ? "Not applicable" : "Not answered"}
                     </span>
                   </div>
                   <p className="text-sm leading-relaxed line-clamp-3">{q.question}</p>
@@ -427,7 +466,7 @@ export default function SessionWorkspacePage({
                     <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{answers[q.question_id]}</p>
                   )}
                   <div className="flex items-center gap-1 mt-3 text-xs text-primary font-medium">
-                    {answered ? "Edit" : "Answer"} <ChevronRight className="h-3 w-3" />
+                    {answered || isNa ? "Edit" : "Answer"} <ChevronRight className="h-3 w-3" />
                   </div>
                 </button>
               )
@@ -518,7 +557,12 @@ export default function SessionWorkspacePage({
           <Button
             size="sm" className="h-8 shrink-0"
             onClick={handleGenerateDraft}
-            disabled={!canEdit || answeredCount === 0 || generateDraft.isPending}
+            disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
+            title={
+              !meetsAnswerMinimum
+                ? `Answer at least ${minRealAnswers} of ${questions.length} questions before generating draft content`
+                : undefined
+            }
           >
             {generateDraft.isPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -549,7 +593,9 @@ export default function SessionWorkspacePage({
               </div>
               <div className="flex-1 overflow-y-auto">
                 {questions.map((q: Question, idx: number) => {
-                  const answered = !!answers[q.question_id]?.trim()
+                  const isNa = naQuestions.has(q.question_id)
+                  // "Answered" here means a real answer — N/A is shown distinctly.
+                  const answered = !isNa && !!answers[q.question_id]?.trim()
                   const active = idx === currentIndex
                   return (
                     <button
@@ -566,11 +612,17 @@ export default function SessionWorkspacePage({
                         "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium",
                         answered
                           ? "bg-green-500 border-green-500 text-white"
-                          : active
-                            ? "border-primary text-primary"
-                            : "border-muted-foreground/50 text-muted-foreground"
+                          : isNa
+                            ? "bg-amber-500 border-amber-500 text-white"
+                            : active
+                              ? "border-primary text-primary"
+                              : "border-muted-foreground/50 text-muted-foreground"
                       )}>
-                        {answered ? <CheckCircle2 className="h-3 w-3" /> : idx + 1}
+                        {answered
+                          ? <CheckCircle2 className="h-3 w-3" />
+                          : isNa
+                            ? <Ban className="h-3 w-3" />
+                            : idx + 1}
                       </div>
                       <p className={cn("text-xs leading-relaxed line-clamp-2", active && "font-medium text-foreground")}>
                         {q.question}
@@ -805,7 +857,12 @@ export default function SessionWorkspacePage({
                           size="sm" variant="outline"
                           className="h-7 px-2.5 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400"
                           onClick={() => markAsNA(currentQ.question_id)}
-                          disabled={!canEdit || submitAnswers.isPending}
+                          disabled={!canEdit || submitAnswers.isPending || naLimitReached}
+                          title={
+                            naLimitReached
+                              ? `N/A limit reached — at least half of the ${questions.length} questions must be answered`
+                              : undefined
+                          }
                         >
                           <Ban className="h-3.5 w-3.5 mr-1" /> Mark as N/A
                         </Button>
