@@ -267,32 +267,62 @@ export interface Document {
   created_at: string
 }
 
+export type DocumentPurpose =
+  | "kickoff"
+  | "reference"
+  | "submission"
+  | "supporting"
+  | "template"
+
+// A row from GET /knowledge-base/documents. Every nullable field below can be
+// null for deleted/unlinked records — render with fallbacks.
 export interface KBDocument {
   id: string
   document_id: string
   filename: string
   file_type: string
   file_size: number
-  document_purpose: string | null
+  document_purpose: DocumentPurpose | null
   user_id: string | null
+  uploader_name: string | null
   department_id: string | null
+  department_name: string | null
   cycle_id: string | null
-  word_count?: number | null
+  cycle_name: string | null
   created_at: string
-  // Not returned by GET /documents/ — uploader_name/department_name are
-  // absent; cycle_name is resolved client-side from the cycles endpoint.
-  uploader_name?: string | null
-  department_name?: string | null
-  cycle_name?: string | null
+}
+
+// GET /knowledge-base/documents/{id} — single-document metadata. Unlike the
+// list row this carries word_count but not the resolved *_name fields.
+export interface KBDocumentDetail {
+  id: string
+  document_id: string
+  filename: string
+  file_type: string
+  file_size: number
+  user_id: string | null
+  cycle_id: string | null
+  department_id: string | null
+  document_purpose: DocumentPurpose | null
+  word_count: number
+  created_at: string
+}
+
+// GET /knowledge-base/documents/{id}/text
+export interface KBDocumentText {
+  success: boolean
+  document_id: string
+  text: string
+  word_count: number
 }
 
 export interface KBListResponse {
   success: boolean
   documents: KBDocument[]
+  // Full count before pagination — drive the pager off this, not documents.length.
   total: number
-  // /documents/ is not paginated — these may be absent.
-  page?: number
-  page_size?: number
+  page: number
+  page_size: number
 }
 
 export interface KBDownloadResponse {

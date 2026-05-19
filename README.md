@@ -94,7 +94,7 @@ spark-ar-studio/
 │   │   ├── cycles.ts
 │   │   ├── pm.ts
 │   │   ├── department.ts
-│   │   └── documents.ts
+│   │   └── knowledge-base.ts
 │   ├── constants.ts        # Status maps, query keys, tone options
 │   └── utils.ts            # cn, formatDate, getInitials
 └── types/
