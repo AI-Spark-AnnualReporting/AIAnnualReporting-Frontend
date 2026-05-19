@@ -1,8 +1,9 @@
 "use client"
 
 import { useUserStats } from "@/hooks/useUsers"
-import { useCycles } from "@/hooks/useCycles"
+import { useCycles, useCycleOverview } from "@/hooks/useCycles"
 import { useDepartments } from "@/hooks/useDepartments"
+import { Cycle } from "@/types"
 import { PageHeader } from "@/components/ui/page-header"
 import { StatsCard } from "@/components/ui/stats-card"
 import { StatusBadge } from "@/components/ui/status-badge"
@@ -106,37 +107,9 @@ const pendingUsers = stats?.pending_users ?? 0
             </Link>
           </div>
           <div className="divide-y">
-            {activeCycles.map((cycle) => {
-              const submitted = cycle.submitted_count ?? 0
-              const total = cycle.total_departments ?? 0
-              const pct = total > 0 ? Math.round((submitted / total) * 100) : 0
-              const isLow = pct < 30
-              const isMid = pct >= 30 && pct < 70
-              return (
-                <div key={cycle.id} className="px-6 py-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className="font-medium">{cycle.cycle_name}</p>
-                      <div className="flex items-center gap-3 mt-0.5">
-                        <span className="text-xs text-muted-foreground">Deadline: {formatDate(cycle.submission_deadline)}</span>
-                        {cycle.pm_name && <span className="text-xs text-muted-foreground">· PM: {cycle.pm_name}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <StatusBadge status={cycle.status} variant="cycle" />
-                      <Link href={`/admin/cycles/${cycle.id}`}><Button variant="outline" size="sm">View</Button></Link>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-muted-foreground">{submitted} of {total} departments submitted</span>
-                      <span className={isLow ? "text-red-600 font-semibold" : isMid ? "text-amber-600 font-semibold" : "text-green-600 font-semibold"}>{pct}%</span>
-                    </div>
-                    <Progress value={pct} className={isLow ? "[&>div]:bg-red-500 h-2" : isMid ? "[&>div]:bg-amber-500 h-2" : "[&>div]:bg-green-500 h-2"} />
-                  </div>
-                </div>
-              )
-            })}
+            {activeCycles.map((cycle) => (
+              <ActiveCycleRow key={cycle.id} cycle={cycle} />
+            ))}
           </div>
         </div>
       )}
@@ -176,6 +149,51 @@ const pendingUsers = stats?.pending_users ?? 0
             <p className="text-xs text-primary mt-2 font-medium">{allCycles.length} total cycles</p>
           </Link>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One row in the "Active Cycles" widget. The /admin/cycles list endpoint does
+ * not populate per-cycle session counts, so we read them from the accurate
+ * /admin/cycles/{id}/overview endpoint (the same source the cycle-detail page
+ * uses). Falls back to the raw list counts while the overview is loading.
+ */
+function ActiveCycleRow({ cycle }: { cycle: Cycle }) {
+  const { data: overview } = useCycleOverview(cycle.id)
+  const stats = overview?.stats
+
+  const total = stats?.total_departments ?? cycle.total_departments ?? 0
+  // "Submitted" includes approved departments — an approved one was submitted too.
+  const submitted = stats
+    ? stats.submitted + stats.approved
+    : cycle.submitted_count ?? 0
+  const pct = total > 0 ? Math.round((submitted / total) * 100) : 0
+  const isLow = pct < 30
+  const isMid = pct >= 30 && pct < 70
+
+  return (
+    <div className="px-6 py-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="font-medium">{cycle.cycle_name}</p>
+          <div className="flex items-center gap-3 mt-0.5">
+            <span className="text-xs text-muted-foreground">Deadline: {formatDate(cycle.submission_deadline)}</span>
+            {cycle.pm_name && <span className="text-xs text-muted-foreground">· PM: {cycle.pm_name}</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <StatusBadge status={cycle.status} variant="cycle" />
+          <Link href={`/admin/cycles/${cycle.id}`}><Button variant="outline" size="sm">View</Button></Link>
+        </div>
+      </div>
+      <div>
+        <div className="flex justify-between text-xs mb-1.5">
+          <span className="text-muted-foreground">{submitted} of {total} departments submitted</span>
+          <span className={isLow ? "text-red-600 font-semibold" : isMid ? "text-amber-600 font-semibold" : "text-green-600 font-semibold"}>{pct}%</span>
+        </div>
+        <Progress value={pct} className={isLow ? "[&>div]:bg-red-500 h-2" : isMid ? "[&>div]:bg-amber-500 h-2" : "[&>div]:bg-green-500 h-2"} />
       </div>
     </div>
   )
