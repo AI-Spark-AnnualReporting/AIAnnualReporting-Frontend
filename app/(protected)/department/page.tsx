@@ -120,10 +120,31 @@ export default function DepartmentDashboard() {
     setExtractionResult(null)
     setStarting(true)
 
+    // ── Phase 1: upload documents ───────────────────────────────────────────
+    // If the upload itself fails (file size limit exceeded, network error,
+    // timeout…) the documents never reached the server. Drop the loader, return
+    // to the dashboard and reopen the upload dialog with the files still
+    // selected so the user can adjust them and retry.
     try {
       for (const file of files) {
         await departmentApi.uploadDocument(sessionId, file)
       }
+    } catch (err: unknown) {
+      setStarting(false)
+      setExtractionResult(null)
+      setPendingFiles(files)      // keep the selection so the user can retry
+      setStartTarget(sessionId)   // reopen the upload popup on the dashboard
+      toast.error(
+        (err as { message?: string })?.message ||
+          "Document upload failed — please check your files and try again."
+      )
+      return
+    }
+
+    // ── Phase 2: extract answers ────────────────────────────────────────────
+    // Documents are uploaded. If extraction fails the user can still answer
+    // manually, so continue into the workspace as before.
+    try {
       const result = await departmentApi.extractAnswers(sessionId)
       setExtractionResult({
         total_questions: result.total_questions,

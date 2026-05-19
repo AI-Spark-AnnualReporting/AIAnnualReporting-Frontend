@@ -1,9 +1,8 @@
 "use client"
 
-import { use, useState, useEffect, useCallback, useRef } from "react"
+import { use, useState, useEffect, useCallback } from "react"
 import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
-import { chatApi } from "@/lib/api/chat"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -13,72 +12,42 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Question } from "@/types"
 import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
-  FileText, Loader2, ArrowUpRight, LayoutGrid, Send, Bot,
-  User as UserIcon, RotateCcw, PanelLeftOpen, Copy,
-  Wand2, Paperclip, PanelLeftClose, List, Ban, Info, Save,
+  FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
+  RotateCcw, PanelLeftOpen,
+  PanelLeftClose, List, Ban, Info, Save,
 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface ChatMessage {
-  role: "user" | "assistant"
-  content: string
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-/**
- * Pull a string out of an AI API response using only explicit field names.
- * Does NOT fall back to iterating all values — that picks up the "question" field.
- */
-function extractContent(res: unknown): string | null {
-  if (!res || typeof res !== "object") return null
-  const obj = res as Record<string, unknown>
-
-  // { assistant_message: { content: "..." } } — Chat API shape
-  if (obj.assistant_message && typeof obj.assistant_message === "object") {
-    const nested = obj.assistant_message as Record<string, unknown>
-    if (typeof nested.content === "string" && nested.content.trim())
-      return nested.content
-  }
-
-  // { message: { content: "..." } } — alternative nested shape
-  if (obj.message && typeof obj.message === "object") {
-    const nested = obj.message as Record<string, unknown>
-    if (typeof nested.content === "string" && nested.content.trim())
-      return nested.content
-  }
-
-  // Explicit answer field names (most-specific first, no ambiguous fallbacks)
-  const KEYS = [
-    "assistant_response",
-    "suggested_answer", "suggestion", "answer", "result", "ai_suggestion", "ai_response",
-    "content", "text", "output", "generated_text", "completion", "reply", "response",
-  ]
-  for (const k of KEYS) {
-    const v = obj[k]
-    if (typeof v === "string" && v.trim().length > 0) return v
-  }
-
-  return null
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────────
-const TONE_ACTIONS = [
-  { label: "Executive summary", prompt: "Rewrite in an executive tone — strategic, concise, and impact-focused" },
-  { label: "Add data & metrics", prompt: "Expand with specific KPIs, metrics and quantifiable achievements" },
-  { label: "Bullet points", prompt: "Restructure as a clear, organised bullet-point list" },
-  { label: "Shorten it", prompt: "Make more concise while keeping every key point" },
-  { label: "Formal tone", prompt: "Rewrite in formal language appropriate for a board-level annual report" },
-]
 
 // Canonical "Not Applicable" answer — submitted verbatim through the normal
 // answers endpoint. A question whose answer starts with "N/A" is treated as N/A.
 const NA_ANSWER = "N/A — This question does not apply to our department."
 const isNAAnswer = (text: string | undefined) => !!text && text.startsWith("N/A")
+
+// The document-extraction step stores this exact phrase when it can't find an
+// answer in the uploaded documents. Treated as "no answer" — never pre-filled.
+const NOT_FOUND_PREFIX = "information not found in uploaded documents"
+const isNotFoundAnswer = (text: string | undefined) =>
+  !!text && text.trim().toLowerCase().startsWith(NOT_FOUND_PREFIX)
+
+// Pull the text out of an AI refine response — checks the common field names.
+function extractAiText(res: unknown): string | null {
+  if (!res || typeof res !== "object") return null
+  const o = res as Record<string, unknown>
+  if (o.message && typeof o.message === "object") {
+    const c = (o.message as Record<string, unknown>).content
+    if (typeof c === "string" && c.trim()) return c
+  }
+  for (const k of ["suggestion", "answer", "result", "response", "content", "text", "reply"]) {
+    const v = o[k]
+    if (typeof v === "string" && v.trim()) return v
+  }
+  return null
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function SessionWorkspacePage({
@@ -91,8 +60,6 @@ export default function SessionWorkspacePage({
   const { data, isLoading, refetch } = useSession(id)
   const submitAnswers = useSubmitAnswers()
   const generateDraft = useGenerateDraft()
-  const chatEndRef = useRef<HTMLDivElement>(null)
-  const docInputRef = useRef<HTMLInputElement>(null)
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -116,19 +83,22 @@ export default function SessionWorkspacePage({
   // Questions marked "Not Applicable" — local mirror of N/A answers
   const [naQuestions, setNaQuestions] = useState<Set<string>>(new Set())
 
-  // Evidence upload
-  const [uploadingDoc, setUploadingDoc] = useState(false)
-
-  // AI Chat
-  const [conversationId, setConversationId] = useState<string | null>(null)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  // "Ask AI to refine" — user-initiated only. aiResult holds the latest refined
+  // answer for the current question (shown in the card); cleared on question switch.
   const [chatInput, setChatInput] = useState("")
-  const [chatLoading, setChatLoading] = useState(false)
+  const [aiResult, setAiResult] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
 
   const session = data?.session
   const questions = session?.questions || []
   const currentQ = questions[currentIndex]
   const currentIsNA = !!currentQ && naQuestions.has(currentQ.question_id)
+  // The answer stored on the server for the current question — the AI extraction
+  // on first visit, the user's saved answer afterwards. Shown in the answer card.
+  const storedAnswer = currentQ
+    ? session?.answers?.find((a) => a.question_id === currentQ.question_id)?.answer
+    : undefined
+  const hasStoredAnswer = !!storedAnswer?.trim() && !isNotFoundAnswer(storedAnswer)
 
   // Count only answers tied to a CURRENT question — answers for regenerated/
   // removed questions stay in session.answers but must not inflate progress.
@@ -162,13 +132,15 @@ export default function SessionWorkspacePage({
     session?.status === "reopened" ||
     session?.status === "not_started"
 
-  // Pre-fill saved answers, and mirror any already-saved N/A answers into local state
+  // Pre-fill saved answers, and mirror any already-saved N/A answers into local state.
+  // The "not found" extraction marker is treated as no answer — it's surfaced in the
+  // answer card instead, and must never land in the editable textarea.
   useEffect(() => {
     if (session?.answers) {
       const existing: Record<string, string> = {}
       const na = new Set<string>()
       session.answers.forEach((a) => {
-        existing[a.question_id] = a.answer
+        existing[a.question_id] = isNotFoundAnswer(a.answer) ? "" : a.answer
         if (isNAAnswer(a.answer)) na.add(a.question_id)
       })
       setAnswers(existing)
@@ -176,15 +148,10 @@ export default function SessionWorkspacePage({
     }
   }, [session])
 
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [chatMessages, chatLoading])
-
+  // Switch question — clear the per-question AI refine state.
   const switchToQuestion = (idx: number) => {
     setCurrentIndex(idx)
-    setConversationId(null)
-    setChatMessages([])
+    setAiResult(null)
     setChatInput("")
   }
 
@@ -197,6 +164,55 @@ export default function SessionWorkspacePage({
     },
     []
   )
+
+  // Copy a card answer (the document answer, or an AI refine result) into the
+  // editable draft below.
+  const applyAsAnswer = (text: string) => {
+    if (!currentQ || !text.trim()) return
+    const qId = currentQ.question_id
+    setAnswers((prev) => ({ ...prev, [qId]: text }))
+    setSaved((prev) => ({ ...prev, [qId]: false }))
+    // Applying an answer clears any prior "Not Applicable" mark.
+    setNaQuestions((prev) => {
+      if (!prev.has(qId)) return prev
+      const s = new Set(prev)
+      s.delete(qId)
+      return s
+    })
+    toast.success("Applied to your answer below")
+  }
+
+  // "Ask AI to refine, expand, or rephrase" — user-initiated. Sends the
+  // instruction plus the current answer to the flexible /ai-assist endpoint
+  // (handles tone changes and content additions) and shows the result in the
+  // card. Stateless — the result is only persisted when the user saves.
+  const sendRefine = async (prompt: string) => {
+    if (!currentQ || !prompt.trim() || aiLoading) return
+    setAiLoading(true)
+    try {
+      const currentAnswer =
+        answers[currentQ.question_id]?.trim() || storedAnswer || ""
+      const message = currentAnswer
+        ? `${prompt.trim()}\n\n${currentAnswer}`
+        : prompt.trim()
+      const res = await departmentApi.aiAssist(id, {
+        message,
+        question_id: currentQ.question_id,
+        include_documents: false,
+      })
+      const text = extractAiText(res)
+      if (text) {
+        setAiResult(text)
+        setChatInput("")
+      } else {
+        toast.error("Couldn't get a response — please try again.")
+      }
+    } catch {
+      toast.error("Couldn't reach the AI — please try again.")
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   // Submit the full set of non-empty answers (matches autosave/save behaviour).
   const persistAnswers = async (next: Record<string, string>) => {
@@ -249,136 +265,6 @@ export default function SessionWorkspacePage({
       await persistAnswers(next)
     } catch {
       toast.error("Couldn't update — please try again")
-    }
-  }
-
-  const getOrCreateConversation = async (): Promise<string> => {
-    if (conversationId) return conversationId
-    const conv = await chatApi.createConversation({
-      title: `${session?.department_name || "Annual Report"} – Q&A`,
-    })
-    const newId = conv.conversation_id || conv.id || ""
-    setConversationId(newId)
-    return newId
-  }
-
-  /**
-   * Tries AI endpoints in sequence, returns first successful string content.
-   * All attempts are logged so failures are visible in DevTools console.
-   */
-  const fetchAiContent = async (displayText: string, isSuggest: boolean): Promise<string | null> => {
-    if (!currentQ) return null
-    const currentAnswer = answers[currentQ.question_id] || ""
-
-    // 1 ── Chat API ────────────────────────────────────────────────────────────
-    try {
-      const convId = await getOrCreateConversation()
-      const msg = isSuggest
-        ? [
-            "You are helping a department write their annual report.",
-            `Question: "${currentQ.question}"`,
-            currentAnswer ? `Existing draft: "${currentAnswer.substring(0, 400)}"` : "",
-            "Write a comprehensive, professional answer.",
-          ].filter(Boolean).join("\n")
-        : [
-            displayText,
-            `Context — Question: "${currentQ.question}"`,
-            currentAnswer ? `Current answer: "${currentAnswer.substring(0, 300)}"` : "",
-          ].filter(Boolean).join("\n")
-      const res = await chatApi.sendMessage(convId, msg)
-      console.info("[AI raw] Chat API:", res)
-      const c = extractContent(res)
-      if (c) { console.info("[AI ✓] Chat API"); return c }
-      console.warn("[AI ✗] Chat API returned unrecognised shape:", Object.keys(res as object))
-    } catch (e) { console.warn("[AI ✗] Chat API:", e) }
-
-    // 2 ── GET /questions/{id}/suggestion ─────────────────────────────────────
-    try {
-      const res = await departmentApi.getAiSuggestion(id, currentQ.question_id)
-      console.info("[AI raw] getAiSuggestion:", res)
-      const c = extractContent(res)
-      if (c) { console.info("[AI ✓] getAiSuggestion"); return c }
-      console.warn("[AI ✗] getAiSuggestion returned unrecognised shape:", Object.keys(res as object))
-    } catch (e) { console.warn("[AI ✗] getAiSuggestion:", e) }
-
-    // 3 ── POST suggest-answer ─────────────────────────────────────────────────
-    try {
-      const res = await departmentApi.suggestAnswer(id, {
-        question_id: currentQ.question_id,
-        question: currentQ.question,
-        context: currentAnswer,
-      })
-      console.info("[AI raw] suggestAnswer:", res)
-      const c = extractContent(res)
-      if (c) { console.info("[AI ✓] suggestAnswer"); return c }
-      console.warn("[AI ✗] suggestAnswer returned unrecognised shape:", Object.keys(res as object))
-    } catch (e) { console.warn("[AI ✗] suggestAnswer:", e) }
-
-    // 4 ── POST conversation ───────────────────────────────────────────────────
-    try {
-      const res = await departmentApi.conversationPrompt(id, {
-        question_id: currentQ.question_id,
-        question: currentQ.question,
-        current_answer: currentAnswer,
-        prompt: displayText,
-      })
-      console.info("[AI raw] conversationPrompt:", res)
-      const c = extractContent(res)
-      if (c) { console.info("[AI ✓] conversationPrompt"); return c }
-      console.warn("[AI ✗] conversationPrompt returned unrecognised shape:", Object.keys(res as object))
-    } catch (e) { console.warn("[AI ✗] conversationPrompt:", e) }
-
-    return null
-  }
-
-  const sendChatMessage = async (displayText: string, isSuggest = false) => {
-    if (!currentQ || chatLoading) return
-    setChatMessages((prev) => [...prev, { role: "user", content: displayText }])
-    setChatLoading(true)
-    const content = await fetchAiContent(displayText, isSuggest)
-    if (content) {
-      setChatMessages((prev) => [...prev, { role: "assistant", content }])
-    } else {
-      toast.error("Couldn't reach the AI — check the browser console for details.")
-      setChatMessages((prev) => prev.slice(0, -1))
-    }
-    setChatLoading(false)
-  }
-
-  const applyToAnswer = (content: string) => {
-    if (!currentQ) return
-    const qId = currentQ.question_id
-    setAnswers((prev) => ({ ...prev, [qId]: content }))
-    setSaved((prev) => ({ ...prev, [qId]: false }))
-    // Applying an answer un-marks any prior "Not Applicable" state.
-    setNaQuestions((prev) => {
-      if (!prev.has(qId)) return prev
-      const s = new Set(prev)
-      s.delete(qId)
-      return s
-    })
-    toast.success("Applied to your answer below")
-  }
-
-  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase()
-    if (![".pdf", ".docx", ".doc", ".txt"].includes(ext)) {
-      toast.error("Upload PDF, Word, or TXT files only.")
-      e.target.value = ""
-      return
-    }
-    setUploadingDoc(true)
-    try {
-      await departmentApi.uploadDocument(id, file)
-      toast.success(`"${file.name}" uploaded — AI will reference this document`)
-      refetch()
-    } catch (err: unknown) {
-      toast.error((err as { message?: string })?.message || "Upload failed.")
-    } finally {
-      setUploadingDoc(false)
-      e.target.value = ""
     }
   }
 
@@ -675,294 +561,248 @@ export default function SessionWorkspacePage({
                 </div>
               </div>
 
-              {/* ── AI Chat area (flex-1 — takes most of the screen) ── */}
-              <div className="flex-1 overflow-y-auto min-h-0 bg-background">
-                {/* Empty state */}
-                {chatMessages.length === 0 && !chatLoading && (
-                  <div className="flex flex-col items-center justify-center h-full px-8 py-10 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 border border-primary/20">
-                      <Wand2 className="h-7 w-7 text-primary" />
+              {/* ── Answer card — document answer, the user's saved answer, or
+                  an AI refine result. No automatic AI call. ── */}
+              <div className="flex-1 overflow-y-auto min-h-0 bg-background px-6 py-5">
+                {aiLoading ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3 border border-primary/20">
+                      <Loader2 className="h-6 w-6 text-primary animate-spin" />
                     </div>
-                    <p className="text-base font-semibold mb-1">AI Assistant</p>
-                    <p className="text-sm text-muted-foreground max-w-sm mb-6 leading-relaxed">
-                      Generate a professional answer based on the question context and any session documents.
+                    <p className="text-sm font-medium">Asking the AI…</p>
+                  </div>
+                ) : aiResult ? (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+                        <Wand2 className="h-4 w-4 text-primary" />
+                      </div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        AI response
+                      </p>
+                    </div>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                      {aiResult}
                     </p>
                     {!isSubmitted && (
-                      <>
-                        <Button
-                          className="w-full max-w-xs h-11 text-sm mb-5"
-                          onClick={() => sendChatMessage(`Suggest an answer for: "${currentQ.question}"`, true)}
-                          disabled={!canEdit || chatLoading}
+                      <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-border/60">
+                        <button
+                          onClick={() => applyAsAnswer(aiResult)}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
                         >
-                          {chatLoading
-                            ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            : <Sparkles className="h-4 w-4 mr-2" />}
-                          Generate Answer
-                        </Button>
-                        <div className="flex items-center gap-3 w-full max-w-xs mb-4">
-                          <div className="h-px flex-1 bg-border" />
-                          <span className="text-xs text-muted-foreground">or choose a style</span>
-                          <div className="h-px flex-1 bg-border" />
-                        </div>
-                        <div className="flex flex-wrap gap-2 justify-center max-w-sm">
-                          {TONE_ACTIONS.map((t) => (
-                            <button
-                              key={t.label}
-                              onClick={() => sendChatMessage(t.prompt, false)}
-                              disabled={!canEdit || chatLoading}
-                              className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent hover:border-primary/30 transition-colors disabled:opacity-50 font-medium"
-                            >
-                              {t.label}
-                            </button>
-                          ))}
-                        </div>
-                      </>
+                          <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
+                        </button>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(aiResult); toast.success("Copied") }}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <Copy className="h-3 w-3" /> Copy
+                        </button>
+                        <button
+                          onClick={() => setAiResult(null)}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground ml-auto"
+                        >
+                          <RotateCcw className="h-3 w-3" /> Discard
+                        </button>
+                      </div>
                     )}
                   </div>
-                )}
-
-                {/* Messages */}
-                {(chatMessages.length > 0 || chatLoading) && (
-                  <div className="px-6 py-5 space-y-5">
-                    {chatMessages.map((msg, i) => (
-                      <div key={i} className={cn("flex gap-3", msg.role === "user" && "flex-row-reverse")}>
-                        <div className={cn(
-                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-0.5",
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted border border-border"
-                        )}>
-                          {msg.role === "user"
-                            ? <UserIcon className="h-4 w-4" />
-                            : <Bot className="h-4 w-4 text-muted-foreground" />}
-                        </div>
-                        <div className={cn(
-                          "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground rounded-tr-sm"
-                            : "bg-muted/60 border rounded-tl-sm"
-                        )}>
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
-                          {msg.role === "assistant" && !isSubmitted && (
-                            <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-border/50">
-                              <button
-                                onClick={() => applyToAnswer(msg.content)}
-                                className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
-                              >
-                                <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
-                              </button>
-                              <button
-                                onClick={() => { navigator.clipboard.writeText(msg.content); toast.success("Copied") }}
-                                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                              >
-                                <Copy className="h-3 w-3" /> Copy
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                ) : hasStoredAnswer ? (
+                  <div className="rounded-xl border bg-muted/40 px-4 py-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+                        <Wand2 className="h-4 w-4 text-primary" />
                       </div>
-                    ))}
-
-                    {/* Typing indicator */}
-                    {chatLoading && (
-                      <div className="flex gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted border border-border">
-                          <Bot className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="rounded-2xl rounded-tl-sm bg-muted/60 border px-5 py-4">
-                          <div className="flex gap-1.5 items-center">
-                            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "160ms" }} />
-                            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "320ms" }} />
-                          </div>
-                        </div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Answer from your documents
+                      </p>
+                    </div>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                      {storedAnswer}
+                    </p>
+                    {!isSubmitted && (
+                      <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-border/60">
+                        <button
+                          onClick={() => applyAsAnswer(storedAnswer ?? "")}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+                        >
+                          <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(storedAnswer ?? "")
+                            toast.success("Copied")
+                          }}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <Copy className="h-3 w-3" /> Copy
+                        </button>
                       </div>
                     )}
-                    <div ref={chatEndRef} />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+                    <div className="flex items-start gap-3">
+                      <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-amber-900">
+                          Information not found in this document
+                        </p>
+                        <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                          The AI couldn&apos;t find an answer to this question in your
+                          uploaded documents. Please answer it manually below.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* ── Bottom panel ── compact to maximise chat space ─────────── */}
-              <div className="border-t bg-card shrink-0">
+              {/* ── Ask AI to refine, expand, or rephrase ── */}
+              {!isSubmitted && (
+                <div className="shrink-0 border-t bg-card px-4 py-2 flex items-center gap-2">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Ask AI to refine, expand, or rephrase… (Enter)"
+                    className="flex-1 h-9 px-3 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    disabled={!canEdit || aiLoading}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && chatInput.trim()) sendRefine(chatInput)
+                    }}
+                  />
+                  <Button
+                    size="icon" className="h-9 w-9 shrink-0"
+                    onClick={() => sendRefine(chatInput)}
+                    disabled={!canEdit || !chatInput.trim() || aiLoading}
+                  >
+                    {aiLoading
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+              )}
 
-                {/* Refine chips — only visible when a conversation is active */}
-                {chatMessages.length > 0 && !isSubmitted && (
-                  <div className="px-4 pt-2 pb-1 flex flex-wrap gap-1.5">
-                    {TONE_ACTIONS.slice(0, 4).map((t) => (
-                      <button
-                        key={t.label}
-                        onClick={() => sendChatMessage(t.prompt, false)}
-                        disabled={!canEdit || chatLoading}
-                        className="text-xs px-3 py-1 rounded-full border hover:bg-accent hover:border-primary/30 transition-colors disabled:opacity-50 font-medium"
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Chat input row — attach + single-line input + send */}
-                {!isSubmitted && (
-                  <div className="px-4 py-2 flex items-center gap-2">
-                    {/* Attach document */}
-                    <label className="cursor-pointer shrink-0" title="Attach evidence document (PDF / Word / TXT)">
-                      <input
-                        ref={docInputRef}
-                        type="file"
-                        accept=".pdf,.docx,.doc,.txt"
-                        className="hidden"
-                        onChange={handleDocUpload}
-                        disabled={!canEdit || uploadingDoc}
-                      />
-                      <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                        <span>
-                          {uploadingDoc
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            : <Paperclip className="h-3.5 w-3.5" />}
-                        </span>
-                      </Button>
-                    </label>
-                    <input
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Ask AI to refine, expand, or rephrase… (Enter)"
-                      className="flex-1 h-8 px-3 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && chatInput.trim()) {
-                          sendChatMessage(chatInput, false)
-                          setChatInput("")
+              {/* ── Answer editor ── */}
+              <div className={cn(
+                "shrink-0 flex flex-col px-4 pt-2.5 pb-3 border-t transition-colors",
+                currentIsNA && "bg-muted/40"
+              )}>
+                <div className="flex items-center gap-2 mb-1.5 shrink-0">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Answer</span>
+                  {saved[currentQ.question_id] && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                  <div className="flex-1" />
+                  {!isSubmitted && !currentIsNA && (
+                    <>
+                      <Button
+                        size="sm" variant="outline"
+                        className="h-7 px-2.5 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400"
+                        onClick={() => markAsNA(currentQ.question_id)}
+                        disabled={!canEdit || submitAnswers.isPending || naLimitReached}
+                        title={
+                          naLimitReached
+                            ? `N/A limit reached — at least half of the ${questions.length} questions must be answered`
+                            : undefined
                         }
-                      }}
-                    />
+                      >
+                        <Ban className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 px-3 text-xs font-medium bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+                        onClick={handleSaveAnswer}
+                        disabled={!canEdit || submitAnswers.isPending}
+                      >
+                        {submitAnswers.isPending ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Saving…
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-3.5 w-3.5 mr-1" /> Save Answer
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
+                  <div className="flex items-center gap-0.5 ml-1 border-l pl-2">
                     <Button
-                      size="icon" className="h-8 w-8 shrink-0"
-                      onClick={() => { if (chatInput.trim()) { sendChatMessage(chatInput, false); setChatInput("") } }}
-                      disabled={!canEdit || !chatInput.trim() || chatLoading}
+                      variant="ghost" size="icon" className="h-6 w-6"
+                      onClick={() => switchToQuestion(Math.max(0, currentIndex - 1))}
+                      disabled={currentIndex === 0}
                     >
-                      <Send className="h-3.5 w-3.5" />
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground tabular-nums w-12 text-center">
+                      {currentIndex + 1}/{questions.length}
+                    </span>
+                    <Button
+                      variant="ghost" size="icon" className="h-6 w-6"
+                      onClick={() => switchToQuestion(Math.min(questions.length - 1, currentIndex + 1))}
+                      disabled={currentIndex === questions.length - 1}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                )}
-
-                {/* Answer editor — compact: label + status + actions + nav in one header row */}
-                <div className={cn("px-4 pb-3 border-t pt-2 transition-colors", currentIsNA && "bg-muted/40")}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Answer</span>
-                    {saved[currentQ.question_id] && <CheckCircle2 className="h-3 w-3 text-green-500" />}
-                    <div className="flex-1" />
-                    {!isSubmitted && !currentIsNA && (
-                      <>
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 px-2.5 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400"
-                          onClick={() => markAsNA(currentQ.question_id)}
-                          disabled={!canEdit || submitAnswers.isPending || naLimitReached}
-                          title={
-                            naLimitReached
-                              ? `N/A limit reached — at least half of the ${questions.length} questions must be answered`
-                              : undefined
-                          }
-                        >
-                          <Ban className="h-3.5 w-3.5 mr-1" /> Mark as N/A
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="h-7 px-3 text-xs font-medium bg-blue-600 text-white shadow-sm hover:bg-blue-700"
-                          onClick={handleSaveAnswer}
-                          disabled={!canEdit || submitAnswers.isPending}
-                        >
-                          {submitAnswers.isPending ? (
-                            <>
-                              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Saving…
-                            </>
-                          ) : (
-                            <>
-                              <Save className="h-3.5 w-3.5 mr-1" /> Save Answer
-                            </>
-                          )}
-                        </Button>
-                      </>
-                    )}
-                    <div className="flex items-center gap-0.5 ml-1 border-l pl-2">
-                      <Button
-                        variant="ghost" size="icon" className="h-6 w-6"
-                        onClick={() => switchToQuestion(Math.max(0, currentIndex - 1))}
-                        disabled={currentIndex === 0}
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" />
-                      </Button>
-                      <span className="text-xs text-muted-foreground tabular-nums w-12 text-center">
-                        {currentIndex + 1}/{questions.length}
-                      </span>
-                      <Button
-                        variant="ghost" size="icon" className="h-6 w-6"
-                        onClick={() => switchToQuestion(Math.min(questions.length - 1, currentIndex + 1))}
-                        disabled={currentIndex === questions.length - 1}
-                      >
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  {currentIsNA ? (
-                    <div className="flex items-start gap-3 rounded-md border bg-muted/30 px-4 py-3">
-                      <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
-                          <Ban className="h-3.5 w-3.5" /> Marked as not applicable
-                        </p>
-                        <p className="text-xs italic text-muted-foreground/80 mt-0.5">
-                          &ldquo;This question does not apply to our department.&rdquo;
-                        </p>
-                      </div>
-                      {!isSubmitted && (
-                        <Button
-                          size="sm" variant="outline" className="h-7 text-xs shrink-0"
-                          onClick={() => undoNA(currentQ.question_id)}
-                          disabled={!canEdit || submitAnswers.isPending}
-                        >
-                          <RotateCcw className="h-3 w-3 mr-1" /> Undo
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <Textarea
-                      value={answers[currentQ.question_id] || ""}
-                      onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
-                      placeholder="Type your answer, or generate with AI above…"
-                      rows={3}
-                      className="w-full resize-y text-sm leading-relaxed min-h-[72px]"
-                      disabled={!canEdit}
-                    />
-                  )}
                 </div>
-
-                {/* Submit CTA — appears on the last question once every
-                    question is answered or marked N/A */}
-                {isLastQuestion && allComplete && !isSubmitted && (
-                  <div className="px-4 pb-3 pt-1">
-                    <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-                      <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-green-800">All questions complete</p>
-                        <p className="text-xs text-green-700">
-                          Every question is answered or marked N/A — review your draft and submit.
-                        </p>
-                      </div>
-                      <Button
-                        className="shrink-0 bg-green-600 text-white shadow-sm hover:bg-green-700"
-                        onClick={handleProceedToSubmit}
-                        disabled={!canEdit || generateDraft.isPending}
-                      >
-                        {generateDraft.isPending
-                          ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                          : <Send className="mr-1.5 h-4 w-4" />}
-                        Review &amp; Submit
-                      </Button>
+                {currentIsNA ? (
+                  <div className="flex items-start gap-3 rounded-md border bg-muted/30 px-4 py-3 shrink-0">
+                    <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        <Ban className="h-3.5 w-3.5" /> Marked as not applicable
+                      </p>
+                      <p className="text-xs italic text-muted-foreground/80 mt-0.5">
+                        &ldquo;This question does not apply to our department.&rdquo;
+                      </p>
                     </div>
+                    {!isSubmitted && (
+                      <Button
+                        size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                        onClick={() => undoNA(currentQ.question_id)}
+                        disabled={!canEdit || submitAnswers.isPending}
+                      >
+                        <RotateCcw className="h-3 w-3 mr-1" /> Undo
+                      </Button>
+                    )}
                   </div>
+                ) : (
+                  <Textarea
+                    value={answers[currentQ.question_id] || ""}
+                    onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
+                    placeholder="Type your answer here…"
+                    rows={4}
+                    className="w-full resize-y text-sm leading-relaxed min-h-[96px]"
+                    disabled={!canEdit}
+                  />
                 )}
               </div>
+
+              {/* Submit CTA — appears on the last question once every
+                  question is answered or marked N/A */}
+              {isLastQuestion && allComplete && !isSubmitted && (
+                <div className="px-4 pb-3 pt-0 shrink-0">
+                  <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-green-800">All questions complete</p>
+                      <p className="text-xs text-green-700">
+                        Every question is answered or marked N/A — review your draft and submit.
+                      </p>
+                    </div>
+                    <Button
+                      className="shrink-0 bg-green-600 text-white shadow-sm hover:bg-green-700"
+                      onClick={handleProceedToSubmit}
+                      disabled={!canEdit || generateDraft.isPending}
+                    >
+                      {generateDraft.isPending
+                        ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        : <Send className="mr-1.5 h-4 w-4" />}
+                      Review &amp; Submit
+                    </Button>
+                  </div>
+                </div>
+              )}
 
             </div>
           )}
