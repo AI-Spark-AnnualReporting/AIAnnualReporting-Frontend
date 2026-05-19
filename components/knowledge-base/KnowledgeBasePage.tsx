@@ -141,7 +141,7 @@ export function KnowledgeBasePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Knowledge Base"
+        title="Document Bank"
         description={subtitle}
         action={
           <Button variant="outline" onClick={handleRefresh} disabled={isFetching}>
