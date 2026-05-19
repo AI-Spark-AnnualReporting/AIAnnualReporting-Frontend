@@ -24,6 +24,13 @@ export interface AdjustTonePayload {
   target_tone: string
 }
 
+// Flexible refine endpoint — rephrase, expand, restructure, or add content.
+export interface AiAssistMessagePayload {
+  message: string
+  question_id: string
+  include_documents?: boolean
+}
+
 export interface ConversationPromptPayload {
   question_id: string
   question: string
@@ -138,6 +145,16 @@ export const departmentApi = {
   adjustTone: async (sessionId: string, payload: AdjustTonePayload) => {
     const { data } = await apiClient.post(
       `/department/sessions/${sessionId}/adjust-tone`,
+      payload
+    )
+    return data
+  },
+
+  // Flexible AI refine — rephrase / expand / restructure / add content.
+  // Stateless: returns the rewritten text, does not persist it.
+  aiAssist: async (sessionId: string, payload: AiAssistMessagePayload) => {
+    const { data } = await apiClient.post(
+      `/department/sessions/${sessionId}/ai-assist`,
       payload
     )
     return data
