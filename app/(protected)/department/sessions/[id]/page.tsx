@@ -114,13 +114,12 @@ export default function SessionWorkspacePage({
   // than 50% may be marked "Not Applicable".
   const maxNA = Math.floor(questions.length / 2)
   const naLimitReached = naQuestions.size >= maxNA
-  // Draft generation is gated on the same 50% rule: count only REAL answers
-  // (N/A answers don't count), and require them to cover at least half.
+  // Draft generation needs at least one REAL answer (N/A answers don't count) —
+  // one is enough to unlock the button.
   const realAnsweredCount = questions.filter(
     (q) => answers[q.question_id]?.trim() && !isNAAnswer(answers[q.question_id])
   ).length
-  const minRealAnswers = Math.ceil(questions.length / 2)
-  const meetsAnswerMinimum = questions.length > 0 && realAnsweredCount >= minRealAnswers
+  const meetsAnswerMinimum = realAnsweredCount >= 1
   const isLastQuestion = questions.length > 0 && currentIndex === questions.length - 1
   const isSubmitted = session?.status === "submitted" || session?.status === "approved"
   const isReopened = session?.status === "reopened"
@@ -446,7 +445,7 @@ export default function SessionWorkspacePage({
             disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
             title={
               !meetsAnswerMinimum
-                ? `Answer at least ${minRealAnswers} of ${questions.length} questions before generating draft content`
+                ? "Answer at least one question before generating draft content"
                 : undefined
             }
           >
