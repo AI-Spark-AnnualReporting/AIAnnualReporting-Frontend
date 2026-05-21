@@ -159,4 +159,17 @@ export const departmentApi = {
     )
     return data
   },
+
+  // Download the session's questions as a PDF. The backend regenerates the file
+  // on every call (not stored), so the response is a binary stream.
+  downloadQuestions: async (sessionId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(
+      `/department/sessions/${sessionId}/questions/download`,
+      { responseType: "blob" }
+    )
+    const disposition = response.headers["content-disposition"] as string | undefined
+    const filename =
+      disposition?.match(/filename="?([^"]+)"?/)?.[1] ?? "Questions.pdf"
+    return { blob: response.data, filename }
+  },
 }
