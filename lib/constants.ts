@@ -111,6 +111,8 @@ export const QUERY_KEYS = {
   CYCLE_OVERVIEW: (id: string) => ["cycle", id, "overview"],
   PM_DASHBOARD: ["pm", "dashboard"],
   PM_CYCLE: (id: string) => ["pm", "cycle", id],
+  BUILD_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "readiness"],
+  PM_CYCLE_SECTIONS: (cycleId: string) => ["pm", "cycle", cycleId, "sections"],
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],

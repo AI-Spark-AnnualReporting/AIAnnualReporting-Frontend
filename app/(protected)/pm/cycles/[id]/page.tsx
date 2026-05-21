@@ -6,6 +6,7 @@ import {
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
   useEscalations, useBulkReminder,
 } from "@/hooks/useSessions"
+import { useBuildReadiness } from "@/hooks/useReportBuilder"
 import { PageHeader } from "@/components/ui/page-header"
 import { KickoffLoader } from "@/components/pm/kickoff-loader"
 import { Button } from "@/components/ui/button"
@@ -27,7 +28,7 @@ import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
   AlertTriangle, BookOpen, CheckCircle2, Clock, RefreshCw, Sparkles,
   FileUp, Zap, AlertOctagon, BellRing, Trophy, ShieldAlert,
-  ListChecks, ClipboardCheck,
+  ListChecks, ClipboardCheck, Hammer, ArrowRight,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
@@ -68,6 +69,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const createEscalation = useCreateEscalation()
   const { data: escalationsData } = useEscalations(id)
   const bulkReminder = useBulkReminder()
+  const { data: readiness } = useBuildReadiness(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -569,6 +571,58 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           }
         />
+      </div>
+
+      {/* ── Report Builder entry ── */}
+      <div className="rounded-xl border bg-card px-6 py-5">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+              <Hammer className="h-5 w-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-semibold">Report Builder</h2>
+              <p className="text-sm text-muted-foreground">
+                Assemble this cycle&apos;s annual report section by section.
+              </p>
+              {readiness?.can_build ? (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {readiness.departments_approved} of {readiness.departments_total}{" "}
+                  departments approved.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Report sections haven&apos;t been set up for this cycle yet.
+                </p>
+              )}
+            </div>
+          </div>
+          {readiness?.can_build ? (
+            <Link href={`/pm/cycles/${id}/build`}>
+              <Button>
+                Open Report Builder
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              disabled
+              title="Report sections haven't been set up for this cycle yet"
+            >
+              Open Report Builder
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        {readiness?.can_build && readiness.departments_approved === 0 && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              No department content is approved yet — narrative sections will have
+              nothing to draft from until you approve submissions.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── Workflow Pipeline ── */}

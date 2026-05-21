@@ -107,6 +107,17 @@ export interface ResolveSectionsResponse {
   sections: CycleReportSection[]
 }
 
+// Readiness of a cycle to enter the Report Builder.
+export interface BuildReadiness {
+  sections_resolved: boolean
+  sections_total: number
+  departments_total: number
+  departments_approved: number
+  all_approved: boolean
+  status_breakdown: Record<string, number>
+  can_build: boolean
+}
+
 export interface BriefQuality {
   quality: "low" | "acceptable" | "good"
   total: number
