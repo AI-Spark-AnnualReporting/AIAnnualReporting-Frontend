@@ -1,3 +1,11 @@
+import type {
+  SectionMode,
+  SectionLayer,
+  SectionStatus,
+  CompanyProfile,
+  Sector,
+} from "@/types"
+
 export const SESSION_STATUSES = {
   assigned: { label: "Assigned", color: "slate" },
   not_started: { label: "Not Started", color: "gray" },
@@ -35,6 +43,62 @@ export const TONE_OPTIONS = [
   { value: "conversational", label: "Conversational", description: "Friendly, accessible" },
   { value: "formal", label: "Formal", description: "Official document style" },
 ] as const
+
+// Report-section badge maps. `color` holds full Tailwind class fragments
+// (StatusBadge's colorMap lacks violet/cyan/neutral, so section badges render
+// these directly via a local span instead of through StatusBadge).
+export const SECTION_MODES: Record<
+  SectionMode,
+  { label: string; color: string; hint: string }
+> = {
+  generate: {
+    label: "AI-written",
+    color: "bg-violet-100 text-violet-700 border-violet-200",
+    hint: "Drafted by the narrative agent, refined by you",
+  },
+  attach: {
+    label: "Upload",
+    color: "bg-cyan-100 text-cyan-700 border-cyan-200",
+    hint: "You upload the source document; embedded as-is",
+  },
+  auto: {
+    label: "System",
+    color: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    hint: "Generated automatically at render (cover, contents)",
+  },
+}
+
+export const SECTION_LAYERS: Record<
+  SectionLayer,
+  { label: string; color: string }
+> = {
+  common: { label: "Common", color: "bg-slate-100 text-slate-700 border-slate-200" },
+  cma: { label: "CMA Required", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  sector: { label: "Sector", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  optional: { label: "Optional", color: "bg-gray-100 text-gray-700 border-gray-200" },
+}
+
+export const SECTION_STATUSES: Record<
+  SectionStatus,
+  { label: string; color: string }
+> = {
+  pending: { label: "Pending", color: "bg-gray-100 text-gray-700 border-gray-200" },
+  drafting: { label: "Drafting", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  locked: { label: "Locked", color: "bg-green-100 text-green-700 border-green-200" },
+}
+
+export const COMPANY_PROFILES: Record<CompanyProfile, string> = {
+  listed: "Listed (Tadawul)",
+  private: "Private",
+}
+
+export const SECTORS: Record<Sector, string> = {
+  bank: "Bank",
+  insurance: "Insurance",
+  general: "General",
+  reit: "REIT",
+  finance_co: "Finance Company",
+}
 
 export const QUERY_KEYS = {
   ME: ["me"],

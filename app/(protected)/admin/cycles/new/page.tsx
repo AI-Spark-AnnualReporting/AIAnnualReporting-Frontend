@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -18,7 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowLeft, Info, UserCog, CalendarDays, FileText } from "lucide-react"
+import { COMPANY_PROFILES, SECTORS } from "@/lib/constants"
+import { ArrowLeft, Info, UserCog, CalendarDays, FileText, Building2 } from "lucide-react"
 import Link from "next/link"
 
 const schema = z.object({
@@ -29,6 +31,15 @@ const schema = z.object({
   submission_deadline: z.string().min(1, "Required"),
   project_manager_id: z.string().min(1, "Project Manager is required"),
   kickoff_brief: z.string().optional(),
+  company_profile: z.enum(["listed", "private"], {
+    message: "Select a company profile",
+  }),
+  sector: z.enum(["bank", "insurance", "general", "reit", "finance_co"], {
+    message: "Select a sector",
+  }),
+  is_shariah: z.boolean(),
+  has_subsidiaries: z.boolean(),
+  has_sukuk: z.boolean(),
 })
 type Form = z.infer<typeof schema>
 
@@ -46,7 +57,12 @@ export default function NewCyclePage() {
     formState: { errors },
   } = useForm<Form>({
     resolver: zodResolver(schema),
-    defaultValues: { fiscal_year: currentYear },
+    defaultValues: {
+      fiscal_year: currentYear,
+      is_shariah: false,
+      has_subsidiaries: false,
+      has_sukuk: false,
+    },
   })
 
   const selectedPM = watch("project_manager_id")
@@ -186,6 +202,101 @@ export default function NewCyclePage() {
               <p className="text-xs text-muted-foreground">When departments must submit by</p>
               {errors.submission_deadline && <p className="text-xs text-destructive">{errors.submission_deadline.message}</p>}
             </div>
+          </div>
+        </div>
+
+        {/* Section 4: Company Profile */}
+        <div className="rounded-xl border bg-card p-6 space-y-5">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-semibold">Company Profile</h2>
+          </div>
+          <p className="text-sm text-muted-foreground -mt-2">
+            These determine which sections your report requires.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Company Profile <span className="text-destructive">*</span></Label>
+              <Controller
+                name="company_profile"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value || ""} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a company profile" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(COMPANY_PROFILES).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.company_profile && (
+                <p className="text-xs text-destructive">{errors.company_profile.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Sector <span className="text-destructive">*</span></Label>
+              <Controller
+                name="sector"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value || ""} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a sector" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SECTORS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.sector && (
+                <p className="text-xs text-destructive">{errors.sector.message}</p>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Controller
+              name="is_shariah"
+              control={control}
+              render={({ field }) => (
+                <Checkbox
+                  id="is_shariah"
+                  checked={!!field.value}
+                  onCheckedChange={field.onChange}
+                  label="Shariah-compliant"
+                />
+              )}
+            />
+            <Controller
+              name="has_subsidiaries"
+              control={control}
+              render={({ field }) => (
+                <Checkbox
+                  id="has_subsidiaries"
+                  checked={!!field.value}
+                  onCheckedChange={field.onChange}
+                  label="Has subsidiaries"
+                />
+              )}
+            />
+            <Controller
+              name="has_sukuk"
+              control={control}
+              render={({ field }) => (
+                <Checkbox
+                  id="has_sukuk"
+                  checked={!!field.value}
+                  onCheckedChange={field.onChange}
+                  label="Has sukuk"
+                />
+              )}
+            />
           </div>
         </div>
 

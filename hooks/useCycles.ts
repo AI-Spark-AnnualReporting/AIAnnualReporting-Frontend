@@ -103,6 +103,31 @@ export function useDeleteCycle() {
   })
 }
 
+export function useCycleSections(cycleId: string) {
+  return useQuery({
+    queryKey: ["cycle", cycleId, "sections"],
+    queryFn: () => cyclesApi.getSections(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+export function useResolveSections(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => cyclesApi.resolveSections(cycleId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["cycle", cycleId, "sections"] })
+      toast.success(
+        `Resolved ${res.sections.length} sections (${res.sections_created} new)`
+      )
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to resolve sections")
+    },
+  })
+}
+
 export function useActivateCycle() {
   const qc = useQueryClient()
   return useMutation({
