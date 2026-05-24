@@ -1,5 +1,12 @@
 import apiClient from "./client"
-import { Cycle, CycleOverview } from "@/types"
+import {
+  Cycle,
+  CycleOverview,
+  CompanyProfile,
+  Sector,
+  CycleReportSection,
+  ResolveSectionsResponse,
+} from "@/types"
 
 export interface CreateCyclePayload {
   cycle_name: string
@@ -9,6 +16,11 @@ export interface CreateCyclePayload {
   submission_deadline: string
   project_manager_id?: string
   kickoff_brief?: string
+  company_profile: CompanyProfile
+  sector: Sector
+  is_shariah?: boolean
+  has_subsidiaries?: boolean
+  has_sukuk?: boolean
 }
 
 export interface UpdateCyclePayload extends Partial<CreateCyclePayload> {}
@@ -88,5 +100,17 @@ export const cyclesApi = {
   delete: async (cycleId: string) => {
     const { data } = await apiClient.delete(`/admin/cycles/${cycleId}`)
     return data
+  },
+
+  // Resolve the cycle's report-section list from its company profile.
+  // Idempotent — safe to call again after a profile change (no duplicates).
+  resolveSections: async (cycleId: string): Promise<ResolveSectionsResponse> => {
+    const { data } = await apiClient.post(`/admin/cycles/${cycleId}/resolve-sections`)
+    return data
+  },
+
+  getSections: async (cycleId: string): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.get(`/admin/cycles/${cycleId}/sections`)
+    return data.sections
   },
 }

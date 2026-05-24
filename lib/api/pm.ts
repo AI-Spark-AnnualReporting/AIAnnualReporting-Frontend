@@ -1,5 +1,8 @@
 import apiClient from "./client"
-import { Session, KickoffBriefResponse, PMReviewAction, SessionStatus } from "@/types"
+import {
+  Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
+  BuildReadiness, CycleReportSection,
+} from "@/types"
 
 export interface ReviewPayload {
   action: PMReviewAction
@@ -181,5 +184,17 @@ export const pmApi = {
       responseType: "blob",
     })
     return data
+  },
+
+  // Whether a cycle is ready to enter the Report Builder.
+  buildReadiness: async (cycleId: string): Promise<BuildReadiness> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/build-readiness`)
+    return data
+  },
+
+  // Resolved report sections for a cycle (PM-access). Named to parallel getCycleSessions.
+  getCycleSections: async (cycleId: string): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sections`)
+    return data.sections
   },
 }

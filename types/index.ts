@@ -11,6 +11,13 @@ export type SessionStatus =
 
 export type PMReviewAction = "approved" | "rejected" | "reopened"
 
+// ── Company profile & report sections ──────────────────────────────────────
+export type CompanyProfile = "listed" | "private"
+export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
+export type SectionMode = "generate" | "attach" | "auto"
+export type SectionLayer = "common" | "cma" | "sector" | "optional"
+export type SectionStatus = "pending" | "drafting" | "locked"
+
 export interface User {
   id?: string
   user_id: string
@@ -73,6 +80,42 @@ export interface Cycle {
   total_departments?: number
   submitted_count?: number
   created_at: string
+  // Company profile — null on pre-existing cycles created before this field existed
+  company_profile: CompanyProfile | null
+  sector: Sector | null
+  is_shariah: boolean
+  has_subsidiaries: boolean
+  has_sukuk: boolean
+}
+
+// A resolved report section, enriched via the section-definitions join.
+export interface CycleReportSection {
+  section_code: string
+  title: string
+  layer: SectionLayer
+  content_source: "narrative" | "structured" | "financials" | "composite"
+  mode: SectionMode
+  status: SectionStatus
+  display_order: number
+  ai_allowed: boolean
+}
+
+export interface ResolveSectionsResponse {
+  success: boolean
+  cycle_id: string
+  sections_created: number
+  sections: CycleReportSection[]
+}
+
+// Readiness of a cycle to enter the Report Builder.
+export interface BuildReadiness {
+  sections_resolved: boolean
+  sections_total: number
+  departments_total: number
+  departments_approved: number
+  all_approved: boolean
+  status_breakdown: Record<string, number>
+  can_build: boolean
 }
 
 export interface BriefQuality {

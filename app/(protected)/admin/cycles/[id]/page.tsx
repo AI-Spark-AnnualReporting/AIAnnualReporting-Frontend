@@ -8,6 +8,7 @@ import { z } from "zod"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   useCycle, useCycleOverview, useUploadKickoffDocs, useAssignDepartments, useUpdateCycle,
+  useCycleSections, useResolveSections,
 } from "@/hooks/useCycles"
 import { useDepartments } from "@/hooks/useDepartments"
 import { useUsers } from "@/hooks/useUsers"
@@ -16,6 +17,7 @@ import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { DataTable, Column } from "@/components/ui/data-table"
@@ -26,12 +28,16 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { Department, SessionSummary, User } from "@/types"
+import { Cycle, Department, SessionSummary, User, CycleReportSection } from "@/types"
+import {
+  COMPANY_PROFILES, SECTORS, SECTION_MODES, SECTION_LAYERS, SECTION_STATUSES,
+} from "@/lib/constants"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import {
   FileUp, ArrowLeft, Building2, Search, Plus, Trash2,
   CheckCircle, XCircle, AlertCircle, Save, Info, Pencil, RefreshCw,
+  Layers, Sparkles,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -43,6 +49,15 @@ const editCycleSchema = z.object({
   end_date: z.string().min(1, "Required"),
   submission_deadline: z.string().min(1, "Required"),
   project_manager_id: z.string().optional(),
+  company_profile: z.enum(["listed", "private"], {
+    message: "Select a company profile",
+  }),
+  sector: z.enum(["bank", "insurance", "general", "reit", "finance_co"], {
+    message: "Select a sector",
+  }),
+  is_shariah: z.boolean(),
+  has_subsidiaries: z.boolean(),
+  has_sukuk: z.boolean(),
 })
 type EditCycleForm = z.infer<typeof editCycleSchema>
 
@@ -98,6 +113,11 @@ export default function CycleDetailPage({
         end_date: cycleData.end_date?.slice(0, 10) ?? "",
         submission_deadline: cycleData.submission_deadline?.slice(0, 10) ?? "",
         project_manager_id: cycleData.project_manager_id ?? "",
+        company_profile: cycleData.company_profile ?? undefined,
+        sector: cycleData.sector ?? undefined,
+        is_shariah: cycleData.is_shariah ?? false,
+        has_subsidiaries: cycleData.has_subsidiaries ?? false,
+        has_sukuk: cycleData.has_sukuk ?? false,
       })
     }
   }, [editOpen, cycleData, editReset])
@@ -112,6 +132,11 @@ export default function CycleDetailPage({
         end_date: formData.end_date,
         submission_deadline: formData.submission_deadline,
         project_manager_id: (formData.project_manager_id && formData.project_manager_id !== "__none__") ? formData.project_manager_id : undefined,
+        company_profile: formData.company_profile,
+        sector: formData.sector,
+        is_shariah: formData.is_shariah,
+        has_subsidiaries: formData.has_subsidiaries,
+        has_sukuk: formData.has_sukuk,
       },
     })
     setEditOpen(false)
@@ -465,6 +490,11 @@ export default function CycleDetailPage({
         </div>
       )}
 
+      {/* ── Report Sections ── */}
+      {cycle && (
+        <ReportSectionsCard cycle={cycle} onSetProfile={() => setEditOpen(true)} />
+      )}
+
       {/* ── Edit Cycle Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -494,6 +524,90 @@ export default function CycleDetailPage({
               <Label>Submission Deadline</Label>
               <Input type="date" {...editRegister("submission_deadline")} />
             </div>
+
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                Company Profile
+              </p>
+              <div className="space-y-2">
+                <Label>Company Profile <span className="text-destructive">*</span></Label>
+                <Controller
+                  name="company_profile"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Select value={field.value || ""} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a company profile" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(COMPANY_PROFILES).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Sector <span className="text-destructive">*</span></Label>
+                <Controller
+                  name="sector"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Select value={field.value || ""} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a sector" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(SECTORS).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Controller
+                  name="is_shariah"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Checkbox
+                      id="edit_is_shariah"
+                      checked={!!field.value}
+                      onCheckedChange={field.onChange}
+                      label="Shariah-compliant"
+                    />
+                  )}
+                />
+                <Controller
+                  name="has_subsidiaries"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Checkbox
+                      id="edit_has_subsidiaries"
+                      checked={!!field.value}
+                      onCheckedChange={field.onChange}
+                      label="Has subsidiaries"
+                    />
+                  )}
+                />
+                <Controller
+                  name="has_sukuk"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Checkbox
+                      id="edit_has_sukuk"
+                      checked={!!field.value}
+                      onCheckedChange={field.onChange}
+                      label="Has sukuk"
+                    />
+                  )}
+                />
+              </div>
+            </div>
+
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setEditOpen(false)}>
                 Cancel
@@ -542,6 +656,187 @@ export default function CycleDetailPage({
           />
         )}
       </div>
+    </div>
+  )
+}
+
+// Small pill badge for section mode / layer / status — uses the full Tailwind
+// class fragments stored in the constants maps.
+function SectionBadge({ label, color }: { label: string; color: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+        color
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
+// "Report Sections" panel — three states: profile incomplete (A), profile set
+// but not resolved (B), resolved (C). Read-only at this stage.
+function ReportSectionsCard({
+  cycle,
+  onSetProfile,
+}: {
+  cycle: Cycle
+  onSetProfile: () => void
+}) {
+  const profileSet = !!cycle.company_profile && !!cycle.sector
+  const { data: sections, isLoading } = useCycleSections(profileSet ? cycle.id : "")
+  const resolveMutation = useResolveSections(cycle.id)
+
+  const header = (
+    <div>
+      <h2 className="font-semibold text-base flex items-center gap-2">
+        <Layers className="h-4 w-4 text-muted-foreground" />
+        Report Sections
+      </h2>
+      <p className="text-xs text-muted-foreground mt-0.5">
+        The sections this cycle&apos;s annual report will contain.
+      </p>
+    </div>
+  )
+
+  const list = [...(sections ?? [])].sort((a, b) => a.display_order - b.display_order)
+
+  const sectionColumns: Column<CycleReportSection>[] = [
+    {
+      key: "order",
+      header: "#",
+      cell: (row) => (
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {row.display_order}
+        </span>
+      ),
+    },
+    {
+      key: "title",
+      header: "Section",
+      cell: (row) => <span className="text-sm font-medium">{row.title}</span>,
+    },
+    {
+      key: "layer",
+      header: "Layer",
+      cell: (row) => (
+        <SectionBadge
+          label={SECTION_LAYERS[row.layer]?.label ?? row.layer}
+          color={SECTION_LAYERS[row.layer]?.color ?? ""}
+        />
+      ),
+    },
+    {
+      key: "mode",
+      header: "Mode",
+      cell: (row) => (
+        <SectionBadge
+          label={SECTION_MODES[row.mode]?.label ?? row.mode}
+          color={SECTION_MODES[row.mode]?.color ?? ""}
+        />
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (row) => (
+        <SectionBadge
+          label={SECTION_STATUSES[row.status]?.label ?? row.status}
+          color={SECTION_STATUSES[row.status]?.color ?? ""}
+        />
+      ),
+    },
+  ]
+
+  // ── State A — profile incomplete ──
+  if (!profileSet) {
+    return (
+      <div className="rounded-xl border bg-card p-6 space-y-5">
+        {header}
+        <EmptyState
+          icon={Building2}
+          title="Set the company profile first"
+          description="Set this cycle's company profile to generate the report's section list."
+          action={
+            <Button variant="outline" onClick={onSetProfile}>
+              <Pencil className="mr-2 h-4 w-4" /> Set Company Profile
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
+
+  // ── State B — profile set, not yet resolved ──
+  if (!isLoading && list.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card p-6 space-y-5">
+        {header}
+        <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
+          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>
+            Resolve the section list from this cycle&apos;s profile. Required
+            sections are added automatically; you can review them below.
+          </span>
+        </div>
+        <Button
+          onClick={() => resolveMutation.mutate()}
+          disabled={resolveMutation.isPending}
+        >
+          <Sparkles className="mr-2 h-4 w-4" />
+          {resolveMutation.isPending ? "Resolving…" : "Resolve Sections"}
+        </Button>
+      </div>
+    )
+  }
+
+  // ── State C — resolved ──
+  const counts = { generate: 0, attach: 0, auto: 0 }
+  list.forEach((s) => {
+    if (s.mode in counts) counts[s.mode] += 1
+  })
+
+  return (
+    <div className="rounded-xl border bg-card p-6 space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        {header}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => resolveMutation.mutate()}
+          disabled={resolveMutation.isPending}
+        >
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          {resolveMutation.isPending ? "Resolving…" : "Re-resolve from current profile"}
+        </Button>
+      </div>
+
+      {!isLoading && list.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{list.length} sections</span>
+          <span className="text-muted-foreground">·</span>
+          <SectionBadge
+            label={`${counts.generate} ${SECTION_MODES.generate.label}`}
+            color={SECTION_MODES.generate.color}
+          />
+          <SectionBadge
+            label={`${counts.attach} ${SECTION_MODES.attach.label}`}
+            color={SECTION_MODES.attach.color}
+          />
+          <SectionBadge
+            label={`${counts.auto} ${SECTION_MODES.auto.label}`}
+            color={SECTION_MODES.auto.color}
+          />
+        </div>
+      )}
+
+      <DataTable
+        columns={sectionColumns}
+        data={list}
+        isLoading={isLoading}
+        emptyMessage="No sections resolved yet."
+      />
     </div>
   )
 }
