@@ -1,14 +1,27 @@
 "use client"
 
+import { useState } from "react"
+import { toast } from "sonner"
 import { CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
+import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { Sparkles, Upload, Settings, FileText, MousePointerClick } from "lucide-react"
+import {
+  CheckCircle2,
+  FileText,
+  MousePointerClick,
+  Settings,
+  Sparkles,
+} from "lucide-react"
+import { AttachSection } from "@/components/report/AttachSection"
+import { GenerateSection } from "@/components/report/GenerateSection"
 
 // Shared header for every mode sub-component — title, layer chip, mode badge,
-// and the section's content source.
-function SectionHeader({ section }: { section: CycleReportSection }) {
+// and the section's content source. Exported so other mode panels (e.g.
+// AttachSection in its own file) can render the same header.
+export function SectionHeader({ section }: { section: CycleReportSection }) {
   const mode = SECTION_MODES[section.mode]
   const layer = SECTION_LAYERS[section.layer]
   return (
@@ -59,48 +72,135 @@ function Placeholder({
   )
 }
 
-// Stage 7 replaces this body with the chat-and-preview workspace.
-function GenerateSection({ section }: { section: CycleReportSection }) {
+// System-rendered sections (cover, table of contents). The PM doesn't write
+// or lock content for these — they're composed at assembly time from cycle
+// metadata and the ordered section list. The TOC, for example, is always
+// generated from the live section order; the cover from the cycle name +
+// fiscal year + headline. No lock or input is needed.
+//
+// For PMs who want to inject custom text into a system section (e.g. a custom
+// cover blurb), we offer a notes textarea that persists locally per cycle +
+// section. Backend persistence is a future enhancement; the note shown here is
+// a placeholder so the PM has somewhere to capture intent.
+function AutoSection({
+  section,
+  cycleId,
+}: {
+  section: CycleReportSection
+  cycleId: string
+}) {
+  const storageKey = `cycle:${cycleId}:auto-note:${section.section_code}`
+  const isToc =
+    /^(toc|table[-_ ]?of[-_ ]?contents)$/i.test(section.section_code) ||
+    /table of contents/i.test(section.title)
+
+  const [notes, setNotes] = useState("")
+  const [savedNotes, setSavedNotes] = useState("")
+  const [hydrated, setHydrated] = useState(false)
+
+  // Hydrate from localStorage on first render — kept out of useEffect to avoid
+  // SSR mismatch warnings; we render the textarea empty first and fill it in.
+  if (typeof window !== "undefined" && !hydrated) {
+    setHydrated(true)
+    const stored = window.localStorage.getItem(storageKey) ?? ""
+    setNotes(stored)
+    setSavedNotes(stored)
+  }
+
+  const dirty = notes !== savedNotes
+
+  const save = () => {
+    try {
+      window.localStorage.setItem(storageKey, notes)
+      setSavedNotes(notes)
+      toast.success("Notes saved (in this browser)")
+    } catch {
+      toast.error("Couldn't save notes — browser storage unavailable")
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <SectionHeader section={section} />
-      <Placeholder
-        icon={Sparkles}
-        message="This section will be written by the narrative agent. Drafting becomes available once the report plan is built."
-      />
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl px-6 py-6 space-y-5">
+          <div className="flex flex-col items-center justify-center text-center py-8 px-4">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
+              <Settings className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium mb-1.5">
+              Rendered automatically at assembly
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-md">
+              {isToc
+                ? "The table of contents is generated from the ordered list of sections each time the report is assembled. No action needed here."
+                : "This section is composed from cycle metadata (name, fiscal year, headline) at assembly time. No action needed — it always counts as ready."}
+            </p>
+          </div>
+
+          {/* Custom notes — local-only for v1. Useful for capturing intent
+              like "use the brand-team supplied cover image" or specific
+              copy that a future backend hook can pick up. */}
+          <div className="rounded-lg border bg-card p-4 space-y-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Optional notes
+              </p>
+              <span className="text-[11px] text-muted-foreground">
+                Saved in this browser
+              </span>
+            </div>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder={
+                isToc
+                  ? "Notes for the TOC (e.g. any special ordering instructions)…"
+                  : "Notes for this system section (e.g. cover image to use, headline tweaks)…"
+              }
+              rows={4}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground italic">
+                Notes are not yet wired to the assembled report — backend
+                support coming.
+              </p>
+              <Button size="sm" onClick={save} disabled={!dirty}>
+                Save notes
+              </Button>
+            </div>
+          </div>
+
+          {/* Always-ready badge — auto sections need no lock. */}
+          <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/50 dark:bg-green-950/25">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
+              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">
+                Always ready
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                System sections don&apos;t need to be locked — they&apos;re
+                always included in the assembled report.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
 
-// Stage 3 replaces this body with the upload-and-verify panel.
-function AttachSection({ section }: { section: CycleReportSection }) {
-  return (
-    <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
-      <Placeholder
-        icon={Upload}
-        message="This section is filled by uploading its source document. Upload becomes available next."
-      />
-    </div>
-  )
-}
-
-// Stays a placeholder permanently — rendered automatically at report time.
-function AutoSection({ section }: { section: CycleReportSection }) {
-  return (
-    <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
-      <Placeholder
-        icon={Settings}
-        message="Generated automatically when the report is rendered — no input needed."
-      />
-    </div>
-  )
-}
-
-// The architectural seam: switches on section.mode. Stages 3 & 7 swap two
-// sub-component bodies without touching this switch.
-export function SectionDetail({ section }: { section: CycleReportSection | null }) {
+// The architectural seam: switches on section.mode. Stage 7 will swap the
+// generate body without touching this switch.
+export function SectionDetail({
+  section,
+  cycleId,
+}: {
+  section: CycleReportSection | null
+  cycleId: string
+}) {
   if (!section) {
     return (
       <div className="flex flex-1 items-center justify-center">
@@ -115,11 +215,11 @@ export function SectionDetail({ section }: { section: CycleReportSection | null 
 
   switch (section.mode) {
     case "generate":
-      return <GenerateSection section={section} />
+      return <GenerateSection section={section} cycleId={cycleId} />
     case "attach":
-      return <AttachSection section={section} />
+      return <AttachSection section={section} cycleId={cycleId} />
     case "auto":
-      return <AutoSection section={section} />
+      return <AutoSection section={section} cycleId={cycleId} />
     default:
       return (
         <div className="flex flex-1 flex-col min-h-0">

@@ -113,14 +113,29 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Normalize error — supports both {"message":"..."} and FastAPI {"detail":"..."} formats
+    // Normalize error — supports both {"message":"..."} and FastAPI {"detail":"..."} formats.
+    // FastAPI returns detail as an array of { type, loc, msg, input } for 422s; flatten
+    // to a string BEFORE the `||` chain so the array never escapes as a message (React
+    // would crash trying to render an object child).
     const responseData = error.response?.data
+    const detail = responseData?.detail
+    const detailMessage = Array.isArray(detail)
+      ? detail
+          .map((d: { msg?: string; loc?: unknown[] }) =>
+            d?.msg
+              ? Array.isArray(d.loc) && d.loc.length > 0
+                ? `${d.loc.join(".")}: ${d.msg}`
+                : d.msg
+              : null,
+          )
+          .filter(Boolean)
+          .join("; ")
+      : typeof detail === "string"
+        ? detail
+        : null
     const backendMessage =
       responseData?.message ||
-      responseData?.detail ||
-      (Array.isArray(responseData?.detail)
-        ? responseData.detail.map((d: { msg: string }) => d.msg).join(", ")
-        : undefined) ||
+      detailMessage ||
       responseData?.error ||
       null
 

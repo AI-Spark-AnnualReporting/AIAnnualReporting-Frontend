@@ -13,7 +13,8 @@ import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
-import { ArrowLeft, Lock, ShieldAlert } from "lucide-react"
+import { AssembleEntry } from "@/components/report/AssembleEntry"
+import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
 
 export default function ReportBuilderPage({
   params,
@@ -91,7 +92,11 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
   const total = sections.length
-  const locked = sections.filter((s) => s.status === "locked").length
+  // Auto sections are system-rendered at assembly time — count them as always
+  // ready so they don't block the progress bar from reaching 100%.
+  const locked = sections.filter(
+    (s) => s.status === "locked" || s.mode === "auto",
+  ).length
   const lockedPct = total > 0 ? Math.round((locked / total) * 100) : 0
   const selected =
     sections.find((s) => s.section_code === selectedCode) ?? null
@@ -112,12 +117,13 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
             Report Builder{cycleName ? ` — ${cycleName}` : ""}
           </h1>
         </div>
-        {readiness && (
-          <span className="text-xs text-muted-foreground shrink-0">
-            {readiness.departments_approved} of {readiness.departments_total}{" "}
-            departments approved
-          </span>
-        )}
+        <Link href={`/pm/cycles/${cycleId}/plan`}>
+          <Button variant="outline" size="sm" className="h-8 shrink-0">
+            <ClipboardList className="h-3.5 w-3.5 mr-1.5" />
+            Review Plan
+          </Button>
+        </Link>
+        <AssembleEntry cycleId={cycleId} />
       </div>
 
       {/* Body */}
@@ -144,7 +150,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
         {/* Right — mode-appropriate detail */}
         <div className="flex-1 flex flex-col min-h-0">
-          <SectionDetail section={selected} />
+          <SectionDetail section={selected} cycleId={cycleId} />
         </div>
       </div>
     </div>

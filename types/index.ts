@@ -88,6 +88,15 @@ export interface Cycle {
   has_sukuk: boolean
 }
 
+// Source document attached to an attach-mode section.
+export interface AttachmentInfo {
+  document_id: string
+  filename: string
+  file_type: string
+  file_size: number
+  uploaded_at: string
+}
+
 // A resolved report section, enriched via the section-definitions join.
 export interface CycleReportSection {
   section_code: string
@@ -98,6 +107,13 @@ export interface CycleReportSection {
   status: SectionStatus
   display_order: number
   ai_allowed: boolean
+  // Attach-mode state. Populated for attach sections; benign defaults elsewhere.
+  verified: boolean
+  locked_at: string | null
+  attachment: AttachmentInfo | null
+  // Generate-mode content. Populated after the LLM pass for generate sections;
+  // null on pending generate sections and irrelevant for attach/auto.
+  content: string | null
 }
 
 export interface ResolveSectionsResponse {
@@ -105,6 +121,79 @@ export interface ResolveSectionsResponse {
   cycle_id: string
   sections_created: number
   sections: CycleReportSection[]
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Stage 6 — Plan Review Screen
+// The AI-generated plan: a headline, themes, and per-section feeders.
+// `feeders` is the routing map the PM reviews and edits.
+// ──────────────────────────────────────────────────────────────────────
+
+export interface ReportTheme {
+  title: string
+  description: string
+}
+
+export interface FeederMapEntry {
+  section_code: string
+  title: string
+  departments: string[] // department codes
+}
+
+export interface PlanResponse {
+  cycle_id: string
+  headline: string | null
+  themes: ReportTheme[]
+  plan_generated_at: string | null
+  feeders: FeederMapEntry[]
+}
+
+export interface AvailableOptionalSection {
+  section_code: string
+  title: string
+  layer: SectionLayer
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Stage 8 — Assemble & Final Report
+// ──────────────────────────────────────────────────────────────────────
+
+export interface AssemblyReadiness {
+  cycle_id: string
+  total: number
+  locked: number
+  can_assemble: boolean
+  unlocked_sections: Array<{
+    section_code: string
+    title: string
+    layer: SectionLayer
+  }>
+  has_final_report: boolean
+  final_report_generated_at: string | null
+}
+
+export interface FinalReportSection {
+  type: "narrative" | "attachment" | "auto"
+  section_code: string
+  title: string
+  order: number
+  content?: string
+  document?: {
+    document_id: string
+    filename: string
+    file_type: string
+    file_size?: number
+  }
+}
+
+export interface FinalReport {
+  cycle_id: string
+  headline: string | null
+  executive_summary: string | null
+  word_count: number
+  status: string
+  generated_at: string | null
+  sections: FinalReportSection[]
 }
 
 // Readiness of a cycle to enter the Report Builder.

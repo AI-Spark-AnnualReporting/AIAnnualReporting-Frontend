@@ -598,7 +598,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
           {readiness?.can_build ? (
-            <Link href={`/pm/cycles/${id}/build`}>
+            <Link href={`/pm/cycles/${id}/plan`}>
               <Button>
                 Open Report Builder
                 <ArrowRight className="ml-2 h-4 w-4" />
