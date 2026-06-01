@@ -127,7 +127,10 @@ function SectionTile({
 
   const mode = SECTION_MODES[section.mode]
   const layer = SECTION_LAYERS[section.layer]
-  const needsSource = section.mode === "generate" && feederCodes.length === 0
+  const needsSource =
+    section.mode === "generate" &&
+    section.ai_allowed &&
+    feederCodes.length === 0
 
   return (
     <div
@@ -181,6 +184,11 @@ function SectionTile({
             >
               {mode?.label ?? section.mode}
             </span>
+            {!section.ai_allowed && (
+              <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                Manual
+              </span>
+            )}
           </div>
           <FeederArea
             cycleId={cycleId}
@@ -213,6 +221,15 @@ function FeederArea({
   deptByCode: Map<string, string>
   readOnly?: boolean
 }) {
+  if (!section.ai_allowed) {
+    return (
+      <p className="text-xs text-muted-foreground italic">
+        {section.content_source === "narrative"
+          ? "Manual — written by the PM"
+          : "Manual — file uploaded by the PM"}
+      </p>
+    )
+  }
   if (section.mode === "attach") {
     return <p className="text-xs text-muted-foreground italic">Uploaded separately</p>
   }

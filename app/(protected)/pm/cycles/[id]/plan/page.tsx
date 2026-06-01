@@ -487,6 +487,8 @@ function StartBuildingAction({
 
   const eligibleToGenerate = sections.filter((s) => {
     if (s.mode !== "generate") return false
+    // Never invoke the AI for manual sections — the PM writes those directly.
+    if (!s.ai_allowed) return false
     if (s.status !== "pending") return false
     const feeders =
       plan.feeders?.find((f) => f.section_code === s.section_code)
@@ -680,8 +682,12 @@ function countSectionsNeedingFeeders(
   sections: CycleReportSection[],
 ): number {
   if (!feeders) return 0
+  // Manual sections (`ai_allowed = false`) are written by the PM directly —
+  // they never need a department source, so don't count them as blockers.
   const generateCodes = new Set(
-    sections.filter((s) => s.mode === "generate").map((s) => s.section_code),
+    sections
+      .filter((s) => s.mode === "generate" && s.ai_allowed)
+      .map((s) => s.section_code),
   )
   return feeders.filter(
     (f) => generateCodes.has(f.section_code) && f.departments.length === 0,
