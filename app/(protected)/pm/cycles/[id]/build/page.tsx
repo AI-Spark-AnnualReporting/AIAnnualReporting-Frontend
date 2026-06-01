@@ -15,6 +15,7 @@ import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
 import { AssembleEntry } from "@/components/report/AssembleEntry"
 import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
+import { isTableOfContentsSection } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
   params,
@@ -38,7 +39,9 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const [selectedCode, setSelectedCode] = useState<string | null>(null)
 
   const readiness = readinessQuery.data
-  const sections = sectionsQuery.data ?? []
+  const sections = (sectionsQuery.data ?? []).filter(
+    (s) => !isTableOfContentsSection(s),
+  )
 
   // Give the builder horizontal room — collapse the app nav, restore on leave.
   useEffect(() => {

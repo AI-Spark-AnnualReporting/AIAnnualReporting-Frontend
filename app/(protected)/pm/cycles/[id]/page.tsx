@@ -474,8 +474,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           )}
           {row.status === "approved" && (
             <Link href={`/pm/sessions/${row.session_id}`}>
-              <Button size="sm" variant="outline" className="text-green-600 border-green-200">
-                <CheckCircle2 className="h-3 w-3 mr-1" /> Approved
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-green-700 border-green-200 hover:bg-green-50"
+                title="Open the approved submission"
+              >
+                <Eye className="h-3 w-3 mr-1" /> View Submission
               </Button>
             </Link>
           )}
@@ -548,21 +553,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   Remind All
                 </Button>
               )}
-              <Button
-                variant="outline"
-                onClick={openReportDialog}
-                disabled={generatingReport || departments.length === 0 || !hasActiveWork}
-                title={
-                  !hasActiveWork
-                    ? "Available once at least one department starts working"
-                    : undefined
-                }
-              >
-                {generatingReport
-                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  : <FileText className="mr-2 h-4 w-4" />}
-                Generate Content
-              </Button>
               {reportResult && (
                 <Button onClick={downloadReport}>
                   <Download className="mr-2 h-4 w-4" /> Download
@@ -597,32 +587,49 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               )}
             </div>
           </div>
-          {readiness?.can_build ? (
-            <Link href={`/pm/cycles/${id}/plan`}>
-              <Button>
+          {(() => {
+            const sectionsReady = !!readiness?.can_build
+            const total = readiness?.departments_total ?? 0
+            const approved = readiness?.departments_approved ?? 0
+            const allApproved = sectionsReady && total > 0 && approved === total
+
+            if (allApproved) {
+              return (
+                <Link href={`/pm/cycles/${id}/plan`}>
+                  <Button>
+                    Open Report Builder
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+              )
+            }
+
+            const tooltip = !sectionsReady
+              ? "Report sections haven't been set up for this cycle yet"
+              : total === 0
+                ? "No departments assigned to this cycle yet"
+                : `Available once all departments are approved (${approved} of ${total} so far)`
+
+            return (
+              <Button disabled title={tooltip}>
                 Open Report Builder
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
-            </Link>
-          ) : (
-            <Button
-              disabled
-              title="Report sections haven't been set up for this cycle yet"
-            >
-              Open Report Builder
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          )}
+            )
+          })()}
         </div>
-        {readiness?.can_build && readiness.departments_approved === 0 && (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-            <span>
-              No department content is approved yet — narrative sections will have
-              nothing to draft from until you approve submissions.
-            </span>
-          </div>
-        )}
+        {readiness?.can_build &&
+          (readiness.departments_total ?? 0) > 0 &&
+          readiness.departments_approved < readiness.departments_total && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>
+                {readiness.departments_approved === 0
+                  ? "No department content is approved yet — approve all department submissions to open the Report Builder."
+                  : `${readiness.departments_approved} of ${readiness.departments_total} departments approved — the Report Builder unlocks once every department is approved.`}
+              </span>
+            </div>
+          )}
       </div>
 
       {/* ── Workflow Pipeline ── */}
@@ -710,15 +717,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               Review and approve the submissions, then generate the final consolidated report.
             </p>
           </div>
-          <Button
-            size="sm" onClick={openReportDialog} disabled={generatingReport}
-            className="ml-auto shrink-0 bg-green-600 hover:bg-green-700"
-          >
-            {generatingReport
-              ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              : <FileText className="h-4 w-4 mr-1" />}
-            Generate Content
-          </Button>
         </div>
       )}
 
@@ -954,17 +952,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               {approved.map((d) => d.department_name).join(", ")}
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={openReportDialog}
-            disabled={generatingReport}
-            className="shrink-0 bg-green-600 hover:bg-green-700"
-          >
-            {generatingReport
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-              : <FileText className="h-3.5 w-3.5 mr-1" />}
-            Generate Content
-          </Button>
         </div>
       )}
 

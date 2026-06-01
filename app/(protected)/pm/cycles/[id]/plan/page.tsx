@@ -8,8 +8,12 @@ import { toast } from "sonner"
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
+  Layers,
   Loader2,
+  Lock,
+  Palette,
   Sparkles,
 } from "lucide-react"
 import { RouteGuard } from "@/components/auth/RouteGuard"
@@ -25,8 +29,8 @@ import {
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
-import { HeadlineBlock } from "@/components/report/HeadlineBlock"
-import { PlanSectionList } from "@/components/report/PlanSectionList"
+import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
+import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
 import { ThemeEditor } from "@/components/report/ThemeEditor"
 import {
   useBuildPlan,
@@ -36,11 +40,15 @@ import {
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
+import { isTableOfContentsSection } from "@/lib/section-filters"
+import { cn } from "@/lib/utils"
 import type {
   CycleReportSection,
   FeederMapEntry,
   PlanResponse,
 } from "@/types"
+
+type Step = 1 | 2
 
 export default function PlanReviewPage({
   params,
@@ -61,12 +69,12 @@ interface PMDashboardData {
 }
 
 function PlanShell({ cycleId }: { cycleId: string }) {
+  const [step, setStep] = useState<Step>(1)
   const planQuery = usePlan(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as PMDashboardData | undefined
 
-  // Builder shell collapses the app nav for room — mirror that here.
   useEffect(() => {
     window.dispatchEvent(
       new CustomEvent("sidebar-set-mode", { detail: { mode: "hidden" } }),
@@ -86,87 +94,365 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     department_name: d.department_name,
   }))
 
-  // No plan yet — either a 404 from the backend or a 200 with null timestamp.
-  // Either way drive the same "Generate Plan" prompt.
   const plan = planQuery.data
   const planMissing =
     !!planQuery.error || !plan || plan.plan_generated_at === null
 
   if (planMissing) {
     return (
-      <PlanLayout cycleId={cycleId} cycleName={cycleName} header={null}>
+      <PlanShellChrome cycleId={cycleId} cycleName={cycleName} toolbarRight={null}>
         <EmptyPlan cycleId={cycleId} />
-      </PlanLayout>
+      </PlanShellChrome>
     )
   }
 
-  const sections = sectionsQuery.data ?? []
+  const sections = [...(sectionsQuery.data ?? [])]
+    .filter((s) => !isTableOfContentsSection(s))
+    .sort((a, b) => a.display_order - b.display_order)
+  const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
+  const canLockSections = needsSource === 0 && sections.length > 0
+
+  const toolbarRight = (
+    <div className="flex items-center gap-2">
+      <RegeneratePlanButton cycleId={cycleId} />
+    </div>
+  )
+
   return (
-    <PlanLayout
+    <PlanShellChrome
       cycleId={cycleId}
       cycleName={cycleName}
-      header={
-        <StartBuildingHeader
-          cycleId={cycleId}
-          plan={plan}
-          sections={sections}
-        />
-      }
+      toolbarRight={toolbarRight}
     >
-      <div className="mx-auto max-w-4xl px-6 py-6 space-y-8">
-        <HeadlineBlock cycleId={cycleId} headline={plan.headline} />
-        <ThemeEditor cycleId={cycleId} themes={plan.themes ?? []} />
-        <PlanSectionList
-          cycleId={cycleId}
-          sections={[...sections].sort(
-            (a, b) => a.display_order - b.display_order,
+      <div className="mx-auto w-full max-w-6xl px-6 pt-8 pb-0 flex flex-col flex-1 min-h-0">
+        <ReportTitleBlock cycleName={cycleName} />
+
+        <div className="mt-7">
+          <StepIndicator
+            step={step}
+            canAdvance={canLockSections}
+            onStep={(s) => {
+              // Allow free backward nav; gate forward.
+              if (s === 1) setStep(1)
+              else if (s === 2 && canLockSections) setStep(2)
+            }}
+          />
+        </div>
+
+        <div className="mt-6 flex-1 min-h-0 flex flex-col">
+          {step === 1 ? (
+            <SectionsStep
+              cycleId={cycleId}
+              sections={sections}
+              feeders={plan.feeders ?? []}
+              departments={departments}
+              needsSource={needsSource}
+              onLock={() => setStep(2)}
+            />
+          ) : (
+            <ThemesStep
+              cycleId={cycleId}
+              plan={plan}
+              sections={sections}
+              onBack={() => setStep(1)}
+            />
           )}
-          feeders={plan.feeders ?? []}
-          departments={departments}
-        />
-        <AddSectionPicker cycleId={cycleId} />
+        </div>
       </div>
-    </PlanLayout>
+    </PlanShellChrome>
   )
 }
 
-// Shared chrome — back button + title + a right-side slot.
-function PlanLayout({
+// ─────────────────────────── Chrome / Layout ───────────────────────────
+
+function PlanShellChrome({
   cycleId,
   cycleName,
-  header,
+  toolbarRight,
   children,
 }: {
   cycleId: string
   cycleName: string | undefined
-  header: React.ReactNode
+  toolbarRight: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-background">
-      <div className="flex items-center gap-3 px-5 py-3 border-b bg-card shrink-0">
+    <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-muted/30">
+      <header className="flex items-center gap-3 px-6 py-3 border-b bg-card shrink-0">
         <Link href={`/pm/cycles/${cycleId}`}>
           <Button variant="ghost" size="icon" className="h-8 w-8">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <div className="flex-1 min-w-0">
-          <h1 className="font-semibold text-sm truncate">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium">
             Review the plan before we build
-            {cycleName ? ` — ${cycleName}` : ""}
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            Edit anything here — the build uses your revisions.
           </p>
+          <h1 className="font-semibold text-base truncate -mt-0.5">
+            {cycleName ?? "Untitled cycle"}
+          </h1>
         </div>
-        {header}
-      </div>
-      <div className="flex-1 overflow-y-auto">{children}</div>
+        <p className="hidden md:block text-xs text-muted-foreground max-w-xs text-right">
+          Edit anything here — the build uses your revisions.
+        </p>
+        {toolbarRight}
+      </header>
+
+      <main className="flex-1 min-h-0 flex flex-col">{children}</main>
     </div>
   )
 }
 
-function StartBuildingHeader({
+// ─────────────────────────── Report Title ───────────────────────────
+
+function ReportTitleBlock({ cycleName }: { cycleName: string | undefined }) {
+  return (
+    <section className="space-y-2">
+      <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground font-medium">
+        Report title
+      </p>
+      <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-[1.1] text-foreground">
+        {cycleName ?? "Untitled cycle"}
+      </h2>
+    </section>
+  )
+}
+
+// ─────────────────────────── Step Indicator ───────────────────────────
+
+function StepIndicator({
+  step,
+  canAdvance,
+  onStep,
+}: {
+  step: Step
+  canAdvance: boolean
+  onStep: (s: Step) => void
+}) {
+  const step1State: BubbleState = step === 1 ? "active" : "complete"
+  const step2State: BubbleState =
+    step === 2 ? "active" : canAdvance ? "available" : "locked"
+
+  return (
+    <div className="rounded-2xl border bg-card px-5 py-4 shadow-sm">
+      <ol className="flex items-center gap-2">
+        <StepBubble
+          n={1}
+          icon={Layers}
+          label="Sections"
+          sublabel="Review, source and lock"
+          state={step1State}
+          onClick={() => onStep(1)}
+        />
+        <StepConnector active={step === 2 || canAdvance} />
+        <StepBubble
+          n={2}
+          icon={Palette}
+          label="Themes"
+          sublabel="Confirm the narrative"
+          state={step2State}
+          onClick={() => onStep(2)}
+        />
+      </ol>
+    </div>
+  )
+}
+
+type BubbleState = "active" | "complete" | "available" | "locked"
+
+function StepBubble({
+  n,
+  icon: Icon,
+  label,
+  sublabel,
+  state,
+  onClick,
+}: {
+  n: number
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  sublabel: string
+  state: BubbleState
+  onClick: () => void
+}) {
+  const isLocked = state === "locked"
+  return (
+    <li className="flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={isLocked}
+        className={cn(
+          "w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+          state === "active" && "bg-primary/5",
+          state === "available" && "hover:bg-accent",
+          state === "complete" && "hover:bg-accent",
+          isLocked && "opacity-60 cursor-not-allowed",
+        )}
+      >
+        <span
+          className={cn(
+            "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all",
+            state === "active" &&
+              "bg-primary text-primary-foreground shadow-[0_0_0_4px_hsl(var(--primary)/0.12)]",
+            state === "complete" &&
+              "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+            state === "available" &&
+              "bg-muted text-foreground border",
+            isLocked && "bg-muted text-muted-foreground border",
+          )}
+        >
+          {state === "complete" ? (
+            <Check className="h-4 w-4" strokeWidth={3} />
+          ) : isLocked ? (
+            <Lock className="h-3.5 w-3.5" />
+          ) : (
+            <span className="tabular-nums">{n}</span>
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <Icon
+              className={cn(
+                "h-3.5 w-3.5 shrink-0",
+                state === "active"
+                  ? "text-primary"
+                  : "text-muted-foreground",
+              )}
+            />
+            <span
+              className={cn(
+                "text-sm font-semibold truncate",
+                state === "active" ? "text-foreground" : "text-foreground/90",
+              )}
+            >
+              {label}
+            </span>
+          </span>
+          <span className="block text-[11px] text-muted-foreground truncate">
+            {sublabel}
+          </span>
+        </span>
+      </button>
+    </li>
+  )
+}
+
+function StepConnector({ active }: { active: boolean }) {
+  return (
+    <li
+      aria-hidden
+      className={cn(
+        "h-px flex-1 max-w-16 transition-colors",
+        active ? "bg-primary/30" : "bg-border",
+      )}
+    />
+  )
+}
+
+// ─────────────────────────── Step 1: Sections ───────────────────────────
+
+function SectionsStep({
+  cycleId,
+  sections,
+  feeders,
+  departments,
+  needsSource,
+  onLock,
+}: {
+  cycleId: string
+  sections: CycleReportSection[]
+  feeders: FeederMapEntry[]
+  departments: Array<{ department_code: string; department_name: string }>
+  needsSource: number
+  onLock: () => void
+}) {
+  const canLock = needsSource === 0 && sections.length > 0
+
+  return (
+    <section className="flex flex-col flex-1 min-h-0">
+      <div className="flex items-end justify-between gap-4 mb-4">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">
+            Report sections
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Drag to reorder, assign a department source to each generated section, and add optional sections.
+          </p>
+        </div>
+        <div className="text-xs text-muted-foreground tabular-nums shrink-0">
+          {sections.length} total
+          {needsSource > 0 && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              {needsSource} need a source
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-2">
+        <PlanSectionGrid
+          cycleId={cycleId}
+          sections={sections}
+          feeders={feeders}
+          departments={departments}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-border/80">
+        <AddSectionPicker cycleId={cycleId} />
+        <div className="flex items-center gap-3">
+          {!canLock && needsSource > 0 && (
+            <span className="text-xs text-amber-700 dark:text-amber-400 hidden sm:block">
+              Assign a source to every flagged section to continue.
+            </span>
+          )}
+          <Button onClick={onLock} disabled={!canLock} size="sm">
+            <Lock className="h-3.5 w-3.5 mr-1.5" />
+            Lock sections
+            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ─────────────────────────── Step 2: Themes ───────────────────────────
+
+function ThemesStep({
+  cycleId,
+  plan,
+  sections,
+  onBack,
+}: {
+  cycleId: string
+  plan: PlanResponse
+  sections: CycleReportSection[]
+  onBack: () => void
+}) {
+  return (
+    <section className="flex flex-col flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-2">
+        <div className="rounded-2xl border bg-card p-5">
+          <ThemeEditor cycleId={cycleId} themes={plan.themes ?? []} />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-border/80">
+        <Button variant="outline" size="sm" onClick={onBack}>
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+          Back to sections
+        </Button>
+        <StartBuildingAction cycleId={cycleId} plan={plan} sections={sections} />
+      </div>
+    </section>
+  )
+}
+
+// ─────────────────────────── Start Building Action ───────────────────────────
+
+function StartBuildingAction({
   cycleId,
   plan,
   sections,
@@ -180,7 +466,6 @@ function StartBuildingHeader({
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
   const disabled = needsSource > 0
 
-  // Bulk-generate progress dialog state.
   const [running, setRunning] = useState(false)
   const [total, setTotal] = useState(0)
   const [completed, setCompleted] = useState(0)
@@ -200,26 +485,19 @@ function StartBuildingHeader({
     )
   }
 
-  // Find every pending narrative section that has feeders assigned — the AI
-  // can write these without further input.
   const eligibleToGenerate = sections.filter((s) => {
     if (s.mode !== "generate") return false
-    if (s.status !== "pending") return false // skip drafting/locked; don't overwrite
+    if (s.status !== "pending") return false
     const feeders =
       plan.feeders?.find((f) => f.section_code === s.section_code)
         ?.departments ?? []
     return feeders.length > 0
   })
 
-  // System (auto) sections are rendered at assembly time and don't need to be
-  // locked — the backend rejects lock attempts on them. So we no longer try
-  // to lock them here; they're treated as always-ready in the progress count.
-
   const totalWork = eligibleToGenerate.length
 
   const onStart = async () => {
     if (totalWork === 0) {
-      // Nothing to do here; just route.
       router.push(`/pm/cycles/${cycleId}/build`)
       return
     }
@@ -230,9 +508,6 @@ function StartBuildingHeader({
     setAllDone(false)
     setPendingTitles(eligibleToGenerate.map((s) => s.title))
 
-    // Fire all narrative generations in parallel. Each completion patches the
-    // sections cache so the PM sees fresh content the moment they land on
-    // /build. Auto sections need no action here.
     await Promise.allSettled(
       eligibleToGenerate.map(async (s) => {
         try {
@@ -262,12 +537,7 @@ function StartBuildingHeader({
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0
 
   return (
-    <div className="flex items-center gap-3 shrink-0">
-      {disabled && (
-        <span className="text-xs text-amber-700 dark:text-amber-400">
-          {needsSource} section{needsSource === 1 ? "" : "s"} still need a source
-        </span>
-      )}
+    <>
       <Button
         size="sm"
         disabled={disabled || running}
@@ -287,8 +557,6 @@ function StartBuildingHeader({
       <Dialog
         open={running}
         onOpenChange={(open) => {
-          // Only allow close once everything is done — otherwise generations
-          // are in-flight and we want the PM to wait or explicitly skip.
           if (!open && allDone) goToBuilder()
         }}
       >
@@ -357,9 +625,11 @@ function StartBuildingHeader({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }
+
+// ─────────────────────────── Empty Plan ───────────────────────────
 
 function EmptyPlan({ cycleId }: { cycleId: string }) {
   const build = useBuildPlan(cycleId)

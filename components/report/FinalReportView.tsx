@@ -31,7 +31,6 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
   return (
     <article className="mx-auto max-w-3xl px-6 py-10 space-y-12 print:max-w-none print:px-0 print:py-0 print:space-y-0">
       <CoverBlock report={report} cycle={cycle} />
-      <TableOfContents sections={bodySections} />
       <ExecutiveSummary content={report.executive_summary} />
       {bodySections.map((section, i) => (
         <ReportSectionRenderer
@@ -88,33 +87,6 @@ function CoverBlock({
         </p>
       )}
     </section>
-  )
-}
-
-function TableOfContents({ sections }: { sections: FinalReport["sections"] }) {
-  if (sections.length === 0) return null
-  return (
-    <nav className="print:break-before-page">
-      <h2 className="text-2xl font-semibold mb-6">Contents</h2>
-      <ol className="space-y-2.5 border-t pt-4">
-        {sections.map((s, i) => (
-          <li
-            key={s.section_code}
-            className="flex items-baseline gap-3 border-b border-dotted border-muted pb-2"
-          >
-            <span className="text-muted-foreground tabular-nums text-sm">
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <a
-              href={`#${s.section_code}`}
-              className="flex-1 hover:underline print:no-underline"
-            >
-              {s.title}
-            </a>
-          </li>
-        ))}
-      </ol>
-    </nav>
   )
 }
 
