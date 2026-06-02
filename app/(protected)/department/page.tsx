@@ -108,12 +108,21 @@ export default function DepartmentDashboard() {
     setPendingFiles([])
   }
 
-  // Documents are mandatory: upload every file, run AI answer-extraction over
-  // them, then hand the user to the session workspace to review the answers.
+  // Documents are optional. When files are attached: upload them, run AI
+  // answer-extraction, then hand the user to the session workspace to review
+  // the drafted answers. When none are attached: skip straight to the workspace
+  // — the user can upload documents from there later.
   const handleStartSession = async () => {
-    if (!startTarget || pendingFiles.length === 0) return
+    if (!startTarget) return
     const sessionId = startTarget
     const files = [...pendingFiles]
+
+    // No documents attached — uploading is optional, so go straight in.
+    if (files.length === 0) {
+      closeStartDialog()
+      router.push(`/department/sessions/${sessionId}`)
+      return
+    }
 
     // Swap the dialog for the full-screen extraction loader.
     setStartTarget(null)
@@ -371,9 +380,10 @@ export default function DepartmentDashboard() {
           <DialogHeader>
             <DialogTitle>Start Session</DialogTitle>
             <DialogDescription>
-              Upload the supporting documents for this report (financial reports, project
+              Optionally upload supporting documents for this report (financial reports, project
               summaries, etc.). Our AI will read them and draft an answer for every question —
-              you&apos;ll review and refine each one in the next step. At least one document is required.
+              you&apos;ll review and refine each one in the next step. You can also skip this and
+              upload documents later from the session workspace.
             </DialogDescription>
           </DialogHeader>
 
@@ -395,7 +405,7 @@ export default function DepartmentDashboard() {
               >
                 <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
                 <p className="text-sm font-medium">Click to attach documents</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — at least one file required</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — optional</p>
               </button>
             ) : (
               <div className="space-y-2">
@@ -437,8 +447,8 @@ export default function DepartmentDashboard() {
             <Button variant="outline" onClick={closeStartDialog}>
               Cancel
             </Button>
-            <Button onClick={handleStartSession} disabled={pendingFiles.length === 0}>
-              Extract Answers &amp; Start
+            <Button onClick={handleStartSession}>
+              {pendingFiles.length === 0 ? "Skip" : "Extract Answers & Start"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </DialogFooter>
