@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useState, useEffect, useCallback } from "react"
+import { use, useState, useEffect, useCallback, useRef } from "react"
 import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
 import { PageSkeleton } from "@/components/ui/skeletons"
@@ -9,13 +9,22 @@ import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { EmptyState } from "@/components/ui/empty-state"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Question } from "@/types"
 import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
-  PanelLeftClose, List, Ban, Info, Save, Download,
+  PanelLeftClose, List, Ban, Info, Save, Download, FileUp, X,
 } from "lucide-react"
+import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -91,6 +100,15 @@ export default function SessionWorkspacePage({
 
   // PDF download of the question list
   const [downloading, setDownloading] = useState(false)
+
+  // Upload supporting documents — same flow as the dashboard's Start Session
+  // popup: upload each file, run AI answer-extraction, then refresh the session
+  // so the drafted answers appear in the cards.
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const session = data?.session
   const questions = session?.questions || []
@@ -289,6 +307,83 @@ export default function SessionWorkspacePage({
     }
   }
 
+  // ── Upload supporting documents ──────────────────────────────────────────────
+  const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || [])
+    const valid: File[] = []
+    const invalid: string[] = []
+    for (const f of picked) {
+      if (/\.(pdf|docx?|txt)$/i.test(f.name)) valid.push(f)
+      else invalid.push(f.name)
+    }
+    if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
+    setPendingFiles((prev) => [...prev, ...valid])
+    e.target.value = ""
+  }
+
+  const removePendingFile = (idx: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const closeUploadDialog = () => {
+    setUploadOpen(false)
+    setPendingFiles([])
+  }
+
+  // Upload every file then run AI answer-extraction — identical to the dashboard
+  // Start Session flow, but stays on this page and refreshes the answers in place.
+  const handleUploadDocuments = async () => {
+    if (pendingFiles.length === 0) return
+    const files = [...pendingFiles]
+
+    // Swap the dialog for the full-screen extraction loader.
+    setUploadOpen(false)
+    setExtractionResult(null)
+    setUploading(true)
+
+    // ── Phase 1: upload documents ──────────────────────────────────────────────
+    // If the upload fails the documents never reached the server — drop the
+    // loader and reopen the dialog with the files still selected so the user can
+    // adjust and retry.
+    try {
+      for (const file of files) {
+        await departmentApi.uploadDocument(id, file)
+      }
+    } catch (err: unknown) {
+      setUploading(false)
+      setExtractionResult(null)
+      setPendingFiles(files)
+      setUploadOpen(true)
+      toast.error(
+        (err as { message?: string })?.message ||
+          "Document upload failed — please check your files and try again."
+      )
+      return
+    }
+
+    // ── Phase 2: extract answers ───────────────────────────────────────────────
+    // Documents are uploaded. Refetch on success or failure so any drafted
+    // answers (and progress) are reflected in the workspace.
+    try {
+      const result = await departmentApi.extractAnswers(id)
+      setExtractionResult({
+        total_questions: result.total_questions,
+        found_count: result.found_count,
+        not_found_count: result.not_found_count,
+      })
+      // Let the success state breathe before returning to the workspace.
+      setTimeout(() => { setUploading(false); refetch() }, 2200)
+    } catch (err: unknown) {
+      toast.error(
+        (err as { message?: string })?.message ||
+          "We couldn't extract answers from your documents — you can still answer each question manually."
+      )
+      setTimeout(() => { setUploading(false); refetch() }, 1400)
+    } finally {
+      setPendingFiles([])
+    }
+  }
+
   const handleGenerateDraft = async () => {
     await generateDraft.mutateAsync(id)
     router.push(`/department/sessions/${id}/draft`)
@@ -306,6 +401,7 @@ export default function SessionWorkspacePage({
 
   // ── Early returns ─────────────────────────────────────────────────────────────
   if (isLoading) return <PageSkeleton />
+  if (uploading) return <ExtractionLoader result={extractionResult} />
   if (!session)
     return <EmptyState title="Session not found" description="This session doesn't exist or you don't have access." />
 
@@ -459,6 +555,17 @@ export default function SessionWorkspacePage({
           <Progress value={progress} className="w-20 h-1.5" />
           <span className="text-xs text-muted-foreground tabular-nums">{progress}%</span>
         </div>
+
+        {canEdit && (
+          <Button
+            variant="outline" size="sm" className="h-8 text-xs shrink-0"
+            onClick={() => { setPendingFiles([]); setUploadOpen(true) }}
+            title="Upload supporting documents and let AI draft answers"
+          >
+            <FileUp className="h-3.5 w-3.5 mr-1.5" />
+            Upload Documents
+          </Button>
+        )}
 
         {questions.length > 0 && (
           <Button
@@ -856,6 +963,87 @@ export default function SessionWorkspacePage({
           )}
         </div>
       )}
+
+      {/* ── Upload supporting documents — same upload + AI extraction as the
+          dashboard Start Session popup ── */}
+      <Dialog open={uploadOpen} onOpenChange={(o) => { if (!o) closeUploadDialog() }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Upload Supporting Documents</DialogTitle>
+            <DialogDescription>
+              Upload supporting documents for this report (financial reports, project
+              summaries, etc.). Our AI will read them and draft an answer for every question —
+              you can review and refine each one here.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt"
+              multiple
+              className="hidden"
+              onChange={handlePickFiles}
+            />
+
+            {pendingFiles.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors"
+              >
+                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
+                <p className="text-sm font-medium">Click to attach documents</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT</p>
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="rounded-lg border divide-y">
+                  {pendingFiles.map((f, i) => (
+                    <div key={`${f.name}-${i}`} className="flex items-center gap-3 p-2.5">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{f.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(f.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                        onClick={() => removePendingFile(i)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FileUp className="mr-2 h-3.5 w-3.5" />
+                  Add more
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeUploadDialog}>
+              Cancel
+            </Button>
+            <Button onClick={handleUploadDocuments} disabled={pendingFiles.length === 0}>
+              Extract Answers
+              <Sparkles className="ml-2 h-4 w-4" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
