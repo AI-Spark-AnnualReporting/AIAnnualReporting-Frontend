@@ -280,6 +280,20 @@ export const pmApi = {
     return data.section
   },
 
+  // Manual sections (ai_allowed = false): the PM types content directly. No
+  // LLM, no department source. Saves overwrite the previous body.
+  saveManualContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/manual-content`,
+      { content },
+    )
+    return data.section
+  },
+
   // ───── Stage 6 — Plan Review ─────────────────────────────────────────
   // Backend responses may wrap as { plan: {...} } / { sections: [...] } /
   // { available: [...] } or return the value directly. Tolerate both.

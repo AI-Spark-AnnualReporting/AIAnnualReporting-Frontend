@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { AttachSection } from "@/components/report/AttachSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
+import { ManualSection } from "@/components/report/ManualSection"
 
 // Shared header for every mode sub-component — title, layer chip, mode badge,
 // and the section's content source. Exported so other mode panels (e.g.
@@ -43,6 +44,11 @@ export function SectionHeader({ section }: { section: CycleReportSection }) {
         >
           {mode?.label ?? section.mode}
         </span>
+        {!section.ai_allowed && (
+          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+            Manual
+          </span>
+        )}
         <span className="text-xs text-muted-foreground capitalize">
           {section.content_source}
         </span>
@@ -211,6 +217,18 @@ export function SectionDetail({
         />
       </div>
     )
+  }
+
+  // Manual sections (PM provides the content themselves) override mode-based
+  // UI — no source picker and no Generate button. The input shape depends on
+  // the section's content_source:
+  //   - narrative → free-text editor (ManualSection)
+  //   - structured / financials / composite → file upload (AttachSection)
+  if (!section.ai_allowed) {
+    if (section.content_source === "narrative") {
+      return <ManualSection section={section} cycleId={cycleId} />
+    }
+    return <AttachSection section={section} cycleId={cycleId} />
   }
 
   switch (section.mode) {

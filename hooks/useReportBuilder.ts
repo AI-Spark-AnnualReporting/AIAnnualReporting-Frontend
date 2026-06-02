@@ -135,6 +135,27 @@ export function useGenerateSection(cycleId: string) {
   })
 }
 
+// Manual-content sections (`ai_allowed = false`). PM types the body directly
+// — no AI, no feeder. Save overwrites the section's content.
+export function useSaveManualContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string
+    }) => pmApi.saveManualContent(cycleId, sectionCode, content),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Section saved")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to save section")),
+  })
+}
+
 // Stage 7b — refine an existing draft with a natural-language instruction.
 // Silent on success — refines happen many times in a session; the preview swap
 // is the visible feedback. Errors still toast.
