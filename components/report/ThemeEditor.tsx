@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Plus, Sparkles, Trash2 } from "lucide-react"
+import { Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,6 +15,8 @@ const MIN_THEMES = 1
 interface ThemeEditorProps {
   cycleId: string
   themes: ReportTheme[]
+  /** When the plan is locked, themes are read-only — no edits, add, or save. */
+  readOnly?: boolean
 }
 
 function themesEqual(a: ReportTheme[], b: ReportTheme[]) {
@@ -24,7 +26,7 @@ function themesEqual(a: ReportTheme[], b: ReportTheme[]) {
   )
 }
 
-export function ThemeEditor({ cycleId, themes }: ThemeEditorProps) {
+export function ThemeEditor({ cycleId, themes, readOnly }: ThemeEditorProps) {
   const [draft, setDraft] = useState<ReportTheme[]>(themes)
   const [errors, setErrors] = useState<Record<number, string>>({})
   const update = useUpdatePlan(cycleId)
@@ -39,6 +41,10 @@ export function ThemeEditor({ cycleId, themes }: ThemeEditorProps) {
     setDraft(themes)
     setErrors({})
   }
+
+  // Locked plan → present themes as polished read-only cards, not dull
+  // disabled form fields.
+  if (readOnly) return <LockedThemes themes={themes} />
 
   const dirty = !themesEqual(draft, themes)
 
@@ -217,6 +223,59 @@ function ThemeCard({
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
+  )
+}
+
+// Read-only presentation shown once the plan is locked. The narrative is final,
+// so render each theme as a clean, fully-readable card instead of a disabled
+// input/textarea pair.
+function LockedThemes({ themes }: { themes: ReportTheme[] }) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Themes
+        </span>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+          <Lock className="h-3 w-3" />
+          Locked
+        </span>
+      </div>
+
+      {themes.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center">
+          <Sparkles className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">No themes.</p>
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {themes.map((theme, i) => (
+            <div
+              key={i}
+              className="rounded-xl border bg-card p-4 shadow-sm transition-colors hover:border-foreground/15"
+            >
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+                  {i + 1}
+                </span>
+                <div className="min-w-0 space-y-1">
+                  <h4 className="text-sm font-semibold leading-snug text-foreground">
+                    {theme.title || (
+                      <span className="text-muted-foreground italic">
+                        Untitled theme
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {theme.description}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

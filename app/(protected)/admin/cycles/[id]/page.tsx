@@ -796,7 +796,7 @@ function ReportSectionsCard({
   }
 
   // ── State C — resolved ──
-  const counts = { generate: 0, attach: 0, auto: 0 }
+  const counts = { generate: 0, attach: 0, auto: 0, extract: 0, analyze: 0 }
   list.forEach((s) => {
     if (s.mode in counts) counts[s.mode] += 1
   })
@@ -832,6 +832,12 @@ function ReportSectionsCard({
             label={`${counts.auto} ${SECTION_MODES.auto.label}`}
             color={SECTION_MODES.auto.color}
           />
+          {counts.extract > 0 && (
+            <SectionBadge
+              label={`${counts.extract} ${SECTION_MODES.extract.label}`}
+              color={SECTION_MODES.extract.color}
+            />
+          )}
         </div>
       )}
 
