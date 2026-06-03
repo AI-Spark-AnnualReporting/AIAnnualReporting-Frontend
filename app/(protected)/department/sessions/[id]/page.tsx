@@ -3,6 +3,7 @@
 import { use, useState, useEffect, useCallback, useRef } from "react"
 import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
+import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -120,6 +121,12 @@ export default function SessionWorkspacePage({
     ? session?.answers?.find((a) => a.question_id === currentQ.question_id)?.answer
     : undefined
   const hasStoredAnswer = !!storedAnswer?.trim() && !isNotFoundAnswer(storedAnswer)
+
+  // Answer language must match the cycle's language (warn + block Save).
+  const cycleLang = session?.content_language ?? "english"
+  const currentAnswerText = currentQ ? answers[currentQ.question_id] || "" : ""
+  const currentAnswerLangWarning = languageMismatchWarning(currentAnswerText, cycleLang)
+  const currentAnswerLangOk = isLanguageAcceptable(currentAnswerText, cycleLang)
 
   // Count only answers tied to a CURRENT question — answers for regenerated/
   // removed questions stay in session.answers but must not inflate progress.
@@ -866,7 +873,8 @@ export default function SessionWorkspacePage({
                         size="sm"
                         className="h-7 px-3 text-xs font-medium bg-blue-600 text-white shadow-sm hover:bg-blue-700"
                         onClick={handleSaveAnswer}
-                        disabled={!canEdit || submitAnswers.isPending}
+                        disabled={!canEdit || submitAnswers.isPending || !currentAnswerLangOk}
+                        title={!currentAnswerLangOk ? currentAnswerLangWarning ?? undefined : undefined}
                       >
                         {submitAnswers.isPending ? (
                           <>
@@ -922,14 +930,19 @@ export default function SessionWorkspacePage({
                     )}
                   </div>
                 ) : (
-                  <Textarea
-                    value={answers[currentQ.question_id] || ""}
-                    onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
-                    placeholder="Type your answer here…"
-                    rows={4}
-                    className="w-full resize-y text-sm leading-relaxed min-h-[96px]"
-                    disabled={!canEdit}
-                  />
+                  <div className="space-y-1.5">
+                    <Textarea
+                      value={answers[currentQ.question_id] || ""}
+                      onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
+                      placeholder="Type your answer here…"
+                      rows={4}
+                      className="w-full resize-y text-sm leading-relaxed min-h-[96px]"
+                      disabled={!canEdit}
+                    />
+                    {currentAnswerLangWarning && (
+                      <p className="text-xs text-amber-600">{currentAnswerLangWarning}</p>
+                    )}
+                  </div>
                 )}
               </div>
 

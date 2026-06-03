@@ -281,6 +281,7 @@ export interface Session {
   cycle_id: string
   department_id: string
   department_name: string
+  content_language?: ContentLanguage
   user_id?: string
   status: SessionStatus
   progress_percentage: number

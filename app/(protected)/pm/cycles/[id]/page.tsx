@@ -22,7 +22,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { SessionSummary } from "@/types"
+import { SessionSummary, ContentLanguage } from "@/types"
+import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
 import { pmApi } from "@/lib/api/pm"
 import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
@@ -45,6 +46,7 @@ interface PMCycleDashboardData {
     fiscal_year?: number
     project_manager_id?: string
     kickoff_brief?: string | null
+    content_language?: ContentLanguage
   }
   stats?: {
     total_departments: number
@@ -133,6 +135,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const stats = pmDash?.stats
   const departments = pmDash?.departments || []
   const cycleName = pmDash?.cycle?.cycle_name || "Cycle Management"
+  // Cycle language → drives the brief language warnings + submit gating below.
+  const cycleLang = pmDash?.cycle?.content_language ?? "english"
+  const kickoffLangOk =
+    isLanguageAcceptable(briefText, cycleLang) &&
+    isLanguageAcceptable(additionalContext, cycleLang)
   const cycleId = id
 
   const hasKickoff    = !!(pmDash?.cycle?.kickoff_brief)
@@ -1195,6 +1202,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   `${wordCount} words — good detail`
                 return <p className={cn("text-xs", tone)}>{msg}</p>
               })()}
+              {(() => {
+                const warn = languageMismatchWarning(
+                  briefText, pmDash?.cycle?.content_language ?? "english",
+                )
+                return warn ? <p className="text-xs text-amber-600">{warn}</p> : null
+              })()}
             </div>
             <div className="space-y-2">
               <Label>Additional Context <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
@@ -1205,6 +1218,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 rows={2}
                 className="text-sm"
               />
+              {(() => {
+                const warn = languageMismatchWarning(
+                  additionalContext, pmDash?.cycle?.content_language ?? "english",
+                )
+                return warn ? <p className="text-xs text-amber-600">{warn}</p> : null
+              })()}
             </div>
             {/* num_questions slider (5-20, default 12) */}
             <div className="space-y-2">
@@ -1338,7 +1357,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )}
             <Button
               onClick={handleSubmitKickoff}
-              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut}
+              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut || !kickoffLangOk}
             >
               {submittingKickoff
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
