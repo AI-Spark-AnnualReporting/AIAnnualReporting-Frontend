@@ -277,6 +277,35 @@ export const pmApi = {
     return data.section
   },
 
+  // Analyze-mode: trigger (or re-trigger) the analyze agent for a section.
+  // The backend reads feeder department digests and writes structured Markdown
+  // findings into section.content. Long timeout — LLM call over N digests.
+  runAnalysis: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Analyze-mode: override or clear the AI findings. Pass "" or null to clear
+  // (backend stores as null). Mirrors the existing extract-content endpoint.
+  setAnalyzeContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string | null,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
+      { content },
+    )
+    return data.section
+  },
+
   // Stage 7b — refine an existing draft with a natural-language instruction.
   // Backend takes the current section + the instruction, runs an LLM pass, and
   // returns the wholly-rewritten section. Stateless on the backend: each call

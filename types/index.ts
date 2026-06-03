@@ -14,7 +14,7 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 // ── Company profile & report sections ──────────────────────────────────────
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
-export type SectionMode = "generate" | "attach" | "auto" | "extract"
+export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
 

@@ -178,6 +178,41 @@ export function useSaveManualContent(cycleId: string) {
   })
 }
 
+// Analyze-mode: (re-)trigger the analyze agent for a section.
+export function useRunAnalysis(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.runAnalysis(cycleId, sectionCode),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Analysis triggered")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to trigger analysis")),
+  })
+}
+
+// Analyze-mode: override or clear the AI findings. Pass null to clear.
+export function useSetAnalyzeContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string | null
+    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Content saved")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to save content")),
+  })
+}
+
 // Stage 7b — refine an existing draft with a natural-language instruction.
 // Silent on success — refines happen many times in a session; the preview swap
 // is the visible feedback. Errors still toast.
@@ -366,8 +401,9 @@ export function useLockPlan(cycleId: string) {
 }
 
 // Switch a section's source type via the dedicated endpoint. The response
-// section's `mode` is authoritative; patch it into the sections cache and
-// refetch the plan (the backend clears feeders/content on switch).
+// section's `mode` is authoritative; patch it into both the sections cache and
+// the plan's feeder map immediately so the badge updates without waiting for a
+// plan refetch (the feeder map's mode takes priority in the tile display logic).
 export function useSetSourceMode(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -379,6 +415,7 @@ export function useSetSourceMode(cycleId: string) {
       mode: SectionMode
     }) => pmApi.setSourceMode(cycleId, sectionCode, mode),
     onSuccess: (section) => {
+      // Patch sections cache immediately.
       qc.setQueryData<CycleReportSection[]>(
         QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
         (old) =>
@@ -386,7 +423,35 @@ export function useSetSourceMode(cycleId: string) {
             s.section_code === section.section_code ? section : s,
           ) ?? old,
       )
-      // Switching clears feeders, so the plan's feeder map changed — refetch it.
+      // Also patch the feeder map entry's mode so the badge reflects the new
+      // mode instantly — the tile uses entry?.mode ?? s.mode, so a stale feeder
+      // entry would show the old badge until the plan refetch completes.
+      qc.setQueryData<PlanResponse>(
+        QUERY_KEYS.PM_CYCLE_PLAN(cycleId),
+        (old) => {
+          if (!old) return old
+          const hasEntry = old.feeders.some(
+            (f) => f.section_code === section.section_code,
+          )
+          const updatedFeeders = hasEntry
+            ? old.feeders.map((f) =>
+                f.section_code === section.section_code
+                  ? { ...f, mode: section.mode }
+                  : f,
+              )
+            : [
+                ...old.feeders,
+                {
+                  section_code: section.section_code,
+                  title: section.title,
+                  departments: [],
+                  mode: section.mode,
+                },
+              ]
+          return { ...old, feeders: updatedFeeders }
+        },
+      )
+      // Full refetch to pick up any other feeder map changes (cleared feeders etc.).
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
     },
     onError: (err: MutationError) =>

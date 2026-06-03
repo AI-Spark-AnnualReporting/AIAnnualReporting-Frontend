@@ -22,10 +22,10 @@ interface FeederPickerProps {
   departments: FeederDepartment[]
   selected: string[] // current department_codes
   children: React.ReactNode // the trigger
-  // Optional "Upload document later" choice. `checked` reflects whether the
-  // section is in extract mode (the single source of truth). `onChange` switches
-  // the source type via the dedicated endpoint. While checked, departments are
-  // disabled — the two sources are mutually exclusive.
+  // Optional "Upload document later" choice — only relevant for generate sections.
+  // `checked` reflects whether the section is in extract mode (single source of
+  // truth). `onChange` switches the source type via the dedicated endpoint. While
+  // checked, departments are disabled (extract is document-sourced, not dept-sourced).
   documentOption?: {
     checked: boolean
     onChange: (next: boolean) => void
@@ -102,7 +102,8 @@ export function FeederPicker({
             <DropdownMenuCheckboxItem
               key={d.department_code}
               checked={local.has(d.department_code)}
-              // Mutually exclusive with the document option.
+              // Extract mode is document-based — departments don't apply.
+              // Analyze mode uses department feeders, so don't disable them.
               disabled={docChecked}
               onCheckedChange={(checked) => toggle(d.department_code, !!checked)}
               onSelect={(e) => e.preventDefault()} // keep the menu open on click
@@ -116,7 +117,7 @@ export function FeederPicker({
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              Document
+              Source mode
             </DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={docChecked}

@@ -796,7 +796,7 @@ function ReportSectionsCard({
   }
 
   // ── State C — resolved ──
-  const counts = { generate: 0, attach: 0, auto: 0, extract: 0 }
+  const counts = { generate: 0, attach: 0, auto: 0, extract: 0, analyze: 0 }
   list.forEach((s) => {
     if (s.mode in counts) counts[s.mode] += 1
   })

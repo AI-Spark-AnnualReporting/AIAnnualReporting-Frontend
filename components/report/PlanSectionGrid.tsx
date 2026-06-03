@@ -82,7 +82,9 @@ export function PlanSectionGrid({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sections.map((s, i) => {
             const entry = feederByCode.get(s.section_code)
-            const isExtract = (entry?.mode ?? s.mode) === "extract"
+            const effectiveMode = entry?.mode ?? s.mode
+            const isExtract = effectiveMode === "extract"
+            const isAnalyze = effectiveMode === "analyze"
             return (
               <SectionTile
                 key={s.section_code}
@@ -92,6 +94,7 @@ export function PlanSectionGrid({
                 feederCodes={entry?.departments ?? []}
                 documentUploaded={entry?.document_uploaded ?? false}
                 isExtract={isExtract}
+                isAnalyze={isAnalyze}
                 departments={departments}
                 deptByCode={deptByCode}
                 readOnly={readOnly}
@@ -111,6 +114,7 @@ function SectionTile({
   feederCodes,
   documentUploaded,
   isExtract,
+  isAnalyze,
   departments,
   deptByCode,
   readOnly,
@@ -121,6 +125,7 @@ function SectionTile({
   feederCodes: string[]
   documentUploaded: boolean
   isExtract: boolean
+  isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
@@ -140,11 +145,13 @@ function SectionTile({
   }
 
   // The feeder map's mode wins (the sections list can lag a mode switch).
-  const mode = SECTION_MODES[isExtract ? "extract" : section.mode]
+  const effectiveMode = isExtract ? "extract" : isAnalyze ? "analyze" : section.mode
+  const mode = SECTION_MODES[effectiveMode]
   const layer = SECTION_LAYERS[section.layer]
+  // Generate and analyze sections both require department feeders as their source.
   const needsSource =
     !isExtract &&
-    section.mode === "generate" &&
+    (isAnalyze || section.mode === "generate") &&
     section.ai_allowed &&
     feederCodes.length === 0
 
@@ -212,6 +219,7 @@ function SectionTile({
             feederCodes={feederCodes}
             documentUploaded={documentUploaded}
             isExtract={isExtract}
+            isAnalyze={isAnalyze}
             departments={departments}
             deptByCode={deptByCode}
             readOnly={readOnly}
@@ -230,6 +238,7 @@ function FeederArea({
   feederCodes,
   documentUploaded,
   isExtract,
+  isAnalyze,
   departments,
   deptByCode,
   readOnly,
@@ -239,12 +248,13 @@ function FeederArea({
   feederCodes: string[]
   documentUploaded: boolean
   isExtract: boolean
+  isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
 }) {
   // Manual sections (PM writes/uploads directly) — no sources to assign.
-  if (!section.ai_allowed && !isExtract) {
+  if (!section.ai_allowed && !isExtract && !isAnalyze) {
     return (
       <p className="text-xs text-muted-foreground italic">
         {section.content_source === "narrative"
@@ -253,16 +263,16 @@ function FeederArea({
       </p>
     )
   }
-  if (!isExtract && section.mode === "attach") {
+  if (!isExtract && !isAnalyze && section.mode === "attach") {
     return <p className="text-xs text-muted-foreground italic">Uploaded separately</p>
   }
-  if (!isExtract && section.mode === "auto") {
+  if (!isExtract && !isAnalyze && section.mode === "auto") {
     return <p className="text-xs text-muted-foreground italic">System-generated</p>
   }
 
-  // Generate (AI-written) and extract sections share one source picker. The
-  // "Upload document later" toggle switches the section to extract mode so the
-  // document can be uploaded in the builder.
+  // Generate, extract, and analyze sections share one source picker.
+  // The mode toggles switch between these three — extract is document-based,
+  // analyze and generate are department-based.
   return (
     <SourcesFeederArea
       cycleId={cycleId}
@@ -270,6 +280,7 @@ function FeederArea({
       feederCodes={feederCodes}
       documentUploaded={documentUploaded}
       isExtract={isExtract}
+      isAnalyze={isAnalyze}
       departments={departments}
       deptByCode={deptByCode}
       readOnly={readOnly}
@@ -277,16 +288,16 @@ function FeederArea({
   )
 }
 
-// One dropdown holds both sources: department feeders (checkboxes) and an
-// "Upload document later" toggle. Ticking the toggle switches the section to
-// extract mode (persisted via the feeders API) so a document can be uploaded in
-// the builder. Extract counts as a source, clearing the "needs a source" gate.
+// One dropdown holds all three sources: department feeders (checkboxes), an
+// "Upload document later" toggle (→ extract mode), and an "Analyze mode" toggle
+// (→ analyze mode, keeps department feeders). Modes are mutually exclusive.
 function SourcesFeederArea({
   cycleId,
   section,
   feederCodes,
   documentUploaded,
   isExtract,
+  isAnalyze,
   departments,
   deptByCode,
   readOnly,
@@ -296,6 +307,7 @@ function SourcesFeederArea({
   feederCodes: string[]
   documentUploaded: boolean
   isExtract: boolean
+  isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
@@ -304,8 +316,7 @@ function SourcesFeederArea({
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
-  // Generate sections need a department source; extract is sourced by its
-  // document, so it never needs one.
+  // Generate and analyze need a department source; extract is sourced by document.
   const showAmber = !isExtract && !hasDepts
 
   const deptPills = feederCodes.map((code) => (
@@ -328,6 +339,12 @@ function SourcesFeederArea({
     </span>
   ) : null
 
+  const analyzeChip = isAnalyze ? (
+    <span className="inline-flex items-center gap-1 rounded-sm bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/30 dark:border-indigo-900/50 dark:text-indigo-300">
+      Analyze
+    </span>
+  ) : null
+
   // Read-only (locked plan) — summarize the chosen sources, no picker.
   if (readOnly) {
     return (
@@ -336,6 +353,7 @@ function SourcesFeederArea({
           <span className="flex flex-wrap items-center gap-1">
             {deptPills}
             {docChip}
+            {analyzeChip}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
@@ -353,14 +371,21 @@ function SourcesFeederArea({
       sectionCode={section.section_code}
       departments={departments}
       selected={feederCodes}
-      documentOption={{
-        checked: isExtract,
-        onChange: (next) =>
-          setSourceMode.mutate({
-            sectionCode: section.section_code,
-            mode: next ? "extract" : "generate",
-          }),
-      }}
+      // Analyze sections: departments only — no source-mode switcher.
+      // Generate sections: show "Upload document later" to switch to extract.
+      // Extract sections: "Upload document later" is checked (toggle back to generate).
+      documentOption={
+        isAnalyze
+          ? undefined
+          : {
+              checked: isExtract,
+              onChange: (next) =>
+                setSourceMode.mutate({
+                  sectionCode: section.section_code,
+                  mode: next ? "extract" : "generate",
+                }),
+            }
+      }
     >
       <button
         type="button"
@@ -375,6 +400,7 @@ function SourcesFeederArea({
           <span className="flex flex-wrap items-center gap-1">
             {deptPills}
             {docChip}
+            {analyzeChip}
             <span className="text-muted-foreground">edit</span>
           </span>
         ) : (

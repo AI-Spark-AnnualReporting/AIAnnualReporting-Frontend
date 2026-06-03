@@ -15,6 +15,7 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react"
+import { AnalyzeSection } from "@/components/report/AnalyzeSection"
 import { AttachSection } from "@/components/report/AttachSection"
 import { ExtractSection } from "@/components/report/ExtractSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
@@ -221,11 +222,15 @@ export function SectionDetail({
   }
 
   // Extract-mode is document-driven: upload runs AI extraction, the PM edits
-  // the result, then locks. `mode === "extract"` is the only signal — it takes
-  // priority over the ai_allowed branch below. (A generate section the PM
-  // converted via "upload document later" arrives here as mode "extract".)
+  // the result, then locks. Takes priority over the ai_allowed branch below.
   if (section.mode === "extract") {
     return <ExtractSection section={section} cycleId={cycleId} />
+  }
+
+  // Analyze-mode: structured Markdown findings from the analyze agent. No
+  // document — department digests are the source. Locks like generate.
+  if (section.mode === "analyze") {
+    return <AnalyzeSection section={section} cycleId={cycleId} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based

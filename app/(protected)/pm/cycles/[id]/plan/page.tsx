@@ -747,11 +747,11 @@ function countSectionsNeedingFeeders(
     // Manual sections (`ai_allowed = false`) are written by the PM directly.
     if (!s.ai_allowed) return false
     const entry = feederByCode.get(s.section_code)
-    // The feeder map's mode is authoritative (an extract switch lands there
-    // first). Only generate sections require a department source; extract is
+    // The feeder map's mode is authoritative (a mode switch lands there first).
+    // Generate and analyze sections require department feeders; extract is
     // sourced by its document.
     const mode = entry?.mode ?? s.mode
-    if (mode !== "generate") return false
+    if (mode !== "generate" && mode !== "analyze") return false
     return (entry?.departments.length ?? 0) === 0
   }).length
 }
