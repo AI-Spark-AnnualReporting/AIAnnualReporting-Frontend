@@ -7,6 +7,7 @@ import type {
   FinalReport,
   PlanResponse,
   ReportTheme,
+  SectionMode,
 } from "@/types"
 
 // Whether a cycle is ready to enter the Report Builder.
@@ -78,6 +79,27 @@ export function useAttachUpload(cycleId: string) {
       toast.success("Document uploaded")
     },
     onError: (err: MutationError) => toast.error(readError(err, "Upload failed")),
+  })
+}
+
+// Extract-mode: persist the PM's edits to the AI-extracted content. The
+// document stays attached; only the body changes.
+export function useSetExtractContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string
+    }) => pmApi.setExtractContent(cycleId, sectionCode, content),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Content saved")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to save content")),
   })
 }
 
@@ -324,6 +346,51 @@ export function useUpdatePlan(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save plan")),
+  })
+}
+
+// One-way blueprint lock. On success the returned plan carries
+// `sections_locked: true`; writing it to the cache flips every gated control
+// (sources, reorder, optional add/remove, themes, regenerate) to read-only.
+export function useLockPlan(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.lockPlan(cycleId),
+    onSuccess: (plan) => {
+      setPlanCache(qc, cycleId, plan)
+      toast.success("Sections locked")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to lock sections")),
+  })
+}
+
+// Switch a section's source type via the dedicated endpoint. The response
+// section's `mode` is authoritative; patch it into the sections cache and
+// refetch the plan (the backend clears feeders/content on switch).
+export function useSetSourceMode(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      mode,
+    }: {
+      sectionCode: string
+      mode: SectionMode
+    }) => pmApi.setSourceMode(cycleId, sectionCode, mode),
+    onSuccess: (section) => {
+      qc.setQueryData<CycleReportSection[]>(
+        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+        (old) =>
+          old?.map((s) =>
+            s.section_code === section.section_code ? section : s,
+          ) ?? old,
+      )
+      // Switching clears feeders, so the plan's feeder map changed — refetch it.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to switch source type")),
   })
 }
 

@@ -3,7 +3,7 @@ import {
   Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
-  AssemblyReadiness, FinalReport,
+  AssemblyReadiness, FinalReport, SectionMode,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -218,6 +218,20 @@ export const pmApi = {
     return data.section
   },
 
+  // Extract-mode: override the AI-extracted text. The source document stays
+  // attached — only the content body is updated. Pass "" to clear it.
+  setExtractContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/extract-content`,
+      { content },
+    )
+    return data.section
+  },
+
   lockSection: async (
     cycleId: string,
     sectionCode: string,
@@ -321,6 +335,13 @@ export const pmApi = {
     return data.plan ?? data
   },
 
+  // One-way lock that freezes the plan blueprint. No request body, no unlock.
+  // Returns the full plan with `sections_locked: true`.
+  lockPlan: async (cycleId: string): Promise<PlanResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/plan/lock`)
+    return data.plan ?? data
+  },
+
   setFeeders: async (
     cycleId: string,
     sectionCode: string,
@@ -331,6 +352,21 @@ export const pmApi = {
       { departments: departmentCodes },
     )
     return data.plan ?? data
+  },
+
+  // Switch a section's source type. generate → extract clears feeders + content;
+  // extract → generate deletes the document, content, and feeders. Returns the
+  // updated section (its `mode` is the single source of truth afterwards).
+  setSourceMode: async (
+    cycleId: string,
+    sectionCode: string,
+    mode: SectionMode,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/source-mode`,
+      { mode },
+    )
+    return data.section
   },
 
   reorderSections: async (

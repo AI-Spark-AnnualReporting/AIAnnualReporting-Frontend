@@ -204,6 +204,13 @@ function FeederArea({
   if (section.mode === "auto") {
     return <p className="text-xs text-muted-foreground italic">System-generated</p>
   }
+  if (section.mode === "extract") {
+    return (
+      <p className="text-xs text-muted-foreground italic">
+        Uploaded &amp; auto-extracted
+      </p>
+    )
+  }
 
   // generate mode
   const isEmpty = feederCodes.length === 0

@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from "lucide-react"
 import { AttachSection } from "@/components/report/AttachSection"
+import { ExtractSection } from "@/components/report/ExtractSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 import { ManualSection } from "@/components/report/ManualSection"
 
@@ -217,6 +218,14 @@ export function SectionDetail({
         />
       </div>
     )
+  }
+
+  // Extract-mode is document-driven: upload runs AI extraction, the PM edits
+  // the result, then locks. `mode === "extract"` is the only signal — it takes
+  // priority over the ai_allowed branch below. (A generate section the PM
+  // converted via "upload document later" arrives here as mode "extract".)
+  if (section.mode === "extract") {
+    return <ExtractSection section={section} cycleId={cycleId} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based

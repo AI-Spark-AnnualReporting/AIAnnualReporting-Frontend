@@ -66,6 +66,11 @@ export const SECTION_MODES: Record<
     color: "bg-neutral-100 text-neutral-700 border-neutral-200",
     hint: "Generated automatically at render (cover, contents)",
   },
+  extract: {
+    label: "Extract",
+    color: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    hint: "Upload a document; AI extracts the content for you to review and edit",
+  },
 }
 
 export const SECTION_LAYERS: Record<
