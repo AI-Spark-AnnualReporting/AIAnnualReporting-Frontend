@@ -15,7 +15,7 @@ import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
 import { AssembleEntry } from "@/components/report/AssembleEntry"
 import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
-import { isTableOfContentsSection } from "@/lib/section-filters"
+import { isTableOfContentsSection, isSectionReady } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
   params,
@@ -95,11 +95,10 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
   const total = sections.length
-  // Auto sections are system-rendered at assembly time — count them as always
-  // ready so they don't block the progress bar from reaching 100%.
-  const locked = sections.filter(
-    (s) => s.status === "locked" || s.mode === "auto",
-  ).length
+  // Auto sections are system-rendered at assembly time, and the cover is always
+  // ready (optional image) — count them as ready so they don't block the
+  // progress bar from reaching 100%.
+  const locked = sections.filter(isSectionReady).length
   const lockedPct = total > 0 ? Math.round((locked / total) * 100) : 0
   const selected =
     sections.find((s) => s.section_code === selectedCode) ?? null

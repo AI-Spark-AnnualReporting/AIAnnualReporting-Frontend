@@ -394,11 +394,39 @@ export function useSetFeeders(cycleId: string) {
   })
 }
 
+// The reorder UI hides system sections (e.g. the auto "toc" Table of Contents),
+// so the codes it produces are only a SUBSET of the cycle's sections. The backend
+// requires the payload to contain EVERY section code exactly once, so fill any
+// omitted sections back in, pinning each to its current position (by display_order).
+// Returns the complete ordered list of section codes.
+function completeReorder(
+  qc: ReturnType<typeof useQueryClient>,
+  cycleId: string,
+  partial: string[],
+): string[] {
+  const all = qc.getQueryData<CycleReportSection[]>(
+    QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+  )
+  if (!all || all.length === 0) return partial
+  const partialSet = new Set(partial)
+  const queue = [...partial]
+  const sortedAll = [...all].sort((a, b) => a.display_order - b.display_order)
+  // Walk the cycle's full section list in display order: keep each omitted
+  // (hidden) section pinned to its slot, and fill the remaining slots with the
+  // caller's reordered visible sequence.
+  return sortedAll.map((s) =>
+    partialSet.has(s.section_code) ? (queue.shift() as string) : s.section_code,
+  )
+}
+
 export function useReorderSections(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ orderedSectionCodes }: { orderedSectionCodes: string[] }) =>
-      pmApi.reorderSections(cycleId, orderedSectionCodes),
+      pmApi.reorderSections(
+        cycleId,
+        completeReorder(qc, cycleId, orderedSectionCodes),
+      ),
     // Drop must feel instant — reorder the cache immediately, then let the
     // server response (or an error rollback) reconcile.
     onMutate: async ({ orderedSectionCodes }) => {
@@ -407,8 +435,11 @@ export function useReorderSections(cycleId: string) {
         QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
       )
       if (previous) {
+        // Use the COMPLETE order (incl. hidden sections) so the optimistic
+        // update doesn't drop toc/cover from the cache.
+        const fullOrder = completeReorder(qc, cycleId, orderedSectionCodes)
         const byCode = new Map(previous.map((s) => [s.section_code, s]))
-        const reordered = orderedSectionCodes
+        const reordered = fullOrder
           .map((code, i) => {
             const s = byCode.get(code)
             return s ? { ...s, display_order: i } : null

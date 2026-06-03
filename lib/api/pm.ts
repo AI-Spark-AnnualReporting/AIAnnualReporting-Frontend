@@ -287,7 +287,7 @@ export const pmApi = {
     sectionCode: string,
     content: string,
   ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${sectionCode}/manual-content`,
       { content },
     )

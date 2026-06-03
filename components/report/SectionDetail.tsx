@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from "lucide-react"
 import { AttachSection } from "@/components/report/AttachSection"
+import { CoverSection } from "@/components/report/CoverSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 import { ManualSection } from "@/components/report/ManualSection"
 
@@ -217,6 +218,13 @@ export function SectionDetail({
         />
       </div>
     )
+  }
+
+  // The cover is special: an auto section that accepts an OPTIONAL cover image
+  // (PNG/JPG) which becomes the report's front cover. Handle it before the
+  // mode/ai_allowed routing below.
+  if (section.section_code === "cover") {
+    return <CoverSection section={section} cycleId={cycleId} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based

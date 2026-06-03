@@ -3,6 +3,7 @@ import {
   Cycle,
   CycleOverview,
   CompanyProfile,
+  ContentLanguage,
   Sector,
   CycleReportSection,
   ResolveSectionsResponse,
@@ -21,6 +22,7 @@ export interface CreateCyclePayload {
   is_shariah?: boolean
   has_subsidiaries?: boolean
   has_sukuk?: boolean
+  content_language?: ContentLanguage
 }
 
 export interface UpdateCyclePayload extends Partial<CreateCyclePayload> {}

@@ -14,6 +14,7 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 // ── Company profile & report sections ──────────────────────────────────────
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
+export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
@@ -86,6 +87,7 @@ export interface Cycle {
   is_shariah: boolean
   has_subsidiaries: boolean
   has_sukuk: boolean
+  content_language: ContentLanguage
 }
 
 // Source document attached to an attach-mode section.
