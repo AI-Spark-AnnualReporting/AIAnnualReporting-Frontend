@@ -19,6 +19,7 @@ import {
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { AnalyzeSection } from "@/components/report/AnalyzeSection"
 import { AttachSection } from "@/components/report/AttachSection"
+import { CoverSection } from "@/components/report/CoverSection"
 import { ExtractSection } from "@/components/report/ExtractSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 import { ManualSection } from "@/components/report/ManualSection"
@@ -268,6 +269,11 @@ export function SectionDetail({
     )
   }
 
+  // The cover is special: an auto section that accepts an OPTIONAL cover image
+  // (PNG/JPG) which becomes the report's front cover. Handle it before the
+  // mode-based routing below.
+  if (section.section_code === "cover") {
+    return <CoverSection section={section} cycleId={cycleId} />}
   // Once assembled, all non-auto sections are view-only.
   if (assembled && section.mode !== "auto") {
     return <AssembledView section={section} />
