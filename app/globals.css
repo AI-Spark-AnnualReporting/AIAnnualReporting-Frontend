@@ -93,3 +93,49 @@ body {
 
 .bell-shake { animation: bell-shake 0.8s ease-in-out infinite; }
 .priority-blink { animation: priority-blink 1s ease-in-out infinite; }
+
+/* ── Stage 8 — Print-to-PDF ─────────────────────────────────────────────
+   Most layout-level print rules are expressed inline via Tailwind 4's
+   `print:` variants on the report components themselves. This block carries
+   the things variants can't express: page margins, app-chrome suppression,
+   and pleasant print colors. The final report page (`/pm/cycles/[id]/report`)
+   is the only route designed to print. */
+
+@media print {
+  @page {
+    margin: 0.75in;
+    size: A4;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Suppress app-shell chrome that might survive above the route's negative
+     margins. Anything tagged data-app-chrome will be hidden. The route itself
+     uses print:hidden on its own buttons + header. */
+  [data-app-chrome="true"],
+  .app-sidebar,
+  .app-header,
+  .app-nav,
+  nav[role="navigation"] {
+    display: none !important;
+  }
+
+  /* Sonner toasts and dialog overlays shouldn't render in print. */
+  [data-sonner-toaster],
+  [data-radix-popper-content-wrapper],
+  [role="dialog"] {
+    display: none !important;
+  }
+
+  /* Avoid orphan/widow ugliness in long prose sections. */
+  h1, h2, h3 {
+    break-after: avoid;
+  }
+  p, li {
+    orphans: 3;
+    widows: 3;
+  }
+}

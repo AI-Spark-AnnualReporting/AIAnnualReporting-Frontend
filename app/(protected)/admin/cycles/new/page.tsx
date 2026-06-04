@@ -5,6 +5,7 @@ import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useCreateCycle } from "@/hooks/useCycles"
+import { cyclesApi } from "@/lib/api/cycles"
 import { useUsers } from "@/hooks/useUsers"
 import { PageHeader } from "@/components/ui/page-header"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,11 @@ export default function NewCyclePage() {
     const result = await createMutation.mutateAsync(data)
     // Backend may return { id } or { cycle_id } depending on the endpoint version
     const newId = result?.cycle_id || result?.id
+    try {
+      await cyclesApi.resolveSections(newId)
+    } catch {
+      // View page will retry on mount if this silently fails
+    }
     router.push(`/admin/cycles/${newId}`)
   }
 

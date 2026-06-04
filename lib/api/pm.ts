@@ -2,6 +2,8 @@ import apiClient from "./client"
 import {
   Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
   BuildReadiness, CycleReportSection,
+  PlanResponse, ReportTheme, AvailableOptionalSection,
+  AssemblyReadiness, FinalReport, SectionMode,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -197,4 +199,357 @@ export const pmApi = {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sections`)
     return data.sections
   },
+
+  // Attach-mode: upload the source document for a single section.
+  // Same multipart pattern as department.uploadDocument — "Content-Type": undefined so axios
+  // sets the multipart boundary, and 120s timeout because the backend extracts + chunks the file.
+  attachUpload: async (
+    cycleId: string,
+    sectionCode: string,
+    file: File,
+  ): Promise<CycleReportSection> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+      formData,
+      { headers: { "Content-Type": undefined }, timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Extract-mode: override the AI-extracted text. The source document stays
+  // attached — only the content body is updated. Pass "" to clear it.
+  setExtractContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/extract-content`,
+      { content },
+    )
+    return data.section
+  },
+
+  lockSection: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/lock`,
+    )
+    return data.section
+  },
+
+  unlockSection: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/unlock`,
+    )
+    return data.section
+  },
+
+  removeAttachment: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.delete<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+    )
+    return data.section
+  },
+
+  // Stage 7a — generate the narrative for a section via the LLM.
+  // Returns the updated section with content + status:"drafting".
+  // Long timeout because the LLM call typically runs 10–40s.
+  generateSection: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/generate`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Analyze-mode: trigger (or re-trigger) the analyze agent for a section.
+  // The backend reads feeder department digests and writes structured Markdown
+  // findings into section.content. Long timeout — LLM call over N digests.
+  runAnalysis: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Analyze-mode: override or clear the AI findings. Pass "" or null to clear
+  // (backend stores as null). Mirrors the existing extract-content endpoint.
+  setAnalyzeContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string | null,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
+      { content },
+    )
+    return data.section
+  },
+
+  // Stage 7b — refine an existing draft with a natural-language instruction.
+  // Backend takes the current section + the instruction, runs an LLM pass, and
+  // returns the wholly-rewritten section. Stateless on the backend: each call
+  // stands alone (no transcript), so the latest content IS the persisted state.
+  refineSection: async (
+    cycleId: string,
+    sectionCode: string,
+    instruction: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/refine`,
+      { instruction },
+      { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Manual sections (ai_allowed = false): the PM types content directly. No
+  // LLM, no department source. Saves overwrite the previous body.
+  saveManualContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/manual-content`,
+      { content },
+    )
+    return data.section
+  },
+
+  // ───── Stage 6 — Plan Review ─────────────────────────────────────────
+  // Backend responses may wrap as { plan: {...} } / { sections: [...] } /
+  // { available: [...] } or return the value directly. Tolerate both.
+
+  getPlan: async (cycleId: string): Promise<PlanResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/plan`)
+    return data.plan ?? data
+  },
+
+  // refresh=true regenerates and overwrites manual edits.
+  buildPlan: async (cycleId: string, refresh = false): Promise<PlanResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/plan${refresh ? "?refresh=true" : ""}`,
+      undefined,
+      { timeout: 180000 }, // two LLM passes — generous timeout
+    )
+    return data.plan ?? data
+  },
+
+  updatePlan: async (
+    cycleId: string,
+    payload: { headline?: string | null; themes?: ReportTheme[] },
+  ): Promise<PlanResponse> => {
+    const { data } = await apiClient.patch(`/pm/cycles/${cycleId}/plan`, payload)
+    return data.plan ?? data
+  },
+
+  // One-way lock that freezes the plan blueprint. No request body, no unlock.
+  // Returns the full plan with `sections_locked: true`.
+  lockPlan: async (cycleId: string): Promise<PlanResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/plan/lock`)
+    return data.plan ?? data
+  },
+
+  setFeeders: async (
+    cycleId: string,
+    sectionCode: string,
+    departmentCodes: string[],
+  ): Promise<PlanResponse> => {
+    const { data } = await apiClient.put(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/feeders`,
+      { departments: departmentCodes },
+    )
+    return data.plan ?? data
+  },
+
+  // Switch a section's source type. generate → extract clears feeders + content;
+  // extract → generate deletes the document, content, and feeders. Returns the
+  // updated section (its `mode` is the single source of truth afterwards).
+  setSourceMode: async (
+    cycleId: string,
+    sectionCode: string,
+    mode: SectionMode,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/source-mode`,
+      { mode },
+    )
+    return data.section
+  },
+
+  reorderSections: async (
+    cycleId: string,
+    orderedSectionCodes: string[],
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.put(`/pm/cycles/${cycleId}/sections/order`, {
+      ordered_codes: orderedSectionCodes,
+    })
+    return data.sections ?? data
+  },
+
+  addOptionalSection: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/sections/optional`,
+      { section_code: sectionCode },
+    )
+    return data.sections ?? data
+  },
+
+  // `force=true` lets the PM remove required sections after confirming the
+  // warning dialog. Locked sections still 409 either way — caller must unlock
+  // first.
+  removeOptionalSection: async (
+    cycleId: string,
+    sectionCode: string,
+    force = false,
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.delete(
+      `/pm/cycles/${cycleId}/sections/optional/${sectionCode}${force ? "?force=true" : ""}`,
+    )
+    return data.sections ?? data
+  },
+
+  getAvailableOptional: async (
+    cycleId: string,
+  ): Promise<AvailableOptionalSection[]> => {
+    const { data } = await apiClient.get(
+      `/pm/cycles/${cycleId}/sections/optional/available`,
+    )
+    return data.available ?? data
+  },
+
+  // ───── Stage 8 — Assemble & Final Report ─────────────────────────────
+
+  assemblyReadiness: async (cycleId: string): Promise<AssemblyReadiness> => {
+    const { data } = await apiClient.get(
+      `/pm/cycles/${cycleId}/assembly-readiness`,
+    )
+    return data
+  },
+
+  // 120s — backend writes exec summary + assembles. refresh=true regenerates.
+  assembleReport: async (
+    cycleId: string,
+    refresh = false,
+  ): Promise<FinalReport> => {
+    const { data } = await apiClient.post<
+      { success: boolean; report: FinalReport } | FinalReport
+    >(
+      `/pm/cycles/${cycleId}/assemble${refresh ? "?refresh=true" : ""}`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return (data as { report?: FinalReport }).report ?? (data as FinalReport)
+  },
+
+  getFinalReport: async (cycleId: string): Promise<FinalReport> => {
+    const { data } = await apiClient.get<
+      { report: FinalReport } | FinalReport
+    >(`/pm/cycles/${cycleId}/final-report`)
+    return (data as { report?: FinalReport }).report ?? (data as FinalReport)
+  },
+
+  // Stage 9a — render the assembled report to a downloadable file.
+  // Backend returns the file as a binary stream with Content-Disposition for
+  // the filename. 9a supports docx; pdf returns 501 until 9b ships.
+  // CRITICAL: responseType "blob" — without it axios tries to JSON-parse the
+  // binary and corrupts the file.
+  renderReport: async (
+    cycleId: string,
+    format: "docx" | "pdf",
+  ): Promise<{ blob: Blob; filename: string }> => {
+    try {
+      const response = await apiClient.post(
+        `/pm/cycles/${cycleId}/render?format=${format}`,
+        null,
+        { responseType: "blob", timeout: 120000 },
+      )
+      const filename =
+        parseContentDispositionFilename(
+          response.headers?.["content-disposition"],
+        ) ?? `Annual_Report.${format}`
+      return { blob: response.data as Blob, filename }
+    } catch (err: unknown) {
+      // When responseType is "blob", error bodies are also Blobs. Read the
+      // blob as text so we can surface the backend's `detail` message in the
+      // toast instead of a generic "Request failed".
+      const decoded = await decodeBlobError(err)
+      if (decoded) throw new Error(decoded)
+      throw err
+    }
+  },
+}
+
+// Pull `filename` from a Content-Disposition header. Handles both the legacy
+// `filename="..."` form and the UTF-8 form `filename*=UTF-8''<encoded>`.
+function parseContentDispositionFilename(header?: string): string | null {
+  if (!header) return null
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim())
+    } catch {
+      // fall through to the standard form
+    }
+  }
+  const match = header.match(/filename="?([^";]+)"?/i)
+  return match ? match[1].trim() : null
+}
+
+// Read an axios error whose `response.data` is a Blob and pull out the
+// FastAPI `{ detail }` string for surfacing in a toast. Returns null if the
+// error didn't carry a parseable blob body.
+async function decodeBlobError(err: unknown): Promise<string | null> {
+  if (!err || typeof err !== "object") return null
+  // After the global apiClient interceptor runs, the rejection shape is
+  // `{ message, status, details, error }`. When responseType was "blob",
+  // `details` ends up being the raw Blob (the interceptor doesn't try to
+  // parse it). Look in both possible spots defensively.
+  const candidate =
+    (err as { details?: unknown }).details ??
+    (err as { response?: { data?: unknown } }).response?.data
+  if (!(candidate instanceof Blob)) return null
+  try {
+    const text = await candidate.text()
+    const parsed = JSON.parse(text) as {
+      detail?: unknown
+      message?: unknown
+    }
+    const detail = parsed.detail ?? parsed.message
+    if (typeof detail === "string") return detail
+    if (Array.isArray(detail)) {
+      const flat = detail
+        .map((d) => (d as { msg?: string })?.msg)
+        .filter(Boolean)
+        .join("; ")
+      return flat || null
+    }
+    return null
+  } catch {
+    return null
+  }
 }

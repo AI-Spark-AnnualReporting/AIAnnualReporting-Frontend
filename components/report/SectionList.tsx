@@ -1,15 +1,17 @@
 "use client"
 
-import { CycleReportSection, SectionStatus } from "@/types"
+import { CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import { Circle, CircleDot, CheckCircle2 } from "lucide-react"
 
-// Status indicator — hollow circle (pending) / half-dot (drafting) / check (locked).
-function StatusIcon({ status }: { status: SectionStatus }) {
-  if (status === "locked")
+// Status indicator — hollow circle (pending) / half-dot (drafting) / check
+// (locked OR auto). Auto sections are system-rendered at assembly time and
+// can't be locked by the backend, so they read as always-ready.
+function StatusIcon({ section }: { section: CycleReportSection }) {
+  if (section.status === "locked" || section.mode === "auto")
     return <CheckCircle2 className="h-4 w-4 text-green-600" />
-  if (status === "drafting")
+  if (section.status === "drafting")
     return <CircleDot className="h-4 w-4 text-yellow-600" />
   return <Circle className="h-4 w-4 text-muted-foreground/50" />
 }
@@ -25,13 +27,14 @@ interface SectionListProps {
 export function SectionList({ sections, selectedCode, onSelect }: SectionListProps) {
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
 
-  let lastLayer: string | null = null
-
   return (
     <div className="flex flex-col">
-      {ordered.map((section) => {
-        const showDivider = section.layer !== lastLayer
-        lastLayer = section.layer
+      {ordered.map((section, i) => {
+        // Layer divider whenever the previous section was in a different
+        // layer (or this is the first section). Derived inline — avoids
+        // mutating render-scoped state.
+        const prevLayer = i > 0 ? ordered[i - 1].layer : null
+        const showDivider = section.layer !== prevLayer
         const mode = SECTION_MODES[section.mode]
         const active = section.section_code === selectedCode
 
@@ -52,7 +55,7 @@ export function SectionList({ sections, selectedCode, onSelect }: SectionListPro
                   : "border-l-transparent hover:bg-accent"
               )}
             >
-              <StatusIcon status={section.status} />
+              <StatusIcon section={section} />
               <span
                 className={cn(
                   "flex-1 min-w-0 truncate text-sm",

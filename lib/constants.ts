@@ -66,6 +66,16 @@ export const SECTION_MODES: Record<
     color: "bg-neutral-100 text-neutral-700 border-neutral-200",
     hint: "Generated automatically at render (cover, contents)",
   },
+  extract: {
+    label: "Extract",
+    color: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    hint: "Upload a document; AI extracts the content for you to review and edit",
+  },
+  analyze: {
+    label: "Analyze",
+    color: "bg-indigo-100 text-indigo-700 border-indigo-200",
+    hint: "Structured findings produced by the analyze agent across department digests",
+  },
 }
 
 export const SECTION_LAYERS: Record<
@@ -113,6 +123,10 @@ export const QUERY_KEYS = {
   PM_CYCLE: (id: string) => ["pm", "cycle", id],
   BUILD_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "readiness"],
   PM_CYCLE_SECTIONS: (cycleId: string) => ["pm", "cycle", cycleId, "sections"],
+  PM_CYCLE_PLAN: (cycleId: string) => ["pm", "cycle", cycleId, "plan"],
+  PM_AVAILABLE_OPTIONAL: (cycleId: string) => ["pm", "cycle", cycleId, "optional-available"],
+  PM_ASSEMBLY_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "assembly-readiness"],
+  PM_FINAL_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report"],
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],

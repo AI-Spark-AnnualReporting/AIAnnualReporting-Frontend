@@ -687,6 +687,20 @@ function ReportSectionsCard({
   const profileSet = !!cycle.company_profile && !!cycle.sector
   const { data: sections, isLoading } = useCycleSections(profileSet ? cycle.id : "")
   const resolveMutation = useResolveSections(cycle.id)
+  const autoResolvedRef = useRef(false)
+
+  useEffect(() => {
+    if (
+      profileSet &&
+      !isLoading &&
+      (sections?.length ?? 0) === 0 &&
+      !resolveMutation.isPending &&
+      !autoResolvedRef.current
+    ) {
+      autoResolvedRef.current = true
+      resolveMutation.mutate()
+    }
+  }, [profileSet, isLoading, sections, resolveMutation])
 
   const header = (
     <div>
@@ -768,31 +782,21 @@ function ReportSectionsCard({
     )
   }
 
-  // ── State B — profile set, not yet resolved ──
+  // ── State B — profile set, not yet resolved (auto-resolving) ──
   if (!isLoading && list.length === 0) {
     return (
       <div className="rounded-xl border bg-card p-6 space-y-5">
         {header}
-        <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
-          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-          <span>
-            Resolve the section list from this cycle&apos;s profile. Required
-            sections are added automatically; you can review them below.
-          </span>
+        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+          <span>Resolving sections from this cycle&apos;s profile…</span>
         </div>
-        <Button
-          onClick={() => resolveMutation.mutate()}
-          disabled={resolveMutation.isPending}
-        >
-          <Sparkles className="mr-2 h-4 w-4" />
-          {resolveMutation.isPending ? "Resolving…" : "Resolve Sections"}
-        </Button>
       </div>
     )
   }
 
   // ── State C — resolved ──
-  const counts = { generate: 0, attach: 0, auto: 0 }
+  const counts = { generate: 0, attach: 0, auto: 0, extract: 0, analyze: 0 }
   list.forEach((s) => {
     if (s.mode in counts) counts[s.mode] += 1
   })
@@ -828,6 +832,12 @@ function ReportSectionsCard({
             label={`${counts.auto} ${SECTION_MODES.auto.label}`}
             color={SECTION_MODES.auto.color}
           />
+          {counts.extract > 0 && (
+            <SectionBadge
+              label={`${counts.extract} ${SECTION_MODES.extract.label}`}
+              color={SECTION_MODES.extract.color}
+            />
+          )}
         </div>
       )}
 
