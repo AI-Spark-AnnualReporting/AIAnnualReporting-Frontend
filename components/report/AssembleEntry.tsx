@@ -1,11 +1,9 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { FileCheck, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +14,7 @@ import {
 import {
   useAssembleReport,
   useAssemblyReadiness,
+  useFinalReport,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS } from "@/lib/constants"
 
@@ -25,9 +24,9 @@ interface AssembleEntryProps {
 
 export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readinessQuery = useAssemblyReadiness(cycleId)
+  const finalReportQuery = useFinalReport(cycleId)
   const assemble = useAssembleReport(cycleId)
   const router = useRouter()
-  const [reassembleOpen, setReassembleOpen] = useState(false)
 
   if (readinessQuery.isLoading) {
     return (
@@ -43,50 +42,25 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   // directly; no client-side massaging needed.
   const {
     can_assemble,
-    has_final_report,
     locked,
     total,
     unlocked_sections,
   } = readiness
 
-  // Final report already exists → View + Re-assemble.
-  if (has_final_report && can_assemble) {
-    return (
-      <div className="flex items-center gap-2 shrink-0">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setReassembleOpen(true)}
-          disabled={assemble.isPending}
-          className="h-8"
-        >
-          {assemble.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-          ) : null}
-          Re-assemble
-        </Button>
-        <Link href={`/pm/cycles/${cycleId}/report`}>
-          <Button size="sm" className="h-8">
-            <FileCheck className="h-3.5 w-3.5 mr-1.5" />
-            View Report
-          </Button>
-        </Link>
+  // Use the final-report query as the source of truth for whether a report
+  // exists — assembly-readiness may not return has_final_report reliably.
+  const hasReport = finalReportQuery.isSuccess
 
-        <ConfirmDialog
-          open={reassembleOpen}
-          onOpenChange={setReassembleOpen}
-          title="Re-assemble the report?"
-          description="Regenerate the executive summary and reassemble the document from the latest locked sections."
-          confirmLabel="Re-assemble"
-          variant="destructive"
-          isLoading={assemble.isPending}
-          onConfirm={async () => {
-            await assemble.mutateAsync({ refresh: true })
-            setReassembleOpen(false)
-            router.push(`/pm/cycles/${cycleId}/report`)
-          }}
-        />
-      </div>
+  // Final report already exists → View Report only (redirect, no API call).
+  // Re-assemble is available on the report page itself.
+  if (hasReport) {
+    return (
+      <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
+        <Button size="sm" className="h-8">
+          <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+          View Report
+        </Button>
+      </Link>
     )
   }
 
