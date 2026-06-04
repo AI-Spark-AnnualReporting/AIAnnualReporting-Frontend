@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { AnalyzeSection } from "@/components/report/AnalyzeSection"
 import { AttachSection } from "@/components/report/AttachSection"
+import { CoverSection } from "@/components/report/CoverSection"
 import { ExtractSection } from "@/components/report/ExtractSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 import { ManualSection } from "@/components/report/ManualSection"
@@ -219,6 +220,13 @@ export function SectionDetail({
         />
       </div>
     )
+  }
+
+  // The cover is special: an auto section that accepts an OPTIONAL cover image
+  // (PNG/JPG) which becomes the report's front cover. Handle it before the
+  // mode-based routing below.
+  if (section.section_code === "cover") {
+    return <CoverSection section={section} cycleId={cycleId} />
   }
 
   // Extract-mode is document-driven: upload runs AI extraction, the PM edits
