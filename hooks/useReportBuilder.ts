@@ -7,6 +7,7 @@ import type {
   FinalReport,
   PlanResponse,
   ReportTheme,
+  SectionMode,
 } from "@/types"
 
 // Whether a cycle is ready to enter the Report Builder.
@@ -78,6 +79,27 @@ export function useAttachUpload(cycleId: string) {
       toast.success("Document uploaded")
     },
     onError: (err: MutationError) => toast.error(readError(err, "Upload failed")),
+  })
+}
+
+// Extract-mode: persist the PM's edits to the AI-extracted content. The
+// document stays attached; only the body changes.
+export function useSetExtractContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string
+    }) => pmApi.setExtractContent(cycleId, sectionCode, content),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Content saved")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to save content")),
   })
 }
 
@@ -153,6 +175,41 @@ export function useSaveManualContent(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save section")),
+  })
+}
+
+// Analyze-mode: (re-)trigger the analyze agent for a section.
+export function useRunAnalysis(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.runAnalysis(cycleId, sectionCode),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Analysis triggered")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to trigger analysis")),
+  })
+}
+
+// Analyze-mode: override or clear the AI findings. Pass null to clear.
+export function useSetAnalyzeContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string | null
+    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content),
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+      toast.success("Content saved")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to save content")),
   })
 }
 
@@ -324,6 +381,81 @@ export function useUpdatePlan(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save plan")),
+  })
+}
+
+// One-way blueprint lock. On success the returned plan carries
+// `sections_locked: true`; writing it to the cache flips every gated control
+// (sources, reorder, optional add/remove, themes, regenerate) to read-only.
+export function useLockPlan(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.lockPlan(cycleId),
+    onSuccess: (plan) => {
+      setPlanCache(qc, cycleId, plan)
+      toast.success("Sections locked")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to lock sections")),
+  })
+}
+
+// Switch a section's source type via the dedicated endpoint. The response
+// section's `mode` is authoritative; patch it into both the sections cache and
+// the plan's feeder map immediately so the badge updates without waiting for a
+// plan refetch (the feeder map's mode takes priority in the tile display logic).
+export function useSetSourceMode(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      mode,
+    }: {
+      sectionCode: string
+      mode: SectionMode
+    }) => pmApi.setSourceMode(cycleId, sectionCode, mode),
+    onSuccess: (section) => {
+      // Patch sections cache immediately.
+      qc.setQueryData<CycleReportSection[]>(
+        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+        (old) =>
+          old?.map((s) =>
+            s.section_code === section.section_code ? section : s,
+          ) ?? old,
+      )
+      // Also patch the feeder map entry's mode so the badge reflects the new
+      // mode instantly — the tile uses entry?.mode ?? s.mode, so a stale feeder
+      // entry would show the old badge until the plan refetch completes.
+      qc.setQueryData<PlanResponse>(
+        QUERY_KEYS.PM_CYCLE_PLAN(cycleId),
+        (old) => {
+          if (!old) return old
+          const hasEntry = old.feeders.some(
+            (f) => f.section_code === section.section_code,
+          )
+          const updatedFeeders = hasEntry
+            ? old.feeders.map((f) =>
+                f.section_code === section.section_code
+                  ? { ...f, mode: section.mode }
+                  : f,
+              )
+            : [
+                ...old.feeders,
+                {
+                  section_code: section.section_code,
+                  title: section.title,
+                  departments: [],
+                  mode: section.mode,
+                },
+              ]
+          return { ...old, feeders: updatedFeeders }
+        },
+      )
+      // Full refetch to pick up any other feeder map changes (cleared feeders etc.).
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to switch source type")),
   })
 }
 

@@ -18,12 +18,13 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { useState } from "react"
-import { AlertCircle, GripVertical, X } from "lucide-react"
+import { AlertCircle, CheckCircle2, GripVertical, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   useRemoveOptional,
   useReorderSections,
+  useSetSourceMode,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -51,7 +52,10 @@ export function PlanSectionGrid({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const feederMap = new Map(feeders.map((f) => [f.section_code, f.departments]))
+  // Index the feeder map once — it carries departments, the section's mode, and
+  // whether a document has been uploaded. The feeder map's `mode` is the
+  // authority (the sections list can lag a mode switch).
+  const feederByCode = new Map(feeders.map((f) => [f.section_code, f]))
   const deptByCode = new Map(
     departments.map((d) => [d.department_code, d.department_name]),
   )
@@ -76,18 +80,27 @@ export function PlanSectionGrid({
     >
       <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {sections.map((s, i) => (
-            <SectionTile
-              key={s.section_code}
-              index={i}
-              cycleId={cycleId}
-              section={s}
-              feederCodes={feederMap.get(s.section_code) ?? []}
-              departments={departments}
-              deptByCode={deptByCode}
-              readOnly={readOnly}
-            />
-          ))}
+          {sections.map((s, i) => {
+            const entry = feederByCode.get(s.section_code)
+            const effectiveMode = entry?.mode ?? s.mode
+            const isExtract = effectiveMode === "extract"
+            const isAnalyze = effectiveMode === "analyze"
+            return (
+              <SectionTile
+                key={s.section_code}
+                index={i}
+                cycleId={cycleId}
+                section={s}
+                feederCodes={entry?.departments ?? []}
+                documentUploaded={entry?.document_uploaded ?? false}
+                isExtract={isExtract}
+                isAnalyze={isAnalyze}
+                departments={departments}
+                deptByCode={deptByCode}
+                readOnly={readOnly}
+              />
+            )
+          })}
         </div>
       </SortableContext>
     </DndContext>
@@ -99,6 +112,9 @@ function SectionTile({
   cycleId,
   section,
   feederCodes,
+  documentUploaded,
+  isExtract,
+  isAnalyze,
   departments,
   deptByCode,
   readOnly,
@@ -107,6 +123,9 @@ function SectionTile({
   cycleId: string
   section: CycleReportSection
   feederCodes: string[]
+  documentUploaded: boolean
+  isExtract: boolean
+  isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
@@ -125,10 +144,14 @@ function SectionTile({
     transition,
   }
 
-  const mode = SECTION_MODES[section.mode]
+  // The feeder map's mode wins (the sections list can lag a mode switch).
+  const effectiveMode = isExtract ? "extract" : isAnalyze ? "analyze" : section.mode
+  const mode = SECTION_MODES[effectiveMode]
   const layer = SECTION_LAYERS[section.layer]
+  // Generate and analyze sections both require department feeders as their source.
   const needsSource =
-    section.mode === "generate" &&
+    !isExtract &&
+    (isAnalyze || section.mode === "generate") &&
     section.ai_allowed &&
     feederCodes.length === 0
 
@@ -184,7 +207,7 @@ function SectionTile({
             >
               {mode?.label ?? section.mode}
             </span>
-            {!section.ai_allowed && (
+            {!section.ai_allowed && !isExtract && (
               <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
                 Manual
               </span>
@@ -194,6 +217,9 @@ function SectionTile({
             cycleId={cycleId}
             section={section}
             feederCodes={feederCodes}
+            documentUploaded={documentUploaded}
+            isExtract={isExtract}
+            isAnalyze={isAnalyze}
             departments={departments}
             deptByCode={deptByCode}
             readOnly={readOnly}
@@ -210,6 +236,9 @@ function FeederArea({
   cycleId,
   section,
   feederCodes,
+  documentUploaded,
+  isExtract,
+  isAnalyze,
   departments,
   deptByCode,
   readOnly,
@@ -217,11 +246,15 @@ function FeederArea({
   cycleId: string
   section: CycleReportSection
   feederCodes: string[]
+  documentUploaded: boolean
+  isExtract: boolean
+  isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
 }) {
-  if (!section.ai_allowed) {
+  // Manual sections (PM writes/uploads directly) — no sources to assign.
+  if (!section.ai_allowed && !isExtract && !isAnalyze) {
     return (
       <p className="text-xs text-muted-foreground italic">
         {section.content_source === "narrative"
@@ -230,33 +263,102 @@ function FeederArea({
       </p>
     )
   }
-  if (section.mode === "attach") {
+  if (!isExtract && !isAnalyze && section.mode === "attach") {
     return <p className="text-xs text-muted-foreground italic">Uploaded separately</p>
   }
-  if (section.mode === "auto") {
+  if (!isExtract && !isAnalyze && section.mode === "auto") {
     return <p className="text-xs text-muted-foreground italic">System-generated</p>
   }
 
-  const isEmpty = feederCodes.length === 0
+  // Generate, extract, and analyze sections share one source picker.
+  // The mode toggles switch between these three — extract is document-based,
+  // analyze and generate are department-based.
+  return (
+    <SourcesFeederArea
+      cycleId={cycleId}
+      section={section}
+      feederCodes={feederCodes}
+      documentUploaded={documentUploaded}
+      isExtract={isExtract}
+      isAnalyze={isAnalyze}
+      departments={departments}
+      deptByCode={deptByCode}
+      readOnly={readOnly}
+    />
+  )
+}
 
+// One dropdown holds all three sources: department feeders (checkboxes), an
+// "Upload document later" toggle (→ extract mode), and an "Analyze mode" toggle
+// (→ analyze mode, keeps department feeders). Modes are mutually exclusive.
+function SourcesFeederArea({
+  cycleId,
+  section,
+  feederCodes,
+  documentUploaded,
+  isExtract,
+  isAnalyze,
+  departments,
+  deptByCode,
+  readOnly,
+}: {
+  cycleId: string
+  section: CycleReportSection
+  feederCodes: string[]
+  documentUploaded: boolean
+  isExtract: boolean
+  isAnalyze: boolean
+  departments: FeederDepartment[]
+  deptByCode: Map<string, string>
+  readOnly?: boolean
+}) {
+  const setSourceMode = useSetSourceMode(cycleId)
+  const hasDoc = documentUploaded || !!section.attachment
+  const hasDepts = feederCodes.length > 0
+
+  // Generate and analyze need a department source; extract is sourced by document.
+  const showAmber = !isExtract && !hasDepts
+
+  const deptPills = feederCodes.map((code) => (
+    <span
+      key={code}
+      className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground"
+    >
+      {deptByCode.get(code) ?? code}
+    </span>
+  ))
+
+  const docChip = isExtract ? (
+    <span className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+      {hasDoc ? (
+        <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+      ) : (
+        <Upload className="h-3 w-3" />
+      )}
+      {hasDoc ? "Document" : "Document later"}
+    </span>
+  ) : null
+
+  const analyzeChip = isAnalyze ? (
+    <span className="inline-flex items-center gap-1 rounded-sm bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/30 dark:border-indigo-900/50 dark:text-indigo-300">
+      Analyze
+    </span>
+  ) : null
+
+  // Read-only (locked plan) — summarize the chosen sources, no picker.
   if (readOnly) {
     return (
       <div className="text-xs">
-        {isEmpty ? (
+        {hasDepts || isExtract ? (
+          <span className="flex flex-wrap items-center gap-1">
+            {deptPills}
+            {docChip}
+            {analyzeChip}
+          </span>
+        ) : (
           <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
             <AlertCircle className="h-3 w-3" />
             <span>No source</span>
-          </span>
-        ) : (
-          <span className="flex flex-wrap items-center gap-1">
-            {feederCodes.map((code) => (
-              <span
-                key={code}
-                className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground"
-              >
-                {deptByCode.get(code) ?? code}
-              </span>
-            ))}
           </span>
         )}
       </div>
@@ -269,33 +371,43 @@ function FeederArea({
       sectionCode={section.section_code}
       departments={departments}
       selected={feederCodes}
+      // Analyze sections: departments only — no source-mode switcher.
+      // Generate sections: show "Upload document later" to switch to extract.
+      // Extract sections: "Upload document later" is checked (toggle back to generate).
+      documentOption={
+        isAnalyze
+          ? undefined
+          : {
+              checked: isExtract,
+              onChange: (next) =>
+                setSourceMode.mutate({
+                  sectionCode: section.section_code,
+                  mode: next ? "extract" : "generate",
+                }),
+            }
+      }
     >
       <button
         type="button"
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors text-left",
-          isEmpty
+          showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",
         )}
       >
-        {isEmpty ? (
+        {hasDepts || isExtract ? (
+          <span className="flex flex-wrap items-center gap-1">
+            {deptPills}
+            {docChip}
+            {analyzeChip}
+            <span className="text-muted-foreground">edit</span>
+          </span>
+        ) : (
           <>
             <AlertCircle className="h-3.5 w-3.5" />
             <span className="font-medium">Needs a source</span>
           </>
-        ) : (
-          <span className="flex flex-wrap items-center gap-1">
-            {feederCodes.map((code) => (
-              <span
-                key={code}
-                className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground"
-              >
-                {deptByCode.get(code) ?? code}
-              </span>
-            ))}
-            <span className="text-muted-foreground">edit</span>
-          </span>
         )}
       </button>
     </FeederPicker>

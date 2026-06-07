@@ -15,7 +15,7 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
-export type SectionMode = "generate" | "attach" | "auto"
+export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
 
@@ -140,6 +140,10 @@ export interface FeederMapEntry {
   section_code: string
   title: string
   departments: string[] // department codes
+  // Extract-mode entries also carry their mode and whether a source document
+  // has been uploaded yet — both sources are optional and independent.
+  mode?: SectionMode
+  document_uploaded?: boolean
 }
 
 export interface PlanResponse {
@@ -148,6 +152,12 @@ export interface PlanResponse {
   themes: ReportTheme[]
   plan_generated_at: string | null
   feeders: FeederMapEntry[]
+  // Server-side blueprint lock. Once `sections_locked` is true the plan is
+  // frozen: sources, ordering, optional sections, themes/headline, and
+  // regeneration are all rejected (409) by the backend. One-way — no unlock.
+  sections_locked: boolean
+  sections_locked_at: string | null
+  sections_locked_by: string | null
 }
 
 export interface AvailableOptionalSection {

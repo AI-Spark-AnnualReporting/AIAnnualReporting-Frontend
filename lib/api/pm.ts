@@ -3,7 +3,7 @@ import {
   Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
-  AssemblyReadiness, FinalReport,
+  AssemblyReadiness, FinalReport, SectionMode,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -218,6 +218,20 @@ export const pmApi = {
     return data.section
   },
 
+  // Extract-mode: override the AI-extracted text. The source document stays
+  // attached — only the content body is updated. Pass "" to clear it.
+  setExtractContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/extract-content`,
+      { content },
+    )
+    return data.section
+  },
+
   lockSection: async (
     cycleId: string,
     sectionCode: string,
@@ -259,6 +273,35 @@ export const pmApi = {
       `/pm/cycles/${cycleId}/sections/${sectionCode}/generate`,
       undefined,
       { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Analyze-mode: trigger (or re-trigger) the analyze agent for a section.
+  // The backend reads feeder department digests and writes structured Markdown
+  // findings into section.content. Long timeout — LLM call over N digests.
+  runAnalysis: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return data.section
+  },
+
+  // Analyze-mode: override or clear the AI findings. Pass "" or null to clear
+  // (backend stores as null). Mirrors the existing extract-content endpoint.
+  setAnalyzeContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string | null,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
+      { content },
     )
     return data.section
   },
@@ -321,6 +364,13 @@ export const pmApi = {
     return data.plan ?? data
   },
 
+  // One-way lock that freezes the plan blueprint. No request body, no unlock.
+  // Returns the full plan with `sections_locked: true`.
+  lockPlan: async (cycleId: string): Promise<PlanResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/plan/lock`)
+    return data.plan ?? data
+  },
+
   setFeeders: async (
     cycleId: string,
     sectionCode: string,
@@ -331,6 +381,21 @@ export const pmApi = {
       { departments: departmentCodes },
     )
     return data.plan ?? data
+  },
+
+  // Switch a section's source type. generate → extract clears feeders + content;
+  // extract → generate deletes the document, content, and feeders. Returns the
+  // updated section (its `mode` is the single source of truth afterwards).
+  setSourceMode: async (
+    cycleId: string,
+    sectionCode: string,
+    mode: SectionMode,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/source-mode`,
+      { mode },
+    )
+    return data.section
   },
 
   reorderSections: async (

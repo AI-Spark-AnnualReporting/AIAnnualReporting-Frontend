@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
-import { useBuildReadiness, usePMCycleSections } from "@/hooks/useReportBuilder"
+import { useBuildReadiness, usePMCycleSections, useFinalReport } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -35,6 +35,9 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const readinessQuery = useBuildReadiness(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmData } = usePMCycleDashboard(cycleId)
+  const finalReportQuery = useFinalReport(cycleId)
+  // isSuccess = a final report exists (404 → isError, loading → isPending)
+  const assembled = finalReportQuery.isSuccess
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null)
 
@@ -152,7 +155,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
         {/* Right — mode-appropriate detail */}
         <div className="flex-1 flex flex-col min-h-0">
-          <SectionDetail section={selected} cycleId={cycleId} />
+          <SectionDetail section={selected} cycleId={cycleId} assembled={assembled} />
         </div>
       </div>
     </div>

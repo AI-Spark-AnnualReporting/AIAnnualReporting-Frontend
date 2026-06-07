@@ -22,30 +22,43 @@ interface FeederPickerProps {
   departments: FeederDepartment[]
   selected: string[] // current department_codes
   children: React.ReactNode // the trigger
+  // Optional "Upload document later" choice — only relevant for generate sections.
+  // `checked` reflects whether the section is in extract mode (single source of
+  // truth). `onChange` switches the source type via the dedicated endpoint. While
+  // checked, departments are disabled (extract is document-sourced, not dept-sourced).
+  documentOption?: {
+    checked: boolean
+    onChange: (next: boolean) => void
+    label?: string
+  }
 }
 
-// Popover (via DropdownMenu) for selecting which departments feed a section.
-// Batches selection during the menu's lifetime, commits on close.
+// Popover (via DropdownMenu) for selecting which departments feed a section, plus
+// an optional document-source toggle. Department selection batches during the
+// menu's lifetime and commits on close; the document toggle switches mode
+// immediately via its own endpoint.
 export function FeederPicker({
   cycleId,
   sectionCode,
   departments,
   selected,
   children,
+  documentOption,
 }: FeederPickerProps) {
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState<Set<string>>(new Set(selected))
   const setFeeders = useSetFeeders(cycleId)
 
-  // Sync local set with the server-truth `selected` when the menu (re)opens —
-  // covers the case where another action (regenerate, etc.) updated feeders
-  // while the popover was closed.
+  // Sync local set with server-truth `selected` when the menu (re)opens — covers
+  // the case where another action updated feeders while the popover was closed.
   const [prevSelectedKey, setPrevSelectedKey] = useState(selected.join("|"))
   const currentSelectedKey = selected.join("|")
   if (prevSelectedKey !== currentSelectedKey) {
     setPrevSelectedKey(currentSelectedKey)
     setLocal(new Set(selected))
   }
+
+  const docChecked = documentOption?.checked ?? false
 
   const toggle = (code: string, next: boolean) => {
     setLocal((prev) => {
@@ -58,7 +71,9 @@ export function FeederPicker({
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
-    if (!nextOpen) {
+    // Commit department changes on close. (Mode is handled live by the document
+    // toggle, not here.) Skip while in extract mode — it has no departments.
+    if (!nextOpen && !docChecked) {
       const current = [...local].sort()
       const previous = [...selected].sort()
       const changed =
@@ -87,12 +102,31 @@ export function FeederPicker({
             <DropdownMenuCheckboxItem
               key={d.department_code}
               checked={local.has(d.department_code)}
+              // Extract mode is document-based — departments don't apply.
+              // Analyze mode uses department feeders, so don't disable them.
+              disabled={docChecked}
               onCheckedChange={(checked) => toggle(d.department_code, !!checked)}
               onSelect={(e) => e.preventDefault()} // keep the menu open on click
             >
               {d.department_name}
             </DropdownMenuCheckboxItem>
           ))
+        )}
+
+        {documentOption && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              Source mode
+            </DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={docChecked}
+              onCheckedChange={(checked) => documentOption.onChange(!!checked)}
+              onSelect={(e) => e.preventDefault()}
+            >
+              {documentOption.label ?? "Upload document later"}
+            </DropdownMenuCheckboxItem>
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

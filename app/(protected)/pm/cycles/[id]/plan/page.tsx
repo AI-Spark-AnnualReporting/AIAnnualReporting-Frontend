@@ -34,6 +34,7 @@ import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
 import { ThemeEditor } from "@/components/report/ThemeEditor"
 import {
   useBuildPlan,
+  useLockPlan,
   usePMCycleSections,
   usePlan,
 } from "@/hooks/useReportBuilder"
@@ -41,7 +42,7 @@ import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import { isTableOfContentsSection } from "@/lib/section-filters"
-import { cn } from "@/lib/utils"
+import { cn, formatDateTime } from "@/lib/utils"
 import type {
   CycleReportSection,
   FeederMapEntry,
@@ -70,6 +71,11 @@ interface PMDashboardData {
 
 function PlanShell({ cycleId }: { cycleId: string }) {
   const [step, setStep] = useState<Step>(1)
+  // The lock is authoritative on the server (`plan.sections_locked`). Once set,
+  // the blueprint is frozen one-way: no reordering, removing, source editing,
+  // theme/headline edits, or regeneration. There is no unlock.
+  const lockPlan = useLockPlan(cycleId)
+
   const planQuery = usePlan(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
@@ -109,12 +115,13 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const sections = [...(sectionsQuery.data ?? [])]
     .filter((s) => !isTableOfContentsSection(s))
     .sort((a, b) => a.display_order - b.display_order)
+  const sectionsLocked = plan.sections_locked
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
   const canLockSections = needsSource === 0 && sections.length > 0
 
   const toolbarRight = (
     <div className="flex items-center gap-2">
-      <RegeneratePlanButton cycleId={cycleId} />
+      <RegeneratePlanButton cycleId={cycleId} disabled={sectionsLocked} />
     </div>
   )
 
@@ -147,13 +154,22 @@ function PlanShell({ cycleId }: { cycleId: string }) {
               feeders={plan.feeders ?? []}
               departments={departments}
               needsSource={needsSource}
-              onLock={() => setStep(2)}
+              locked={sectionsLocked}
+              lockedAt={plan.sections_locked_at}
+              locking={lockPlan.isPending}
+              onLock={async () => {
+                // Persist the lock first; only advance once the server confirms.
+                await lockPlan.mutateAsync()
+                setStep(2)
+              }}
+              onContinue={() => setStep(2)}
             />
           ) : (
             <ThemesStep
               cycleId={cycleId}
               plan={plan}
               sections={sections}
+              locked={sectionsLocked}
               onBack={() => setStep(1)}
             />
           )}
@@ -358,14 +374,22 @@ function SectionsStep({
   feeders,
   departments,
   needsSource,
+  locked,
+  lockedAt,
+  locking,
   onLock,
+  onContinue,
 }: {
   cycleId: string
   sections: CycleReportSection[]
   feeders: FeederMapEntry[]
   departments: Array<{ department_code: string; department_name: string }>
   needsSource: number
+  locked: boolean
+  lockedAt: string | null
+  locking: boolean
   onLock: () => void
+  onContinue: () => void
 }) {
   const canLock = needsSource === 0 && sections.length > 0
 
@@ -377,12 +401,14 @@ function SectionsStep({
             Report sections
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Drag to reorder, assign a department source to each generated section, and add optional sections.
+            {locked
+              ? "Sections are locked — reordering, sources, and removal are disabled."
+              : "Drag to reorder, assign a department source to each generated section, and add optional sections."}
           </p>
         </div>
         <div className="text-xs text-muted-foreground tabular-nums shrink-0">
           {sections.length} total
-          {needsSource > 0 && (
+          {!locked && needsSource > 0 && (
             <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
               {needsSource} need a source
             </span>
@@ -396,22 +422,49 @@ function SectionsStep({
           sections={sections}
           feeders={feeders}
           departments={departments}
+          readOnly={locked}
         />
       </div>
 
       <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-border/80">
-        <AddSectionPicker cycleId={cycleId} />
+        {locked ? (
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" />
+            Sections locked
+            {lockedAt ? ` on ${formatDateTime(lockedAt)}` : ""} — sources and
+            structure can&apos;t be changed.
+          </span>
+        ) : (
+          <AddSectionPicker cycleId={cycleId} />
+        )}
         <div className="flex items-center gap-3">
-          {!canLock && needsSource > 0 && (
-            <span className="text-xs text-amber-700 dark:text-amber-400 hidden sm:block">
-              Assign a source to every flagged section to continue.
-            </span>
+          {locked ? (
+            <Button onClick={onContinue} size="sm">
+              Continue
+              <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+            </Button>
+          ) : (
+            <>
+              {!canLock && needsSource > 0 && (
+                <span className="text-xs text-amber-700 dark:text-amber-400 hidden sm:block">
+                  Assign a source to every flagged section to continue.
+                </span>
+              )}
+              <Button
+                onClick={onLock}
+                disabled={!canLock || locking}
+                size="sm"
+              >
+                {locking ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Lock sections
+                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+              </Button>
+            </>
           )}
-          <Button onClick={onLock} disabled={!canLock} size="sm">
-            <Lock className="h-3.5 w-3.5 mr-1.5" />
-            Lock sections
-            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-          </Button>
         </div>
       </div>
     </section>
@@ -424,18 +477,24 @@ function ThemesStep({
   cycleId,
   plan,
   sections,
+  locked,
   onBack,
 }: {
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
+  locked: boolean
   onBack: () => void
 }) {
   return (
     <section className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-2">
         <div className="rounded-2xl border bg-card p-5">
-          <ThemeEditor cycleId={cycleId} themes={plan.themes ?? []} />
+          <ThemeEditor
+            cycleId={cycleId}
+            themes={plan.themes ?? []}
+            readOnly={locked}
+          />
         </div>
       </div>
 
@@ -681,15 +740,18 @@ function countSectionsNeedingFeeders(
   feeders: FeederMapEntry[] | undefined,
   sections: CycleReportSection[],
 ): number {
-  if (!feeders) return 0
-  // Manual sections (`ai_allowed = false`) are written by the PM directly —
-  // they never need a department source, so don't count them as blockers.
-  const generateCodes = new Set(
-    sections
-      .filter((s) => s.mode === "generate" && s.ai_allowed)
-      .map((s) => s.section_code),
-  )
-  return feeders.filter(
-    (f) => generateCodes.has(f.section_code) && f.departments.length === 0,
-  ).length
+  // Iterate the sections themselves — a generate section with no feeder entry at
+  // all still needs a source, so counting only feeder rows would miss it.
+  const feederByCode = new Map((feeders ?? []).map((f) => [f.section_code, f]))
+  return sections.filter((s) => {
+    // Manual sections (`ai_allowed = false`) are written by the PM directly.
+    if (!s.ai_allowed) return false
+    const entry = feederByCode.get(s.section_code)
+    // The feeder map's mode is authoritative (a mode switch lands there first).
+    // Generate and analyze sections require department feeders; extract is
+    // sourced by its document.
+    const mode = entry?.mode ?? s.mode
+    if (mode !== "generate" && mode !== "analyze") return false
+    return (entry?.departments.length ?? 0) === 0
+  }).length
 }
