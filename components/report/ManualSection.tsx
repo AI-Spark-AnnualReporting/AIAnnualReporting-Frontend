@@ -19,21 +19,28 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { formatDateTime } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 // Manual section editor: no source picker, no Generate button. The PM writes
 // the body directly and saves it. Rendered when `section.ai_allowed === false`.
 export function ManualSection({
   section,
   cycleId,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
 }) {
   const sectionCode = section.section_code
   const saved = section.content ?? ""
 
   const [draft, setDraft] = useState(saved)
+  // Content must be in the cycle's language (warn + block Save), like the dept
+  // answer box and the kickoff brief.
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
 
   // Re-seed the draft when the server content changes externally (e.g. after
   // unlocking, or switching sections in the builder).
@@ -129,6 +136,9 @@ export function ManualSection({
               rows={14}
               className="text-sm leading-relaxed"
             />
+            {langWarning && (
+              <p className="text-xs text-amber-600">{langWarning}</p>
+            )}
             <div className="flex items-center justify-between text-xs">
               {dirty ? (
                 <span className="text-amber-700 dark:text-amber-400">
@@ -156,13 +166,15 @@ export function ManualSection({
               onClick={() =>
                 save.mutate({ sectionCode, content: draft })
               }
-              disabled={save.isPending || !dirty || !trimmed}
+              disabled={save.isPending || !dirty || !trimmed || !langOk}
               title={
                 !trimmed
                   ? "Add some content before saving"
-                  : !dirty
-                    ? "No changes to save"
-                    : undefined
+                  : !langOk
+                    ? langWarning ?? undefined
+                    : !dirty
+                      ? "No changes to save"
+                      : undefined
               }
             >
               {save.isPending ? (

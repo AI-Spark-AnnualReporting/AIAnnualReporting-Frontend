@@ -291,7 +291,7 @@ export function SectionDetail({
   // Analyze-mode: structured Markdown findings from the analyze agent. No
   // document — department digests are the source. Locks like generate.
   if (section.mode === "analyze") {
-    return <AnalyzeSection section={section} cycleId={cycleId} />
+    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based
@@ -301,7 +301,7 @@ export function SectionDetail({
   //   - structured / financials / composite → file upload (AttachSection)
   if (!section.ai_allowed) {
     if (section.content_source === "narrative") {
-      return <ManualSection section={section} cycleId={cycleId} />
+      return <ManualSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
     }
     return <AttachSection section={section} cycleId={cycleId} />
   }

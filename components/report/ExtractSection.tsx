@@ -29,7 +29,7 @@ import {
 } from "@/hooks/useReportBuilder"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
 import { documentsApi } from "@/lib/api/documents"
-import { documentLanguageWarning } from "@/lib/lang"
+import { documentLanguageWarning, languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import type { ContentLanguage, CycleReportSection } from "@/types"
 
@@ -185,6 +185,7 @@ export function ExtractSection({
                   extractedEmpty={saved.trim() === ""}
                   saving={save.isPending}
                   locking={lock.isPending}
+                  contentLanguage={contentLanguage}
                   onChange={setDraft}
                   onSave={() => save.mutate({ sectionCode, content: draft })}
                   onLock={() => lock.mutate({ sectionCode })}
@@ -237,6 +238,7 @@ function ContentEditor({
   onChange,
   onSave,
   onLock,
+  contentLanguage,
 }: {
   draft: string
   saved: string
@@ -247,11 +249,15 @@ function ContentEditor({
   onChange: (next: string) => void
   onSave: () => void
   onLock: () => void
+  contentLanguage: ContentLanguage
 }) {
   const busy = saving || locking
   // Lock requires a document (guaranteed here) but not content. Just don't lock
   // over unsaved edits.
   const lockDisabled = dirty || busy
+  // Edited content must stay in the cycle's language (warn + block Save).
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
 
   return (
     <div className="space-y-2">
@@ -284,6 +290,8 @@ function ContentEditor({
         className="text-sm leading-relaxed"
       />
 
+      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
+
       <div className="flex items-center justify-between text-xs">
         {dirty ? (
           <span className="text-amber-700 dark:text-amber-400">
@@ -306,8 +314,8 @@ function ContentEditor({
         <Button
           variant="outline"
           onClick={onSave}
-          disabled={saving || !dirty}
-          title={!dirty ? "No changes to save" : undefined}
+          disabled={saving || !dirty || !langOk}
+          title={!langOk ? langWarning ?? undefined : !dirty ? "No changes to save" : undefined}
         >
           {saving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
