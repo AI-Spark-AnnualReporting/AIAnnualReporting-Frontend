@@ -322,6 +322,7 @@ export interface DepartmentDashboard {
     progress_percentage: number
     has_questions: boolean
     review_notes?: string | null
+    content_language?: ContentLanguage
   }[]
   total_assignments: number
   pending_count: number

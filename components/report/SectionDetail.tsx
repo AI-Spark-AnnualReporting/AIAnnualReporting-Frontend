@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { CycleReportSection } from "@/types"
+import { ContentLanguage, CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -252,10 +252,12 @@ export function SectionDetail({
   section,
   cycleId,
   assembled = false,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection | null
   cycleId: string
   assembled?: boolean
+  contentLanguage?: ContentLanguage
 }) {
   if (!section) {
     return (
@@ -283,7 +285,7 @@ export function SectionDetail({
   // Extract-mode is document-driven: upload runs AI extraction, the PM edits
   // the result, then locks. Takes priority over the ai_allowed branch below.
   if (section.mode === "extract") {
-    return <ExtractSection section={section} cycleId={cycleId} />
+    return <ExtractSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
   }
 
   // Analyze-mode: structured Markdown findings from the analyze agent. No

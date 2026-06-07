@@ -1308,12 +1308,6 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               Upload Document <span className="text-xs text-muted-foreground font-normal">(optional)</span>
             </div>
             <LanguageMismatchAlert message={docLangWarning} />
-            {docLangChecking && (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Checking document language…
-              </p>
-            )}
             <input
               ref={fileRef}
               type="file"
@@ -1322,12 +1316,35 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               onChange={handleFilePick}
             />
             {pendingFile ? (
-              <div className="w-full rounded-lg border border-blue-300 bg-blue-50 p-3 flex items-center gap-3">
-                <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+              <div className={cn(
+                "w-full rounded-lg border p-3 flex items-center gap-3",
+                docLangWarning
+                  ? "border-destructive/40 bg-destructive/10"
+                  : docLangChecking
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-green-300 bg-green-50 dark:border-green-900/50 dark:bg-green-950/25",
+              )}>
+                {docLangWarning ? (
+                  <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
+                ) : docLangChecking ? (
+                  <Loader2 className="h-5 w-5 text-blue-600 shrink-0 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-blue-900 truncate">{pendingFile.name}</p>
-                  <p className="text-xs text-blue-700">
-                    Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.
+                  <p className={cn(
+                    "text-sm font-medium truncate",
+                    docLangWarning ? "text-destructive" : docLangChecking ? "text-blue-900" : "text-green-900 dark:text-green-200",
+                  )}>{pendingFile.name}</p>
+                  <p className={cn(
+                    "text-xs",
+                    docLangWarning ? "text-destructive/80" : docLangChecking ? "text-blue-700" : "text-green-700 dark:text-green-300/80",
+                  )}>
+                    {docLangWarning
+                      ? "Wrong language — replace this file to continue."
+                      : docLangChecking
+                        ? "Checking document language…"
+                        : <>Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.</>}
                   </p>
                 </div>
                 <Button

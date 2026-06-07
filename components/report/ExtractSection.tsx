@@ -28,7 +28,10 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { documentsApi } from "@/lib/api/documents"
+import { documentLanguageWarning } from "@/lib/lang"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 // Document-driven extraction: uploading the source runs AI extraction on the
 // backend and returns the text in `section.content`. The PM reviews/edits it,
@@ -44,9 +47,11 @@ const ACCEPT = {
 export function ExtractSection({
   section,
   cycleId,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
 }) {
   const sectionCode = section.section_code
   const isLocked = section.status === "locked"
@@ -55,6 +60,10 @@ export function ExtractSection({
 
   const [draft, setDraft] = useState(saved)
   const [unlockOpen, setUnlockOpen] = useState(false)
+  // Wrong-language guard: verify the dropped file's language BEFORE uploading,
+  // so an extract source in the wrong language is never sent.
+  const [langWarning, setLangWarning] = useState<string | null>(null)
+  const [checkingLang, setCheckingLang] = useState(false)
 
   // Re-seed the editor when the server content changes externally — after an
   // upload (extraction result), a remove (cleared), an unlock, or a section
@@ -73,13 +82,31 @@ export function ExtractSection({
 
   const dirty = draft !== saved
 
-  const onDrop = (accepted: File[], rejections: FileRejection[]) => {
+  const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
       toast.error("Unsupported file type. Use PDF or DOCX.")
       return
     }
     const file = accepted[0]
     if (!file) return
+    // Verify language first — only upload if it matches the cycle's language.
+    setLangWarning(null)
+    setCheckingLang(true)
+    try {
+      const res = await documentsApi.checkLanguage(file, contentLanguage)
+      if (!res.matches) {
+        const detected =
+          res.detected_language === "arabic" || res.detected_language === "english"
+            ? res.detected_language
+            : undefined
+        setLangWarning(documentLanguageWarning(contentLanguage, detected))
+        return
+      }
+    } catch {
+      // Fail open — let the upload proceed; the backend still extracts.
+    } finally {
+      setCheckingLang(false)
+    }
     upload.mutate({ sectionCode, file })
   }
 
@@ -89,7 +116,7 @@ export function ExtractSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked,
+    disabled: upload.isPending || isLocked || checkingLang,
     noClick: !!attachment,
     noKeyboard: !!attachment,
   })
@@ -165,7 +192,10 @@ export function ExtractSection({
               )}
             </>
           ) : (
-            <EmptyDropzone dz={dz} uploading={upload.isPending} />
+            <div className="space-y-2.5">
+              <LanguageMismatchAlert message={langWarning} />
+              <EmptyDropzone dz={dz} uploading={upload.isPending || checkingLang} />
+            </div>
           )}
 
           {/* Replace flow reuses the dropzone hook — render an off-screen root

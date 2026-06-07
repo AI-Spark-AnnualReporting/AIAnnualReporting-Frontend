@@ -6,10 +6,9 @@ import { departmentApi } from "@/lib/api/department"
 import {
   languageMismatchWarning,
   isLanguageAcceptable,
-  documentLanguageWarning,
-  isDocumentLanguageError,
 } from "@/lib/lang"
-import { documentsApi } from "@/lib/api/documents"
+import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
+import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
@@ -30,7 +29,7 @@ import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
-  PanelLeftClose, List, Ban, Info, Save, Download, FileUp, X,
+  PanelLeftClose, List, Ban, Info, Save, Download, FileUp,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import Link from "next/link"
@@ -113,12 +112,6 @@ export default function SessionWorkspacePage({
   // popup: upload each file, run AI answer-extraction, then refresh the session
   // so the drafted answers appear in the cards.
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  // Prominent inline warning when a picked/uploaded document isn't in the cycle's
-  // language — set instantly for .txt, or after the backend rejects a PDF/DOCX.
-  const [docLangWarning, setDocLangWarning] = useState<string | null>(null)
-  // True while picked documents' languages are being verified on the server.
-  const [docLangChecking, setDocLangChecking] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -136,6 +129,8 @@ export default function SessionWorkspacePage({
 
   // Answer language must match the cycle's language (warn + block Save).
   const cycleLang = session?.content_language ?? "english"
+  // Per-file language status for the supporting-docs upload dialog.
+  const docCheck = useDocLanguageCheck(cycleLang)
   const currentAnswerText = currentQ ? answers[currentQ.question_id] || "" : ""
   const currentAnswerLangWarning = languageMismatchWarning(currentAnswerText, cycleLang)
   const currentAnswerLangOk = isLanguageAcceptable(currentAnswerText, cycleLang)
@@ -336,53 +331,26 @@ export default function SessionWorkspacePage({
       else invalid.push(f.name)
     }
     if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
-    setPendingFiles((prev) => [...prev, ...valid])
-    setDocLangWarning(null)
     e.target.value = ""
-    if (valid.length === 0) return
-    // Verify each newly-picked document's language NOW (PDF/DOCX included, via
-    // the backend) so a wrong-language file is flagged at attach time. The
-    // "Extract Answers" button stays disabled while this runs and on a mismatch.
-    setDocLangChecking(true)
-    Promise.all(valid.map((f) => documentsApi.checkLanguage(f, cycleLang)))
-      .then((results) => {
-        const bad = results.find((r) => !r.matches)
-        if (bad) {
-          const detected =
-            bad.detected_language === "arabic" || bad.detected_language === "english"
-              ? bad.detected_language
-              : undefined
-          setDocLangWarning(documentLanguageWarning(cycleLang, detected))
-        }
-      })
-      .catch(() => {
-        // Fail open — the submit-time gate still protects.
-      })
-      .finally(() => setDocLangChecking(false))
-  }
-
-  const removePendingFile = (idx: number) => {
-    setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
-    setDocLangWarning(null)
+    // Each file is language-checked independently; a wrong-language file stays
+    // red and keeps the button disabled until removed.
+    docCheck.addFiles(valid)
   }
 
   const closeUploadDialog = () => {
     setUploadOpen(false)
-    setPendingFiles([])
-    setDocLangWarning(null)
-    setDocLangChecking(false)
+    docCheck.reset()
   }
 
   // Upload every file then run AI answer-extraction — identical to the dashboard
   // Start Session flow, but stays on this page and refreshes the answers in place.
   const handleUploadDocuments = async () => {
-    if (pendingFiles.length === 0) return
-    const files = [...pendingFiles]
+    const files = [...docCheck.files]
+    if (files.length === 0) return
 
     // Swap the dialog for the full-screen extraction loader.
     setUploadOpen(false)
     setExtractionResult(null)
-    setDocLangWarning(null)
     setUploading(true)
 
     // ── Phase 1: upload documents ──────────────────────────────────────────────
@@ -396,14 +364,10 @@ export default function SessionWorkspacePage({
     } catch (err: unknown) {
       setUploading(false)
       setExtractionResult(null)
-      setPendingFiles(files)
+      // Restore the files (re-verifying language) and reopen the dialog so the
+      // user can adjust and retry; a wrong-language file re-flags itself red.
+      docCheck.setAll(files)
       setUploadOpen(true)
-      // Wrong-language document: show the prominent inline banner in the dialog
-      // instead of a toast, so the warning isn't duplicated.
-      if (isDocumentLanguageError(err)) {
-        setDocLangWarning(documentLanguageWarning(cycleLang))
-        return
-      }
       toast.error(
         (err as { message?: string })?.message ||
           "Document upload failed — please check your files and try again."
@@ -430,7 +394,7 @@ export default function SessionWorkspacePage({
       )
       setTimeout(() => { setUploading(false); refetch() }, 1400)
     } finally {
-      setPendingFiles([])
+      docCheck.reset()
     }
   }
 
@@ -609,7 +573,7 @@ export default function SessionWorkspacePage({
         {canEdit && (
           <Button
             variant="outline" size="sm" className="h-8 text-xs shrink-0"
-            onClick={() => { setPendingFiles([]); setUploadOpen(true) }}
+            onClick={() => { docCheck.reset(); setUploadOpen(true) }}
             title="Upload supporting documents and let AI draft answers"
           >
             <FileUp className="h-3.5 w-3.5 mr-1.5" />
@@ -1034,13 +998,7 @@ export default function SessionWorkspacePage({
           </DialogHeader>
 
           <div className="space-y-3">
-            <LanguageMismatchAlert message={docLangWarning} />
-            {docLangChecking && (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Checking document language…
-              </p>
-            )}
+            <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
               type="file"
@@ -1050,7 +1008,7 @@ export default function SessionWorkspacePage({
               onChange={handlePickFiles}
             />
 
-            {pendingFiles.length === 0 ? (
+            {docCheck.docs.length === 0 ? (
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -1062,27 +1020,15 @@ export default function SessionWorkspacePage({
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="rounded-lg border divide-y">
-                  {pendingFiles.map((f, i) => (
-                    <div key={`${f.name}-${i}`} className="flex items-center gap-3 p-2.5">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{f.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {(f.size / 1024).toFixed(1)} KB
-                        </p>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => removePendingFile(i)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+                {docCheck.docs.map((d, i) => (
+                  <DocFileRow
+                    key={`${d.file.name}-${i}`}
+                    name={d.file.name}
+                    sizeKB={d.file.size / 1024}
+                    lang={d.lang}
+                    onRemove={() => docCheck.removeAt(i)}
+                  />
+                ))}
                 <Button
                   type="button"
                   variant="outline"
@@ -1100,7 +1046,7 @@ export default function SessionWorkspacePage({
             <Button variant="outline" onClick={closeUploadDialog}>
               Cancel
             </Button>
-            <Button onClick={handleUploadDocuments} disabled={pendingFiles.length === 0 || docLangChecking || !!docLangWarning}>
+            <Button onClick={handleUploadDocuments} disabled={docCheck.docs.length === 0 || docCheck.blocked}>
               Extract Answers
               <Sparkles className="ml-2 h-4 w-4" />
             </Button>

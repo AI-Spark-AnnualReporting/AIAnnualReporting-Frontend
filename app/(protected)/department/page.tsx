@@ -20,9 +20,12 @@ import {
 } from "@/components/ui/dialog"
 import { SESSION_STATUSES } from "@/lib/constants"
 import { SessionStatus } from "@/types"
+import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
+import { DocFileRow } from "@/components/ui/doc-file-row"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import {
   ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye,
-  FileUp, FileText, X,
+  FileUp,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
@@ -81,10 +84,14 @@ export default function DepartmentDashboard() {
   const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
   const [startTarget, setStartTarget] = useState<string | null>(null)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [starting, setStarting] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Language of the cycle whose "Start Session" dialog is open — drives the
+  // per-file wrong-language check below.
+  const startAssignment = data?.assignments?.find((a) => a.session_id === startTarget)
+  const docCheck = useDocLanguageCheck(startAssignment?.content_language ?? "english")
 
   const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files || [])
@@ -95,17 +102,13 @@ export default function DepartmentDashboard() {
       else invalid.push(f.name)
     }
     if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
-    setPendingFiles((prev) => [...prev, ...valid])
     e.target.value = ""
-  }
-
-  const removePendingFile = (idx: number) => {
-    setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
+    docCheck.addFiles(valid)
   }
 
   const closeStartDialog = () => {
     setStartTarget(null)
-    setPendingFiles([])
+    docCheck.reset()
   }
 
   // Documents are optional. When files are attached: upload them, run AI
@@ -115,7 +118,7 @@ export default function DepartmentDashboard() {
   const handleStartSession = async () => {
     if (!startTarget) return
     const sessionId = startTarget
-    const files = [...pendingFiles]
+    const files = [...docCheck.files]
 
     // No documents attached — uploading is optional, so go straight in.
     if (files.length === 0) {
@@ -141,7 +144,7 @@ export default function DepartmentDashboard() {
     } catch (err: unknown) {
       setStarting(false)
       setExtractionResult(null)
-      setPendingFiles(files)      // keep the selection so the user can retry
+      docCheck.setAll(files)      // keep + re-verify the selection so the user can retry
       setStartTarget(sessionId)   // reopen the upload popup on the dashboard
       toast.error(
         (err as { message?: string })?.message ||
@@ -169,7 +172,7 @@ export default function DepartmentDashboard() {
       )
       setTimeout(() => router.push(`/department/sessions/${sessionId}`), 1400)
     } finally {
-      setPendingFiles([])
+      docCheck.reset()
     }
   }
 
@@ -341,7 +344,7 @@ export default function DepartmentDashboard() {
                         size="sm"
                         variant={cta.variant}
                         onClick={() => {
-                          setPendingFiles([])
+                          docCheck.reset()
                           setStartTarget(session.session_id)
                         }}
                       >
@@ -388,6 +391,7 @@ export default function DepartmentDashboard() {
           </DialogHeader>
 
           <div className="space-y-3">
+            <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
               type="file"
@@ -397,7 +401,7 @@ export default function DepartmentDashboard() {
               onChange={handlePickFiles}
             />
 
-            {pendingFiles.length === 0 ? (
+            {docCheck.docs.length === 0 ? (
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -409,27 +413,15 @@ export default function DepartmentDashboard() {
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="rounded-lg border divide-y">
-                  {pendingFiles.map((f, i) => (
-                    <div key={`${f.name}-${i}`} className="flex items-center gap-3 p-2.5">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{f.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {(f.size / 1024).toFixed(1)} KB
-                        </p>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => removePendingFile(i)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+                {docCheck.docs.map((d, i) => (
+                  <DocFileRow
+                    key={`${d.file.name}-${i}`}
+                    name={d.file.name}
+                    sizeKB={d.file.size / 1024}
+                    lang={d.lang}
+                    onRemove={() => docCheck.removeAt(i)}
+                  />
+                ))}
                 <Button
                   type="button"
                   variant="outline"
@@ -447,8 +439,8 @@ export default function DepartmentDashboard() {
             <Button variant="outline" onClick={closeStartDialog}>
               Cancel
             </Button>
-            <Button onClick={handleStartSession}>
-              {pendingFiles.length === 0 ? "Skip" : "Extract Answers & Start"}
+            <Button onClick={handleStartSession} disabled={docCheck.blocked}>
+              {docCheck.docs.length === 0 ? "Skip" : "Extract Answers & Start"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </DialogFooter>

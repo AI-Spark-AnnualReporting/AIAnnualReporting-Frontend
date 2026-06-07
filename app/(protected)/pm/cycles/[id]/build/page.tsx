@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
+import type { ContentLanguage } from "@/types"
 import { AssembleEntry } from "@/components/report/AssembleEntry"
 import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
 import { isTableOfContentsSection, isSectionReady } from "@/lib/section-filters"
@@ -105,8 +106,9 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const lockedPct = total > 0 ? Math.round((locked / total) * 100) : 0
   const selected =
     sections.find((s) => s.section_code === selectedCode) ?? null
-  const cycleName = (pmData as { cycle?: { cycle_name?: string } } | undefined)
-    ?.cycle?.cycle_name
+  const cycleMeta = (pmData as { cycle?: { cycle_name?: string; content_language?: ContentLanguage } } | undefined)?.cycle
+  const cycleName = cycleMeta?.cycle_name
+  const contentLanguage = cycleMeta?.content_language ?? "english"
 
   return (
     <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-background">
@@ -155,7 +157,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
         {/* Right — mode-appropriate detail */}
         <div className="flex-1 flex flex-col min-h-0">
-          <SectionDetail section={selected} cycleId={cycleId} assembled={assembled} />
+          <SectionDetail section={selected} cycleId={cycleId} assembled={assembled} contentLanguage={contentLanguage} />
         </div>
       </div>
     </div>
