@@ -215,7 +215,7 @@ function AssembledView({ section }: { section: CycleReportSection }) {
       <SectionHeader section={section} />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-6 space-y-5">
-          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
+          <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
             <FileCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
               The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes.
