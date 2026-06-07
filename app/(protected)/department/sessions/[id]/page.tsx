@@ -3,7 +3,14 @@
 import { use, useState, useEffect, useCallback, useRef } from "react"
 import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
-import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import {
+  languageMismatchWarning,
+  isLanguageAcceptable,
+  documentLanguageWarning,
+  isDocumentLanguageError,
+} from "@/lib/lang"
+import { documentsApi } from "@/lib/api/documents"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -107,6 +114,11 @@ export default function SessionWorkspacePage({
   // so the drafted answers appear in the cards.
   const [uploadOpen, setUploadOpen] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  // Prominent inline warning when a picked/uploaded document isn't in the cycle's
+  // language — set instantly for .txt, or after the backend rejects a PDF/DOCX.
+  const [docLangWarning, setDocLangWarning] = useState<string | null>(null)
+  // True while picked documents' languages are being verified on the server.
+  const [docLangChecking, setDocLangChecking] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -325,16 +337,40 @@ export default function SessionWorkspacePage({
     }
     if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
     setPendingFiles((prev) => [...prev, ...valid])
+    setDocLangWarning(null)
     e.target.value = ""
+    if (valid.length === 0) return
+    // Verify each newly-picked document's language NOW (PDF/DOCX included, via
+    // the backend) so a wrong-language file is flagged at attach time. The
+    // "Extract Answers" button stays disabled while this runs and on a mismatch.
+    setDocLangChecking(true)
+    Promise.all(valid.map((f) => documentsApi.checkLanguage(f, cycleLang)))
+      .then((results) => {
+        const bad = results.find((r) => !r.matches)
+        if (bad) {
+          const detected =
+            bad.detected_language === "arabic" || bad.detected_language === "english"
+              ? bad.detected_language
+              : undefined
+          setDocLangWarning(documentLanguageWarning(cycleLang, detected))
+        }
+      })
+      .catch(() => {
+        // Fail open — the submit-time gate still protects.
+      })
+      .finally(() => setDocLangChecking(false))
   }
 
   const removePendingFile = (idx: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
+    setDocLangWarning(null)
   }
 
   const closeUploadDialog = () => {
     setUploadOpen(false)
     setPendingFiles([])
+    setDocLangWarning(null)
+    setDocLangChecking(false)
   }
 
   // Upload every file then run AI answer-extraction — identical to the dashboard
@@ -346,6 +382,7 @@ export default function SessionWorkspacePage({
     // Swap the dialog for the full-screen extraction loader.
     setUploadOpen(false)
     setExtractionResult(null)
+    setDocLangWarning(null)
     setUploading(true)
 
     // ── Phase 1: upload documents ──────────────────────────────────────────────
@@ -361,6 +398,12 @@ export default function SessionWorkspacePage({
       setExtractionResult(null)
       setPendingFiles(files)
       setUploadOpen(true)
+      // Wrong-language document: show the prominent inline banner in the dialog
+      // instead of a toast, so the warning isn't duplicated.
+      if (isDocumentLanguageError(err)) {
+        setDocLangWarning(documentLanguageWarning(cycleLang))
+        return
+      }
       toast.error(
         (err as { message?: string })?.message ||
           "Document upload failed — please check your files and try again."
@@ -991,6 +1034,13 @@ export default function SessionWorkspacePage({
           </DialogHeader>
 
           <div className="space-y-3">
+            <LanguageMismatchAlert message={docLangWarning} />
+            {docLangChecking && (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Checking document language…
+              </p>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -1050,7 +1100,7 @@ export default function SessionWorkspacePage({
             <Button variant="outline" onClick={closeUploadDialog}>
               Cancel
             </Button>
-            <Button onClick={handleUploadDocuments} disabled={pendingFiles.length === 0}>
+            <Button onClick={handleUploadDocuments} disabled={pendingFiles.length === 0 || docLangChecking || !!docLangWarning}>
               Extract Answers
               <Sparkles className="ml-2 h-4 w-4" />
             </Button>

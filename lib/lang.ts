@@ -77,3 +77,58 @@ export function languageMismatchWarning(
     MIN_CORRECT_RATIO * 100,
   )}%).`
 }
+
+const langName = (l: ContentLanguage) => (l === "arabic" ? "Arabic" : "English")
+
+// User-facing banner text for a DOCUMENT whose language doesn't match the cycle.
+// Keyed off the cycle language the component already knows (so the message never
+// depends on the backend's exact phrasing). `detected` is included when we know
+// it (the instant .txt pre-check) for a clearer message.
+export function documentLanguageWarning(
+  expected: ContentLanguage,
+  detected?: ContentLanguage,
+): string {
+  const want = langName(expected)
+  const got = detected ? langName(detected) : null
+  const lead = got
+    ? `This document looks like it's in ${got}, not ${want}.`
+    : `This document doesn't look like it's in ${want}.`
+  return `${lead} This cycle is set to ${want} — please upload a ${want} document instead.`
+}
+
+// True when a caught upload error is the backend's language-mismatch rejection.
+// The backend raises a 422 whose message reads: "This document doesn't appear to
+// be in {Lang}. This cycle's language is set to {Lang} …". The API client copies
+// that text onto `message` (and `response.data.detail`), so we match a stable
+// phrase from it rather than relying on a status code alone.
+export function isDocumentLanguageError(err: unknown): boolean {
+  const e = err as
+    | { message?: string; response?: { data?: { detail?: string } } }
+    | null
+    | undefined
+  const text = `${e?.message ?? ""} ${e?.response?.data?.detail ?? ""}`
+  return /language is set to|doesn'?t appear to be in/i.test(text)
+}
+
+// Best-effort language of a picked file, WITHOUT a network call. Only plain-text
+// files can be read meaningfully in the browser; for PDF/DOCX (and on any read
+// error) we return "unknown" so the caller stays silent and lets the backend be
+// the authority. Safe to call for any file — binary content yields "unknown".
+export function readTextFileLanguage(
+  file: File,
+): Promise<"arabic" | "english" | "ambiguous" | "unknown"> {
+  const isText =
+    /\.txt$/i.test(file.name) || file.type === "text/plain"
+  if (!isText) return Promise.resolve("unknown")
+
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : ""
+      resolve(detectScriptLanguage(text))
+    }
+    reader.onerror = () => resolve("unknown")
+    // A few KB is plenty of signal for a script-ratio check.
+    reader.readAsText(file.slice(0, 20000))
+  })
+}
