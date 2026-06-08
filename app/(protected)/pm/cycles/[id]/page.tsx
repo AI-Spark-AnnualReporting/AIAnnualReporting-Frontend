@@ -81,6 +81,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const { data: readiness } = useBuildReadiness(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
+  // Bumped on every pick/replace/remove so a stale in-flight language check
+  // can't overwrite the current file's status (replace race guard).
+  const docCheckSeq = useRef(0)
 
   const [reminderTarget, setReminderTarget] = useState<SessionSummary | null>(null)
   const [reminderMsg, setReminderMsg] = useState("")
@@ -193,6 +196,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setPendingFile(null)
     setDocLangWarning(null)
     setDocLangChecking(false)
+    docCheckSeq.current++
     setKickoffTimedOut(false)
   }
 
@@ -260,11 +264,14 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setDocLangWarning(null)
     // Verify the document's language NOW (works for PDF/DOCX too, via the
     // backend) so the warning shows at attach time instead of at submit. The
-    // submit button is disabled while this runs and on a mismatch.
+    // submit button is disabled while this runs and on a mismatch. The seq guard
+    // ensures a replace always re-checks and only the latest file's result wins.
     setDocLangChecking(true)
+    const seq = ++docCheckSeq.current
     documentsApi
       .checkLanguage(file, cycleLang)
       .then((res) => {
+        if (seq !== docCheckSeq.current) return // superseded by a newer pick/remove
         if (!res.matches) {
           const detected =
             res.detected_language === "arabic" || res.detected_language === "english"
@@ -277,9 +284,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       })
       .catch(() => {
         // Network/precheck failure: fail open — the submit-time gate still protects.
-        setDocLangWarning(null)
+        if (seq === docCheckSeq.current) setDocLangWarning(null)
       })
-      .finally(() => setDocLangChecking(false))
+      .finally(() => {
+        if (seq === docCheckSeq.current) setDocLangChecking(false)
+      })
     // Clear the input so the same filename can be picked again later
     if (fileRef.current) fileRef.current.value = ""
   }
@@ -1320,25 +1329,23 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 "w-full rounded-lg border p-3 flex items-center gap-3",
                 docLangWarning
                   ? "border-destructive/40 bg-destructive/10"
-                  : docLangChecking
-                    ? "border-blue-300 bg-blue-50"
-                    : "border-green-300 bg-green-50 dark:border-green-900/50 dark:bg-green-950/25",
+                  : "border bg-card",
               )}>
                 {docLangWarning ? (
                   <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
                 ) : docLangChecking ? (
-                  <Loader2 className="h-5 w-5 text-blue-600 shrink-0 animate-spin" />
+                  <Loader2 className="h-5 w-5 text-muted-foreground shrink-0 animate-spin" />
                 ) : (
                   <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <p className={cn(
                     "text-sm font-medium truncate",
-                    docLangWarning ? "text-destructive" : docLangChecking ? "text-blue-900" : "text-green-900 dark:text-green-200",
+                    docLangWarning ? "text-destructive" : "text-foreground",
                   )}>{pendingFile.name}</p>
                   <p className={cn(
                     "text-xs",
-                    docLangWarning ? "text-destructive/80" : docLangChecking ? "text-blue-700" : "text-green-700 dark:text-green-300/80",
+                    docLangWarning ? "text-destructive/80" : "text-muted-foreground",
                   )}>
                     {docLangWarning
                       ? "Wrong language — replace this file to continue."
@@ -1350,7 +1357,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-xs text-blue-700 hover:text-blue-900 hover:bg-blue-100"
+                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => fileRef.current?.click()}
                   disabled={submittingKickoff}
                 >
@@ -1360,7 +1367,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                  onClick={() => { setPendingFile(null); setDocLangWarning(null); setDocLangChecking(false) }}
+                  onClick={() => { setPendingFile(null); setDocLangWarning(null); setDocLangChecking(false); docCheckSeq.current++ }}
                   disabled={submittingKickoff}
                 >
                   Remove

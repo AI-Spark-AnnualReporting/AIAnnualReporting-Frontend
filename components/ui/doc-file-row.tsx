@@ -20,11 +20,7 @@ export function DocFileRow({
 }) {
   const tone = {
     checking: { box: "border bg-card", text: "text-foreground", sub: "text-muted-foreground" },
-    ok: {
-      box: "border-green-300 bg-green-50 dark:border-green-900/50 dark:bg-green-950/25",
-      text: "text-green-900 dark:text-green-200",
-      sub: "text-green-700 dark:text-green-300/80",
-    },
+    ok: { box: "border bg-card", text: "text-foreground", sub: "text-muted-foreground" },
     bad: {
       box: "border-destructive/40 bg-destructive/10",
       text: "text-destructive",
