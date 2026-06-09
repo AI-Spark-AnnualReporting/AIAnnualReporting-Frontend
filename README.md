@@ -1,179 +1,86 @@
-# Spark Annual Report AI Studio
+# Spark Annual Report AI Studio — Frontend
 
-A production-ready, AI-powered annual report generation platform built with Next.js 14 App Router, TypeScript, TailwindCSS, and shadcn/ui.
+A production-grade, AI-powered annual-report generation platform built with Next.js 16 (App Router), TypeScript (strict), TailwindCSS v4, and shadcn/ui.
 
-## Tech Stack
+> **Single source of truth:** see [`FRONTEND_DOCUMENTATION.md`](./FRONTEND_DOCUMENTATION.md).
+> It covers every page, every API call, every hook, the Report Builder pipeline (Resolve → Plan → Build → Assemble → Render), the section data model, the Next.js proxy layer, and the operational workflow end-to-end.
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | TailwindCSS + shadcn/ui |
-| Server State | TanStack Query (React Query) |
-| Forms | React Hook Form + Zod |
-| HTTP Client | Axios (with JWT auto-refresh) |
-| Icons | Lucide React |
-| Notifications | Sonner |
-| Auth | JWT (access + refresh tokens) |
+---
 
 ## Quick Start
 
-### 1. Install dependencies
-
 ```bash
 npm install
-```
-
-### 2. Configure environment
-
-```bash
 cp .env.example .env.local
-```
-
-Edit `.env.local`:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
-NEXT_PUBLIC_APP_NAME=Spark Annual Report AI Studio
-```
-
-### 3. Run development server
-
-```bash
+# edit .env.local — at minimum:
+#   NEXT_PUBLIC_API_BASE_URL=https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
+#   NEXT_PUBLIC_APP_NAME=Spark Annual Report AI Studio
+#   ADMIN_SERVICE_EMAIL=...          # server-only, for /api/pm/* proxies
+#   ADMIN_SERVICE_PASSWORD=...
+#   DEPT_USER_DEFAULT_PASSWORD=...   # optional; falls back to ADMIN_SERVICE_PASSWORD
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Project Structure
+## Scripts
 
-```
-spark-ar-studio/
-├── app/
-│   ├── (public)/           # Unauthenticated pages
-│   │   ├── login/
-│   │   ├── forgot-password/
-│   │   └── reset-password/
-│   └── (protected)/        # Auth-gated pages
-│       ├── admin/          # Admin module (M1, M2, M3)
-│       │   ├── departments/
-│       │   ├── users/
-│       │   ├── cycles/
-│       │   │   ├── new/
-│       │   │   └── [id]/activate/
-│       │   ├── documents/
-│       │   ├── conversations/
-│       │   └── agents/
-│       ├── pm/             # PM module (M5)
-│       │   ├── cycles/[id]/
-│       │   └── sessions/[id]/
-│       ├── department/     # Department module (M4)
-│       │   ├── sessions/[id]/
-│       │   │   └── draft/
-│       │   ├── documents/
-│       │   ├── conversations/
-│       │   └── agents/
-│       └── profile/
-├── components/
-│   ├── auth/               # RouteGuard, Can (RBAC)
-│   ├── layout/             # Sidebar, TopNav
-│   └── ui/                 # Design system components
-├── contexts/
-│   └── AuthContext.tsx     # JWT auth + role routing
-├── hooks/                  # TanStack Query hooks
-│   ├── useUsers.ts
-│   ├── useDepartments.ts
-│   ├── useCycles.ts
-│   └── useSessions.ts
-├── lib/
-│   ├── api/                # Typed API client
-│   │   ├── client.ts       # Axios + 401 refresh interceptor
-│   │   ├── auth.ts
-│   │   ├── users.ts
-│   │   ├── departments.ts
-│   │   ├── cycles.ts
-│   │   ├── pm.ts
-│   │   ├── department.ts
-│   │   └── knowledge-base.ts
-│   ├── constants.ts        # Status maps, query keys, tone options
-│   └── utils.ts            # cn, formatDate, getInitials
-└── types/
-    └── index.ts            # All TypeScript types
-```
+| Script | Purpose |
+|--------|---------|
+| `npm run dev`   | Next.js dev server |
+| `npm run build` | Production build |
+| `npm run start` | Serve the production build |
+| `npm run lint`  | ESLint flat config + `next/core-web-vitals` |
+| `npx tsc --noEmit` | Type check (no script alias) |
 
-## Role-Based Access
+## Tech Stack
 
-| Role | Default Route | Access |
-|------|--------------|--------|
+| Layer | Tech |
+|-------|------|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript (strict) |
+| Styling | TailwindCSS v4 + shadcn/ui (Radix) |
+| Server state | TanStack Query |
+| Forms | React Hook Form + Zod |
+| HTTP | Axios (JWT auto-refresh, single-flight queue) |
+| Icons | Lucide React |
+| Toasts | Sonner |
+| Auth | JWT (access + refresh, `localStorage`) |
+| DnD | `@dnd-kit/core` + `@dnd-kit/sortable` (plan reorder) |
+| Markdown | `react-markdown` |
+| Drag-and-drop upload | `react-dropzone` |
+
+## Roles
+
+| Role | Default route after login | Access |
+|------|---------------------------|--------|
 | `admin` | `/admin` | Full system |
-| `project_manager` | `/pm` | Cycles, reviews, reports |
+| `project_manager` | `/pm` | Cycle ops + Report Builder + reviews |
 | `department_user` | `/department` | Assigned sessions only |
 
-## Operational Workflow
+## Operational Workflow (one-line)
 
 ```
-Admin creates departments
-    → Creates/activates users
-    → Creates cycle (sets PM, dates)
-    → Uploads kickoff documents
-    → Activates cycle (selects departments)
-         → AI generates 10-15 questions per department
-         → Sessions created for each department
-
-Department User
-    → Sees session on dashboard
-    → Answers questions (or gets AI suggestions)
-    → Generates AI draft
-    → Adjusts tone (Executive/Professional/Technical/Conversational/Formal)
-    → Finalizes & submits
-
-PM
-    → Monitors completion on cycle dashboard
-    → Reviews submitted sessions (approve/reject/reopen)
-    → Sends reminders to lagging departments
-    → Generates consolidated final report
+Admin creates departments/users/cycle (with profile)
+  → admin assigns departments + activates cycle
+  → PM submits kickoff brief → AI generates per-department questions
+  → departments answer + draft + finalize ("submitted")
+  → PM reviews/approves each session
+  → PM opens Report Builder (gated on every department approved):
+       Plan Review → Builder Shell → Assemble → Final Report → Download DOCX
 ```
 
-## Key Components
+## Key Concepts (one-screen mental model)
 
-### Authentication
-- `AuthContext` — JWT login/logout, `/me` endpoint, role-based routing
-- `RouteGuard` — Protects pages, shows auth skeleton (no flash)
-- `Can` — Component-level RBAC: `<Can role="ADMIN">...</Can>`
-
-### Data Fetching
-All server state uses TanStack Query with structured query keys:
-
-```ts
-useUsers(filters)        → ["users", filters]
-useDepartments()         → ["departments"]
-useCycles(status)        → ["cycles", { status }]
-useCycle(id)             → ["cycle", id]
-useCycleOverview(id)     → ["cycle", id, "overview"]
-useSession(id)           → ["session", id]
-usePMDashboard()         → ["pm", "dashboard"]
-useDepartmentDashboard() → ["dept", "dashboard"]
-```
-
-### API Client
-`lib/api/client.ts` — Axios instance with:
-- Automatic `Bearer` token injection
-- Single retry on 401 → refresh token → retry original request
-- Hard logout if refresh fails
-- Normalized error format
-
-## API Base URL
-
-```
-https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
-```
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_API_BASE_URL` | Backend API base URL |
-| `NEXT_PUBLIC_APP_NAME` | App display name |
+- **Sections** are the unit of the final report. Each row has four facets:
+  - `mode` ∈ `generate | attach | auto` (how content is produced)
+  - `layer` ∈ `common | cma | sector | optional` (why it's required)
+  - `status` ∈ `pending | drafting | locked`
+  - `ai_allowed` (if false → manual section)
+- **Plan** = AI-generated `{headline, themes[], feeders[]}` that the PM reviews and edits.
+- **Feeder** = which approved department session(s) supply content for a `generate`-mode section.
+- **Assemble** = stitch all locked sections + cover + executive summary into a `FinalReport`.
+- **Render** = export `FinalReport` to DOCX (PDF planned).
 
 ## Build
 
@@ -181,3 +88,5 @@ https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
 npm run build
 npm run start
 ```
+
+For everything else — pages, endpoints, hooks, types, conventions — read [`FRONTEND_DOCUMENTATION.md`](./FRONTEND_DOCUMENTATION.md).
