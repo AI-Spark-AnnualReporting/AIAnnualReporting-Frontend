@@ -31,7 +31,8 @@ import {
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { cn, formatDateTime } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 interface DashboardData {
   departments?: Array<{ department_code: string; department_name: string }>
@@ -40,9 +41,11 @@ interface DashboardData {
 export function AnalyzeSection({
   section,
   cycleId,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
 }) {
   const sectionCode = section.section_code
   const status = section.status
@@ -102,6 +105,7 @@ export function AnalyzeSection({
             <EditView
               draft={draft}
               saving={setContent.isPending}
+              contentLanguage={contentLanguage}
               onChange={setDraft}
               onSave={async () => {
                 await setContent.mutateAsync({ sectionCode, content: draft })
@@ -369,16 +373,20 @@ function DraftingView({
 function EditView({
   draft,
   saving,
+  contentLanguage,
   onChange,
   onSave,
   onCancel,
 }: {
   draft: string
   saving: boolean
+  contentLanguage: ContentLanguage
   onChange: (v: string) => void
   onSave: () => void
   onCancel: () => void
 }) {
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -398,12 +406,17 @@ function EditView({
         rows={18}
         className="text-sm leading-relaxed font-mono"
       />
+      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel} disabled={saving}>
           <X className="h-4 w-4 mr-2" />
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={saving}>
+        <Button
+          onClick={onSave}
+          disabled={saving || !langOk}
+          title={!langOk ? langWarning ?? undefined : undefined}
+        >
           {saving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (

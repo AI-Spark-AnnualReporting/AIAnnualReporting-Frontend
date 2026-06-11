@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { CycleReportSection } from "@/types"
+import { ContentLanguage, CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -215,7 +215,7 @@ function AssembledView({ section }: { section: CycleReportSection }) {
       <SectionHeader section={section} />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-6 space-y-5">
-          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
+          <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
             <FileCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
               The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes.
@@ -252,10 +252,12 @@ export function SectionDetail({
   section,
   cycleId,
   assembled = false,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection | null
   cycleId: string
   assembled?: boolean
+  contentLanguage?: ContentLanguage
 }) {
   if (!section) {
     return (
@@ -273,7 +275,8 @@ export function SectionDetail({
   // (PNG/JPG) which becomes the report's front cover. Handle it before the
   // mode-based routing below.
   if (section.section_code === "cover") {
-    return <CoverSection section={section} cycleId={cycleId} />}
+    return <CoverSection section={section} cycleId={cycleId} />
+  }
   // Once assembled, all non-auto sections are view-only.
   if (assembled && section.mode !== "auto") {
     return <AssembledView section={section} />
@@ -282,13 +285,13 @@ export function SectionDetail({
   // Extract-mode is document-driven: upload runs AI extraction, the PM edits
   // the result, then locks. Takes priority over the ai_allowed branch below.
   if (section.mode === "extract") {
-    return <ExtractSection section={section} cycleId={cycleId} />
+    return <ExtractSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
   }
 
   // Analyze-mode: structured Markdown findings from the analyze agent. No
   // document — department digests are the source. Locks like generate.
   if (section.mode === "analyze") {
-    return <AnalyzeSection section={section} cycleId={cycleId} />
+    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based
@@ -298,7 +301,7 @@ export function SectionDetail({
   //   - structured / financials / composite → file upload (AttachSection)
   if (!section.ai_allowed) {
     if (section.content_source === "narrative") {
-      return <ManualSection section={section} cycleId={cycleId} />
+      return <ManualSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
     }
     return <AttachSection section={section} cycleId={cycleId} />
   }
