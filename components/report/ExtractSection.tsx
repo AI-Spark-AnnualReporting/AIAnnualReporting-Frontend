@@ -28,7 +28,10 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { documentsApi } from "@/lib/api/documents"
+import { documentLanguageWarning, languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 // Document-driven extraction: uploading the source runs AI extraction on the
 // backend and returns the text in `section.content`. The PM reviews/edits it,
@@ -44,9 +47,11 @@ const ACCEPT = {
 export function ExtractSection({
   section,
   cycleId,
+  contentLanguage = "english",
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
 }) {
   const sectionCode = section.section_code
   const isLocked = section.status === "locked"
@@ -55,6 +60,10 @@ export function ExtractSection({
 
   const [draft, setDraft] = useState(saved)
   const [unlockOpen, setUnlockOpen] = useState(false)
+  // Wrong-language guard: verify the dropped file's language BEFORE uploading,
+  // so an extract source in the wrong language is never sent.
+  const [langWarning, setLangWarning] = useState<string | null>(null)
+  const [checkingLang, setCheckingLang] = useState(false)
 
   // Re-seed the editor when the server content changes externally — after an
   // upload (extraction result), a remove (cleared), an unlock, or a section
@@ -73,13 +82,31 @@ export function ExtractSection({
 
   const dirty = draft !== saved
 
-  const onDrop = (accepted: File[], rejections: FileRejection[]) => {
+  const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
       toast.error("Unsupported file type. Use PDF or DOCX.")
       return
     }
     const file = accepted[0]
     if (!file) return
+    // Verify language first — only upload if it matches the cycle's language.
+    setLangWarning(null)
+    setCheckingLang(true)
+    try {
+      const res = await documentsApi.checkLanguage(file, contentLanguage)
+      if (!res.matches) {
+        const detected =
+          res.detected_language === "arabic" || res.detected_language === "english"
+            ? res.detected_language
+            : undefined
+        setLangWarning(documentLanguageWarning(contentLanguage, detected))
+        return
+      }
+    } catch {
+      // Fail open — let the upload proceed; the backend still extracts.
+    } finally {
+      setCheckingLang(false)
+    }
     upload.mutate({ sectionCode, file })
   }
 
@@ -89,7 +116,7 @@ export function ExtractSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked,
+    disabled: upload.isPending || isLocked || checkingLang,
     noClick: !!attachment,
     noKeyboard: !!attachment,
   })
@@ -158,6 +185,7 @@ export function ExtractSection({
                   extractedEmpty={saved.trim() === ""}
                   saving={save.isPending}
                   locking={lock.isPending}
+                  contentLanguage={contentLanguage}
                   onChange={setDraft}
                   onSave={() => save.mutate({ sectionCode, content: draft })}
                   onLock={() => lock.mutate({ sectionCode })}
@@ -165,7 +193,10 @@ export function ExtractSection({
               )}
             </>
           ) : (
-            <EmptyDropzone dz={dz} uploading={upload.isPending} />
+            <div className="space-y-2.5">
+              <LanguageMismatchAlert message={langWarning} />
+              <EmptyDropzone dz={dz} uploading={upload.isPending || checkingLang} />
+            </div>
           )}
 
           {/* Replace flow reuses the dropzone hook — render an off-screen root
@@ -207,6 +238,7 @@ function ContentEditor({
   onChange,
   onSave,
   onLock,
+  contentLanguage,
 }: {
   draft: string
   saved: string
@@ -217,11 +249,15 @@ function ContentEditor({
   onChange: (next: string) => void
   onSave: () => void
   onLock: () => void
+  contentLanguage: ContentLanguage
 }) {
   const busy = saving || locking
   // Lock requires a document (guaranteed here) but not content. Just don't lock
   // over unsaved edits.
   const lockDisabled = dirty || busy
+  // Edited content must stay in the cycle's language (warn + block Save).
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
 
   return (
     <div className="space-y-2">
@@ -254,6 +290,8 @@ function ContentEditor({
         className="text-sm leading-relaxed"
       />
 
+      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
+
       <div className="flex items-center justify-between text-xs">
         {dirty ? (
           <span className="text-amber-700 dark:text-amber-400">
@@ -276,8 +314,8 @@ function ContentEditor({
         <Button
           variant="outline"
           onClick={onSave}
-          disabled={saving || !dirty}
-          title={!dirty ? "No changes to save" : undefined}
+          disabled={saving || !dirty || !langOk}
+          title={!langOk ? langWarning ?? undefined : !dirty ? "No changes to save" : undefined}
         >
           {saving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />

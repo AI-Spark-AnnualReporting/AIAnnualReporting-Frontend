@@ -3,6 +3,7 @@ import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload
 import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession } from "@/lib/api/pm"
 import { KickoffBriefResponse, PMDashboard } from "@/types"
 import { toast } from "sonner"
+import { isDocumentLanguageError } from "@/lib/lang"
 
 export function useDepartmentDashboard() {
   return useQuery({
@@ -266,6 +267,9 @@ export function useUploadKickoffDoc() {
       }
     },
     onError: (err) => {
+      // Wrong-language documents get a prominent inline banner in the kickoff
+      // card instead of a toast — skip the toast so the warning isn't duplicated.
+      if (isDocumentLanguageError(err)) return
       const detail = err?.response?.data?.detail
       toast.error(detail || err?.message || "Failed to upload kickoff document")
     },

@@ -22,7 +22,15 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { SessionSummary } from "@/types"
+import { SessionSummary, ContentLanguage } from "@/types"
+import {
+  languageMismatchWarning,
+  isLanguageAcceptable,
+  documentLanguageWarning,
+  isDocumentLanguageError,
+} from "@/lib/lang"
+import { documentsApi } from "@/lib/api/documents"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { pmApi } from "@/lib/api/pm"
 import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
@@ -45,6 +53,7 @@ interface PMCycleDashboardData {
     fiscal_year?: number
     project_manager_id?: string
     kickoff_brief?: string | null
+    content_language?: ContentLanguage
   }
   stats?: {
     total_departments: number
@@ -72,6 +81,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const { data: readiness } = useBuildReadiness(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
+  // Bumped on every pick/replace/remove so a stale in-flight language check
+  // can't overwrite the current file's status (replace race guard).
+  const docCheckSeq = useRef(0)
 
   const [reminderTarget, setReminderTarget] = useState<SessionSummary | null>(null)
   const [reminderMsg, setReminderMsg] = useState("")
@@ -101,6 +113,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [numQuestions, setNumQuestions] = useState(12)
   // Locally selected kickoff document — NOT uploaded until the PM clicks Submit
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  // Prominent inline warning when the picked/uploaded document isn't in the
+  // cycle's language. Set instantly for .txt (client pre-check) or after the
+  // backend rejects a PDF/DOCX upload; cleared when the file changes.
+  const [docLangWarning, setDocLangWarning] = useState<string | null>(null)
+  // True while the picked document's language is being verified on the server.
+  // The submit button stays disabled until the check clears.
+  const [docLangChecking, setDocLangChecking] = useState(false)
   // Set when the kickoff request times out. A timeout is a FALSE NEGATIVE — the
   // backend is slow but likely still generating questions, so resubmitting would
   // fire a duplicate kickoff. We lock the form until the PM checks the cycle.
@@ -133,6 +152,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const stats = pmDash?.stats
   const departments = pmDash?.departments || []
   const cycleName = pmDash?.cycle?.cycle_name || "Cycle Management"
+  // Cycle language → drives the brief language warnings + submit gating below.
+  const cycleLang = pmDash?.cycle?.content_language ?? "english"
+  const kickoffLangOk =
+    isLanguageAcceptable(briefText, cycleLang) &&
+    isLanguageAcceptable(additionalContext, cycleLang)
   const cycleId = id
 
   const hasKickoff    = !!(pmDash?.cycle?.kickoff_brief)
@@ -170,6 +194,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setAdditionalContext("")
     setNumQuestions(12)
     setPendingFile(null)
+    setDocLangWarning(null)
+    setDocLangChecking(false)
+    docCheckSeq.current++
     setKickoffTimedOut(false)
   }
 
@@ -180,6 +207,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     }
     setSubmittingKickoff(true)
     setKickoffTimedOut(false)
+    setDocLangWarning(null)
     try {
       // One endpoint per submit. Backend converges both on the same pipeline.
       //   file picked    → POST /pm/kickoff/upload (multipart with `files`)
@@ -216,6 +244,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       const msg = (err as { message?: string })?.message ?? ""
       if (/timeout|ECONNABORTED/i.test(msg)) {
         setKickoffTimedOut(true)
+      } else if (isDocumentLanguageError(err)) {
+        // Wrong-language document: show the prominent inline banner (the hook
+        // suppresses its toast for this case) and keep the file selected so the
+        // PM can Replace it.
+        setDocLangWarning(documentLanguageWarning(cycleLang))
       }
     } finally {
       setSubmittingKickoff(false)
@@ -228,6 +261,34 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     const file = e.target.files?.[0]
     if (!file) return
     setPendingFile(file)
+    setDocLangWarning(null)
+    // Verify the document's language NOW (works for PDF/DOCX too, via the
+    // backend) so the warning shows at attach time instead of at submit. The
+    // submit button is disabled while this runs and on a mismatch. The seq guard
+    // ensures a replace always re-checks and only the latest file's result wins.
+    setDocLangChecking(true)
+    const seq = ++docCheckSeq.current
+    documentsApi
+      .checkLanguage(file, cycleLang)
+      .then((res) => {
+        if (seq !== docCheckSeq.current) return // superseded by a newer pick/remove
+        if (!res.matches) {
+          const detected =
+            res.detected_language === "arabic" || res.detected_language === "english"
+              ? res.detected_language
+              : undefined
+          setDocLangWarning(documentLanguageWarning(cycleLang, detected))
+        } else {
+          setDocLangWarning(null)
+        }
+      })
+      .catch(() => {
+        // Network/precheck failure: fail open — the submit-time gate still protects.
+        if (seq === docCheckSeq.current) setDocLangWarning(null)
+      })
+      .finally(() => {
+        if (seq === docCheckSeq.current) setDocLangChecking(false)
+      })
     // Clear the input so the same filename can be picked again later
     if (fileRef.current) fileRef.current.value = ""
   }
@@ -1195,6 +1256,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   `${wordCount} words — good detail`
                 return <p className={cn("text-xs", tone)}>{msg}</p>
               })()}
+              {(() => {
+                const warn = languageMismatchWarning(
+                  briefText, pmDash?.cycle?.content_language ?? "english",
+                )
+                return warn ? <p className="text-xs text-amber-600">{warn}</p> : null
+              })()}
             </div>
             <div className="space-y-2">
               <Label>Additional Context <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
@@ -1205,6 +1272,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 rows={2}
                 className="text-sm"
               />
+              {(() => {
+                const warn = languageMismatchWarning(
+                  additionalContext, pmDash?.cycle?.content_language ?? "english",
+                )
+                return warn ? <p className="text-xs text-amber-600">{warn}</p> : null
+              })()}
             </div>
             {/* num_questions slider (5-20, default 12) */}
             <div className="space-y-2">
@@ -1243,6 +1316,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <FileUp className="h-4 w-4 text-muted-foreground" />
               Upload Document <span className="text-xs text-muted-foreground font-normal">(optional)</span>
             </div>
+            <LanguageMismatchAlert message={docLangWarning} />
             <input
               ref={fileRef}
               type="file"
@@ -1251,18 +1325,39 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               onChange={handleFilePick}
             />
             {pendingFile ? (
-              <div className="w-full rounded-lg border border-blue-300 bg-blue-50 p-3 flex items-center gap-3">
-                <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+              <div className={cn(
+                "w-full rounded-lg border p-3 flex items-center gap-3",
+                docLangWarning
+                  ? "border-destructive/40 bg-destructive/10"
+                  : "border bg-card",
+              )}>
+                {docLangWarning ? (
+                  <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
+                ) : docLangChecking ? (
+                  <Loader2 className="h-5 w-5 text-muted-foreground shrink-0 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-blue-900 truncate">{pendingFile.name}</p>
-                  <p className="text-xs text-blue-700">
-                    Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.
+                  <p className={cn(
+                    "text-sm font-medium truncate",
+                    docLangWarning ? "text-destructive" : "text-foreground",
+                  )}>{pendingFile.name}</p>
+                  <p className={cn(
+                    "text-xs",
+                    docLangWarning ? "text-destructive/80" : "text-muted-foreground",
+                  )}>
+                    {docLangWarning
+                      ? "Wrong language — replace this file to continue."
+                      : docLangChecking
+                        ? "Checking document language…"
+                        : <>Will be uploaded when you click <strong>Submit &amp; Generate Questions</strong>.</>}
                   </p>
                 </div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-xs text-blue-700 hover:text-blue-900 hover:bg-blue-100"
+                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => fileRef.current?.click()}
                   disabled={submittingKickoff}
                 >
@@ -1272,7 +1367,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                  onClick={() => setPendingFile(null)}
+                  onClick={() => { setPendingFile(null); setDocLangWarning(null); setDocLangChecking(false); docCheckSeq.current++ }}
                   disabled={submittingKickoff}
                 >
                   Remove
@@ -1338,7 +1433,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )}
             <Button
               onClick={handleSubmitKickoff}
-              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut}
+              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut || !kickoffLangOk || docLangChecking || !!docLangWarning}
             >
               {submittingKickoff
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />

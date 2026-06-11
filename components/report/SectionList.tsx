@@ -3,13 +3,14 @@
 import { CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
+import { isSectionReady } from "@/lib/section-filters"
 import { Circle, CircleDot, CheckCircle2 } from "lucide-react"
 
 // Status indicator — hollow circle (pending) / half-dot (drafting) / check
-// (locked OR auto). Auto sections are system-rendered at assembly time and
-// can't be locked by the backend, so they read as always-ready.
+// (ready). Auto sections are system-rendered and the cover is always ready
+// (optional image), so they read as always-ready without an explicit lock.
 function StatusIcon({ section }: { section: CycleReportSection }) {
-  if (section.status === "locked" || section.mode === "auto")
+  if (isSectionReady(section))
     return <CheckCircle2 className="h-4 w-4 text-green-600" />
   if (section.status === "drafting")
     return <CircleDot className="h-4 w-4 text-yellow-600" />
