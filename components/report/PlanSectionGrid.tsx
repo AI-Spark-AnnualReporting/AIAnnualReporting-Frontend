@@ -37,6 +37,8 @@ interface PlanSectionGridProps {
   feeders: FeederMapEntry[]
   departments: FeederDepartment[]
   readOnly?: boolean
+  /** Arabic cycles render section titles right-to-left. */
+  isRtl?: boolean
 }
 
 export function PlanSectionGrid({
@@ -45,6 +47,7 @@ export function PlanSectionGrid({
   feeders,
   departments,
   readOnly,
+  isRtl,
 }: PlanSectionGridProps) {
   const reorder = useReorderSections(cycleId)
   const sensors = useSensors(
@@ -79,7 +82,7 @@ export function PlanSectionGrid({
       onDragEnd={onDragEnd}
     >
       <SortableContext items={ids} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {sections.map((s, i) => {
             const entry = feederByCode.get(s.section_code)
             const effectiveMode = entry?.mode ?? s.mode
@@ -98,6 +101,7 @@ export function PlanSectionGrid({
                 departments={departments}
                 deptByCode={deptByCode}
                 readOnly={readOnly}
+                isRtl={isRtl}
               />
             )
           })}
@@ -118,6 +122,7 @@ function SectionTile({
   departments,
   deptByCode,
   readOnly,
+  isRtl,
 }: {
   index: number
   cycleId: string
@@ -129,6 +134,7 @@ function SectionTile({
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
   readOnly?: boolean
+  isRtl?: boolean
 }) {
   const {
     attributes,
@@ -160,20 +166,20 @@ function SectionTile({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group relative rounded-xl border bg-card p-4 transition-all",
-        "hover:border-foreground/20 hover:shadow-sm",
-        needsSource && "border-amber-200/80 dark:border-amber-900/40",
-        isDragging && "opacity-60 shadow-lg ring-2 ring-primary/30 z-10",
+        "group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all",
+        "hover:shadow-md",
+        needsSource && "border-amber-200",
+        isDragging && "z-10 opacity-60 shadow-lg ring-2 ring-indigo-300",
       )}
     >
       {needsSource && (
-        <div className="absolute top-0 left-0 h-full w-0.5 rounded-l-xl bg-amber-400 dark:bg-amber-500" />
+        <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-amber-400" />
       )}
       <div className="flex items-start gap-3">
         {!readOnly && (
           <button
             type="button"
-            className="mt-0.5 shrink-0 cursor-grab text-muted-foreground/50 hover:text-foreground active:cursor-grabbing touch-none"
+            className="mt-0.5 shrink-0 cursor-grab touch-none text-slate-300 hover:text-slate-600 active:cursor-grabbing"
             aria-label="Drag to reorder"
             {...attributes}
             {...listeners}
@@ -182,18 +188,24 @@ function SectionTile({
           </button>
         )}
 
-        <span className="mt-0.5 inline-flex h-6 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground">
+        <span className="mt-0.5 inline-flex h-6 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[11px] font-semibold tabular-nums text-slate-500">
           {String(index + 1).padStart(2, "0")}
         </span>
 
-        <div className="flex-1 min-w-0 space-y-2">
-          <h3 className="text-sm font-semibold leading-snug text-foreground">
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <h3
+            dir={isRtl ? "rtl" : "ltr"}
+            className={cn(
+              "text-sm font-semibold leading-snug text-slate-900",
+              isRtl ? "text-right" : "text-left",
+            )}
+          >
             {section.title}
           </h3>
           <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
                 layer?.color,
               )}
             >
@@ -201,14 +213,14 @@ function SectionTile({
             </span>
             <span
               className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                mode?.color,
+                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
+                mode?.color ?? "bg-slate-100 text-slate-600",
               )}
             >
               {mode?.label ?? section.mode}
             </span>
             {!section.ai_allowed && !isExtract && (
-              <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
                 Manual
               </span>
             )}
