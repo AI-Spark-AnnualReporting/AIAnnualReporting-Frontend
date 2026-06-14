@@ -1,7 +1,7 @@
 "use client"
 
-import { KnowledgeBasePage } from "@/components/knowledge-base/KnowledgeBasePage"
+import { PMDocumentBank } from "@/components/pm/PMDocumentBank"
 
 export default function PMDocumentsPage() {
-  return <KnowledgeBasePage />
+  return <PMDocumentBank />
 }
