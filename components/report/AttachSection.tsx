@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import {
-  CheckCircle2,
   FileText,
   Loader2,
   Lock,
@@ -18,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { LockedBanner } from "@/components/report/ManualSection"
 import {
   useAttachUpload,
   useLockSection,
@@ -38,9 +38,11 @@ const ACCEPT = {
 export function AttachSection({
   section,
   cycleId,
+  isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  isRtl?: boolean
 }) {
   const sectionCode = section.section_code
   const isLocked = section.status === "locked"
@@ -88,9 +90,9 @@ export function AttachSection({
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6 py-6 space-y-5">
+        <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
           {isLocked ? (
             <LockedView
               section={section}
@@ -154,10 +156,10 @@ function EmptyDropzone({
       <div
         {...dz.getRootProps()}
         className={cn(
-          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-muted/20 px-6 py-10 text-center transition-colors cursor-pointer",
+          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-slate-50 px-6 py-10 text-center transition-colors cursor-pointer",
           dz.isDragActive
-            ? "border-primary bg-primary/5"
-            : "border-border hover:border-primary/40 hover:bg-muted/40",
+            ? "border-indigo-400 bg-indigo-50"
+            : "border-slate-200 hover:border-indigo-300 hover:bg-slate-100/60",
           uploading && "cursor-wait opacity-70",
         )}
       >
@@ -272,6 +274,7 @@ function AttachedView({
         <Button
           onClick={onLock}
           disabled={lockDisabled}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
           title={
             !verified
               ? "Upload a document and confirm verification to lock."
@@ -309,20 +312,15 @@ function LockedView({
     <div className="space-y-4">
       {attachment && <FileCard attachment={attachment} />}
 
-      <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/50 dark:bg-green-950/25">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
-          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">Section locked</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Locked on {formatDateTime(section.locked_at)}
-          </p>
-        </div>
-      </div>
+      <LockedBanner lockedAt={section.locked_at} />
 
       <div className="flex items-center justify-end pt-1">
-        <Button variant="outline" onClick={onUnlock} disabled={unlocking}>
+        <Button
+          variant="outline"
+          onClick={onUnlock}
+          disabled={unlocking}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
           {unlocking ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (

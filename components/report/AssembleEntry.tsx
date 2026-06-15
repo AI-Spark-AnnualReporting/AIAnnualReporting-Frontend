@@ -30,7 +30,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   if (readinessQuery.isLoading) {
     return (
-      <span className="h-8 w-40 rounded-md bg-muted/60 animate-pulse shrink-0" />
+      <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
   }
 
@@ -56,8 +56,8 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   if (hasReport) {
     return (
       <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
-        <Button size="sm" className="h-8">
-          <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+        <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
+          <FileCheck className="h-4 w-4 mr-1.5" />
           View Report
         </Button>
       </Link>
@@ -76,19 +76,18 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     }
     return (
       <Button
-        size="sm"
         onClick={onAssemble}
         disabled={assemble.isPending}
-        className="h-8 shrink-0"
+        className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
       >
         {assemble.isPending ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
             Assembling…
           </>
         ) : (
           <>
-            <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+            <FileCheck className="h-4 w-4 mr-1.5" />
             Assemble Report
           </>
         )}
@@ -102,10 +101,9 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          size="sm"
-          className="h-8 shrink-0 cursor-help"
+          className="shrink-0 cursor-help border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
         >
-          <FileCheck className="h-3.5 w-3.5 mr-1.5" />
+          <FileCheck className="h-4 w-4 mr-1.5" />
           Assemble Report ({locked}/{total})
         </Button>
       </DropdownMenuTrigger>

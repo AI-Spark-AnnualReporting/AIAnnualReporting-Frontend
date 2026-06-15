@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -44,6 +44,7 @@ import { QUERY_KEYS } from "@/lib/constants"
 import { isTableOfContentsSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
 import type {
+  ContentLanguage,
   CycleReportSection,
   FeederMapEntry,
   PlanResponse,
@@ -65,7 +66,7 @@ export default function PlanReviewPage({
 }
 
 interface PMDashboardData {
-  cycle?: { cycle_name?: string }
+  cycle?: { cycle_name?: string; content_language?: ContentLanguage }
   departments?: Array<{ department_code: string; department_name: string }>
 }
 
@@ -81,20 +82,11 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as PMDashboardData | undefined
 
-  useEffect(() => {
-    window.dispatchEvent(
-      new CustomEvent("sidebar-set-mode", { detail: { mode: "hidden" } }),
-    )
-    return () => {
-      window.dispatchEvent(
-        new CustomEvent("sidebar-set-mode", { detail: { mode: "expanded" } }),
-      )
-    }
-  }, [])
-
   if (planQuery.isLoading || sectionsQuery.isLoading) return <PageSkeleton />
 
   const cycleName = pmData?.cycle?.cycle_name
+  // Arabic cycles render section/theme titles right-to-left.
+  const isRtl = pmData?.cycle?.content_language === "arabic"
   const departments = (pmData?.departments ?? []).map((d) => ({
     department_code: d.department_code,
     department_name: d.department_name,
@@ -106,9 +98,10 @@ function PlanShell({ cycleId }: { cycleId: string }) {
 
   if (planMissing) {
     return (
-      <PlanShellChrome cycleId={cycleId} cycleName={cycleName} toolbarRight={null}>
+      <div className="mx-auto w-full max-w-6xl space-y-7">
+        <PlanHeader cycleId={cycleId} cycleName={cycleName} right={null} />
         <EmptyPlan cycleId={cycleId} />
-      </PlanShellChrome>
+      </div>
     )
   }
 
@@ -119,118 +112,95 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
   const canLockSections = needsSource === 0 && sections.length > 0
 
-  const toolbarRight = (
-    <div className="flex items-center gap-2">
-      <RegeneratePlanButton cycleId={cycleId} disabled={sectionsLocked} />
-    </div>
-  )
-
   return (
-    <PlanShellChrome
-      cycleId={cycleId}
-      cycleName={cycleName}
-      toolbarRight={toolbarRight}
-    >
-      <div className="mx-auto w-full max-w-6xl px-6 pt-8 pb-0 flex flex-col flex-1 min-h-0">
-        <ReportTitleBlock cycleName={cycleName} />
+    <div className="mx-auto w-full max-w-6xl space-y-7">
+      <PlanHeader
+        cycleId={cycleId}
+        cycleName={cycleName}
+        right={
+          <div className="flex items-center gap-4">
+            <p className="hidden max-w-xs text-right text-sm text-slate-500 lg:block">
+              Edit anything here — the build uses your revisions.
+            </p>
+            <RegeneratePlanButton cycleId={cycleId} disabled={sectionsLocked} />
+          </div>
+        }
+      />
 
-        <div className="mt-7">
-          <StepIndicator
-            step={step}
-            canAdvance={canLockSections}
-            onStep={(s) => {
-              // Allow free backward nav; gate forward.
-              if (s === 1) setStep(1)
-              else if (s === 2 && canLockSections) setStep(2)
-            }}
-          />
-        </div>
+      <StepIndicator
+        step={step}
+        canAdvance={canLockSections}
+        onStep={(s) => {
+          // Allow free backward nav; gate forward.
+          if (s === 1) setStep(1)
+          else if (s === 2 && canLockSections) setStep(2)
+        }}
+      />
 
-        <div className="mt-6 flex-1 min-h-0 flex flex-col">
-          {step === 1 ? (
-            <SectionsStep
-              cycleId={cycleId}
-              sections={sections}
-              feeders={plan.feeders ?? []}
-              departments={departments}
-              needsSource={needsSource}
-              locked={sectionsLocked}
-              lockedAt={plan.sections_locked_at}
-              locking={lockPlan.isPending}
-              onLock={async () => {
-                // Persist the lock first; only advance once the server confirms.
-                await lockPlan.mutateAsync()
-                setStep(2)
-              }}
-              onContinue={() => setStep(2)}
-            />
-          ) : (
-            <ThemesStep
-              cycleId={cycleId}
-              plan={plan}
-              sections={sections}
-              locked={sectionsLocked}
-              onBack={() => setStep(1)}
-            />
-          )}
-        </div>
-      </div>
-    </PlanShellChrome>
+      {step === 1 ? (
+        <SectionsStep
+          cycleId={cycleId}
+          sections={sections}
+          feeders={plan.feeders ?? []}
+          departments={departments}
+          needsSource={needsSource}
+          locked={sectionsLocked}
+          lockedAt={plan.sections_locked_at}
+          locking={lockPlan.isPending}
+          isRtl={isRtl}
+          onLock={async () => {
+            // Persist the lock first; only advance once the server confirms.
+            await lockPlan.mutateAsync()
+            setStep(2)
+          }}
+          onContinue={() => setStep(2)}
+        />
+      ) : (
+        <ThemesStep
+          cycleId={cycleId}
+          plan={plan}
+          sections={sections}
+          locked={sectionsLocked}
+          isRtl={isRtl}
+          onBack={() => setStep(1)}
+        />
+      )}
+    </div>
   )
 }
 
-// ─────────────────────────── Chrome / Layout ───────────────────────────
+// ─────────────────────────── Header ───────────────────────────
 
-function PlanShellChrome({
+function PlanHeader({
   cycleId,
   cycleName,
-  toolbarRight,
-  children,
+  right,
 }: {
   cycleId: string
   cycleName: string | undefined
-  toolbarRight: React.ReactNode
-  children: React.ReactNode
+  right: React.ReactNode
 }) {
   return (
-    <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-muted/30">
-      <header className="flex items-center gap-3 px-6 py-3 border-b bg-card shrink-0">
-        <Link href={`/pm/cycles/${cycleId}`}>
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex min-w-0 items-start gap-4">
+        <Link
+          href={`/pm/cycles/${cycleId}`}
+          className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
+          aria-label="Back to cycle"
+        >
+          <ArrowLeft className="h-4 w-4" />
         </Link>
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
             Review the plan before we build
           </p>
-          <h1 className="font-semibold text-base truncate -mt-0.5">
+          <h1 className="mt-1 truncate text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
             {cycleName ?? "Untitled cycle"}
           </h1>
         </div>
-        <p className="hidden md:block text-xs text-muted-foreground max-w-xs text-right">
-          Edit anything here — the build uses your revisions.
-        </p>
-        {toolbarRight}
-      </header>
-
-      <main className="flex-1 min-h-0 flex flex-col">{children}</main>
+      </div>
+      {right && <div className="shrink-0">{right}</div>}
     </div>
-  )
-}
-
-// ─────────────────────────── Report Title ───────────────────────────
-
-function ReportTitleBlock({ cycleName }: { cycleName: string | undefined }) {
-  return (
-    <section className="space-y-2">
-      <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground font-medium">
-        Report title
-      </p>
-      <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-[1.1] text-foreground">
-        {cycleName ?? "Untitled cycle"}
-      </h2>
-    </section>
   )
 }
 
@@ -250,8 +220,8 @@ function StepIndicator({
     step === 2 ? "active" : canAdvance ? "available" : "locked"
 
   return (
-    <div className="rounded-2xl border bg-card px-5 py-4 shadow-sm">
-      <ol className="flex items-center gap-2">
+    <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+      <ol className="flex items-center gap-3">
         <StepBubble
           n={1}
           icon={Layers}
@@ -293,29 +263,25 @@ function StepBubble({
 }) {
   const isLocked = state === "locked"
   return (
-    <li className="flex-1 min-w-0">
+    <li className="min-w-0 shrink-0">
       <button
         type="button"
         onClick={onClick}
         disabled={isLocked}
         className={cn(
-          "w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
-          state === "active" && "bg-primary/5",
-          state === "available" && "hover:bg-accent",
-          state === "complete" && "hover:bg-accent",
-          isLocked && "opacity-60 cursor-not-allowed",
+          "flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors",
+          state === "active" && "bg-indigo-50",
+          (state === "available" || state === "complete") && "hover:bg-slate-50",
+          isLocked && "cursor-not-allowed opacity-60",
         )}
       >
         <span
           className={cn(
-            "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all",
-            state === "active" &&
-              "bg-primary text-primary-foreground shadow-[0_0_0_4px_hsl(var(--primary)/0.12)]",
-            state === "complete" &&
-              "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
-            state === "available" &&
-              "bg-muted text-foreground border",
-            isLocked && "bg-muted text-muted-foreground border",
+            "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all",
+            state === "active" && "bg-indigo-600 text-white",
+            state === "complete" && "bg-emerald-500 text-white",
+            state === "available" && "bg-slate-100 text-slate-600",
+            isLocked && "bg-slate-100 text-slate-400",
           )}
         >
           {state === "complete" ? (
@@ -326,26 +292,24 @@ function StepBubble({
             <span className="tabular-nums">{n}</span>
           )}
         </span>
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0">
           <span className="flex items-center gap-1.5">
             <Icon
               className={cn(
-                "h-3.5 w-3.5 shrink-0",
-                state === "active"
-                  ? "text-primary"
-                  : "text-muted-foreground",
+                "h-4 w-4 shrink-0",
+                state === "active" ? "text-indigo-600" : "text-slate-400",
               )}
             />
             <span
               className={cn(
-                "text-sm font-semibold truncate",
-                state === "active" ? "text-foreground" : "text-foreground/90",
+                "truncate text-sm font-semibold",
+                state === "active" ? "text-slate-900" : "text-slate-700",
               )}
             >
               {label}
             </span>
           </span>
-          <span className="block text-[11px] text-muted-foreground truncate">
+          <span className="block truncate text-xs text-slate-400">
             {sublabel}
           </span>
         </span>
@@ -359,8 +323,8 @@ function StepConnector({ active }: { active: boolean }) {
     <li
       aria-hidden
       className={cn(
-        "h-px flex-1 max-w-16 transition-colors",
-        active ? "bg-primary/30" : "bg-border",
+        "h-px flex-1 transition-colors",
+        active ? "bg-indigo-300" : "bg-slate-200",
       )}
     />
   )
@@ -377,6 +341,7 @@ function SectionsStep({
   locked,
   lockedAt,
   locking,
+  isRtl,
   onLock,
   onContinue,
 }: {
@@ -388,48 +353,46 @@ function SectionsStep({
   locked: boolean
   lockedAt: string | null
   locking: boolean
+  isRtl: boolean
   onLock: () => void
   onContinue: () => void
 }) {
   const canLock = needsSource === 0 && sections.length > 0
 
   return (
-    <section className="flex flex-col flex-1 min-h-0">
-      <div className="flex items-end justify-between gap-4 mb-4">
+    <section className="space-y-5">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Report sections
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <h2 className="text-lg font-bold text-slate-900">Report sections</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
             {locked
               ? "Sections are locked — reordering, sources, and removal are disabled."
               : "Drag to reorder, assign a department source to each generated section, and add optional sections."}
           </p>
         </div>
-        <div className="text-xs text-muted-foreground tabular-nums shrink-0">
+        <div className="shrink-0 text-sm tabular-nums text-slate-400">
           {sections.length} total
           {!locked && needsSource > 0 && (
-            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
               {needsSource} need a source
             </span>
           )}
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-2">
-        <PlanSectionGrid
-          cycleId={cycleId}
-          sections={sections}
-          feeders={feeders}
-          departments={departments}
-          readOnly={locked}
-        />
-      </div>
+      <PlanSectionGrid
+        cycleId={cycleId}
+        sections={sections}
+        feeders={feeders}
+        departments={departments}
+        readOnly={locked}
+        isRtl={isRtl}
+      />
 
-      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-border/80">
+      <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
         {locked ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Lock className="h-3.5 w-3.5" />
+          <span className="inline-flex items-center gap-1.5 text-sm text-slate-500">
+            <Lock className="h-4 w-4" />
             Sections locked
             {lockedAt ? ` on ${formatDateTime(lockedAt)}` : ""} — sources and
             structure can&apos;t be changed.
@@ -439,29 +402,32 @@ function SectionsStep({
         )}
         <div className="flex items-center gap-3">
           {locked ? (
-            <Button onClick={onContinue} size="sm">
+            <Button
+              onClick={onContinue}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
               Continue
-              <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+              <ArrowRight className="ml-1.5 h-4 w-4" />
             </Button>
           ) : (
             <>
               {!canLock && needsSource > 0 && (
-                <span className="text-xs text-amber-700 dark:text-amber-400 hidden sm:block">
+                <span className="hidden text-xs text-amber-700 sm:block">
                   Assign a source to every flagged section to continue.
                 </span>
               )}
               <Button
                 onClick={onLock}
                 disabled={!canLock || locking}
-                size="sm"
+                className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
                 {locking ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                 ) : (
-                  <Lock className="h-3.5 w-3.5 mr-1.5" />
+                  <Lock className="mr-1.5 h-4 w-4" />
                 )}
                 Lock sections
-                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </>
           )}
@@ -478,29 +444,34 @@ function ThemesStep({
   plan,
   sections,
   locked,
+  isRtl,
   onBack,
 }: {
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
   locked: boolean
+  isRtl: boolean
   onBack: () => void
 }) {
   return (
-    <section className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-2">
-        <div className="rounded-2xl border bg-card p-5">
-          <ThemeEditor
-            cycleId={cycleId}
-            themes={plan.themes ?? []}
-            readOnly={locked}
-          />
-        </div>
+    <section className="space-y-5">
+      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <ThemeEditor
+          cycleId={cycleId}
+          themes={plan.themes ?? []}
+          readOnly={locked}
+          isRtl={isRtl}
+        />
       </div>
 
-      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-border/80">
-        <Button variant="outline" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+      <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
+        <Button
+          variant="outline"
+          onClick={onBack}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
           Back to sections
         </Button>
         <StartBuildingAction cycleId={cycleId} plan={plan} sections={sections} />
@@ -600,9 +571,9 @@ function StartBuildingAction({
   return (
     <>
       <Button
-        size="sm"
         disabled={disabled || running}
         onClick={onStart}
+        className="bg-indigo-600 text-white hover:bg-indigo-700"
         title={
           disabled
             ? "Assign a department to each flagged section before building."
@@ -612,7 +583,7 @@ function StartBuildingAction({
         }
       >
         Start Building
-        <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+        <ArrowRight className="ml-1.5 h-4 w-4" />
       </Button>
 
       <Dialog
@@ -627,7 +598,7 @@ function StartBuildingAction({
               {allDone ? (
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
               ) : (
-                <Sparkles className="h-5 w-5 text-primary" />
+                <Sparkles className="h-5 w-5 text-indigo-600" />
               )}
               {allDone
                 ? failed > 0
@@ -653,8 +624,8 @@ function StartBuildingAction({
             <Progress value={percent} />
 
             {!allDone && pendingTitles.length > 0 && (
-              <div className="rounded-md border bg-muted/30 p-3 max-h-32 overflow-y-auto">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+              <div className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-3">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Still writing
                 </p>
                 <ul className="space-y-1">
@@ -663,7 +634,7 @@ function StartBuildingAction({
                       key={t}
                       className="flex items-center gap-2 text-xs text-muted-foreground"
                     >
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
                       <span className="truncate">{t}</span>
                     </li>
                   ))}
@@ -674,9 +645,12 @@ function StartBuildingAction({
 
           <DialogFooter>
             {allDone ? (
-              <Button onClick={goToBuilder}>
+              <Button
+                onClick={goToBuilder}
+                className="bg-indigo-600 text-white hover:bg-indigo-700"
+              >
                 Open Builder
-                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             ) : (
               <Button variant="outline" onClick={goToBuilder}>
@@ -695,15 +669,15 @@ function StartBuildingAction({
 function EmptyPlan({ cycleId }: { cycleId: string }) {
   const build = useBuildPlan(cycleId)
   return (
-    <div className="flex flex-1 items-center justify-center p-8 min-h-[60vh]">
-      <div className="max-w-md text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-          <Sparkles className="h-7 w-7 text-primary" />
+    <div className="rounded-2xl border border-slate-100 bg-white p-10 shadow-sm">
+      <div className="mx-auto max-w-md text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50">
+          <Sparkles className="h-7 w-7 text-indigo-600" />
         </div>
-        <h2 className="text-lg font-semibold mb-1.5">
+        <h2 className="mb-1.5 text-lg font-bold text-slate-900">
           Generate the report plan
         </h2>
-        <p className="text-sm text-muted-foreground mb-5">
+        <p className="mb-5 text-sm text-slate-500">
           We&apos;ll run two AI passes over your approved department content to
           propose a headline, themes, and per-section feeders. This usually
           takes 30–60 seconds.
@@ -712,21 +686,22 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           onClick={() => build.mutate({})}
           disabled={build.isPending}
           size="lg"
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
         >
           {build.isPending ? (
             <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Generating plan…
             </>
           ) : (
             <>
-              <Sparkles className="h-4 w-4 mr-2" />
+              <Sparkles className="mr-2 h-4 w-4" />
               Generate Plan
             </>
           )}
         </Button>
         {build.isError && (
-          <p className="text-xs text-destructive mt-3">
+          <p className="mt-3 text-xs text-red-600">
             Couldn&apos;t generate the plan. Make sure at least one department
             session is approved.
           </p>
