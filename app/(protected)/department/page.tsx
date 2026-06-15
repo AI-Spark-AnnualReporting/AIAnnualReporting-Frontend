@@ -4,9 +4,6 @@ import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useDepartmentDashboard } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
-import { PageHeader } from "@/components/ui/page-header"
-import { StatusBadge } from "@/components/ui/status-badge"
-import { Progress } from "@/components/ui/progress"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
@@ -24,8 +21,7 @@ import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
 import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import {
-  ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye,
-  FileUp,
+  ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye, FileUp,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
@@ -44,39 +40,24 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "reopened", label: SESSION_STATUSES.reopened.label },
 ]
 
-type SessionCTA = {
-  label: string
-  disabled: boolean
-  variant: "default" | "outline" | "destructive"
-  icon: React.ElementType
+// Centriton status pill — coloured dot + label, keyed by session status.
+const STATUS_PILL: Record<SessionStatus, { label: string; dot: string; text: string; bg: string }> = {
+  assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
+  submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
+  approved:    { label: "Approved",      dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50" },
+  reopened:    { label: "Needs Changes", dot: "bg-red-500",     text: "text-red-700",     bg: "bg-red-50" },
 }
 
-function getSessionCTA(status: SessionStatus, progress: number): SessionCTA {
-  switch (status) {
-    case "assigned":
-      return { label: "Waiting for Questions", disabled: true, variant: "outline", icon: Clock }
-    case "not_started":
-      return { label: "Start Session", disabled: false, variant: "default", icon: ArrowRight }
-    case "in_progress":
-      return { label: progress > 0 ? "Continue Session" : "Start Session", disabled: false, variant: "default", icon: ArrowRight }
-    case "submitted":
-      return { label: "Awaiting Review", disabled: true, variant: "outline", icon: Clock }
-    case "approved":
-      return { label: "View Submission", disabled: false, variant: "outline", icon: Eye }
-    case "reopened":
-      return { label: "Revise & Resubmit", disabled: false, variant: "destructive", icon: RotateCcw }
-  }
-}
-
-function getCardBorderColor(status: SessionStatus): string {
-  switch (status) {
-    case "assigned":    return "border-slate-200"
-    case "not_started": return "border-gray-200"
-    case "in_progress": return "border-blue-300"
-    case "submitted":   return "border-yellow-300"
-    case "approved":    return "border-green-400"
-    case "reopened":    return "border-red-400"
-  }
+function StatusPill({ status }: { status: SessionStatus }) {
+  const s = STATUS_PILL[status]
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.bg, s.text)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+      {s.label}
+    </span>
+  )
 }
 
 export default function DepartmentDashboard() {
@@ -191,11 +172,16 @@ export default function DepartmentDashboard() {
     f === "all" ? sessions.length : sessions.filter((s) => s.status === f).length
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title={`Welcome, ${data?.user_name || ""}!`}
-        description={`${departmentLabel} Department · Annual Report Workspace`}
-      />
+    <div className="mx-auto max-w-6xl space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+          Welcome, {data?.user_name || ""}!
+        </h1>
+        <p className="mt-1.5 text-base text-slate-500">
+          {departmentLabel} Department · Annual Report Workspace
+        </p>
+      </div>
 
       {/* Unread notifications */}
       {notifications.length > 0 && (
@@ -203,10 +189,10 @@ export default function DepartmentDashboard() {
           {notifications.map((n) => (
             <div
               key={n.id}
-              className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
+              className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4"
             >
-              <Bell className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-              <p className="text-sm text-blue-800">{n.message}</p>
+              <Bell className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+              <p className="text-sm text-indigo-900">{n.message}</p>
             </div>
           ))}
         </div>
@@ -214,16 +200,16 @@ export default function DepartmentDashboard() {
 
       {/* Sessions */}
       <div>
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="font-semibold text-lg">My Report Sessions</h2>
-          <span className="text-xs text-muted-foreground">
+        <div className="mb-4 flex items-baseline justify-between">
+          <h2 className="text-xl font-bold text-slate-900">My Report Sessions</h2>
+          <span className="text-sm text-slate-400">
             {visibleSessions.length} of {sessions.length}
           </span>
         </div>
 
         {/* Status filter chips */}
         {sessions.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-b pb-3 mb-4">
+          <div className="mb-6 flex flex-wrap gap-2">
             {FILTERS.map((f) => {
               const active = filter === f.value
               const count = countFor(f.value)
@@ -232,19 +218,17 @@ export default function DepartmentDashboard() {
                   key={f.value}
                   onClick={() => setFilter(f.value)}
                   className={cn(
-                    "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors border",
+                    "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
                     active
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent border-border"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   )}
                 >
                   <span>{f.label}</span>
                   <span
                     className={cn(
-                      "inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold min-w-5",
-                      active
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : "bg-muted text-muted-foreground"
+                      "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold",
+                      active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
                     )}
                   >
                     {count}
@@ -262,13 +246,16 @@ export default function DepartmentDashboard() {
             description="You don't have any active reporting sessions. An admin will assign one when a cycle is activated."
           />
         ) : visibleSessions.length === 0 ? (
-          <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
-            No sessions in the <span className="font-medium">{FILTERS.find((f) => f.value === filter)?.label}</span> status.
+          <div className="rounded-2xl border border-slate-100 bg-white p-10 text-center text-sm text-slate-500">
+            No sessions in the{" "}
+            <span className="font-medium text-slate-700">
+              {FILTERS.find((f) => f.value === filter)?.label}
+            </span>{" "}
+            status.
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2">
             {visibleSessions.map((session) => {
-              const cta = getSessionCTA(session.status, session.progress_percentage)
               const isReopened = session.status === "reopened"
               const isTerminalOrSubmitted =
                 session.status === "submitted" || session.status === "approved"
@@ -277,32 +264,29 @@ export default function DepartmentDashboard() {
                 new Date(session.submission_deadline) < new Date() &&
                 !isTerminalOrSubmitted &&
                 !isReopened
-              const Icon = cta.icon
+              const pct = session.progress_percentage
 
               return (
                 <div
                   key={session.session_id}
                   className={cn(
-                    "rounded-xl border bg-card p-6 space-y-4 transition-shadow hover:shadow-md",
-                    getCardBorderColor(session.status),
-                    isOverdue && "border-red-300",
+                    "rounded-2xl border bg-white p-6 shadow-sm transition-shadow hover:shadow-md",
+                    isOverdue ? "border-red-200" : "border-slate-100",
                   )}
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-semibold">{session.cycle_name}</p>
-                      <p className="text-sm text-muted-foreground mt-0.5">
-                        {session.department_name}
-                      </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-lg font-bold text-slate-900">{session.cycle_name}</p>
+                      <p className="mt-0.5 text-sm text-slate-500">{session.department_name}</p>
                     </div>
-                    <StatusBadge status={session.status} variant="session" />
+                    <StatusPill status={session.status} />
                   </div>
 
                   {/* Reopened — show PM feedback when present, otherwise a generic prompt */}
                   {isReopened && (
-                    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2">
+                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5">
                       <div className="flex items-center gap-2">
-                        <RotateCcw className="h-3.5 w-3.5 text-red-600 shrink-0" />
+                        <RotateCcw className="h-3.5 w-3.5 shrink-0 text-red-600" />
                         <p className="text-xs font-semibold text-red-800">PM feedback</p>
                       </div>
                       <p className="mt-1 text-sm text-red-700">
@@ -314,58 +298,77 @@ export default function DepartmentDashboard() {
                   )}
 
                   {/* Progress */}
-                  <div>
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-muted-foreground">Progress</span>
-                      <span className="font-medium">{session.progress_percentage}%</span>
+                  <div className="mt-5">
+                    <div className="mb-1.5 flex items-center justify-between text-sm">
+                      <span className="text-slate-500">Progress</span>
+                      <span className="font-bold text-slate-900">{pct}%</span>
                     </div>
-                    <Progress value={session.progress_percentage} className="h-2" />
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all"
+                        style={{ width: `${Math.min(100, pct)}%` }}
+                      />
+                    </div>
                   </div>
 
                   {/* Deadline */}
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className={cn("text-muted-foreground", isOverdue && "text-red-600 font-medium")}>
+                  <div className="mt-4 flex items-center gap-2 text-sm">
+                    <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
+                    <span className={cn("text-slate-500", isOverdue && "font-medium text-red-600")}>
                       Deadline: {formatDate(session.submission_deadline)}
                       {isOverdue && " — Overdue"}
                     </span>
                   </div>
 
                   {/* Action */}
-                  <div className="flex gap-2 pt-1">
+                  <div className="mt-5">
                     {session.status === "assigned" ? (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground italic px-1 py-2">
-                        <Icon className="h-4 w-4 shrink-0" />
+                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm italic text-slate-500">
+                        <Clock className="h-4 w-4 shrink-0" />
                         Awaiting questions from PM
                       </div>
+                    ) : session.status === "submitted" ? (
+                      <Button
+                        className="w-full border-slate-200 bg-white text-slate-500"
+                        variant="outline"
+                        disabled
+                      >
+                        <Clock className="mr-2 h-4 w-4" />
+                        Awaiting Review
+                      </Button>
                     ) : session.status === "not_started" ? (
                       <Button
-                        className="w-full"
-                        size="sm"
-                        variant={cta.variant}
+                        className="w-full bg-indigo-600 text-white hover:bg-indigo-700"
                         onClick={() => {
                           docCheck.reset()
                           setStartTarget(session.session_id)
                         }}
                       >
-                        <Icon className="mr-2 h-3.5 w-3.5" />
-                        {cta.label}
+                        <ArrowRight className="mr-2 h-4 w-4" />
+                        Start Session
                       </Button>
-                    ) : cta.disabled ? (
-                      <Button
-                        className="w-full"
-                        size="sm"
-                        variant={cta.variant}
-                        disabled
-                      >
-                        <Icon className="mr-2 h-3.5 w-3.5" />
-                        {cta.label}
-                      </Button>
+                    ) : session.status === "in_progress" ? (
+                      <Link href={`/department/sessions/${session.session_id}`} className="block">
+                        <Button className="w-full bg-indigo-600 text-white hover:bg-indigo-700">
+                          <ArrowRight className="mr-2 h-4 w-4" />
+                          {pct > 0 ? "Continue Session" : "Start Session"}
+                        </Button>
+                      </Link>
+                    ) : isReopened ? (
+                      <Link href={`/department/sessions/${session.session_id}`} className="block">
+                        <Button className="w-full bg-red-600 text-white hover:bg-red-700">
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          Revise &amp; Resubmit
+                        </Button>
+                      </Link>
                     ) : (
-                      <Link href={`/department/sessions/${session.session_id}`} className="w-full">
-                        <Button className="w-full" size="sm" variant={cta.variant}>
-                          <Icon className="mr-2 h-3.5 w-3.5" />
-                          {cta.label}
+                      <Link href={`/department/sessions/${session.session_id}`} className="block">
+                        <Button
+                          className="w-full border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          variant="outline"
+                        >
+                          View Submission
+                          <Eye className="ml-2 h-4 w-4" />
                         </Button>
                       </Link>
                     )}
@@ -379,10 +382,10 @@ export default function DepartmentDashboard() {
 
       {/* ── Start Session — upload supporting documents ── */}
       <Dialog open={!!startTarget} onOpenChange={(o) => { if (!o) closeStartDialog() }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg rounded-2xl border-slate-200">
           <DialogHeader>
-            <DialogTitle>Start Session</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-xl font-bold text-slate-900">Start Session</DialogTitle>
+            <DialogDescription className="text-slate-500">
               Optionally upload supporting documents for this report (financial reports, project
               summaries, etc.). Our AI will read them and draft an answer for every question —
               you&apos;ll review and refine each one in the next step. You can also skip this and
@@ -405,11 +408,13 @@ export default function DepartmentDashboard() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors"
+                className="w-full rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-8 text-center transition-colors hover:border-indigo-300 hover:bg-indigo-50/40"
               >
-                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
-                <p className="text-sm font-medium">Click to attach documents</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT — optional</p>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
+                  <FileUp className="h-5 w-5 text-slate-400" />
+                </div>
+                <p className="text-sm font-semibold text-slate-900">Click to attach documents</p>
+                <p className="mt-1 text-xs text-slate-500">PDF, DOCX, DOC, TXT — optional</p>
               </button>
             ) : (
               <div className="space-y-2">
@@ -426,6 +431,7 @@ export default function DepartmentDashboard() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="border-slate-200 bg-white"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <FileUp className="mr-2 h-3.5 w-3.5" />
@@ -436,10 +442,14 @@ export default function DepartmentDashboard() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={closeStartDialog}>
+            <Button variant="outline" className="border-slate-200 bg-white" onClick={closeStartDialog}>
               Cancel
             </Button>
-            <Button onClick={handleStartSession} disabled={docCheck.blocked}>
+            <Button
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={handleStartSession}
+              disabled={docCheck.blocked}
+            >
               {docCheck.docs.length === 0 ? "Skip" : "Extract Answers & Start"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
