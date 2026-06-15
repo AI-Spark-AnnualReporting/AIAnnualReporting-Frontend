@@ -63,9 +63,13 @@ spark-ar-studio/
 │   │
 │   ├── (public)/                         Public layout (centered card)
 │   │   ├── layout.tsx
-│   │   ├── login/page.tsx
-│   │   ├── forgot-password/page.tsx
-│   │   └── reset-password/page.tsx
+│   │   ├── login/page.tsx                "Use Centriton" info card (no form)
+│   │   ├── forgot-password/page.tsx      "Manage in Centriton" notice
+│   │   └── reset-password/page.tsx       "Manage in Centriton" notice
+│   │
+│   ├── auth/
+│   │   └── token/page.tsx                Centriton SSO landing — reads ?token=,
+│   │                                     calls loginWithToken, redirects to role home
 │   │
 │   ├── (protected)/                      RouteGuard-wrapped layout (Sidebar + TopNav)
 │   │   ├── layout.tsx
@@ -150,7 +154,7 @@ spark-ar-studio/
 │        table, tabs, textarea)
 │
 ├── contexts/
-│   └── AuthContext.tsx                   Login / me / role redirect / logout
+│   └── AuthContext.tsx                   loginWithToken / me / role redirect / logout (Centriton SSO)
 │
 ├── hooks/
 │   ├── useUsers.ts
@@ -164,8 +168,8 @@ spark-ar-studio/
 │
 ├── lib/
 │   ├── api/
-│   │   ├── client.ts                     Axios singleton with refresh interceptor
-│   │   ├── auth.ts
+│   │   ├── client.ts                     Axios singleton; 401 → Centriton redirect
+│   │   ├── auth.ts                       me + logout only (Centriton SSO)
 │   │   ├── users.ts
 │   │   ├── departments.ts
 │   │   ├── cycles.ts                     Admin cycle ops (incl. resolveSections)
@@ -187,7 +191,7 @@ spark-ar-studio/
 ├── eslint.config.mjs                     ESLint flat config + next/core-web-vitals
 ├── tsconfig.json                         Strict, "@/*" alias → repo root
 ├── next.config.ts                        Empty experimental block
-├── .env.example                          NEXT_PUBLIC_API_BASE_URL, NEXT_PUBLIC_APP_NAME
+├── .env.example                          NEXT_PUBLIC_API_BASE_URL, NEXT_PUBLIC_APP_NAME, NEXT_PUBLIC_CENTRITON_URL
 ├── README.md                             Pointer to this file
 └── FRONTEND_DOCUMENTATION.md             ← you are here
 ```
@@ -200,6 +204,7 @@ spark-ar-studio/
 |----------|-------|---------|---------|
 | `NEXT_PUBLIC_API_BASE_URL` | Browser + server | Backend API base; hard-coded fallback in `lib/api/client.ts` | All Axios calls |
 | `NEXT_PUBLIC_APP_NAME` | Browser + server | Display name | UI only |
+| `NEXT_PUBLIC_CENTRITON_URL` | Browser + server | Centriton frontend URL — SAR redirects here for login, on logout, and on 401 token expiry. No fallback (deliberate: surfaces misconfiguration). | `contexts/AuthContext.tsx`, `lib/api/client.ts`, login/forgot/reset/profile pages |
 | `ADMIN_SERVICE_EMAIL` | Server only | Service-account email for `/api/pm/*` proxies | `app/api/pm/_sessionAggregator.ts` |
 | `ADMIN_SERVICE_PASSWORD` | Server only | Service-account password | same |
 | `DEPT_USER_DEFAULT_PASSWORD` | Server only | Shared password used when proxy impersonates dept users (falls back to `ADMIN_SERVICE_PASSWORD`) | same |
@@ -230,45 +235,83 @@ Server-side hard redirect `/` → `/login`.
 
 ---
 
-## 5. Authentication & RBAC
+## 5. Authentication & RBAC — Centriton SSO
+
+SAR delegates **all** authentication to **Centriton**. SAR's backend no longer issues login, register, refresh, or password-management tokens — those endpoints return 410. SAR receives a Centriton-issued JWT on the URL and uses it directly.
+
+### Sign-in flow
+
+```
+Centriton login UI
+   ↓
+GET https://sar.domain.com?token=<centriton_jwt>
+   ↓ app/page.tsx (server) reads ?token=
+   ↓
+GET /auth/token?token=<jwt>
+   ↓ app/auth/token/page.tsx (client) calls loginWithToken(jwt)
+   ↓
+localStorage.access_token = jwt
+GET /auth/me → User
+router.push(ROLE_ROUTES[user.role])  // /admin, /pm, /department
+```
 
 ### Token lifecycle (`lib/api/client.ts`)
 
-- `access_token` + `refresh_token` are stored in `localStorage`.
+- Only `access_token` is stored (in `localStorage`). There is **no refresh token** — Centriton mints the JWT, SAR can't refresh it.
 - Axios attaches `Authorization: Bearer <access_token>` on every request via the request interceptor.
-- On a `401` that is **not** an `/auth/refresh` or `/auth/login` request, the response interceptor:
-  1. Pauses concurrent requests via a `failedQueue` and `isRefreshing` flag (single-flight refresh).
-  2. POSTs `refresh_token` → `/auth/refresh`.
-  3. Stores the new `access_token`, updates the default header, replays the original request.
-  4. If refresh fails, clears tokens and hard-navigates to `/login`.
+- On a `401`, the response interceptor:
+  1. **Excludes** `/auth/me` and `/auth/logout` (they're handled by `AuthContext.refreshUser` and `logout` respectively — bouncing here would prevent the "use Centriton" info card from rendering).
+  2. Otherwise clears `localStorage` and full-page-navigates to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
+- The old single-flight refresh queue (`isRefreshing`, `failedQueue`, `processQueue`) has been removed entirely.
 - All other errors are normalised to `{ error, message, status, details }`. Hooks always toast `err?.message || "Failed to …"` so UI code reads `err.message` regardless of FastAPI's response shape (`{message}`, `{detail}`, `{detail:[{msg}]}`).
 
+### `lib/api/auth.ts`
+
+Only two methods remain:
+- `me(): Promise<User>` — `GET /auth/me` (hydrate the user)
+- `logout(): Promise<unknown>` — `POST /auth/logout` (best-effort backend cleanup)
+
+`login`, `refresh`, `changePassword`, `requestPasswordReset`, `confirmPasswordReset` have all been removed.
+
 ### `contexts/AuthContext.tsx`
+
 Exposes `useAuth()`:
 - `user`, `isAuthenticated`, `isLoading`
-- `login(email, password)` — calls `/auth/login`, persists tokens, fetches `/auth/me`, then pushes the user to their role home (`/admin`, `/pm`, `/department`) per `ROLE_ROUTES`.
-- `logout()` — best-effort `/auth/logout`, clears tokens, routes to `/login`.
-- `refreshUser()` — re-fetches `/auth/me`.
+- `loginWithToken(token: string)` — persists the Centriton JWT, fetches `/auth/me`, then pushes the user to their role home per `ROLE_ROUTES`. Called by `app/auth/token/page.tsx`.
+- `logout()` — best-effort `/auth/logout`, clears `localStorage`, full-page nav to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
+- `refreshUser()` — re-fetches `/auth/me`; on 401 clears `localStorage` so the next render shows the Centriton info card.
+
+The old `login(email, password)` method has been removed.
 
 ### `components/auth/RouteGuard.tsx`
-Wraps every `(protected)` route:
+
+Wraps every `(protected)` route. Wrapped in `<Suspense>` so `useSearchParams` is allowed in Next 16. Behaviour:
 - While loading: `<AuthSkeleton />`.
-- No token + not authenticated: redirect to `/login?redirect=<pathname>`.
-- Token exists but user state hasn't hydrated yet: keep the skeleton (avoids post-login flash to `/login`).
+- **`?token=` present on the URL**: render the skeleton and let `app/auth/token/page.tsx` complete the handoff — don't bounce to `/login`.
+- No token + not authenticated: redirect to `/login?redirect=<pathname>` (which now shows the Centriton info card).
+- Token exists but user state hasn't hydrated yet: keep the skeleton.
 - `allowedRoles` set and user's role is disallowed: redirect to that user's role home.
 
 ### `components/auth/Can.tsx`
-Inline RBAC:
+Inline RBAC (unchanged):
 
 ```tsx
 <Can role="admin">…admin-only UI…</Can>
 <Can role={["admin","project_manager"]} fallback={<ReadOnlyView/>}>…</Can>
 ```
 
-### Public auth pages
-- `/(public)/login` — Zod-validated email + password, password-visibility toggle, "Forgot password?" link.
-- `/(public)/forgot-password` — `authApi.requestPasswordReset({email})`.
-- `/(public)/reset-password` — `authApi.confirmPasswordReset({token, new_password})`.
+### Public auth pages — now info cards
+
+- `/(public)/login` — "Sign in is managed through Centriton" + **Go to Centriton Login** button (`${NEXT_PUBLIC_CENTRITON_URL}/login`). No form.
+- `/(public)/forgot-password` — "Password reset is handled through Centriton" + **Go to Centriton** button.
+- `/(public)/reset-password` — same as forgot-password.
+
+These routes still exist so old bookmarks land somewhere sensible and `RouteGuard` has a redirect target.
+
+### Profile + TopNav
+
+- `/profile` shows a single **Password & account** card explaining that credentials are managed in Centriton, plus an **Open Centriton** button. The old Change Password form is gone.
+- The TopNav avatar dropdown no longer contains a **Change Password** entry — only **Profile** and **Sign Out**.
 
 ---
 
@@ -299,7 +342,7 @@ Hard-coded in `AuthContext.tsx::ROLE_ROUTES` and the fallback in `RouteGuard.tsx
 
 ### TopNav (`components/layout/TopNav.tsx`)
 - Notifications bell with unread badge + dropdown list (driven by `useNotificationsLive`).
-- Avatar + role chip → Radix DropdownMenu with Profile / Change Password / Sign Out.
+- Avatar + role chip → Radix DropdownMenu with **Profile** and **Sign Out**. Sign Out redirects to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
 
 ---
 
@@ -437,15 +480,14 @@ Every module imports the singleton `apiClient` from `lib/api/client.ts` and expo
 
 ### `auth.ts` — `authApi`
 
+Centriton owns authentication. SAR only calls two endpoints:
+
 | Method | URL | Notes |
 |--------|-----|------|
-| `login(payload)` | `POST /auth/login` | Returns access + refresh + user |
-| `me()` | `GET /auth/me` | Current user |
-| `refresh(refresh_token)` | `POST /auth/refresh` | Triggered by interceptor on 401 |
-| `logout()` | `POST /auth/logout` | Best-effort |
-| `changePassword(payload)` | `POST /auth/change-password` | |
-| `requestPasswordReset({email})` | `POST /auth/password-reset/request` | |
-| `confirmPasswordReset({token,new_password})` | `POST /auth/password-reset/confirm` | |
+| `me()` | `GET /auth/me` | Hydrate the user from the Centriton-issued JWT |
+| `logout()` | `POST /auth/logout` | Best-effort backend cleanup before redirecting to Centriton |
+
+Removed (now handled by Centriton): `login`, `refresh`, `changePassword`, `requestPasswordReset`, `confirmPasswordReset`. The SAR backend's `/auth/login`, `/auth/register`, and password endpoints return 410.
 
 ### `users.ts` — `usersApi`
 
@@ -940,15 +982,16 @@ DEPARTMENT USER
 
 | Route | File | Purpose |
 |-------|------|---------|
-| `/login` | `app/(public)/login/page.tsx` | Email + password, RHF + Zod, password-visibility toggle, "Forgot password?" link. Redirects to role home on success. |
-| `/forgot-password` | `app/(public)/forgot-password/page.tsx` | Email-only form → `requestPasswordReset`. Success state shows "Check your inbox". |
-| `/reset-password` | `app/(public)/reset-password/page.tsx` | Token + new password → `confirmPasswordReset`. |
+| `/login` | `app/(public)/login/page.tsx` | "Use Centriton" info card with a button linking to `${NEXT_PUBLIC_CENTRITON_URL}/login`. No form. |
+| `/forgot-password` | `app/(public)/forgot-password/page.tsx` | "Password reset is handled in Centriton" info card. |
+| `/reset-password` | `app/(public)/reset-password/page.tsx` | Same treatment as forgot-password. |
+| `/auth/token` | `app/auth/token/page.tsx` | Centriton SSO landing — reads `?token=`, calls `loginWithToken`, redirects to the role home. Shows a "Signing you in…" loader. |
 
 ### Profile
 
 | Route | Purpose |
 |-------|---------|
-| `/profile` | View name/email/role/department; change password (current + new + confirm, Zod-validated). |
+| `/profile` | View name/email/role/department + a "Password & account" card explaining that credentials are managed in Centriton, with a button linking out to Centriton. |
 
 ### Admin
 
@@ -1081,6 +1124,9 @@ Required `.env.local`:
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
 NEXT_PUBLIC_APP_NAME=Spark Annual Report AI Studio
+
+# Centriton SSO — SAR redirects here for login, on logout, and on 401 token expiry
+NEXT_PUBLIC_CENTRITON_URL=http://localhost:8080
 
 # Server-side only — required for /api/pm/* proxies to function
 ADMIN_SERVICE_EMAIL=...
