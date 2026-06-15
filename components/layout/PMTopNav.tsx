@@ -1,11 +1,11 @@
 "use client"
 
 import { useState } from "react"
+import { usePathname } from "next/navigation"
+import Link from "next/link"
 import { useAuth } from "@/contexts/AuthContext"
 import { getInitials } from "@/lib/utils"
-import { USER_ROLES } from "@/lib/constants"
-import { LogOut, User, KeyRound } from "lucide-react"
-import Link from "next/link"
+import { LogOut, User, KeyRound, ChevronRight } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,19 +21,28 @@ import {
 } from "@/hooks/useNotifications"
 import { NotificationBell, EscalationBannerStrip } from "@/components/layout/notifications"
 
-// ── TopNav ────────────────────────────────────────────────────────────────────
+// Map the current PM route to a breadcrumb leaf label.
+function pageTitle(pathname: string): string {
+  if (pathname === "/pm") return "Dashboard"
+  if (pathname.startsWith("/pm/cycles")) return "All Cycles"
+  if (pathname.startsWith("/pm/reviews")) return "Pending Reviews"
+  if (pathname.startsWith("/pm/documents")) return "Document Bank"
+  if (pathname.startsWith("/pm/sessions")) return "Review Submission"
+  return "Dashboard"
+}
 
-export function TopNav() {
+export function PMTopNav() {
   const { user, logout } = useAuth()
+  const pathname = usePathname()
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
 
   const { data } = useNotificationsLive()
-  const markRead    = useMarkNotificationRead()
+  const markRead = useMarkNotificationRead()
   const markAllRead = useMarkAllNotificationsRead()
 
-  const allNotifications   = data?.notifications ?? []
-  const unreadEscalations  = allNotifications.filter((n) => n.notification_type === "escalation" && !n.is_read)
-  const bannerEscalations  = unreadEscalations.filter((n) => !dismissed.has(n.id))
+  const allNotifications = data?.notifications ?? []
+  const unreadEscalations = allNotifications.filter((n) => n.notification_type === "escalation" && !n.is_read)
+  const bannerEscalations = unreadEscalations.filter((n) => !dismissed.has(n.id))
 
   function handleView(id: string) {
     markRead.mutate(id)
@@ -46,29 +55,35 @@ export function TopNav() {
 
   if (!user) return null
 
-  const roleLabel = USER_ROLES[user.role as keyof typeof USER_ROLES]?.label || user.role
-
   return (
-    <div className="flex flex-col shrink-0">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-6">
-        <div />
-        <div className="flex items-center gap-3">
+    <div data-app-chrome="true" className="app-header flex flex-col shrink-0">
+      <header className="flex h-[72px] items-center justify-between border-b border-slate-200 bg-white px-8">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-semibold text-slate-900">PM Workspace</span>
+          <ChevronRight className="h-4 w-4 text-slate-300" />
+          <span className="text-slate-500">{pageTitle(pathname)}</span>
+        </div>
+
+        {/* Right cluster */}
+        <div className="flex items-center gap-4">
           <NotificationBell
             notifications={allNotifications}
             onView={handleView}
             markRead={markRead}
             markAllRead={markAllRead}
+            className="relative h-10 w-10 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700"
           />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-accent transition-colors">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+              <button className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-slate-50">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 text-xs font-semibold text-white">
                   {getInitials(user.full_name)}
                 </div>
-                <div className="text-left">
-                  <p className="text-sm font-medium text-foreground leading-tight">{user.full_name}</p>
-                  <p className="text-xs text-muted-foreground">{roleLabel}</p>
+                <div className="text-left leading-tight">
+                  <p className="text-sm font-semibold text-slate-900">{user.full_name}</p>
+                  <p className="text-xs text-slate-500">Project Manager</p>
                 </div>
               </button>
             </DropdownMenuTrigger>
@@ -93,7 +108,7 @@ export function TopNav() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={logout}
-                className="text-red-600 focus:text-red-600 cursor-pointer"
+                className="cursor-pointer text-red-600 focus:text-red-600"
               >
                 <LogOut className="mr-2 h-4 w-4" />
                 Sign Out
@@ -103,7 +118,6 @@ export function TopNav() {
         </div>
       </header>
 
-      {/* Escalation banners — below the nav bar, above page content */}
       <EscalationBannerStrip
         escalations={bannerEscalations}
         onView={handleView}

@@ -27,38 +27,47 @@ import { ManualSection } from "@/components/report/ManualSection"
 // Shared header for every mode sub-component — title, layer chip, mode badge,
 // and the section's content source. Exported so other mode panels (e.g.
 // AttachSection in its own file) can render the same header.
-export function SectionHeader({ section }: { section: CycleReportSection }) {
+export function SectionHeader({
+  section,
+  isRtl,
+}: {
+  section: CycleReportSection
+  isRtl?: boolean
+}) {
   const mode = SECTION_MODES[section.mode]
   const layer = SECTION_LAYERS[section.layer]
   return (
-    <div className="border-b px-6 py-4">
-      <div className="flex items-center gap-2 mb-1.5">
+    <div className="shrink-0 px-8 pb-4 pt-6">
+      <div className="mb-3 flex items-center gap-2">
         <span
           className={cn(
-            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-            layer?.color
+            "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
+            layer?.color ?? "bg-slate-100 text-slate-600",
           )}
         >
           {layer?.label ?? section.layer}
         </span>
         <span
           className={cn(
-            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-            mode?.color
+            "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
+            mode?.color ?? "bg-slate-100 text-slate-600",
           )}
         >
           {mode?.label ?? section.mode}
         </span>
-        {!section.ai_allowed && (
-          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-            Manual
-          </span>
-        )}
-        <span className="text-xs text-muted-foreground capitalize">
+        <span className="text-xs capitalize text-slate-400">
           {section.content_source}
         </span>
       </div>
-      <h2 className="text-lg font-semibold leading-tight">{section.title}</h2>
+      <h2
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn(
+          "text-xl font-bold leading-tight text-slate-900",
+          isRtl ? "text-right" : "text-left",
+        )}
+      >
+        {section.title}
+      </h2>
     </div>
   )
 }
@@ -96,9 +105,11 @@ function Placeholder({
 function AutoSection({
   section,
   cycleId,
+  isRtl,
 }: {
   section: CycleReportSection
   cycleId: string
+  isRtl?: boolean
 }) {
   const storageKey = `cycle:${cycleId}:auto-note:${section.section_code}`
   const isToc =
@@ -132,9 +143,9 @@ function AutoSection({
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6 py-6 space-y-5">
+        <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
           <div className="flex flex-col items-center justify-center text-center py-8 px-4">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
               <Settings className="h-6 w-6 text-muted-foreground" />
@@ -170,13 +181,20 @@ function AutoSection({
                   : "Notes for this system section (e.g. cover image to use, headline tweaks)…"
               }
               rows={4}
+              dir={isRtl ? "rtl" : "ltr"}
+              className={cn(isRtl && "text-right")}
             />
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground italic">
                 Notes are not yet wired to the assembled report — backend
                 support coming.
               </p>
-              <Button size="sm" onClick={save} disabled={!dirty}>
+              <Button
+                size="sm"
+                onClick={save}
+                disabled={!dirty}
+                className="bg-indigo-600 text-white hover:bg-indigo-700"
+              >
                 Save notes
               </Button>
             </div>
@@ -206,38 +224,41 @@ function AutoSection({
 // Read-only view shown for every section once the report has been assembled.
 // Auto sections are excluded — they have no user content and are already
 // handled by AutoSection's own read-only UI.
-function AssembledView({ section }: { section: CycleReportSection }) {
+function AssembledView({ section, isRtl }: { section: CycleReportSection; isRtl?: boolean }) {
   const content = section.content ?? ""
   const attachment = section.attachment
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 py-6 space-y-5">
-          <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-            <FileCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+        <div className="px-8 py-6 space-y-5">
+          <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            <FileCheck className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
               The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes.
             </span>
           </div>
 
           {attachment && (
-            <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted">
-                <FileText className="h-5 w-5 text-muted-foreground" />
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100">
+                <FileText className="h-5 w-5 text-slate-400" />
               </div>
-              <p className="text-sm font-medium truncate flex-1 min-w-0">
+              <p className="text-sm font-medium truncate flex-1 min-w-0 text-slate-900">
                 {attachment.filename}
               </p>
             </div>
           )}
 
-          <div className="rounded-lg border bg-card p-6">
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
+          >
             {content.trim() ? (
               <ProsePreview content={content} />
             ) : (
-              <p className="text-sm text-muted-foreground italic">No content.</p>
+              <p className="text-sm text-slate-400 italic">No content.</p>
             )}
           </div>
         </div>
@@ -253,11 +274,13 @@ export function SectionDetail({
   cycleId,
   assembled = false,
   contentLanguage = "english",
+  isRtl = false,
 }: {
   section: CycleReportSection | null
   cycleId: string
   assembled?: boolean
   contentLanguage?: ContentLanguage
+  isRtl?: boolean
 }) {
   if (!section) {
     return (
@@ -279,19 +302,19 @@ export function SectionDetail({
   }
   // Once assembled, all non-auto sections are view-only.
   if (assembled && section.mode !== "auto") {
-    return <AssembledView section={section} />
+    return <AssembledView section={section} isRtl={isRtl} />
   }
 
   // Extract-mode is document-driven: upload runs AI extraction, the PM edits
   // the result, then locks. Takes priority over the ai_allowed branch below.
   if (section.mode === "extract") {
-    return <ExtractSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
+    return <ExtractSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
   }
 
   // Analyze-mode: structured Markdown findings from the analyze agent. No
   // document — department digests are the source. Locks like generate.
   if (section.mode === "analyze") {
-    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
+    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based
@@ -301,22 +324,22 @@ export function SectionDetail({
   //   - structured / financials / composite → file upload (AttachSection)
   if (!section.ai_allowed) {
     if (section.content_source === "narrative") {
-      return <ManualSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} />
+      return <ManualSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
     }
-    return <AttachSection section={section} cycleId={cycleId} />
+    return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
   }
 
   switch (section.mode) {
     case "generate":
-      return <GenerateSection section={section} cycleId={cycleId} />
+      return <GenerateSection section={section} cycleId={cycleId} isRtl={isRtl} />
     case "attach":
-      return <AttachSection section={section} cycleId={cycleId} />
+      return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
     case "auto":
-      return <AutoSection section={section} cycleId={cycleId} />
+      return <AutoSection section={section} cycleId={cycleId} isRtl={isRtl} />
     default:
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <SectionHeader section={section} />
+          <SectionHeader section={section} isRtl={isRtl} />
           <Placeholder icon={FileText} message="Unknown section mode." />
         </div>
       )

@@ -1,19 +1,15 @@
 "use client"
 
 import { usePMDashboard } from "@/hooks/useSessions"
-import { PageHeader } from "@/components/ui/page-header"
-import { StatsCard } from "@/components/ui/stats-card"
-import { Progress } from "@/components/ui/progress"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { PMStatCard } from "@/components/pm/PMStatCard"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import {
-  RefreshCw, ClipboardCheck, ArrowRight, Clock, FileText,
-  CheckCircle2, AlertTriangle, BookOpen,
+  RefreshCw, ClipboardCheck, ArrowRight, Clock, FileText, CheckCircle2,
 } from "lucide-react"
 import Link from "next/link"
-import { formatDate, formatDateTime } from "@/lib/utils"
+import { formatDate, cn } from "@/lib/utils"
 
 export default function PMDashboard() {
   const { data, isLoading } = usePMDashboard()
@@ -25,42 +21,46 @@ export default function PMDashboard() {
   const pendingReviews = data?.pending_reviews ?? 0
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="PM Dashboard"
-        description="Monitor your assigned cycles, review submissions, and generate reports"
-      />
-
-      {/* Pending Reviews Alert */}
-      {pendingReviews > 0 && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-blue-800">
-              {pendingReviews} submission{pendingReviews !== 1 ? "s" : ""} waiting for your review
-            </p>
-            <p className="text-sm text-blue-600 mt-0.5">
-              Review department submissions before the deadline.
-            </p>
-          </div>
-          <Link href="/pm/reviews">
-            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
-              Review Now
-            </Button>
-          </Link>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatsCard title="Assigned Cycles" value={cycles.length} description="Active reporting cycles" icon={RefreshCw} />
-        <StatsCard title="Pending Reviews" value={pendingReviews} description="Submissions to review" icon={ClipboardCheck} />
-        <StatsCard title="Recent Submissions" value={recentSubmissions.length} description="Latest department submissions" icon={FileText} />
+    <div className="mx-auto max-w-6xl space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">PM Dashboard</h1>
+        <p className="mt-1.5 text-base text-slate-500">
+          Monitor your assigned cycles, review submissions, and generate reports.
+        </p>
       </div>
 
-      {/* Active Cycles */}
-      <div className="space-y-4">
-        <h2 className="font-semibold text-lg">Your Assigned Cycles</h2>
+      {/* Stats */}
+      <div className="grid gap-5 md:grid-cols-3">
+        <PMStatCard
+          title="Assigned Cycles"
+          value={cycles.length}
+          description="Active reporting cycles"
+          icon={RefreshCw}
+          accent="indigo"
+        />
+        <PMStatCard
+          title="Pending Reviews"
+          value={pendingReviews}
+          description="Submissions to review"
+          icon={ClipboardCheck}
+          accent="amber"
+          highlight
+          valueClassName="text-amber-500"
+        />
+        <PMStatCard
+          title="Recent Submissions"
+          value={recentSubmissions.length}
+          description="Latest department submissions"
+          icon={FileText}
+          accent="green"
+        />
+      </div>
+
+      {/* Assigned cycles */}
+      <div className="space-y-5">
+        <h2 className="text-xl font-bold text-slate-900">Your Assigned Cycles</h2>
+
         {cycles.length === 0 ? (
           <EmptyState
             icon={RefreshCw}
@@ -68,82 +68,64 @@ export default function PMDashboard() {
             description="The admin will assign you to a reporting cycle. Once assigned, you can configure and manage it here."
           />
         ) : (
-          <div className="grid gap-4">
+          <div className="space-y-5">
             {cycles.map((cycle) => {
               const submitted = cycle.submitted_count ?? 0
               const total = cycle.total_departments ?? 0
-              const pct = cycle.completion_rate ?? 0
-              const approved = Math.round(pct)
-              // Real counts from the proxy. Fall back to derivation only if older payloads
-              // are still cached without these fields.
+              const pct = Math.round(cycle.completion_rate ?? 0)
               const notStarted = cycle.not_started_count ?? Math.max(0, total - submitted)
               const inProgress = cycle.in_progress_count ?? Math.max(0, total - submitted - notStarted)
-              const isLow = pct < 30
-              const isMid = pct >= 30 && pct < 70
+              const complete = pct >= 100
 
               return (
-                <div key={cycle.id} className="rounded-xl border bg-card overflow-hidden hover:shadow-sm transition-shadow">
-                  {/* Card Header */}
-                  <div className="px-6 pt-5 pb-4 flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold">{cycle.cycle_name}</h3>
+                <div
+                  key={cycle.id}
+                  className="rounded-2xl border border-slate-100 bg-white shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <div className="p-6">
+                    {/* Header row */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-bold text-slate-900">{cycle.cycle_name}</h3>
+                        <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+                          <Clock className="h-4 w-4" />
+                          <span>Deadline: {formatDate(cycle.submission_deadline)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">
-                          Deadline: {formatDate(cycle.submission_deadline)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <Link href={`/pm/cycles/${cycle.id}`}>
-                        <Button size="sm">
-                          Manage <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                      <Link href={`/pm/cycles/${cycle.id}`} className="shrink-0">
+                        <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
+                          Manage <ArrowRight className="ml-1.5 h-4 w-4" />
                         </Button>
                       </Link>
                     </div>
+
+                    {/* Progress */}
+                    <div className="mt-5">
+                      <div className="mb-2 flex items-center justify-between text-sm">
+                        <span className="text-slate-600">
+                          {submitted} of {total} departments submitted
+                        </span>
+                        <span className={cn("font-semibold", complete ? "text-emerald-600" : "text-slate-900")}>
+                          {complete ? "100% complete" : `${pct}%`}
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            complete ? "bg-emerald-500" : "bg-indigo-500"
+                          )}
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="px-6 pb-4">
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-muted-foreground">
-                        {submitted} of {total} departments submitted
-                      </span>
-                      <span className={isLow ? "text-red-600 font-semibold" : isMid ? "text-amber-600 font-semibold" : "text-green-600 font-semibold"}>
-                        {approved}% complete
-                      </span>
-                    </div>
-                    <Progress
-                      value={pct}
-                      className={isLow ? "[&>div]:bg-red-500 h-2.5" : isMid ? "[&>div]:bg-amber-500 h-2.5" : "[&>div]:bg-green-500 h-2.5"}
-                    />
-                  </div>
-
-                  {/* Status Summary */}
-                  <div className="border-t bg-muted/30 px-6 py-3 grid grid-cols-3 gap-4">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Submitted</p>
-                        <p className="text-sm font-semibold">{submitted}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 text-blue-500" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">In Progress</p>
-                        <p className="text-sm font-semibold">{inProgress}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Not Started</p>
-                        <p className="text-sm font-semibold">{notStarted}</p>
-                      </div>
-                    </div>
+                  {/* Status footer */}
+                  <div className="grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100">
+                    <StatusCell icon={CheckCircle2} iconClass="text-emerald-500" label="Submitted" value={submitted} />
+                    <StatusCell icon={RefreshCw} iconClass="text-indigo-500" label="In Progress" value={inProgress} />
+                    <StatusCell icon={Clock} iconClass="text-slate-400" label="Not Started" value={notStarted} />
                   </div>
                 </div>
               )
@@ -151,34 +133,28 @@ export default function PMDashboard() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
 
-      {/* Recent Submissions */}
-      {recentSubmissions.length > 0 && (
-        <div className="rounded-xl border bg-card">
-          <div className="px-6 py-4 border-b flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-muted-foreground" />
-            <h2 className="font-semibold">Recent Submissions to Review</h2>
-          </div>
-          <div className="divide-y">
-            {recentSubmissions.map((sub) => (
-              <div key={sub.session_id} className="flex items-center justify-between px-6 py-4">
-                <div>
-                  <p className="font-medium">{sub.department_name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Submitted {formatDateTime(sub.submitted_at)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <StatusBadge status="submitted" variant="session" />
-                  <Link href={`/pm/sessions/${sub.session_id}`}>
-                    <Button variant="outline" size="sm">Review</Button>
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+function StatusCell({
+  icon: Icon,
+  iconClass,
+  label,
+  value,
+}: {
+  icon: typeof Clock
+  iconClass: string
+  label: string
+  value: number
+}) {
+  return (
+    <div className="px-6 py-4">
+      <div className="flex items-center gap-2 text-slate-500">
+        <Icon className={cn("h-4 w-4", iconClass)} />
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
     </div>
   )
 }
