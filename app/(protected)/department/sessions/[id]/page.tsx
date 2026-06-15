@@ -3,11 +3,16 @@
 import { use, useState, useEffect, useCallback, useRef } from "react"
 import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
+import {
+  languageMismatchWarning,
+  isLanguageAcceptable,
+} from "@/lib/lang"
+import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
+import { DocFileRow } from "@/components/ui/doc-file-row"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { PageSkeleton } from "@/components/ui/skeletons"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Progress } from "@/components/ui/progress"
-import { StatusBadge } from "@/components/ui/status-badge"
 import { EmptyState } from "@/components/ui/empty-state"
 import {
   Dialog,
@@ -22,7 +27,7 @@ import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
-  PanelLeftClose, List, Ban, Info, Save, Download, FileUp, X,
+  PanelLeftClose, List, Ban, Info, Save, Download, FileUp,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import Link from "next/link"
@@ -42,6 +47,26 @@ const isNAAnswer = (text: string | undefined) => !!text && text.startsWith("N/A"
 const NOT_FOUND_PREFIX = "information not found in uploaded documents"
 const isNotFoundAnswer = (text: string | undefined) =>
   !!text && text.trim().toLowerCase().startsWith(NOT_FOUND_PREFIX)
+
+// Centriton status pill — coloured dot + label, keyed by session status.
+const SESSION_PILL: Record<string, { label: string; dot: string; text: string; bg: string }> = {
+  assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
+  submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
+  approved:    { label: "Approved",      dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50" },
+  reopened:    { label: "Needs Changes", dot: "bg-red-500",     text: "text-red-700",     bg: "bg-red-50" },
+}
+
+function SessionStatusPill({ status }: { status: string }) {
+  const s = SESSION_PILL[status] ?? SESSION_PILL.not_started
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.bg, s.text)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+      {s.label}
+    </span>
+  )
+}
 
 // Pull the text out of an AI refine response — checks the common field names.
 function extractAiText(res: unknown): string | null {
@@ -105,7 +130,6 @@ export default function SessionWorkspacePage({
   // popup: upload each file, run AI answer-extraction, then refresh the session
   // so the drafted answers appear in the cards.
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -120,6 +144,14 @@ export default function SessionWorkspacePage({
     ? session?.answers?.find((a) => a.question_id === currentQ.question_id)?.answer
     : undefined
   const hasStoredAnswer = !!storedAnswer?.trim() && !isNotFoundAnswer(storedAnswer)
+
+  // Answer language must match the cycle's language (warn + block Save).
+  const cycleLang = session?.content_language ?? "english"
+  // Per-file language status for the supporting-docs upload dialog.
+  const docCheck = useDocLanguageCheck(cycleLang)
+  const currentAnswerText = currentQ ? answers[currentQ.question_id] || "" : ""
+  const currentAnswerLangWarning = languageMismatchWarning(currentAnswerText, cycleLang)
+  const currentAnswerLangOk = isLanguageAcceptable(currentAnswerText, cycleLang)
 
   // Count only answers tied to a CURRENT question — answers for regenerated/
   // removed questions stay in session.answers but must not inflate progress.
@@ -317,24 +349,22 @@ export default function SessionWorkspacePage({
       else invalid.push(f.name)
     }
     if (invalid.length) toast.error(`Only PDF, Word, and TXT files are supported: ${invalid.join(", ")}`)
-    setPendingFiles((prev) => [...prev, ...valid])
     e.target.value = ""
-  }
-
-  const removePendingFile = (idx: number) => {
-    setPendingFiles((prev) => prev.filter((_, i) => i !== idx))
+    // Each file is language-checked independently; a wrong-language file stays
+    // red and keeps the button disabled until removed.
+    docCheck.addFiles(valid)
   }
 
   const closeUploadDialog = () => {
     setUploadOpen(false)
-    setPendingFiles([])
+    docCheck.reset()
   }
 
   // Upload every file then run AI answer-extraction — identical to the dashboard
   // Start Session flow, but stays on this page and refreshes the answers in place.
   const handleUploadDocuments = async () => {
-    if (pendingFiles.length === 0) return
-    const files = [...pendingFiles]
+    const files = [...docCheck.files]
+    if (files.length === 0) return
 
     // Swap the dialog for the full-screen extraction loader.
     setUploadOpen(false)
@@ -352,7 +382,9 @@ export default function SessionWorkspacePage({
     } catch (err: unknown) {
       setUploading(false)
       setExtractionResult(null)
-      setPendingFiles(files)
+      // Restore the files (re-verifying language) and reopen the dialog so the
+      // user can adjust and retry; a wrong-language file re-flags itself red.
+      docCheck.setAll(files)
       setUploadOpen(true)
       toast.error(
         (err as { message?: string })?.message ||
@@ -380,7 +412,7 @@ export default function SessionWorkspacePage({
       )
       setTimeout(() => { setUploading(false); refetch() }, 1400)
     } finally {
-      setPendingFiles([])
+      docCheck.reset()
     }
   }
 
@@ -408,36 +440,42 @@ export default function SessionWorkspacePage({
   // ── OVERVIEW mode ─────────────────────────────────────────────────────────────
   if (viewMode === "overview") {
     return (
-      <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-background">
+      <div className="-m-8 flex h-[calc(100vh-72px)] flex-col bg-[#f5f6fc]">
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b bg-card shrink-0">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewMode("focused")}>
+        <div className="flex shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-8 py-5">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 shrink-0 rounded-xl border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            onClick={() => setViewMode("focused")}
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-semibold text-sm truncate">{session.department_name}</h1>
-          </div>
-          <span className="text-xs text-muted-foreground shrink-0">{answeredCount}/{questions.length} answered</span>
-          <Progress value={progress} className="w-16 h-1.5 shrink-0" />
-          <span className="text-xs text-muted-foreground tabular-nums shrink-0">{progress}%</span>
+          <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-slate-900">{session.department_name}</h1>
+          <span className="flex shrink-0 items-center gap-2 text-sm text-slate-500">
+            {answeredCount}/{questions.length} answered
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+          </span>
+          <span className="shrink-0 text-sm font-semibold text-slate-900 tabular-nums">{progress}%</span>
           {questions.length > 0 && (
             <Button
-              variant="outline" size="sm" className="h-8 text-xs shrink-0"
+              variant="outline"
+              className="h-10 shrink-0 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               onClick={handleDownloadQuestions}
               disabled={downloading}
               title="Download the question list as a PDF"
             >
               {downloading
-                ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Download className="mr-2 h-4 w-4" />}
               Download Questions
             </Button>
           )}
         </div>
 
         {/* Grid */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex-1 overflow-y-auto px-8 py-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {questions.map((q: Question, idx: number) => {
               const isNa = naQuestions.has(q.question_id)
               // "Answered" means a real answer — N/A is shown distinctly.
@@ -446,43 +484,36 @@ export default function SessionWorkspacePage({
                 <button
                   key={q.question_id}
                   onClick={() => { switchToQuestion(idx); setViewMode("focused") }}
-                  className={cn(
-                    "rounded-xl border p-4 text-left transition-all hover:shadow-md",
-                    answered
-                      ? "border-green-200 bg-green-50"
-                      : isNa
-                        ? "border-amber-200 bg-amber-50"
-                        : "border-border bg-card hover:border-primary/40"
-                  )}
+                  className="rounded-2xl border border-slate-100 bg-white p-5 text-left shadow-sm transition-all hover:shadow-md"
                 >
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="mb-3 flex items-center gap-2">
                     <div className={cn(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold border",
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
                       answered
-                        ? "bg-green-500 border-green-500 text-white"
+                        ? "border-emerald-500 bg-emerald-500 text-white"
                         : isNa
-                          ? "bg-amber-500 border-amber-500 text-white"
-                          : "border-muted-foreground text-muted-foreground"
+                          ? "border-amber-500 bg-amber-500 text-white"
+                          : "border-slate-300 text-slate-400"
                     )}>
                       {answered
-                        ? <CheckCircle2 className="h-3.5 w-3.5" />
+                        ? <CheckCircle2 className="h-4 w-4" />
                         : isNa
-                          ? <Ban className="h-3.5 w-3.5" />
+                          ? <Ban className="h-4 w-4" />
                           : idx + 1}
                     </div>
                     <span className={cn(
-                      "text-xs font-medium",
-                      answered ? "text-green-700" : isNa ? "text-amber-700" : "text-muted-foreground"
+                      "text-xs font-semibold",
+                      answered ? "text-emerald-600" : isNa ? "text-amber-600" : "text-slate-400"
                     )}>
                       {answered ? "Answered" : isNa ? "Not applicable" : "Not answered"}
                     </span>
                   </div>
-                  <p className="text-sm leading-relaxed line-clamp-3">{q.question}</p>
+                  <p className="line-clamp-3 text-sm leading-relaxed text-slate-700">{q.question}</p>
                   {answered && (
-                    <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{answers[q.question_id]}</p>
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-400">{answers[q.question_id]}</p>
                   )}
-                  <div className="flex items-center gap-1 mt-3 text-xs text-primary font-medium">
-                    {answered || isNa ? "Edit" : "Answer"} <ChevronRight className="h-3 w-3" />
+                  <div className="mt-4 flex items-center gap-1 text-sm font-semibold text-indigo-600">
+                    {answered || isNa ? "Edit" : "Answer"} <ChevronRight className="h-4 w-4" />
                   </div>
                 </button>
               )
@@ -495,127 +526,136 @@ export default function SessionWorkspacePage({
 
   // ── FOCUSED workspace ─────────────────────────────────────────────────────────
   return (
-    <div className="-mx-6 -mt-6 -mb-6 flex flex-col h-[calc(100vh-4rem)] bg-background">
+    <div className="-m-8 flex h-[calc(100vh-72px)] flex-col bg-[#f5f6fc]">
 
       {/* Status banners */}
       {(isReopened || isApproved) && (
         <div className={cn(
-          "flex items-start gap-3 px-5 py-3 border-b shrink-0",
-          isApproved ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"
+          "flex shrink-0 items-start gap-3 border-b px-6 py-3",
+          isApproved ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
         )}>
           {isApproved
-            ? <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
-            : <RotateCcw className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />}
+            ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            : <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
           <div>
-            <p className={cn("text-sm font-semibold", isApproved ? "text-green-800" : "text-amber-800")}>
+            <p className={cn("text-sm font-semibold", isApproved ? "text-emerald-800" : "text-amber-800")}>
               {isApproved ? "Report Approved — this session is read-only" : "Revision Requested"}
             </p>
             {isReopened && session.review_notes && (
-              <p className="text-xs text-amber-700 mt-0.5">{session.review_notes}</p>
+              <p className="mt-0.5 text-xs text-amber-700">{session.review_notes}</p>
             )}
           </div>
         </div>
       )}
 
       {/* ── Top bar ───────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b bg-card shrink-0">
-        <Link href="/department">
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        {/* Toggle main navigation sidebar — hides it completely for max horizontal space */}
-        <Button
-          variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-          onClick={toggleMainNav}
-          title={navHidden ? "Show navigation" : "Hide navigation for more space"}
-        >
-          {navHidden
-            ? <PanelLeftOpen className="h-4 w-4" />
-            : <PanelLeftClose className="h-4 w-4" />}
-        </Button>
-        {/* Toggle question list panel */}
-        <Button
-          variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-          onClick={() => setSidebarOpen((v) => !v)}
-          title={sidebarOpen ? "Hide question list" : "Show question list"}
-        >
-          <List className="h-4 w-4" />
-        </Button>
-
-        <div className="flex-1 min-w-0">
-          <h1 className="font-semibold text-sm truncate leading-tight">{session.department_name}</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={session.status} variant="session" />
-            <span className="text-xs text-muted-foreground">{answeredCount}/{questions.length} answered</span>
-          </div>
-        </div>
-
-        <div className="hidden sm:flex items-center gap-2 shrink-0">
-          <Progress value={progress} className="w-20 h-1.5" />
-          <span className="text-xs text-muted-foreground tabular-nums">{progress}%</span>
-        </div>
-
-        {canEdit && (
-          <Button
-            variant="outline" size="sm" className="h-8 text-xs shrink-0"
-            onClick={() => { setPendingFiles([]); setUploadOpen(true) }}
-            title="Upload supporting documents and let AI draft answers"
-          >
-            <FileUp className="h-3.5 w-3.5 mr-1.5" />
-            Upload Documents
-          </Button>
-        )}
-
-        {questions.length > 0 && (
-          <Button
-            variant="outline" size="sm" className="h-8 text-xs shrink-0"
-            onClick={handleDownloadQuestions}
-            disabled={downloading}
-            title="Download the question list as a PDF"
-          >
-            {downloading
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <Download className="h-3.5 w-3.5 mr-1.5" />}
-            Download Questions
-          </Button>
-        )}
-
-        <Button
-          variant="outline" size="sm" className="h-8 text-xs shrink-0"
-          onClick={() => setViewMode("overview")}
-        >
-          <LayoutGrid className="h-3.5 w-3.5 mr-1.5" /> Overview
-        </Button>
-
-        {session.ai_generated_draft ? (
-          <Link href={`/department/sessions/${id}/draft`}>
-            <Button size="sm" variant="outline" className="h-8 shrink-0">
-              <FileText className="mr-1.5 h-3.5 w-3.5" /> Draft Content
+      <div className="shrink-0 border-b border-slate-200 bg-white">
+        {/* Row 1 — title + status */}
+        <div className="flex items-center gap-2 px-6 py-3">
+          <Link href="/department">
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-lg text-slate-500 hover:bg-slate-100">
+              <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
-        ) : (
+          {/* Toggle main navigation sidebar — hides it completely for max horizontal space */}
           <Button
-            size="sm" className="h-8 shrink-0"
-            onClick={handleGenerateDraft}
-            disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
-            title={
-              !meetsAnswerMinimum
-                ? "Answer at least one question before generating draft content"
-                : undefined
-            }
+            variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-lg text-slate-500 hover:bg-slate-100"
+            onClick={toggleMainNav}
+            title={navHidden ? "Show navigation" : "Hide navigation for more space"}
           >
-            {generateDraft.isPending
-              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-            Generate Draft Content
+            {navHidden
+              ? <PanelLeftOpen className="h-4 w-4" />
+              : <PanelLeftClose className="h-4 w-4" />}
           </Button>
-        )}
+          {/* Toggle question list panel */}
+          <Button
+            variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-lg text-slate-500 hover:bg-slate-100"
+            onClick={() => setSidebarOpen((v) => !v)}
+            title={sidebarOpen ? "Hide question list" : "Show question list"}
+          >
+            <List className="h-4 w-4" />
+          </Button>
+
+          <h1 className="ml-1 truncate text-lg font-bold text-slate-900">{session.department_name}</h1>
+          <SessionStatusPill status={session.status} />
+          <span className="shrink-0 text-sm text-slate-500">{answeredCount}/{questions.length} answered</span>
+        </div>
+
+        {/* Row 2 — progress + actions */}
+        <div className="flex items-center gap-3 border-t border-slate-100 px-6 py-2.5">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <span className="text-xs font-medium text-slate-500 tabular-nums">{progress}%</span>
+          </div>
+
+          <div className="flex-1" />
+
+          {canEdit && (
+            <Button
+              variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              onClick={() => { docCheck.reset(); setUploadOpen(true) }}
+              title="Upload supporting documents and let AI draft answers"
+            >
+              <FileUp className="mr-2 h-4 w-4" />
+              Upload Documents
+            </Button>
+          )}
+
+          {questions.length > 0 && (
+            <Button
+              variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              onClick={handleDownloadQuestions}
+              disabled={downloading}
+              title="Download the question list as a PDF"
+            >
+              {downloading
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Download className="mr-2 h-4 w-4" />}
+              Download Questions
+            </Button>
+          )}
+
+          <Button
+            variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            onClick={() => setViewMode("overview")}
+          >
+            <LayoutGrid className="mr-2 h-4 w-4" /> Overview
+          </Button>
+
+          {session.ai_generated_draft ? (
+            <Link href={`/department/sessions/${id}/draft`}>
+              <Button variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+                <FileText className="mr-2 h-4 w-4" /> Draft Content
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              className="h-9 shrink-0 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={handleGenerateDraft}
+              disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
+              title={
+                !meetsAnswerMinimum
+                  ? "Answer at least one question before generating draft content"
+                  : undefined
+              }
+            >
+              {generateDraft.isPending
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Sparkles className="mr-2 h-4 w-4" />}
+              Generate Draft Content
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Body ──────────────────────────────────────────────────────────────── */}
       {questions.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-1 items-center justify-center">
           <EmptyState
             icon={FileText}
             title="No questions yet"
@@ -623,16 +663,16 @@ export default function SessionWorkspacePage({
           />
         </div>
       ) : (
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1">
 
           {/* ── Question sidebar ── */}
           {sidebarOpen && (
-            <div className="w-56 xl:w-64 shrink-0 flex flex-col border-r bg-card overflow-hidden">
-              <div className="px-3 py-2.5 border-b bg-muted/30 flex items-center justify-between shrink-0">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Questions</p>
-                <span className="text-xs text-muted-foreground">{answeredCount}/{questions.length}</span>
+            <div className="flex w-56 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white xl:w-64">
+              <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Questions</p>
+                <span className="text-xs text-slate-400">{answeredCount}/{questions.length}</span>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto p-2">
                 {questions.map((q: Question, idx: number) => {
                   const isNa = naQuestions.has(q.question_id)
                   // "Answered" here means a real answer — N/A is shown distinctly.
@@ -643,21 +683,19 @@ export default function SessionWorkspacePage({
                       key={q.question_id}
                       onClick={() => switchToQuestion(idx)}
                       className={cn(
-                        "w-full flex items-start gap-2.5 px-3 py-3 text-left transition-colors border-b border-border/30",
-                        active
-                          ? "bg-primary/10 border-l-2 border-l-primary pl-2.5"
-                          : "hover:bg-accent"
+                        "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors",
+                        active ? "bg-indigo-50" : "hover:bg-slate-50"
                       )}
                     >
                       <div className={cn(
                         "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium",
                         answered
-                          ? "bg-green-500 border-green-500 text-white"
+                          ? "border-emerald-500 bg-emerald-500 text-white"
                           : isNa
-                            ? "bg-amber-500 border-amber-500 text-white"
+                            ? "border-amber-500 bg-amber-500 text-white"
                             : active
-                              ? "border-primary text-primary"
-                              : "border-muted-foreground/50 text-muted-foreground"
+                              ? "border-indigo-500 text-indigo-600"
+                              : "border-slate-300 text-slate-400"
                       )}>
                         {answered
                           ? <CheckCircle2 className="h-3 w-3" />
@@ -665,7 +703,7 @@ export default function SessionWorkspacePage({
                             ? <Ban className="h-3 w-3" />
                             : idx + 1}
                       </div>
-                      <p className={cn("text-xs leading-relaxed line-clamp-2", active && "font-medium text-foreground")}>
+                      <p className={cn("line-clamp-2 text-xs leading-relaxed text-slate-600", active && "font-semibold text-slate-900")}>
                         {q.question}
                       </p>
                     </button>
@@ -677,36 +715,34 @@ export default function SessionWorkspacePage({
 
           {/* ── Main workspace ──────────────────────────────────────────────── */}
           {currentQ && (
-            <div className="flex-1 flex flex-col min-h-0 min-w-0">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
 
-              {/* Question header */}
-              <div className="px-6 py-4 border-b bg-card shrink-0">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                        Q{currentIndex + 1} of {questions.length}
+              {/* Scrollable question + answer area */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+                {/* Question label + nav */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-slate-400">
+                      Q{currentIndex + 1} of {questions.length}
+                    </span>
+                    {saved[currentQ.question_id] && (
+                      <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
+                        <CheckCircle2 className="h-4 w-4" /> Saved
                       </span>
-                      {saved[currentQ.question_id] && (
-                        <span className="text-xs text-green-600 flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> Saved
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-base font-medium leading-relaxed text-foreground">
-                      {currentQ.question}
-                    </p>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0 mt-1">
+                  <div className="flex items-center gap-1.5">
                     <Button
-                      variant="ghost" size="icon" className="h-7 w-7"
+                      variant="outline" size="icon"
+                      className="h-9 w-9 rounded-lg border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                       onClick={() => switchToQuestion(Math.max(0, currentIndex - 1))}
                       disabled={currentIndex === 0}
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
                     <Button
-                      variant="ghost" size="icon" className="h-7 w-7"
+                      variant="outline" size="icon"
+                      className="h-9 w-9 rounded-lg border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                       onClick={() => switchToQuestion(Math.min(questions.length - 1, currentIndex + 1))}
                       disabled={currentIndex === questions.length - 1}
                     >
@@ -714,120 +750,137 @@ export default function SessionWorkspacePage({
                     </Button>
                   </div>
                 </div>
-              </div>
 
-              {/* ── Answer card — document answer, the user's saved answer, or
-                  an AI refine result. No automatic AI call. ── */}
-              <div className="flex-1 overflow-y-auto min-h-0 bg-background px-6 py-5">
-                {aiLoading ? (
-                  <div className="flex flex-col items-center justify-center h-full text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3 border border-primary/20">
-                      <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                {/* Question */}
+                <h2 className="mt-4 text-2xl font-bold leading-snug text-slate-900">
+                  {currentQ.question}
+                </h2>
+
+                {/* ── Answer card — document answer, the user's saved answer, or
+                    an AI refine result. No automatic AI call. ── */}
+                <div className="mt-6">
+                  {aiLoading ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50">
+                        <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-600">Asking the AI…</p>
                     </div>
-                    <p className="text-sm font-medium">Asking the AI…</p>
-                  </div>
-                ) : aiResult ? (
-                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
-                        <Wand2 className="h-4 w-4 text-primary" />
-                      </div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        AI response
-                      </p>
-                    </div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
-                      {aiResult}
-                    </p>
-                    {!isSubmitted && (
-                      <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-border/60">
-                        <button
-                          onClick={() => applyAsAnswer(aiResult)}
-                          className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
-                        >
-                          <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
-                        </button>
-                        <button
-                          onClick={() => { navigator.clipboard.writeText(aiResult); toast.success("Copied") }}
-                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="h-3 w-3" /> Copy
-                        </button>
-                        <button
-                          onClick={() => setAiResult(null)}
-                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground ml-auto"
-                        >
-                          <RotateCcw className="h-3 w-3" /> Discard
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : hasStoredAnswer ? (
-                  <div className="rounded-xl border bg-muted/40 px-4 py-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
-                        <Wand2 className="h-4 w-4 text-primary" />
-                      </div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Answer from your documents
-                      </p>
-                    </div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
-                      {storedAnswer}
-                    </p>
-                    {!isSubmitted && (
-                      <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-border/60">
-                        <button
-                          onClick={() => applyAsAnswer(storedAnswer ?? "")}
-                          className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
-                        >
-                          <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
-                        </button>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(storedAnswer ?? "")
-                            toast.success("Copied")
-                          }}
-                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="h-3 w-3" /> Copy
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
-                    <div className="flex items-start gap-3">
-                      <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-amber-900">
-                          Information not found in this document
-                        </p>
-                        <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                          The AI couldn&apos;t find an answer to this question in your
-                          uploaded documents. Please answer it manually below.
+                  ) : aiResult ? (
+                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 px-5 py-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white ring-1 ring-indigo-100">
+                          <Wand2 className="h-4 w-4 text-indigo-600" />
+                        </div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                          AI response
                         </p>
                       </div>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                        {aiResult}
+                      </p>
+                      {!isSubmitted && (
+                        <div className="mt-3 flex items-center gap-4 border-t border-indigo-100 pt-2.5">
+                          <button
+                            onClick={() => applyAsAnswer(aiResult)}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:underline"
+                          >
+                            <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
+                          </button>
+                          <button
+                            onClick={() => { navigator.clipboard.writeText(aiResult); toast.success("Copied") }}
+                            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            <Copy className="h-3 w-3" /> Copy
+                          </button>
+                          <button
+                            onClick={() => setAiResult(null)}
+                            className="ml-auto flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            <RotateCcw className="h-3 w-3" /> Discard
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  ) : saved[currentQ.question_id] && hasStoredAnswer ? (
+                    <div className="rounded-2xl border border-slate-100 bg-white px-5 py-4 shadow-sm">
+                      <div className="mb-2 flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+                        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                          Saved answer
+                        </p>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                        {storedAnswer}
+                      </p>
+                    </div>
+                  ) : hasStoredAnswer ? (
+                    <div className="rounded-2xl border border-slate-100 bg-white px-5 py-4 shadow-sm">
+                      <div className="mb-2 flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50">
+                          <Wand2 className="h-4 w-4 text-indigo-600" />
+                        </div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Answer from your documents
+                        </p>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                        {storedAnswer}
+                      </p>
+                      {!isSubmitted && (
+                        <div className="mt-3 flex items-center gap-4 border-t border-slate-100 pt-2.5">
+                          <button
+                            onClick={() => applyAsAnswer(storedAnswer ?? "")}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:underline"
+                          >
+                            <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
+                          </button>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(storedAnswer ?? "")
+                              toast.success("Copied")
+                            }}
+                            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            <Copy className="h-3 w-3" /> Copy
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                      <div className="flex items-start gap-3">
+                        <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-amber-900">
+                            Information not found in this document
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                            The AI couldn&apos;t find an answer to this question in your
+                            uploaded documents. Please answer it manually below.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* ── Ask AI to refine, expand, or rephrase ── */}
               {!isSubmitted && (
-                <div className="shrink-0 border-t bg-card px-4 py-2 flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-6 py-3">
                   <input
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Ask AI to refine, expand, or rephrase… (Enter)"
-                    className="flex-1 h-9 px-3 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:opacity-50"
                     disabled={!canEdit || aiLoading}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && chatInput.trim()) sendRefine(chatInput)
                     }}
                   />
                   <Button
-                    size="icon" className="h-9 w-9 shrink-0"
+                    size="icon" className="h-11 w-11 shrink-0 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
                     onClick={() => sendRefine(chatInput)}
                     disabled={!canEdit || !chatInput.trim() || aiLoading}
                   >
@@ -840,18 +893,18 @@ export default function SessionWorkspacePage({
 
               {/* ── Answer editor ── */}
               <div className={cn(
-                "shrink-0 flex flex-col px-4 pt-2.5 pb-3 border-t transition-colors",
-                currentIsNA && "bg-muted/40"
+                "flex shrink-0 flex-col border-t border-slate-200 bg-white px-6 pb-4 pt-3 transition-colors",
+                currentIsNA && "bg-slate-50"
               )}>
-                <div className="flex items-center gap-2 mb-1.5 shrink-0">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Answer</span>
-                  {saved[currentQ.question_id] && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                <div className="mb-2 flex shrink-0 items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Answer</span>
+                  {saved[currentQ.question_id] && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
                   <div className="flex-1" />
                   {!isSubmitted && !currentIsNA && (
                     <>
                       <Button
                         size="sm" variant="outline"
-                        className="h-7 px-2.5 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400"
+                        className="h-9 rounded-lg border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => markAsNA(currentQ.question_id)}
                         disabled={!canEdit || submitAnswers.isPending || naLimitReached}
                         title={
@@ -860,93 +913,99 @@ export default function SessionWorkspacePage({
                             : undefined
                         }
                       >
-                        <Ban className="h-3.5 w-3.5 mr-1" /> Reject
+                        <Ban className="mr-1.5 h-3.5 w-3.5" /> Reject
                       </Button>
                       <Button
                         size="sm"
-                        className="h-7 px-3 text-xs font-medium bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+                        className="h-9 rounded-lg bg-indigo-600 px-4 text-xs font-medium text-white hover:bg-indigo-700"
                         onClick={handleSaveAnswer}
-                        disabled={!canEdit || submitAnswers.isPending}
+                        disabled={!canEdit || submitAnswers.isPending || !currentAnswerLangOk}
+                        title={!currentAnswerLangOk ? currentAnswerLangWarning ?? undefined : undefined}
                       >
                         {submitAnswers.isPending ? (
                           <>
-                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Saving…
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…
                           </>
                         ) : (
                           <>
-                            <Save className="h-3.5 w-3.5 mr-1" /> Save Answer
+                            <Save className="mr-1.5 h-3.5 w-3.5" /> Save Answer
                           </>
                         )}
                       </Button>
                     </>
                   )}
-                  <div className="flex items-center gap-0.5 ml-1 border-l pl-2">
+                  <div className="ml-1 flex items-center gap-0.5 border-l border-slate-200 pl-2">
                     <Button
-                      variant="ghost" size="icon" className="h-6 w-6"
+                      variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100"
                       onClick={() => switchToQuestion(Math.max(0, currentIndex - 1))}
                       disabled={currentIndex === 0}
                     >
-                      <ChevronLeft className="h-3.5 w-3.5" />
+                      <ChevronLeft className="h-4 w-4" />
                     </Button>
-                    <span className="text-xs text-muted-foreground tabular-nums w-12 text-center">
+                    <span className="w-12 text-center text-xs tabular-nums text-slate-500">
                       {currentIndex + 1}/{questions.length}
                     </span>
                     <Button
-                      variant="ghost" size="icon" className="h-6 w-6"
+                      variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:bg-slate-100"
                       onClick={() => switchToQuestion(Math.min(questions.length - 1, currentIndex + 1))}
                       disabled={currentIndex === questions.length - 1}
                     >
-                      <ChevronRight className="h-3.5 w-3.5" />
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
                 {currentIsNA ? (
-                  <div className="flex items-start gap-3 rounded-md border bg-muted/30 px-4 py-3 shrink-0">
-                    <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  <div className="flex shrink-0 items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
                         <Ban className="h-3.5 w-3.5" /> Marked as not applicable
                       </p>
-                      <p className="text-xs italic text-muted-foreground/80 mt-0.5">
+                      <p className="mt-0.5 text-xs italic text-slate-400">
                         &ldquo;This question does not apply to our department.&rdquo;
                       </p>
                     </div>
                     {!isSubmitted && (
                       <Button
-                        size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                        size="sm" variant="outline" className="h-8 shrink-0 border-slate-200 bg-white text-xs"
                         onClick={() => undoNA(currentQ.question_id)}
                         disabled={!canEdit || submitAnswers.isPending}
                       >
-                        <RotateCcw className="h-3 w-3 mr-1" /> Undo
+                        <RotateCcw className="mr-1 h-3 w-3" /> Undo
                       </Button>
                     )}
                   </div>
                 ) : (
-                  <Textarea
-                    value={answers[currentQ.question_id] || ""}
-                    onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
-                    placeholder="Type your answer here…"
-                    rows={4}
-                    className="w-full resize-y text-sm leading-relaxed min-h-[96px]"
-                    disabled={!canEdit}
-                  />
+                  <div className="space-y-1.5">
+                    <Textarea
+                      value={answers[currentQ.question_id] || ""}
+                      onChange={(e) => handleAnswerChange(currentQ.question_id, e.target.value)}
+                      placeholder="Type your answer here…"
+                      rows={4}
+                      className="min-h-[96px] w-full resize-y rounded-xl border-slate-200 text-sm leading-relaxed"
+                      disabled={!canEdit}
+                    />
+                    {currentAnswerLangWarning && (
+                      <p className="text-xs text-amber-600">{currentAnswerLangWarning}</p>
+                    )}
+                  </div>
                 )}
               </div>
 
               {/* Submit CTA — appears on the last question once every
                   question is answered or marked N/A */}
               {isLastQuestion && allComplete && !isSubmitted && (
-                <div className="px-4 pb-3 pt-0 shrink-0">
-                  <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-                    <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-green-800">All questions complete</p>
-                      <p className="text-xs text-green-700">
+                <div className="shrink-0 bg-white px-6 pb-4 pt-0">
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-emerald-800">All questions complete</p>
+                      <p className="text-xs text-emerald-700">
                         Every question is answered or marked N/A — review your draft and submit.
                       </p>
                     </div>
                     <Button
-                      className="shrink-0 bg-green-600 text-white shadow-sm hover:bg-green-700"
+                      className="shrink-0 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
                       onClick={handleProceedToSubmit}
                       disabled={!canEdit || generateDraft.isPending}
                     >
@@ -967,10 +1026,10 @@ export default function SessionWorkspacePage({
       {/* ── Upload supporting documents — same upload + AI extraction as the
           dashboard Start Session popup ── */}
       <Dialog open={uploadOpen} onOpenChange={(o) => { if (!o) closeUploadDialog() }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg rounded-2xl border-slate-200">
           <DialogHeader>
-            <DialogTitle>Upload Supporting Documents</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-xl font-bold text-slate-900">Upload Supporting Documents</DialogTitle>
+            <DialogDescription className="text-slate-500">
               Upload supporting documents for this report (financial reports, project
               summaries, etc.). Our AI will read them and draft an answer for every question —
               you can review and refine each one here.
@@ -978,6 +1037,7 @@ export default function SessionWorkspacePage({
           </DialogHeader>
 
           <div className="space-y-3">
+            <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
               type="file"
@@ -987,43 +1047,34 @@ export default function SessionWorkspacePage({
               onChange={handlePickFiles}
             />
 
-            {pendingFiles.length === 0 ? (
+            {docCheck.docs.length === 0 ? (
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-lg border-2 border-dashed border-muted-foreground/30 p-5 text-center hover:border-primary/50 hover:bg-accent transition-colors"
+                className="w-full rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-8 text-center transition-colors hover:border-indigo-300 hover:bg-indigo-50/40"
               >
-                <FileUp className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
-                <p className="text-sm font-medium">Click to attach documents</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, DOC, TXT</p>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
+                  <FileUp className="h-5 w-5 text-slate-400" />
+                </div>
+                <p className="text-sm font-semibold text-slate-900">Click to attach documents</p>
+                <p className="mt-1 text-xs text-slate-500">PDF, DOCX, DOC, TXT</p>
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="rounded-lg border divide-y">
-                  {pendingFiles.map((f, i) => (
-                    <div key={`${f.name}-${i}`} className="flex items-center gap-3 p-2.5">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{f.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {(f.size / 1024).toFixed(1)} KB
-                        </p>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => removePendingFile(i)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+                {docCheck.docs.map((d, i) => (
+                  <DocFileRow
+                    key={`${d.file.name}-${i}`}
+                    name={d.file.name}
+                    sizeKB={d.file.size / 1024}
+                    lang={d.lang}
+                    onRemove={() => docCheck.removeAt(i)}
+                  />
+                ))}
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="border-slate-200 bg-white"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <FileUp className="mr-2 h-3.5 w-3.5" />
@@ -1034,10 +1085,14 @@ export default function SessionWorkspacePage({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={closeUploadDialog}>
+            <Button variant="outline" className="border-slate-200 bg-white" onClick={closeUploadDialog}>
               Cancel
             </Button>
-            <Button onClick={handleUploadDocuments} disabled={pendingFiles.length === 0}>
+            <Button
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={handleUploadDocuments}
+              disabled={docCheck.docs.length === 0 || docCheck.blocked}
+            >
               Extract Answers
               <Sparkles className="ml-2 h-4 w-4" />
             </Button>

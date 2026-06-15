@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -21,8 +22,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { COMPANY_PROFILES, SECTORS } from "@/lib/constants"
-import { ArrowLeft, Info, UserCog, CalendarDays, FileText, Building2 } from "lucide-react"
+import { ArrowLeft, Info, UserCog, CalendarDays, FileText, Building2, Languages } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
 
 const schema = z.object({
   cycle_name: z.string().min(3, "Required — e.g. FY2025 Annual Report"),
@@ -69,8 +71,16 @@ export default function NewCyclePage() {
   const selectedPM = watch("project_manager_id")
   const pmUser = usersData?.users.find((u) => u.user_id === selectedPM)
 
+  // Content language toggle — sent with the create-cycle payload (stored on the
+  // cycle as `content_language`). It lives in local state rather than the form
+  // schema since it's a simple two-way switch.
+  const [contentLanguage, setContentLanguage] = useState<"english" | "arabic">("english")
+
   const onSubmit = async (data: Form) => {
-    const result = await createMutation.mutateAsync(data)
+    const result = await createMutation.mutateAsync({
+      ...data,
+      content_language: contentLanguage,
+    })
     // Backend may return { id } or { cycle_id } depending on the endpoint version
     const newId = result?.cycle_id || result?.id
     try {
@@ -131,6 +141,40 @@ export default function NewCyclePage() {
                 placeholder={String(currentYear)}
               />
               {errors.fiscal_year && <p className="text-xs text-destructive">{errors.fiscal_year.message}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Languages className="h-3.5 w-3.5 text-muted-foreground" />
+                Content Language
+              </Label>
+              <div className="inline-flex rounded-lg border bg-muted p-1">
+                <button
+                  type="button"
+                  onClick={() => setContentLanguage("english")}
+                  aria-pressed={contentLanguage === "english"}
+                  className={cn(
+                    "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
+                    contentLanguage === "english"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContentLanguage("arabic")}
+                  aria-pressed={contentLanguage === "arabic"}
+                  className={cn(
+                    "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
+                    contentLanguage === "arabic"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  العربية
+                </button>
+              </div>
             </div>
           </div>
         </div>

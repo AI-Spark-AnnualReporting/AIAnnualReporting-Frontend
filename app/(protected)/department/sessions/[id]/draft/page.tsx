@@ -109,19 +109,19 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
       ? "Resubmitted — your revised report is back with the PM for review."
       : "Your report has been submitted for PM review. You will be notified when it's approved."
     return (
-      <div className="max-w-lg mx-auto text-center space-y-6 py-16">
+      <div className="mx-auto max-w-lg space-y-6 py-16 text-center">
         <div className={cn(
-          "flex h-16 w-16 items-center justify-center rounded-full mx-auto",
-          isApproved ? "bg-green-100" : "bg-blue-100"
+          "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
+          isApproved ? "bg-emerald-100" : "bg-indigo-100"
         )}>
-          <CheckCircle2 className={cn("h-8 w-8", isApproved ? "text-green-600" : "text-blue-600")} />
+          <CheckCircle2 className={cn("h-8 w-8", isApproved ? "text-emerald-600" : "text-indigo-600")} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold">{heading}</h1>
-          <p className="mt-2 text-muted-foreground">{message}</p>
+          <h1 className="text-2xl font-bold text-slate-900">{heading}</h1>
+          <p className="mt-2 text-slate-500">{message}</p>
         </div>
         <Link href="/department">
-          <Button>Back to Dashboard</Button>
+          <Button className="bg-indigo-600 text-white hover:bg-indigo-700">Back to Dashboard</Button>
         </Link>
       </div>
     )
@@ -129,14 +129,14 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
 
   if (!serverDraft && !generateDraft.isPending) {
     return (
-      <div className="max-w-lg mx-auto text-center space-y-6 py-16">
+      <div className="mx-auto max-w-lg space-y-6 py-16 text-center">
         <EmptyState
           icon={FileText}
           title="No draft yet"
           description="Go back to the session workspace and answer questions first, then generate your draft."
           action={
             <Link href={`/department/sessions/${id}`}>
-              <Button>
+              <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Back to Workspace
               </Button>
             </Link>
@@ -147,20 +147,20 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   }
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="mx-auto max-w-6xl space-y-6">
       {/* REOPENED banner */}
       {isReopened && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <RotateCcw className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-          <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-amber-800">Revision Requested</p>
-            <p className="text-xs text-amber-700 mt-0.5">
+            <p className="mt-0.5 text-xs text-amber-700">
               Update your draft based on PM feedback and resubmit when ready.
             </p>
             {session.review_notes && (
               <div className="mt-2 border-t border-amber-200 pt-2">
                 <p className="text-xs font-semibold text-amber-900">PM Notes:</p>
-                <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">{session.review_notes}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-amber-800">{session.review_notes}</p>
               </div>
             )}
           </div>
@@ -168,63 +168,65 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link href={`/department/sessions/${id}`}>
-            <Button variant="ghost" size="icon">
+            <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
           <div>
-            <h1 className="font-semibold">Draft Report — {session.department_name}</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Draft Report — {session.department_name}
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-500">
               Review, edit, and adjust tone before final submission
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           <Button
             variant="outline"
-            size="sm"
+            className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             onClick={handleRegenerateDraft}
             disabled={generateDraft.isPending}
           >
             {generateDraft.isPending ? (
-              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              <RefreshCw className="mr-2 h-4 w-4" />
             )}
             Regenerate
           </Button>
           {canFinalize && (
             <Button
-              size="sm"
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
               onClick={() => setConfirmSubmit(true)}
               disabled={!effectiveDraft}
             >
-              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+              <CheckCircle2 className="mr-2 h-4 w-4" />
               {isReopened ? "Resubmit" : "Finalize & Submit"}
             </Button>
           )}
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         {/* Draft editor / preview */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Draft Content</p>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
+        <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <p className="text-base font-bold text-slate-900">Draft Content</p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">
                 {effectiveDraft.split(/\s+/).filter(Boolean).length} words
               </span>
               {/* Preview / Edit toggle */}
-              <div className="flex items-center border rounded-md overflow-hidden">
+              <div className="flex items-center overflow-hidden rounded-lg border border-slate-200">
                 <button
                   onClick={() => setPreviewMode(true)}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
-                    previewMode ? "bg-primary text-primary-foreground" : "hover:bg-accent text-muted-foreground"
+                    previewMode ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50"
                   )}
                 >
                   <Eye className="h-3 w-3" /> Preview
@@ -232,8 +234,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                 <button
                   onClick={() => setPreviewMode(false)}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors border-l",
-                    !previewMode ? "bg-primary text-primary-foreground" : "hover:bg-accent text-muted-foreground"
+                    "flex items-center gap-1.5 border-l border-slate-200 px-3 py-1.5 text-xs font-medium transition-colors",
+                    !previewMode ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50"
                   )}
                 >
                   <Code2 className="h-3 w-3" /> Edit
@@ -242,45 +244,47 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
             </div>
           </div>
 
-          {previewMode ? (
-            /* Rendered HTML / plain-text preview */
-            <div className="min-h-[500px] rounded-md border bg-background p-5 overflow-y-auto">
-              {effectiveDraft ? (
-                isHtml(effectiveDraft) ? (
-                  <div
-                    className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: effectiveDraft }}
-                  />
+          <div className="p-5">
+            {previewMode ? (
+              /* Rendered HTML / plain-text preview */
+              <div className="min-h-[500px] overflow-y-auto">
+                {effectiveDraft ? (
+                  isHtml(effectiveDraft) ? (
+                    <div
+                      className="prose prose-sm max-w-none prose-slate"
+                      dangerouslySetInnerHTML={{ __html: effectiveDraft }}
+                    />
+                  ) : (
+                    <div className="prose prose-sm max-w-none prose-slate">
+                      <ReactMarkdown>{effectiveDraft}</ReactMarkdown>
+                    </div>
+                  )
                 ) : (
-                  <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown>{effectiveDraft}</ReactMarkdown>
-                  </div>
-                )
-              ) : (
-                <p className="text-sm text-muted-foreground italic">
-                  No draft content yet — generate a draft from the workspace.
-                </p>
-              )}
-            </div>
-          ) : (
-            /* Raw edit textarea */
-            <Textarea
-              value={effectiveDraft}
-              onChange={(e) => setDraft(e.target.value)}
-              className="min-h-[500px] font-mono text-sm leading-relaxed resize-none"
-              placeholder="Your AI-generated draft will appear here..."
-            />
-          )}
+                  <p className="text-sm italic text-slate-400">
+                    No draft content yet — generate a draft from the workspace.
+                  </p>
+                )}
+              </div>
+            ) : (
+              /* Raw edit textarea */
+              <Textarea
+                value={effectiveDraft}
+                onChange={(e) => setDraft(e.target.value)}
+                className="min-h-[500px] resize-none rounded-xl border-slate-200 font-mono text-sm leading-relaxed"
+                placeholder="Your AI-generated draft will appear here..."
+              />
+            )}
+          </div>
         </div>
 
         {/* Right panel: tone */}
-        <div className="space-y-4">
-          <div className="rounded-lg border bg-card p-4 space-y-3">
+        <div className="space-y-5">
+          <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              <p className="text-sm font-medium">Adjust Tone</p>
+              <Sparkles className="h-4 w-4 text-indigo-600" />
+              <p className="text-base font-bold text-slate-900">Adjust Tone</p>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-slate-500">
               Rewrite the draft in a different style using AI.
             </p>
             <div className="space-y-2">
@@ -290,16 +294,18 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                   onClick={() => handleAdjustTone(tone.value)}
                   disabled={adjusting}
                   className={cn(
-                    "w-full flex items-start gap-3 rounded-md border p-3 text-left text-sm transition-colors hover:bg-accent",
-                    selectedTone === tone.value && "border-primary bg-primary/5"
+                    "flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm transition-colors",
+                    selectedTone === tone.value
+                      ? "border-indigo-500 bg-indigo-50/60"
+                      : "border-slate-200 hover:bg-slate-50"
                   )}
                 >
                   <div>
-                    <p className="font-medium text-sm">{tone.label}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{tone.description}</p>
+                    <p className="text-sm font-semibold text-slate-900">{tone.label}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{tone.description}</p>
                   </div>
                   {adjusting && selectedTone === tone.value && (
-                    <Loader2 className="h-4 w-4 animate-spin ml-auto shrink-0 mt-0.5" />
+                    <Loader2 className="ml-auto mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-600" />
                   )}
                 </button>
               ))}
@@ -307,9 +313,9 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
           </div>
 
           {/* Checklist */}
-          <div className="rounded-lg border bg-card p-4 space-y-3">
-            <p className="text-sm font-medium">Submission Checklist</p>
-            <div className="space-y-2 text-sm">
+          <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+            <p className="text-base font-bold text-slate-900">Submission Checklist</p>
+            <div className="space-y-2.5 text-sm">
               {[
                 { label: "All questions answered", done: (session.answers?.length || 0) > 0 },
                 { label: "Draft generated", done: !!serverDraft },
@@ -319,10 +325,10 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                   <CheckCircle2
                     className={cn(
                       "h-4 w-4 shrink-0",
-                      item.done ? "text-green-500" : "text-muted-foreground"
+                      item.done ? "text-emerald-500" : "text-slate-300"
                     )}
                   />
-                  <span className={item.done ? "text-foreground" : "text-muted-foreground"}>
+                  <span className={item.done ? "text-slate-700" : "text-slate-400"}>
                     {item.label}
                   </span>
                 </div>
@@ -332,7 +338,7 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
 
           {canFinalize && (
             <Button
-              className="w-full"
+              className="w-full bg-indigo-600 text-white hover:bg-indigo-700"
               onClick={() => setConfirmSubmit(true)}
               disabled={!effectiveDraft}
             >

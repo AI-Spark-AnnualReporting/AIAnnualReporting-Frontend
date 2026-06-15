@@ -20,6 +20,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { Textarea } from "@/components/ui/textarea"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { LockedBanner } from "@/components/report/ManualSection"
 import {
   useAttachUpload,
   useLockSection,
@@ -28,7 +29,10 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { documentsApi } from "@/lib/api/documents"
+import { documentLanguageWarning, languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 // Document-driven extraction: uploading the source runs AI extraction on the
 // backend and returns the text in `section.content`. The PM reviews/edits it,
@@ -44,9 +48,13 @@ const ACCEPT = {
 export function ExtractSection({
   section,
   cycleId,
+  contentLanguage = "english",
+  isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
+  isRtl?: boolean
 }) {
   const sectionCode = section.section_code
   const isLocked = section.status === "locked"
@@ -55,6 +63,10 @@ export function ExtractSection({
 
   const [draft, setDraft] = useState(saved)
   const [unlockOpen, setUnlockOpen] = useState(false)
+  // Wrong-language guard: verify the dropped file's language BEFORE uploading,
+  // so an extract source in the wrong language is never sent.
+  const [langWarning, setLangWarning] = useState<string | null>(null)
+  const [checkingLang, setCheckingLang] = useState(false)
 
   // Re-seed the editor when the server content changes externally — after an
   // upload (extraction result), a remove (cleared), an unlock, or a section
@@ -73,13 +85,31 @@ export function ExtractSection({
 
   const dirty = draft !== saved
 
-  const onDrop = (accepted: File[], rejections: FileRejection[]) => {
+  const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
       toast.error("Unsupported file type. Use PDF or DOCX.")
       return
     }
     const file = accepted[0]
     if (!file) return
+    // Verify language first — only upload if it matches the cycle's language.
+    setLangWarning(null)
+    setCheckingLang(true)
+    try {
+      const res = await documentsApi.checkLanguage(file, contentLanguage)
+      if (!res.matches) {
+        const detected =
+          res.detected_language === "arabic" || res.detected_language === "english"
+            ? res.detected_language
+            : undefined
+        setLangWarning(documentLanguageWarning(contentLanguage, detected))
+        return
+      }
+    } catch {
+      // Fail open — let the upload proceed; the backend still extracts.
+    } finally {
+      setCheckingLang(false)
+    }
     upload.mutate({ sectionCode, file })
   }
 
@@ -89,21 +119,22 @@ export function ExtractSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked,
+    disabled: upload.isPending || isLocked || checkingLang,
     noClick: !!attachment,
     noKeyboard: !!attachment,
   })
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6 py-6 space-y-5">
+        <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
           {isLocked ? (
             <LockedView
               section={section}
               onUnlock={() => setUnlockOpen(true)}
               unlocking={unlock.isPending}
+              isRtl={isRtl}
             />
           ) : attachment ? (
             <>
@@ -158,6 +189,8 @@ export function ExtractSection({
                   extractedEmpty={saved.trim() === ""}
                   saving={save.isPending}
                   locking={lock.isPending}
+                  contentLanguage={contentLanguage}
+                  isRtl={isRtl}
                   onChange={setDraft}
                   onSave={() => save.mutate({ sectionCode, content: draft })}
                   onLock={() => lock.mutate({ sectionCode })}
@@ -165,7 +198,10 @@ export function ExtractSection({
               )}
             </>
           ) : (
-            <EmptyDropzone dz={dz} uploading={upload.isPending} />
+            <div className="space-y-2.5">
+              <LanguageMismatchAlert message={langWarning} />
+              <EmptyDropzone dz={dz} uploading={upload.isPending || checkingLang} />
+            </div>
           )}
 
           {/* Replace flow reuses the dropzone hook — render an off-screen root
@@ -207,6 +243,8 @@ function ContentEditor({
   onChange,
   onSave,
   onLock,
+  contentLanguage,
+  isRtl,
 }: {
   draft: string
   saved: string
@@ -217,24 +255,29 @@ function ContentEditor({
   onChange: (next: string) => void
   onSave: () => void
   onLock: () => void
+  contentLanguage: ContentLanguage
+  isRtl?: boolean
 }) {
   const busy = saving || locking
   // Lock requires a document (guaranteed here) but not content. Just don't lock
   // over unsaved edits.
   const lockDisabled = dirty || busy
+  // Edited content must stay in the cycle's language (warn + block Save).
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
 
   return (
     <div className="space-y-2">
       <label
         htmlFor="extract-section-content"
-        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+        className="text-xs font-semibold uppercase tracking-wide text-slate-400"
       >
         Extracted content
       </label>
 
       {extractedEmpty && !dirty && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-          <Sparkles className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             No content extracted from the document — enter it manually below.
           </span>
@@ -251,33 +294,33 @@ function ContentEditor({
             : "Extracted content…"
         }
         rows={14}
-        className="text-sm leading-relaxed"
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn("rounded-xl text-sm leading-relaxed", isRtl && "text-right")}
       />
+
+      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
 
       <div className="flex items-center justify-between text-xs">
         {dirty ? (
-          <span className="text-amber-700 dark:text-amber-400">
-            Unsaved changes
-          </span>
+          <span className="text-amber-600">Unsaved changes</span>
         ) : saved.trim() ? (
-          <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
+          <span className="inline-flex items-center gap-1 text-emerald-600">
             <CheckCircle2 className="h-3 w-3" />
             Saved
           </span>
         ) : (
-          <span className="text-muted-foreground">No content yet</span>
+          <span className="text-slate-400">No content yet</span>
         )}
-        <span className="text-muted-foreground tabular-nums">
-          {draft.length} chars
-        </span>
+        <span className="text-slate-400 tabular-nums">{draft.length} chars</span>
       </div>
 
       <div className="flex items-center justify-end gap-2 pt-2">
         <Button
           variant="outline"
           onClick={onSave}
-          disabled={saving || !dirty}
-          title={!dirty ? "No changes to save" : undefined}
+          disabled={saving || !dirty || !langOk}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          title={!langOk ? langWarning ?? undefined : !dirty ? "No changes to save" : undefined}
         >
           {saving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -289,6 +332,7 @@ function ContentEditor({
         <Button
           onClick={onLock}
           disabled={lockDisabled}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
           title={dirty ? "Save your changes before locking" : undefined}
         >
           {locking ? (
@@ -331,10 +375,10 @@ function EmptyDropzone({
       <div
         {...dz.getRootProps()}
         className={cn(
-          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-muted/20 px-6 py-10 text-center transition-colors cursor-pointer",
+          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-slate-50 px-6 py-10 text-center transition-colors cursor-pointer",
           dz.isDragActive
-            ? "border-primary bg-primary/5"
-            : "border-border hover:border-primary/40 hover:bg-muted/40",
+            ? "border-indigo-400 bg-indigo-50"
+            : "border-slate-200 hover:border-indigo-300 hover:bg-slate-100/60",
           uploading && "cursor-wait opacity-70",
         )}
       >
@@ -367,10 +411,12 @@ function LockedView({
   section,
   onUnlock,
   unlocking,
+  isRtl,
 }: {
   section: CycleReportSection
   onUnlock: () => void
   unlocking: boolean
+  isRtl?: boolean
 }) {
   const attachment = section.attachment
   const content = section.content ?? ""
@@ -379,30 +425,26 @@ function LockedView({
     <div className="space-y-4">
       {attachment && <FileCard attachment={attachment} />}
 
-      <div className="rounded-lg border bg-card p-6">
+      <div
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
+      >
         {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
-          <p className="text-sm text-muted-foreground italic">
-            No content extracted.
-          </p>
+          <p className="text-sm text-slate-400 italic">No content extracted.</p>
         )}
       </div>
 
-      <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/50 dark:bg-green-950/25">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
-          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">Section locked</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Locked on {formatDateTime(section.locked_at)}
-          </p>
-        </div>
-      </div>
+      <LockedBanner lockedAt={section.locked_at} />
 
       <div className="flex items-center justify-end pt-1">
-        <Button variant="outline" onClick={onUnlock} disabled={unlocking}>
+        <Button
+          variant="outline"
+          onClick={onUnlock}
+          disabled={unlocking}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
           {unlocking ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (

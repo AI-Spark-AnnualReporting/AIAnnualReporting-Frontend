@@ -4,7 +4,6 @@ import { useState } from "react"
 import Link from "next/link"
 import {
   AlertCircle,
-  CheckCircle2,
   ClipboardList,
   Edit2,
   Loader2,
@@ -21,6 +20,7 @@ import { ProsePreview } from "@/components/ui/prose-preview"
 import { Textarea } from "@/components/ui/textarea"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { LockedBanner } from "@/components/report/ManualSection"
 import {
   useLockSection,
   usePlan,
@@ -30,8 +30,9 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { cn, formatDateTime } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import { cn } from "@/lib/utils"
+import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 interface DashboardData {
   departments?: Array<{ department_code: string; department_name: string }>
@@ -40,9 +41,13 @@ interface DashboardData {
 export function AnalyzeSection({
   section,
   cycleId,
+  contentLanguage = "english",
+  isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  contentLanguage?: ContentLanguage
+  isRtl?: boolean
 }) {
   const sectionCode = section.section_code
   const status = section.status
@@ -80,9 +85,9 @@ export function AnalyzeSection({
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 py-6 space-y-5">
+        <div className="px-8 py-6 space-y-5">
           {status === "pending" ? (
             <PendingView
               cycleId={cycleId}
@@ -96,12 +101,15 @@ export function AnalyzeSection({
               content={content}
               lockedAt={section.locked_at}
               unlocking={unlock.isPending}
+              isRtl={isRtl}
               onUnlock={() => setUnlockOpen(true)}
             />
           ) : editMode ? (
             <EditView
               draft={draft}
               saving={setContent.isPending}
+              contentLanguage={contentLanguage}
+              isRtl={isRtl}
               onChange={setDraft}
               onSave={async () => {
                 await setContent.mutateAsync({ sectionCode, content: draft })
@@ -120,6 +128,7 @@ export function AnalyzeSection({
               refining={refine.isPending}
               locking={lock.isPending}
               canLock={content.trim() !== ""}
+              isRtl={isRtl}
               onRun={() => runAnalysis.mutate({ sectionCode })}
               onRefine={(instruction) => refine.mutate({ sectionCode, instruction })}
               onEdit={() => setEditMode(true)}
@@ -177,15 +186,15 @@ function PendingView({
   if (!hasFeeders) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-12 px-4">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-950/40">
-          <AlertCircle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
+          <AlertCircle className="h-7 w-7 text-amber-500" />
         </div>
-        <h2 className="text-lg font-semibold mb-1.5">No source assigned</h2>
-        <p className="text-sm text-muted-foreground mb-5 max-w-md">
+        <h2 className="text-lg font-bold text-slate-900 mb-1.5">No source assigned</h2>
+        <p className="text-sm text-slate-500 mb-5 max-w-md">
           Assign feeder departments on the Review Plan screen before running analysis.
         </p>
         <Link href={`/pm/cycles/${cycleId}/plan`}>
-          <Button>
+          <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
             <ClipboardList className="h-4 w-4 mr-2" />
             Go to Review Plan
           </Button>
@@ -241,6 +250,7 @@ function DraftingView({
   refining,
   locking,
   canLock,
+  isRtl,
   onRun,
   onRefine,
   onEdit,
@@ -253,6 +263,7 @@ function DraftingView({
   refining: boolean
   locking: boolean
   canLock: boolean
+  isRtl?: boolean
   onRun: () => void
   onRefine: (instruction: string) => void
   onEdit: () => void
@@ -264,24 +275,26 @@ function DraftingView({
   return (
     <div className="space-y-4">
       {feederNames.length > 0 && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-slate-500">
           Findings from:{" "}
-          <span className="font-medium text-foreground">
+          <span className="font-medium text-slate-700">
             {feederNames.join(", ")}
           </span>
         </p>
       )}
 
       <div
+        dir={isRtl ? "rtl" : "ltr"}
         className={cn(
-          "rounded-lg border bg-card p-6 transition-opacity",
+          "rounded-xl border border-slate-200 border-l-2 border-l-indigo-400 bg-white p-6 transition-opacity",
+          isRtl && "text-right",
           (running || refining) && "opacity-60 pointer-events-none",
         )}
       >
         {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
-          <p className="text-sm text-muted-foreground italic">
+          <p className="text-sm text-slate-400 italic">
             No findings yet — run the analysis to generate them.
           </p>
         )}
@@ -298,7 +311,7 @@ function DraftingView({
 
       <SectionChat refining={refining} onRefine={onRefine} />
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-slate-500">
         Review the findings. Lock when you&apos;re satisfied — you can unlock
         and re-run any time.
       </p>
@@ -347,6 +360,7 @@ function DraftingView({
         <Button
           onClick={onLock}
           disabled={busy || !canLock}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
           title={!canLock ? "Run the analysis first — content is required to lock" : undefined}
         >
           {locking ? (
@@ -369,26 +383,32 @@ function DraftingView({
 function EditView({
   draft,
   saving,
+  contentLanguage,
+  isRtl,
   onChange,
   onSave,
   onCancel,
 }: {
   draft: string
   saving: boolean
+  contentLanguage: ContentLanguage
+  isRtl?: boolean
   onChange: (v: string) => void
   onSave: () => void
   onCancel: () => void
 }) {
+  const langWarning = languageMismatchWarning(draft, contentLanguage)
+  const langOk = isLanguageAcceptable(draft, contentLanguage)
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <label
           htmlFor="analyze-section-content"
-          className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          className="text-xs font-semibold uppercase tracking-wide text-slate-400"
         >
           Edit findings
         </label>
-        <span className="text-xs text-muted-foreground">Markdown supported</span>
+        <span className="text-xs text-slate-400">Markdown supported</span>
       </div>
       <Textarea
         id="analyze-section-content"
@@ -396,14 +416,21 @@ function EditView({
         onChange={(e) => onChange(e.target.value)}
         placeholder="## Key Findings&#10;- …&#10;&#10;## Trends&#10;- …"
         rows={18}
-        className="text-sm leading-relaxed font-mono"
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn("rounded-xl text-sm leading-relaxed font-mono", isRtl && "text-right")}
       />
+      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel} disabled={saving}>
           <X className="h-4 w-4 mr-2" />
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={saving}>
+        <Button
+          onClick={onSave}
+          disabled={saving || !langOk}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
+          title={!langOk ? langWarning ?? undefined : undefined}
+        >
           {saving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (
@@ -420,39 +447,37 @@ function LockedView({
   content,
   lockedAt,
   unlocking,
+  isRtl,
   onUnlock,
 }: {
   content: string
   lockedAt: string | null
   unlocking: boolean
+  isRtl?: boolean
   onUnlock: () => void
 }) {
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border bg-card p-6">
+      <div
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
+      >
         {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
-          <p className="text-sm text-muted-foreground italic">
-            No content available.
-          </p>
+          <p className="text-sm text-slate-400 italic">No content available.</p>
         )}
       </div>
 
-      <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/50 dark:bg-green-950/25">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
-          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">Section locked</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Locked on {formatDateTime(lockedAt)}
-          </p>
-        </div>
-      </div>
+      <LockedBanner lockedAt={lockedAt} />
 
       <div className="flex items-center justify-end">
-        <Button variant="outline" onClick={onUnlock} disabled={unlocking}>
+        <Button
+          variant="outline"
+          onClick={onUnlock}
+          disabled={unlocking}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
           {unlocking ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (

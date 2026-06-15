@@ -4,7 +4,6 @@ import { useState } from "react"
 import Link from "next/link"
 import {
   AlertCircle,
-  CheckCircle2,
   ClipboardList,
   Loader2,
   Lock,
@@ -17,6 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { LockedBanner } from "@/components/report/ManualSection"
 import {
   useGenerateSection,
   useLockSection,
@@ -25,7 +25,7 @@ import {
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { cn, formatDateTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import type { CycleReportSection } from "@/types"
 
 interface DashboardData {
@@ -35,9 +35,11 @@ interface DashboardData {
 export function GenerateSection({
   section,
   cycleId,
+  isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  isRtl?: boolean
 }) {
   const sectionCode = section.section_code
   const status = section.status
@@ -64,9 +66,9 @@ export function GenerateSection({
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <SectionHeader section={section} />
+      <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 py-6 space-y-5">
+        <div className="px-8 py-6 space-y-5">
           {status === "pending" ? (
             <PendingView
               cycleId={cycleId}
@@ -80,6 +82,7 @@ export function GenerateSection({
               content={content}
               lockedAt={section.locked_at}
               unlocking={unlock.isPending}
+              isRtl={isRtl}
               onUnlock={() => unlock.mutate({ sectionCode })}
             />
           ) : (
@@ -88,6 +91,7 @@ export function GenerateSection({
               regenerating={generate.isPending}
               locking={lock.isPending}
               refining={refine.isPending}
+              isRtl={isRtl}
               onRegenerate={() => setRegenOpen(true)}
               onLock={() => lock.mutate({ sectionCode })}
               onRefine={(instruction) =>
@@ -131,16 +135,16 @@ function PendingView({
   if (!hasFeeders) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-12 px-4">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-950/40">
-          <AlertCircle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
+          <AlertCircle className="h-7 w-7 text-amber-500" />
         </div>
-        <h2 className="text-lg font-semibold mb-1.5">No source assigned</h2>
-        <p className="text-sm text-muted-foreground mb-5 max-w-md">
+        <h2 className="text-lg font-bold text-slate-900 mb-1.5">No source assigned</h2>
+        <p className="text-sm text-slate-500 mb-5 max-w-md">
           Assign a department on the Review Plan screen before generating this
           section.
         </p>
         <Link href={`/pm/cycles/${cycleId}/plan`}>
-          <Button>
+          <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
             <ClipboardList className="h-4 w-4 mr-2" />
             Go to Review Plan
           </Button>
@@ -151,20 +155,25 @@ function PendingView({
 
   return (
     <div className="flex flex-col items-center justify-center text-center py-12 px-4">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-        <Sparkles className="h-7 w-7 text-primary" />
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50">
+        <Sparkles className="h-7 w-7 text-indigo-600" />
       </div>
-      <h2 className="text-lg font-semibold mb-1.5">
+      <h2 className="text-lg font-bold text-slate-900 mb-1.5">
         Written by the AI narrative writer
       </h2>
-      <p className="text-sm text-muted-foreground mb-5 max-w-md leading-relaxed">
+      <p className="text-sm text-slate-500 mb-5 max-w-md leading-relaxed">
         Uses the report&apos;s themes and content from:{" "}
-        <span className="font-medium text-foreground">
+        <span className="font-medium text-slate-700">
           {feederNames.join(", ")}
         </span>
         .
       </p>
-      <Button onClick={onGenerate} disabled={generating} size="lg">
+      <Button
+        onClick={onGenerate}
+        disabled={generating}
+        size="lg"
+        className="bg-indigo-600 text-white hover:bg-indigo-700"
+      >
         {generating ? (
           <>
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -186,6 +195,7 @@ function DraftingView({
   regenerating,
   locking,
   refining,
+  isRtl,
   onRegenerate,
   onLock,
   onRefine,
@@ -194,6 +204,7 @@ function DraftingView({
   regenerating: boolean
   locking: boolean
   refining: boolean
+  isRtl: boolean
   onRegenerate: () => void
   onLock: () => void
   onRefine: (instruction: string) => void
@@ -205,24 +216,26 @@ function DraftingView({
           while the LLM is rewriting the section. */}
       <div className="relative">
         <div
+          dir={isRtl ? "rtl" : "ltr"}
           className={cn(
-            "rounded-lg border bg-card p-6 transition-opacity",
+            "rounded-xl border border-slate-200 border-l-2 border-l-indigo-400 bg-white p-6 transition-opacity",
+            isRtl && "text-right",
             refining && "opacity-60 pointer-events-none",
           )}
         >
           {content.trim() ? (
             <ProsePreview content={content} />
           ) : (
-            <p className="text-sm text-muted-foreground italic">
+            <p className="text-sm text-slate-400 italic">
               Draft is empty — try regenerating.
             </p>
           )}
         </div>
         {refining && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="flex items-center gap-2 rounded-full border bg-background/95 px-4 py-2 shadow-sm">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-sm font-medium">Refining…</span>
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 shadow-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+              <span className="text-sm font-medium text-slate-700">Refining…</span>
             </div>
           </div>
         )}
@@ -230,7 +243,7 @@ function DraftingView({
 
       <SectionChat refining={refining} onRefine={onRefine} />
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-slate-500">
         Review the draft. Lock it when you&apos;re satisfied — you can unlock
         and regenerate any time.
       </p>
@@ -240,6 +253,7 @@ function DraftingView({
           variant="outline"
           onClick={onRegenerate}
           disabled={busy}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
         >
           {regenerating ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -248,7 +262,11 @@ function DraftingView({
           )}
           Regenerate
         </Button>
-        <Button onClick={onLock} disabled={busy}>
+        <Button
+          onClick={onLock}
+          disabled={busy}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
+        >
           {locking ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -270,39 +288,37 @@ function LockedView({
   content,
   lockedAt,
   unlocking,
+  isRtl,
   onUnlock,
 }: {
   content: string
   lockedAt: string | null
   unlocking: boolean
+  isRtl: boolean
   onUnlock: () => void
 }) {
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border bg-card p-6">
+      <div
+        dir={isRtl ? "rtl" : "ltr"}
+        className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
+      >
         {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
-          <p className="text-sm text-muted-foreground italic">
-            No content available.
-          </p>
+          <p className="text-sm text-slate-400 italic">No content available.</p>
         )}
       </div>
 
-      <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/50 dark:bg-green-950/25">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
-          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">Section locked</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Locked on {formatDateTime(lockedAt)}
-          </p>
-        </div>
-      </div>
+      <LockedBanner lockedAt={lockedAt} />
 
       <div className="flex items-center justify-end">
-        <Button variant="outline" onClick={onUnlock} disabled={unlocking}>
+        <Button
+          variant="outline"
+          onClick={onUnlock}
+          disabled={unlocking}
+          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
           {unlocking ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (

@@ -62,17 +62,16 @@ export function SectionChat({ refining, onRefine }: SectionChatProps) {
 
       {showChips && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Try:</span>
+          <span className="text-sm text-slate-500">Try:</span>
           {SUGGESTED_CHIPS.map((chip) => (
-            <Button
+            <button
               key={chip}
-              size="sm"
-              variant="outline"
+              type="button"
               onClick={() => setInstruction(chip)}
-              className="h-7 text-xs font-normal"
+              className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
             >
               {chip}
-            </Button>
+            </button>
           ))}
         </div>
       )}
@@ -85,11 +84,12 @@ export function SectionChat({ refining, onRefine }: SectionChatProps) {
           rows={2}
           placeholder="Try: 'make this more concise' or 'add the cost-reduction figure'"
           disabled={refining}
-          className="resize-none"
+          className="resize-none rounded-xl"
         />
         <Button
           onClick={send}
           disabled={disabled}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
           title={
             !trimmed
               ? "Type an instruction first"

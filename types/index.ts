@@ -14,6 +14,7 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 // ── Company profile & report sections ──────────────────────────────────────
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
+export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
@@ -86,6 +87,7 @@ export interface Cycle {
   is_shariah: boolean
   has_subsidiaries: boolean
   has_sukuk: boolean
+  content_language: ContentLanguage
 }
 
 // Source document attached to an attach-mode section.
@@ -289,6 +291,7 @@ export interface Session {
   cycle_id: string
   department_id: string
   department_name: string
+  content_language?: ContentLanguage
   user_id?: string
   status: SessionStatus
   progress_percentage: number
@@ -319,6 +322,7 @@ export interface DepartmentDashboard {
     progress_percentage: number
     has_questions: boolean
     review_notes?: string | null
+    content_language?: ContentLanguage
   }[]
   total_assignments: number
   pending_count: number
