@@ -3,7 +3,7 @@
 import { usePMDashboard } from "@/hooks/useSessions"
 import { PMStatCard } from "@/components/pm/PMStatCard"
 import { EmptyState } from "@/components/ui/empty-state"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import {
   RefreshCw, ClipboardCheck, ArrowRight, Clock, FileText, CheckCircle2,
@@ -14,7 +14,7 @@ import { formatDate, cn } from "@/lib/utils"
 export default function PMDashboard() {
   const { data, isLoading } = usePMDashboard()
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   const cycles = data?.active_cycles || []
   const recentSubmissions = data?.recent_submissions || []

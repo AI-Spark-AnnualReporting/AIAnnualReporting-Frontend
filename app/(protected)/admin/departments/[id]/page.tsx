@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { DataTable, Column } from "@/components/ui/data-table"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { User } from "@/types"
 import {
@@ -40,7 +40,7 @@ export default function DepartmentDetailPage({
   const [editName, setEditName] = useState("")
   const [editDescription, setEditDescription] = useState("")
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   if (isError) return (
     <div className="max-w-lg space-y-4">

@@ -2,7 +2,7 @@
 
 import { use, useState } from "react"
 import { usePMSession, useReviewSession } from "@/hooks/useSessions"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -48,7 +48,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
       return next
     })
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   const session = data?.session
 
