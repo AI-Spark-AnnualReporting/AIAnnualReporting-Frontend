@@ -33,7 +33,7 @@ export function RegeneratePlanButton({
         ) : (
           <RefreshCw className="h-4 w-4" />
         )}
-        Regenerate plan
+        Regenerate reporting sections
       </button>
       <ConfirmDialog
         open={open}

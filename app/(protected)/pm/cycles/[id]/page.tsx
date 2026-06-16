@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { DataTable, Column } from "@/components/ui/data-table"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Progress } from "@/components/ui/progress"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -146,7 +146,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     if (isForceKickoff) setBriefOpen(true)
   }, [isForceKickoff])
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   const pmDash = pmData as PMCycleDashboardData | undefined
   const stats = pmDash?.stats

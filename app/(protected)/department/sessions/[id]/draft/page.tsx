@@ -2,7 +2,7 @@
 
 import { use, useState } from "react"
 import { useSession, useGenerateDraft, useAdjustTone, useFinalizeSession } from "@/hooks/useSessions"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -50,7 +50,7 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   const serverDraft = session?.ai_generated_draft || session?.final_submission || ""
   const effectiveDraft = draft || serverDraft
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   if (!session) return (
     <EmptyState title="Session not found" description="Session does not exist." />

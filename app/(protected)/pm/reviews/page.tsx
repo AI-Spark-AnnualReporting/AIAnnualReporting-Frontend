@@ -4,7 +4,7 @@ import { useState } from "react"
 import { usePMReviewQueue, useReviewSession } from "@/hooks/useSessions"
 import type { ReviewQueueItem } from "@/hooks/useSessions"
 import { EmptyState } from "@/components/ui/empty-state"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -39,7 +39,7 @@ export default function PMReviewsPage() {
   const [changesFor, setChangesFor] = useState<ReviewQueueItem | null>(null)
   const [notes, setNotes] = useState("")
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   const submissions = data ?? []
 

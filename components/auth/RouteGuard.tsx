@@ -4,7 +4,7 @@ import { Suspense, useEffect } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { UserRole } from "@/types"
-import { AuthSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 
 interface RouteGuardProps {
   children: React.ReactNode
@@ -16,7 +16,7 @@ interface RouteGuardProps {
 // every consumer to add their own Suspense.
 export function RouteGuard(props: RouteGuardProps) {
   return (
-    <Suspense fallback={<AuthSkeleton />}>
+    <Suspense fallback={<PageLoader fullScreen />}>
       <RouteGuardInner {...props} />
     </Suspense>
   )
@@ -59,16 +59,16 @@ function RouteGuardInner({ children, allowedRoles }: RouteGuardProps) {
     }
   }, [isLoading, isAuthenticated, hasToken, tokenInUrl, user, router, pathname, allowedRoles])
 
-  if (isLoading) return <AuthSkeleton />
-  if (tokenInUrl) return <AuthSkeleton />
+  if (isLoading) return <PageLoader fullScreen />
+  if (tokenInUrl) return <PageLoader fullScreen />
 
-  // Show skeleton while token exists but user state is still propagating
-  if (!isAuthenticated && hasToken) return <AuthSkeleton />
+  // Show loader while token exists but user state is still propagating
+  if (!isAuthenticated && hasToken) return <PageLoader fullScreen />
 
-  if (!isAuthenticated) return <AuthSkeleton />
+  if (!isAuthenticated) return <PageLoader fullScreen />
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return <AuthSkeleton />
+    return <PageLoader fullScreen />
   }
 
   return <>{children}</>
