@@ -229,6 +229,20 @@ export function usePMCycleDashboard(cycleId: string) {
   })
 }
 
+// Previous kickoff brief — used to pre-fill the strategic-brief textarea.
+// `enabled` gates the fetch (e.g. only when the kickoff dialog is open).
+// A non-200 is treated as non-fatal upstream; here we just don't retry so a
+// missing/unauthorized lookup never blocks the form.
+export function usePreviousBrief(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["pm", "previous-brief", cycleId],
+    queryFn: () => pmApi.previousBrief(cycleId),
+    enabled: !!cycleId && enabled,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useSubmitKickoff() {
   const qc = useQueryClient()
   return useMutation<KickoffBriefResponse, { message?: string; response?: { data?: { detail?: string } } }, KickoffBriefPayload>({
