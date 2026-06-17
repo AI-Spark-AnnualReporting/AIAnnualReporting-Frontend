@@ -40,7 +40,7 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "reopened", label: SESSION_STATUSES.reopened.label },
 ]
 
-// Centriton status pill — coloured dot + label, keyed by session status.
+// Centriyon status pill — coloured dot + label, keyed by session status.
 const STATUS_PILL: Record<SessionStatus, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },

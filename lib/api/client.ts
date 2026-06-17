@@ -3,7 +3,7 @@ import axios, {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios"
-import { centritonLoginUrl } from "@/lib/centriton"
+import { centriyonLoginUrl } from "@/lib/centriyon"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -17,7 +17,7 @@ export const apiClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
-// Request interceptor: attach the Centriton-issued JWT.
+// Request interceptor: attach the Centriyon-issued JWT.
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
@@ -33,13 +33,13 @@ apiClient.interceptors.request.use(
 
 // Response interceptor:
 //   401 → token is invalid/expired. There is no SAR refresh flow any more —
-//   bounce the user back to Centriton login so they can re-authenticate.
+//   bounce the user back to Centriyon login so they can re-authenticate.
 //
 //   We deliberately do NOT redirect when the failing call is `/auth/me` or
 //   `/auth/logout`. `me` runs on mount with whatever happens to be in
 //   localStorage; AuthContext.refreshUser handles that cleanly (clears state,
-//   lands the user on `/login` which shows the Centriton info card). Without
-//   this exception a stale token would loop the user back to Centriton before
+//   lands the user on `/login` which shows the Centriyon info card). Without
+//   this exception a stale token would loop the user back to Centriyon before
 //   SAR's info page can render.
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
@@ -51,7 +51,7 @@ apiClient.interceptors.response.use(
       if (!isAuthEndpoint) {
         localStorage.removeItem("access_token")
         localStorage.removeItem("refresh_token")
-        window.location.href = centritonLoginUrl()
+        window.location.href = centriyonLoginUrl()
       }
     }
 

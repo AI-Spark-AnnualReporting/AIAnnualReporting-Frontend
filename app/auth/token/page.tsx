@@ -5,9 +5,9 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { Loader2 } from "lucide-react"
 
-// Transient handoff: receive the Centriton JWT from `?token=`, persist it,
+// Transient handoff: receive the Centriyon JWT from `?token=`, persist it,
 // hydrate the user from /auth/me, and bounce to the role home. If anything
-// fails we fall back to /login which now shows the Centriton info card.
+// fails we fall back to /login which now shows the Centriyon info card.
 function TokenHandler() {
   const searchParams = useSearchParams()
   const router = useRouter()

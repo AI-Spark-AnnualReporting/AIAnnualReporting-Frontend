@@ -10,7 +10,7 @@ import { DeptTopNav } from "@/components/layout/DeptTopNav"
 
 /**
  * Chooses the app shell by role. Project Managers and Department Users get the
- * redesigned "Centriton" workspace (dark sidebar + light canvas); every other
+ * redesigned "Centriyon" workspace (dark sidebar + light canvas); every other
  * role keeps the original shell untouched.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {

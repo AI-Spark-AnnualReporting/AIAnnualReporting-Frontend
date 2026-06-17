@@ -33,7 +33,7 @@ function RouteGuardInner({ children, allowedRoles }: RouteGuardProps) {
   const hasToken =
     typeof window !== "undefined" ? !!localStorage.getItem("access_token") : false
 
-  // Centriton can hand the JWT over via `?token=` on any URL. While the root
+  // Centriyon can hand the JWT over via `?token=` on any URL. While the root
   // handler / token landing page is processing it, render the skeleton instead
   // of bouncing the user to /login.
   const tokenInUrl = !!searchParams?.get("token")

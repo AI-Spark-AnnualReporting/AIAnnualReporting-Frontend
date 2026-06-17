@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button"
 import { Sparkles, ArrowLeft, ArrowUpRight } from "lucide-react"
 import Link from "next/link"
-import { centritonLoginUrl } from "@/lib/centriton"
+import { centriyonLoginUrl } from "@/lib/centriyon"
 
 export default function ResetPasswordPage() {
-  const loginUrl = centritonLoginUrl()
+  const loginUrl = centriyonLoginUrl()
 
   return (
     <div className="w-full max-w-md">
@@ -15,13 +15,13 @@ export default function ResetPasswordPage() {
           </div>
           <h1 className="text-2xl font-bold">Reset your password</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Password resets are completed on the Centriton platform.
+            Password resets are completed on the Centriyon platform.
           </p>
         </div>
 
         <a href={loginUrl} className="block">
           <Button className="w-full">
-            Go to Centriton
+            Go to Centriyon
             <ArrowUpRight className="ml-1.5 h-4 w-4" />
           </Button>
         </a>

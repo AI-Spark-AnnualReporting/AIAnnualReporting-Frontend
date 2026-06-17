@@ -48,7 +48,7 @@ const NOT_FOUND_PREFIX = "information not found in uploaded documents"
 const isNotFoundAnswer = (text: string | undefined) =>
   !!text && text.trim().toLowerCase().startsWith(NOT_FOUND_PREFIX)
 
-// Centriton status pill — coloured dot + label, keyed by session status.
+// Centriyon status pill — coloured dot + label, keyed by session status.
 const SESSION_PILL: Record<string, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
