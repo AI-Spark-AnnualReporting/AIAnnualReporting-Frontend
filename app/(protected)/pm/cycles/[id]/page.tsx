@@ -4,7 +4,7 @@ import { use, useRef, useState, useEffect } from "react"
 import {
   usePMCycleDashboard, useSendReminder, useGenerateReport,
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
-  useEscalations, useBulkReminder,
+  useEscalations, useBulkReminder, usePreviousBrief,
 } from "@/hooks/useSessions"
 import { useBuildReadiness } from "@/hooks/useReportBuilder"
 import { PageHeader } from "@/components/ui/page-header"
@@ -107,6 +107,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   // Kickoff brief state
   const [briefOpen, setBriefOpen] = useState(false)
   const [briefText, setBriefText] = useState("")
+  // Name of the cycle a pre-filled brief was carried over from (for the hint).
+  const [prefillSource, setPrefillSource] = useState<{ name: string; fiscalYear: number | null } | null>(null)
+  // Guards the pre-fill so it runs at most once per dialog-open and never
+  // clobbers text the PM has already started typing/editing.
+  const briefPrefilledRef = useRef(false)
   const [additionalContext, setAdditionalContext] = useState("")
   const [submittingKickoff, setSubmittingKickoff] = useState(false)
   // Module 1-6 additions
@@ -145,6 +150,29 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     if (isForceKickoff) setBriefOpen(true)
   }, [isForceKickoff])
+
+  // Pre-fill the strategic brief from the company's most recent prior cycle.
+  // Only fetch while the dialog is open and the cycle has no brief yet (a new
+  // kickoff). A non-200 surfaces as no data here, so the field just stays empty.
+  const { data: previousBrief } = usePreviousBrief(id, briefOpen && !hasKickoffRaw)
+
+  useEffect(() => {
+    // Run once per open, and never overwrite text the user has already entered.
+    if (
+      briefOpen &&
+      previousBrief?.has_previous &&
+      previousBrief.kickoff_brief &&
+      !briefPrefilledRef.current &&
+      !briefText.trim()
+    ) {
+      briefPrefilledRef.current = true
+      setBriefText(previousBrief.kickoff_brief)
+      setPrefillSource({
+        name: previousBrief.source_cycle_name ?? "a previous cycle",
+        fiscalYear: previousBrief.source_fiscal_year,
+      })
+    }
+  }, [briefOpen, previousBrief, briefText])
 
   if (isLoading) return <PageLoader />
 
@@ -191,6 +219,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   /* ── Handlers ─────────────────────────────────────────────────────────────── */
   const resetKickoffForm = () => {
     setBriefText("")
+    setPrefillSource(null)
+    briefPrefilledRef.current = false
     setAdditionalContext("")
     setNumQuestions(12)
     setPendingFile(null)
@@ -1256,6 +1286,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   `${wordCount} words — good detail`
                 return <p className={cn("text-xs", tone)}>{msg}</p>
               })()}
+              {prefillSource && (
+                <p className="text-xs text-muted-foreground">
+                  Pre-filled from &ldquo;{prefillSource.name}&rdquo;
+                  {prefillSource.fiscalYear ? ` (FY ${prefillSource.fiscalYear})` : ""} — edit as needed.
+                </p>
+              )}
               {(() => {
                 const warn = languageMismatchWarning(
                   briefText, pmDash?.cycle?.content_language ?? "english",

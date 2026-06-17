@@ -33,6 +33,17 @@ export interface GenerateReportPayload {
   format?: "markdown" | "html" | "text"
 }
 
+// Previous kickoff brief lookup — resolved server-side from the most recent
+// OTHER cycle of the same company that has a non-empty brief (highest fiscal
+// year, then newest). Used to pre-fill the strategic-brief textarea.
+export interface PreviousBriefResponse {
+  has_previous: boolean
+  kickoff_brief: string | null
+  source_cycle_id: string | null
+  source_cycle_name: string | null
+  source_fiscal_year: number | null
+}
+
 // PM kickoff brief — submitted after cycle is active
 export interface KickoffBriefPayload {
   cycle_id: string
@@ -72,6 +83,16 @@ export const pmApi = {
    */
   cycleDashboard: async (cycleId: string) => {
     const { data } = await apiClient.get(`/pm/dashboard/${cycleId}`)
+    return data
+  },
+
+  // Fetch the previous kickoff brief to pre-fill the strategic-brief field.
+  // Tenant- and ownership-scoped server-side: a PM only ever gets a brief from
+  // their own company's cycles. has_previous=false (first cycle) is normal.
+  previousBrief: async (cycleId: string): Promise<PreviousBriefResponse> => {
+    const { data } = await apiClient.get<PreviousBriefResponse>(
+      `/pm/cycles/${cycleId}/previous-brief`,
+    )
     return data
   },
 
