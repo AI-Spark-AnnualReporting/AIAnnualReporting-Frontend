@@ -64,7 +64,7 @@ export function HeadlineBlock({ cycleId, headline }: HeadlineBlockProps) {
           ) : (
             <RefreshCw className="h-3 w-3" />
           )}
-          Regenerate plan
+          Regenerate reporting sections
         </button>
       </div>
 

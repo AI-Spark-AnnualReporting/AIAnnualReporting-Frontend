@@ -4,7 +4,10 @@ import { useState } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { getInitials } from "@/lib/utils"
 import { USER_ROLES } from "@/lib/constants"
-import { LogOut, User, KeyRound } from "lucide-react"
+import {
+  Bell, LogOut, User, Check, CheckCheck,
+  AlertTriangle, X, ExternalLink,KeyRound
+} from "lucide-react"
 import Link from "next/link"
 import {
   DropdownMenu,
@@ -82,12 +85,6 @@ export function TopNav() {
                 <Link href="/profile" className="cursor-pointer">
                   <User className="mr-2 h-4 w-4" />
                   Profile
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/profile?tab=password" className="cursor-pointer">
-                  <KeyRound className="mr-2 h-4 w-4" />
-                  Change Password
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

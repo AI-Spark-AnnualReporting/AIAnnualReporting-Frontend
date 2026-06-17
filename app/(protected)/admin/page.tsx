@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/page-header"
 import { StatsCard } from "@/components/ui/stats-card"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Progress } from "@/components/ui/progress"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import {
   Users, Building2, RefreshCw, Activity, Clock,
   UserCheck, AlertCircle, ChevronRight, Plus, TrendingUp, Shield,
@@ -22,7 +22,7 @@ export default function AdminDashboard() {
   const { data: cyclesData } = useCycles()
   const { data: deptsData } = useDepartments()
 
-  if (statsLoading) return <PageSkeleton />
+  if (statsLoading) return <PageLoader />
 
   const stats = statsData
   const allCycles = cyclesData?.cycles || []

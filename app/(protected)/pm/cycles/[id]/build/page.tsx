@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { useBuildReadiness, usePMCycleSections, useFinalReport } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { SectionList } from "@/components/report/SectionList"
@@ -54,7 +54,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
     }
   }, [readiness, router, cycleId])
 
-  if (readinessQuery.isLoading || sectionsQuery.isLoading) return <PageSkeleton />
+  if (readinessQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
 
   if (readinessQuery.isError || sectionsQuery.isError) {
     return (
@@ -72,7 +72,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   }
 
   // Redirect effect above handles this — render a skeleton meanwhile.
-  if (readiness && !readiness.can_build) return <PageSkeleton />
+  if (readiness && !readiness.can_build) return <PageLoader />
 
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
   const total = sections.length

@@ -10,12 +10,13 @@ import React, {
 import { useRouter } from "next/navigation"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
+import { centritonLoginUrl } from "@/lib/centriton"
 
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (email: string, password: string) => Promise<void>
+  loginWithToken: (token: string) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
@@ -53,15 +54,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [refreshUser])
 
-  const login = useCallback(
-    async (email: string, password: string) => {
-      const response = await authApi.login({ email, password })
-      localStorage.setItem("access_token", response.access_token)
-      localStorage.setItem("refresh_token", response.refresh_token)
+  // Centriton SSO: the JWT is minted by Centriton and handed to SAR via
+  // `?token=` on the root URL. We persist it, hydrate the user, and route to
+  // their role home. There's no SAR-issued refresh token any more.
+  const loginWithToken = useCallback(
+    async (token: string) => {
+      localStorage.setItem("access_token", token)
+      localStorage.removeItem("refresh_token")
       const userData = await authApi.me()
       setUser(userData)
-      const defaultRoute = ROLE_ROUTES[userData.role] || "/login"
-      router.push(defaultRoute)
+      const dest = ROLE_ROUTES[userData.role] ?? "/login"
+      router.push(dest)
     },
     [router]
   )
@@ -70,14 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await authApi.logout()
     } catch {
-      // ignore
+      // ignore — local cleanup + Centriton bounce still happens
     } finally {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       setUser(null)
-      router.push("/login")
+      window.location.href = centritonLoginUrl()
     }
-  }, [router])
+  }, [])
 
   return (
     <AuthContext.Provider
@@ -85,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
-        login,
+        loginWithToken,
         logout,
         refreshUser,
       }}

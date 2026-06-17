@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
@@ -82,7 +82,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as PMDashboardData | undefined
 
-  if (planQuery.isLoading || sectionsQuery.isLoading) return <PageSkeleton />
+  if (planQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
 
   const cycleName = pmData?.cycle?.cycle_name
   // Arabic cycles render section/theme titles right-to-left.
@@ -691,12 +691,12 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           {build.isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Generating plan…
+              Generating reporting sections…
             </>
           ) : (
             <>
               <Sparkles className="mr-2 h-4 w-4" />
-              Generate Plan
+              Generate Reporting Sections
             </>
           )}
         </Button>

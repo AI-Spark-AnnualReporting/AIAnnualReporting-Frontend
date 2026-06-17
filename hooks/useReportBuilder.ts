@@ -39,12 +39,18 @@ type MutationError = {
   response?: { data?: { detail?: unknown } }
 }
 
-// The mutation responses are the source of truth for the affected section — they
-// include `attachment`, `verified`, and `locked_at`. The list GET /sections does
-// not yet include those fields, so an invalidate-and-refetch would overwrite our
-// fresh data with a field-less version and snap the panel back to empty. Patch
-// the list cache directly instead; refetch readiness separately (its query is
-// independent and not affected).
+// Patch the affected section into the list cache for INSTANT feedback, then
+// invalidate so the list refetches the authoritative GET /sections shape.
+//
+// The optimistic patch alone is fragile: it only replaces a row when the
+// mutation response's `section_code` matches a list row. If the two responses
+// disagree on shape (a backend inconsistency seen elsewhere in this file), the
+// map matches nothing, the cache is unchanged, and the UI doesn't update until
+// a manual refresh refetches /sections. The follow-up invalidate makes the UI
+// self-heal regardless: it refetches the same data a manual refresh would —
+// which GET /sections now returns complete (attachment/verified/locked_at
+// included), so it no longer risks snapping the panel back to a field-less
+// version. Readiness is invalidated too (independent query).
 function patchSectionInList(
   qc: ReturnType<typeof useQueryClient>,
   cycleId: string,
@@ -54,10 +60,24 @@ function patchSectionInList(
     QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
     (old) => {
       if (!old) return old
-      return old.map((s) => (s.section_code === updated.section_code ? updated : s))
+      // MERGE, don't replace: some mutation responses omit routing-critical
+      // fields (e.g. saveManualContent doesn't echo `content_source`). A full
+      // replace would set those to undefined and mis-route the panel — a manual
+      // narrative section would flip to the upload dropzone because
+      // `content_source !== "narrative"`. Spreading the response over the
+      // existing row keeps omitted fields and applies only what changed.
+      return old.map((s) =>
+        s.section_code === updated.section_code ? { ...s, ...updated } : s,
+      )
     },
   )
+  qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
   qc.invalidateQueries({ queryKey: QUERY_KEYS.BUILD_READINESS(cycleId) })
+  // Lock/unlock changes the assemble gate (locked count, can_assemble,
+  // unlocked_sections). The Assemble button reads this independent query, so
+  // refetch it too — otherwise its "(locked/total)" count stays stale until a
+  // manual refresh.
+  qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
 }
 
 function readError(err: MutationError, fallback: string): string {
