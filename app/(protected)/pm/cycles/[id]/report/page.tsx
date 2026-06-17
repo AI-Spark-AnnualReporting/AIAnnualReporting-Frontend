@@ -21,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import {
   useAssembleReport,
@@ -75,7 +75,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
     }
   }, [])
 
-  if (reportQuery.isLoading) return <PageSkeleton />
+  if (reportQuery.isLoading) return <PageLoader />
 
   const report = reportQuery.data
   // 404 / missing report → empty state with an Assemble CTA.

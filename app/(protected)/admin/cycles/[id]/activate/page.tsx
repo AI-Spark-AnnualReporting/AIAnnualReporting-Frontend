@@ -4,7 +4,7 @@ import { use, useState } from "react"
 import { useCycle, useActivateCycle } from "@/hooks/useCycles"
 import { PageHeader } from "@/components/ui/page-header"
 import { Button } from "@/components/ui/button"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import {
   CheckCircle, Zap, ArrowLeft, AlertCircle, XCircle, Calendar,
 } from "lucide-react"
@@ -23,7 +23,7 @@ export default function ActivateCyclePage({
   const [activated, setActivated] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
 
   const cycle = cycleData
 

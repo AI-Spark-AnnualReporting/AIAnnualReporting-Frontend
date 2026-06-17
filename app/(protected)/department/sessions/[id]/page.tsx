@@ -10,7 +10,7 @@ import {
 import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
 import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -432,7 +432,7 @@ export default function SessionWorkspacePage({
   }
 
   // ── Early returns ─────────────────────────────────────────────────────────────
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
   if (uploading) return <ExtractionLoader result={extractionResult} />
   if (!session)
     return <EmptyState title="Session not found" description="This session doesn't exist or you don't have access." />

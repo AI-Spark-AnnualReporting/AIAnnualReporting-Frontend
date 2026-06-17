@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useDepartmentDashboard } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
 import { EmptyState } from "@/components/ui/empty-state"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -157,7 +157,7 @@ export default function DepartmentDashboard() {
     }
   }
 
-  if (isLoading) return <PageSkeleton />
+  if (isLoading) return <PageLoader />
   if (starting) return <ExtractionLoader result={extractionResult} />
 
   const sessions = data?.assignments || []

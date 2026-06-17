@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
-import { PageSkeleton } from "@/components/ui/skeletons"
+import { PageLoader } from "@/components/ui/spinner"
 import { DataTable, Column } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty-state"
 import {
@@ -154,7 +154,7 @@ export default function CycleDetailPage({
     }
   }
 
-  if (cycleLoading) return <PageSkeleton />
+  if (cycleLoading) return <PageLoader />
 
   const cycle = cycleData
   const stats = overview?.stats
