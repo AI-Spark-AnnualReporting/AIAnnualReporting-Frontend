@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/button"
 import { Sparkles, ArrowUpRight } from "lucide-react"
-import { centritonLoginUrl } from "@/lib/centriton"
+import { centriyonLoginUrl } from "@/lib/centriyon"
 
 export default function LoginPage() {
-  const loginUrl = centritonLoginUrl()
+  const loginUrl = centriyonLoginUrl()
 
   return (
     <div className="w-full max-w-md">
@@ -16,7 +16,7 @@ export default function LoginPage() {
             Spark Annual Report Studio
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in is managed through the Centriton platform.
+            Sign in is managed through the Centriyon platform.
           </p>
         </div>
 
@@ -25,13 +25,13 @@ export default function LoginPage() {
           className="block"
         >
           <Button className="w-full">
-            Go to Centriton Login
+            Go to Centriyon Login
             <ArrowUpRight className="ml-1.5 h-4 w-4" />
           </Button>
         </a>
 
         <p className="mt-5 text-center text-xs text-muted-foreground leading-relaxed">
-          Your Centriton session gives you access to both platforms — no
+          Your Centriyon session gives you access to both platforms — no
           separate password needed.
         </p>
       </div>

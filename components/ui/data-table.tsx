@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 export interface Column<T> {
   key: string
   header: string
-  cell: (row: T) => React.ReactNode
+  cell: (row: T, index: number) => React.ReactNode
   className?: string
 }
 
@@ -79,7 +79,7 @@ export function DataTable<T>({
                 <TableRow key={i} className="hover:bg-muted/40">
                   {columns.map((col) => (
                     <TableCell key={col.key} className={col.className}>
-                      {col.cell(row)}
+                      {col.cell(row, i)}
                     </TableCell>
                   ))}
                 </TableRow>

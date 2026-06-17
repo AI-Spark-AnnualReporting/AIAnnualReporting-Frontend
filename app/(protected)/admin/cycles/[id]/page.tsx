@@ -720,9 +720,9 @@ function ReportSectionsCard({
     {
       key: "order",
       header: "#",
-      cell: (row) => (
+      cell: (_row, index) => (
         <span className="text-sm tabular-nums text-muted-foreground">
-          {row.display_order}
+          {index + 1}
         </span>
       ),
     },

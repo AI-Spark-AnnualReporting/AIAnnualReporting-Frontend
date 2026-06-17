@@ -675,7 +675,7 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           <Sparkles className="h-7 w-7 text-indigo-600" />
         </div>
         <h2 className="mb-1.5 text-lg font-bold text-slate-900">
-          Generate the report plan
+          Report theme and outline
         </h2>
         <p className="mb-5 text-sm text-slate-500">
           We&apos;ll run two AI passes over your approved department content to
@@ -691,12 +691,12 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           {build.isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Generating reporting sections…
+              Generating…
             </>
           ) : (
             <>
               <Sparkles className="mr-2 h-4 w-4" />
-              Generate Reporting Sections
+              Generate
             </>
           )}
         </Button>

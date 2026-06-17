@@ -45,7 +45,7 @@ export function PMSidebar() {
           <LayoutGrid className="h-5 w-5 text-white" />
         </div>
         <div className="leading-tight">
-          <p className="text-base font-bold text-white">Centriton</p>
+          <p className="text-base font-bold text-white">Centriyon</p>
           <p className="text-xs text-indigo-200">PM Workspace</p>
         </div>
       </div>

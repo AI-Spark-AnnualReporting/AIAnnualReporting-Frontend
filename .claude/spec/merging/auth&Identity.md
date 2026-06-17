@@ -6,18 +6,18 @@
 ### Context
 
 SAR's backend login and register endpoints now return 410. All authentication
-goes through Centriton. When a user wants to access SAR, Centriton will open
-SAR in a new tab passing the Centriton JWT via a URL query parameter:
+goes through Centriyon. When a user wants to access SAR, Centriyon will open
+SAR in a new tab passing the Centriyon JWT via a URL query parameter:
 
 ```
-https://sar.domain.com?token=<centriton_jwt>
+https://sar.domain.com?token=<centriyon_jwt>
 ```
 
 SAR's frontend must:
-1. Accept the Centriton JWT from the URL on first load and store it
+1. Accept the Centriyon JWT from the URL on first load and store it
 2. Use that token for all subsequent API calls
-3. Replace the login/register pages with "use Centriton" messages
-4. When the token expires and cannot be refreshed, redirect to Centriton login
+3. Replace the login/register pages with "use Centriyon" messages
+4. When the token expires and cannot be refreshed, redirect to Centriyon login
 
 **Tech stack:** Next.js 16 App Router, TypeScript strict, TanStack Query,
 Axios singleton in `lib/api/client.ts`, auth in `contexts/AuthContext.tsx`.
@@ -32,8 +32,8 @@ Add to `.env.example` and `.env.local`:
 NEXT_PUBLIC_CENTRITON_URL=http://localhost:8080
 ```
 
-This is the URL of the Centriton frontend. SAR uses it to redirect users to
-Centriton login when their token expires or is missing.
+This is the URL of the Centriyon frontend. SAR uses it to redirect users to
+Centriyon login when their token expires or is missing.
 
 ---
 
@@ -43,11 +43,11 @@ Centriton login when their token expires or is missing.
 |---|---|
 | `.env.example` | Add `NEXT_PUBLIC_CENTRITON_URL` |
 | `app/page.tsx` | Handle `?token=` param before redirecting |
-| `app/(public)/login/page.tsx` | Replace login form with "use Centriton" message |
-| `app/(public)/forgot-password/page.tsx` | Replace with redirect to Centriton |
-| `app/(public)/reset-password/page.tsx` | Replace with redirect to Centriton |
+| `app/(public)/login/page.tsx` | Replace login form with "use Centriyon" message |
+| `app/(public)/forgot-password/page.tsx` | Replace with redirect to Centriyon |
+| `app/(public)/reset-password/page.tsx` | Replace with redirect to Centriyon |
 | `contexts/AuthContext.tsx` | Add `loginWithToken()`, update `logout()` |
-| `lib/api/client.ts` | Update 401 handler to redirect to Centriton |
+| `lib/api/client.ts` | Update 401 handler to redirect to Centriyon |
 | `components/providers.tsx` | Token ingestion on app mount |
 
 ---
@@ -82,9 +82,9 @@ This requires a new page at `app/auth/token/page.tsx` — see Change 2.
 
 ### Change 2 — `app/auth/token/page.tsx` (new file)
 
-Client component. Its only job is to receive the Centriton JWT from the URL,
+Client component. Its only job is to receive the Centriyon JWT from the URL,
 store it, call `/auth/me` to get the user, and redirect to the correct role
-home. This runs once per token passthrough from Centriton.
+home. This runs once per token passthrough from Centriyon.
 
 ```tsx
 "use client"
@@ -133,7 +133,7 @@ const ROLE_ROUTES: Record<string, string> = {
 const loginWithToken = async (token: string): Promise<void> => {
   // Store token immediately so Axios attaches it to the /auth/me call
   localStorage.setItem("access_token", token)
-  // Do NOT store a refresh_token — Centriton tokens are not refreshed by SAR
+  // Do NOT store a refresh_token — Centriyon tokens are not refreshed by SAR
   localStorage.removeItem("refresh_token")
 
   // Hydrate user from the backend (verifies the token is valid)
@@ -147,7 +147,7 @@ const loginWithToken = async (token: string): Promise<void> => {
 }
 ```
 
-Update `logout()` to redirect to Centriton login instead of SAR login:
+Update `logout()` to redirect to Centriyon login instead of SAR login:
 
 ```ts
 const logout = async (): Promise<void> => {
@@ -158,9 +158,9 @@ const logout = async (): Promise<void> => {
   localStorage.removeItem("refresh_token")
   setUser(null)
   setIsAuthenticated(false)
-  // Redirect to Centriton, not SAR login
-  const centritonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? ""
-  window.location.href = `${centritonUrl}/login`
+  // Redirect to Centriyon, not SAR login
+  const centriyonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? ""
+  window.location.href = `${centriyonUrl}/login`
 }
 ```
 
@@ -181,7 +181,7 @@ issues its own tokens, there is no refresh token to use. Update the interceptor:
 
 **New behaviour on 401:**
 1. If the failed request IS `/auth/refresh` or `/auth/login` — skip (avoid loop)
-2. Otherwise: clear tokens and redirect to Centriton login
+2. Otherwise: clear tokens and redirect to Centriyon login
 
 ```ts
 // In the response interceptor, replace the refresh logic:
@@ -194,8 +194,8 @@ if (error.response?.status === 401) {
   if (!isAuthEndpoint) {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
-    const centritonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? ""
-    window.location.href = `${centritonUrl}/login`
+    const centriyonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? ""
+    window.location.href = `${centriyonUrl}/login`
   }
 }
 ```
@@ -215,7 +215,7 @@ New content:
 
 ```tsx
 export default function LoginPage() {
-  const centritonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? "#"
+  const centriyonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? "#"
 
   return (
     <div className="flex flex-col items-center justify-center gap-6 p-8 text-center">
@@ -223,18 +223,18 @@ export default function LoginPage() {
       <div>
         <h1 className="text-2xl font-semibold">Spark Annual Report Studio</h1>
         <p className="text-muted-foreground mt-2">
-          Sign in is managed through the Centriton platform.
+          Sign in is managed through the Centriyon platform.
         </p>
       </div>
 
-      <a href={`${centritonUrl}/login`}>
+      <a href={`${centriyonUrl}/login`}>
         <Button className="w-full">
-          Go to Centriton Login
+          Go to Centriyon Login
         </Button>
       </a>
 
       <p className="text-sm text-muted-foreground">
-        Your Centriton session gives you access to both platforms.
+        Your Centriyon session gives you access to both platforms.
         No separate password needed.
       </p>
     </div>
@@ -246,18 +246,18 @@ export default function LoginPage() {
 
 ### Change 6 — `app/(public)/forgot-password/page.tsx`
 
-Replace with a redirect to Centriton:
+Replace with a redirect to Centriyon:
 
 ```tsx
 export default function ForgotPasswordPage() {
-  const centritonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? "#"
+  const centriyonUrl = process.env.NEXT_PUBLIC_CENTRITON_URL ?? "#"
   return (
     <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
       <p className="text-muted-foreground">
-        Password reset is handled through the Centriton platform.
+        Password reset is handled through the Centriyon platform.
       </p>
-      <a href={`${centritonUrl}/login`}>
-        <Button variant="outline">Go to Centriton</Button>
+      <a href={`${centriyonUrl}/login`}>
+        <Button variant="outline">Go to Centriyon</Button>
       </a>
     </div>
   )
@@ -271,7 +271,7 @@ Apply the same treatment to `app/(public)/reset-password/page.tsx`.
 ### Change 7 — `components/auth/RouteGuard.tsx`
 
 No structural changes needed. The RouteGuard already redirects to `/login`
-when unauthenticated, and `/login` now shows the "use Centriton" message.
+when unauthenticated, and `/login` now shows the "use Centriyon" message.
 
 One addition: if the URL contains `?token=`, do NOT redirect to `/login` —
 let the root page handler process the token first. Check for the token param
@@ -301,7 +301,7 @@ if (searchParams.get("token")) {
 
 ### Done Criteria
 
-1. Opening `https://sar.domain.com?token=<centriton_jwt>` stores the token,
+1. Opening `https://sar.domain.com?token=<centriyon_jwt>` stores the token,
    calls `/auth/me`, and redirects to the correct role home (`/admin`, `/pm`,
    or `/department`)
 2. Subsequent page loads use the stored token with no re-authentication
@@ -310,8 +310,8 @@ if (searchParams.get("token")) {
 5. `GET /department` with a valid department_user token → loads the dept dashboard
 6. Token expiry (401 on any request) clears localStorage and redirects to
    `{CENTRITON_URL}/login` — NOT to SAR `/login`
-7. Navigating directly to SAR `/login` shows the "Go to Centriton Login"
+7. Navigating directly to SAR `/login` shows the "Go to Centriyon Login"
    message, not a login form
 8. SAR logout redirects to `{CENTRITON_URL}/login`
 9. The refresh-token interceptor is removed — no attempt to call `/auth/refresh`
-   with a Centriton token
+   with a Centriyon token

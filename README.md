@@ -15,7 +15,7 @@ cp .env.example .env.local
 # edit .env.local — at minimum:
 #   NEXT_PUBLIC_API_BASE_URL=https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1
 #   NEXT_PUBLIC_APP_NAME=Spark Annual Report AI Studio
-#   NEXT_PUBLIC_CENTRITON_URL=http://localhost:8080   # Centriton SSO (login / logout / 401 redirect)
+#   NEXT_PUBLIC_CENTRITON_URL=http://localhost:8080   # Centriyon SSO (login / logout / 401 redirect)
 #   ADMIN_SERVICE_EMAIL=...          # server-only, for /api/pm/* proxies
 #   ADMIN_SERVICE_PASSWORD=...
 #   DEPT_USER_DEFAULT_PASSWORD=...   # optional; falls back to ADMIN_SERVICE_PASSWORD
@@ -43,10 +43,10 @@ Open [http://localhost:3000](http://localhost:3000).
 | Styling | TailwindCSS v4 + shadcn/ui (Radix) |
 | Server state | TanStack Query |
 | Forms | React Hook Form + Zod |
-| HTTP | Axios (Centriton JWT; 401 → Centriton login redirect) |
+| HTTP | Axios (Centriyon JWT; 401 → Centriyon login redirect) |
 | Icons | Lucide React |
 | Toasts | Sonner |
-| Auth | Centriton SSO — receives JWT via `?token=` on root; no refresh token |
+| Auth | Centriyon SSO — receives JWT via `?token=` on root; no refresh token |
 | DnD | `@dnd-kit/core` + `@dnd-kit/sortable` (plan reorder) |
 | Markdown | `react-markdown` |
 | Drag-and-drop upload | `react-dropzone` |

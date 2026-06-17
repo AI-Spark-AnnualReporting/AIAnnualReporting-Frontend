@@ -10,7 +10,7 @@ import React, {
 import { useRouter } from "next/navigation"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
-import { centritonLoginUrl } from "@/lib/centriton"
+import { centriyonLoginUrl } from "@/lib/centriyon"
 
 interface AuthContextValue {
   user: User | null
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [refreshUser])
 
-  // Centriton SSO: the JWT is minted by Centriton and handed to SAR via
+  // Centriyon SSO: the JWT is minted by Centriyon and handed to SAR via
   // `?token=` on the root URL. We persist it, hydrate the user, and route to
   // their role home. There's no SAR-issued refresh token any more.
   const loginWithToken = useCallback(
@@ -73,12 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await authApi.logout()
     } catch {
-      // ignore — local cleanup + Centriton bounce still happens
+      // ignore — local cleanup + Centriyon bounce still happens
     } finally {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       setUser(null)
-      window.location.href = centritonLoginUrl()
+      window.location.href = centriyonLoginUrl()
     }
   }, [])
 
