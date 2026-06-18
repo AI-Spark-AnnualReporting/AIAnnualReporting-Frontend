@@ -324,7 +324,11 @@ export function SectionDetail({
   //   - structured / financials / composite → file upload (AttachSection)
   if (!section.ai_allowed) {
     if (section.content_source === "narrative") {
-      return <ManualSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
+      // key by section_code so the editor remounts (and its draft/seed state
+      // resets) when switching sections — without it, an unsaved section's
+      // seeded draft would bleed into the next unsaved section (both have empty
+      // server content, so the in-place reset can't tell them apart).
+      return <ManualSection key={section.section_code} section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
     }
     return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
   }
