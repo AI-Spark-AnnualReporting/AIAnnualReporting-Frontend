@@ -323,6 +323,8 @@ export interface DepartmentDashboard {
     has_questions: boolean
     review_notes?: string | null
     content_language?: ContentLanguage
+    /** Session last-modified timestamp — drives the "Last Modified" sort. */
+    updated_at?: string
   }[]
   total_assignments: number
   pending_count: number
@@ -379,6 +381,8 @@ export interface PMDashboard {
     reopened_count?: number
     /** Average of every department's progress_percentage across the cycle */
     completion_rate: number
+    /** Cycle last-modified timestamp — drives the "Last Modified" sort. */
+    updated_at?: string
   }[]
   pending_reviews: number
   recent_submissions: {

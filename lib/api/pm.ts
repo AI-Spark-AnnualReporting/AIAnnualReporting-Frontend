@@ -60,6 +60,8 @@ export interface PMCycleListItem {
   fiscal_year: number
   status: string
   submission_deadline?: string
+  // Last-modified timestamp from CycleResponse/TimestampMixin — drives the "Last Modified" sort.
+  updated_at?: string
 }
 
 export interface PMCycleSession {

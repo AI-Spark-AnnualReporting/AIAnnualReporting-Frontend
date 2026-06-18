@@ -1,11 +1,14 @@
 "use client"
 
-import { useState } from "react"
 import { usePMDashboard } from "@/hooks/useSessions"
 import { PMStatCard } from "@/components/pm/PMStatCard"
+import { SortControl } from "@/components/ui/sort-control"
+import { useSort } from "@/hooks/useSort"
+import type { SortField } from "@/lib/sort"
 import { Button } from "@/components/ui/button"
 import { CYCLE_STATUSES } from "@/lib/constants"
 import { CycleStatus } from "@/types"
+import { useState } from "react"
 import { cn, formatDate } from "@/lib/utils"
 import { RefreshCw, Clock, ArrowRight, CheckCircle2, AlertCircle, ClipboardCheck, Info } from "lucide-react"
 import Link from "next/link"
@@ -20,6 +23,8 @@ interface PMCycle {
   total_departments?: number
   submitted_count?: number
   completion_rate?: number
+  fiscal_year?: number
+  updated_at?: string
 }
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
@@ -29,6 +34,12 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "completed", label: CYCLE_STATUSES.completed.label },
   { value: "archived", label: CYCLE_STATUSES.archived.label },
   { value: "closed", label: CYCLE_STATUSES.closed.label },
+]
+
+const SORT_FIELDS: SortField<PMCycle>[] = [
+  { key: "updated_at", label: "Last Modified", defaultDirection: "desc", type: "date", accessor: (c) => c.updated_at },
+  { key: "submission_deadline", label: "Deadline", defaultDirection: "asc", type: "date", accessor: (c) => c.submission_deadline },
+  { key: "fiscal_year", label: "Fiscal Year", defaultDirection: "desc", type: "number", accessor: (c) => c.fiscal_year },
 ]
 
 // Soft status pill with a leading dot, matching the redesign.
@@ -53,12 +64,15 @@ function CycleStatusPill({ status }: { status: CycleStatus }) {
 export default function PMCyclesPage() {
   const { data, isLoading, isError, error } = usePMDashboard()
   const [filter, setFilter] = useState<StatusFilter>("all")
+  const sort = useSort(SORT_FIELDS)
 
   const rawData = data as Record<string, unknown> | undefined
   const allCycles = ((rawData?.active_cycles || rawData?.cycles || []) as PMCycle[])
 
-  const visibleCycles =
-    filter === "all" ? allCycles : allCycles.filter((c) => c.status === filter)
+  // filter → sort → render. Status counts stay on the unsorted list.
+  const visibleCycles = sort.sort(
+    filter === "all" ? allCycles : allCycles.filter((c) => c.status === filter),
+  )
 
   const countFor = (f: StatusFilter) =>
     f === "all" ? allCycles.length : allCycles.filter((c) => c.status === f).length
@@ -113,8 +127,9 @@ export default function PMCyclesPage() {
         />
       </div>
 
-      {/* Filter pills */}
-      <div className="flex flex-wrap gap-2">
+      {/* Filter pills + sort */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => {
           const active = filter === f.value
           const count = countFor(f.value)
@@ -141,6 +156,10 @@ export default function PMCyclesPage() {
             </button>
           )
         })}
+        </div>
+        {allCycles.length > 0 && (
+          <SortControl fields={SORT_FIELDS} value={sort.state} onSelect={sort.onSelect} />
+        )}
       </div>
 
       {/* List */}

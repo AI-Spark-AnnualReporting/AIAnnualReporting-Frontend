@@ -5,18 +5,32 @@ import { PMStatCard } from "@/components/pm/PMStatCard"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { SortControl } from "@/components/ui/sort-control"
+import { useSort } from "@/hooks/useSort"
+import type { SortField } from "@/lib/sort"
+import type { PMDashboard as PMDashboardData } from "@/types"
 import {
   RefreshCw, ClipboardCheck, ArrowRight, Clock, FileText, CheckCircle2,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, cn } from "@/lib/utils"
 
+type PMCycleCard = PMDashboardData["active_cycles"][number]
+
+const SORT_FIELDS: SortField<PMCycleCard>[] = [
+  { key: "updated_at", label: "Last Modified", defaultDirection: "desc", type: "date", accessor: (c) => c.updated_at },
+  { key: "submission_deadline", label: "Deadline", defaultDirection: "asc", type: "date", accessor: (c) => c.submission_deadline },
+  { key: "fiscal_year", label: "Fiscal Year", defaultDirection: "desc", type: "number", accessor: (c) => c.fiscal_year },
+]
+
 export default function PMDashboard() {
   const { data, isLoading } = usePMDashboard()
+  const sort = useSort(SORT_FIELDS)
 
   if (isLoading) return <PageLoader />
 
   const cycles = data?.active_cycles || []
+  const sortedCycles = sort.sort(cycles)
   const recentSubmissions = data?.recent_submissions || []
   const pendingReviews = data?.pending_reviews ?? 0
 
@@ -59,7 +73,12 @@ export default function PMDashboard() {
 
       {/* Assigned cycles */}
       <div className="space-y-5">
-        <h2 className="text-xl font-bold text-slate-900">Your Assigned Cycles</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-slate-900">Your Assigned Cycles</h2>
+          {cycles.length > 0 && (
+            <SortControl fields={SORT_FIELDS} value={sort.state} onSelect={sort.onSelect} />
+          )}
+        </div>
 
         {cycles.length === 0 ? (
           <EmptyState
@@ -69,7 +88,7 @@ export default function PMDashboard() {
           />
         ) : (
           <div className="space-y-5">
-            {cycles.map((cycle) => {
+            {sortedCycles.map((cycle) => {
               const submitted = cycle.submitted_count ?? 0
               const total = cycle.total_departments ?? 0
               const pct = Math.round(cycle.completion_rate ?? 0)

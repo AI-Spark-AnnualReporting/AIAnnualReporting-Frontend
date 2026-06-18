@@ -137,6 +137,7 @@ export function usePMDashboard() {
           fiscal_year: cycle.fiscal_year,
           status: cycle.status,
           submission_deadline: cycle.submission_deadline,
+          updated_at: cycle.updated_at,
           total_departments: total,
           submitted_count: submitted + approved,
           in_progress_count: inProgress,
