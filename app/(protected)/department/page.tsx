@@ -17,6 +17,10 @@ import {
 } from "@/components/ui/dialog"
 import { SESSION_STATUSES } from "@/lib/constants"
 import { SessionStatus } from "@/types"
+import { SortControl } from "@/components/ui/sort-control"
+import { useSort } from "@/hooks/useSort"
+import type { SortField } from "@/lib/sort"
+import type { DepartmentDashboard as DepartmentDashboardData } from "@/types"
 import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
 import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
@@ -38,6 +42,14 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "submitted", label: SESSION_STATUSES.submitted.label },
   { value: "approved", label: SESSION_STATUSES.approved.label },
   { value: "reopened", label: SESSION_STATUSES.reopened.label },
+]
+
+type AssignmentCard = DepartmentDashboardData["assignments"][number]
+
+const SORT_FIELDS: SortField<AssignmentCard>[] = [
+  { key: "updated_at", label: "Last Modified", defaultDirection: "desc", type: "date", accessor: (s) => s.updated_at },
+  { key: "submission_deadline", label: "Deadline", defaultDirection: "asc", type: "date", accessor: (s) => s.submission_deadline },
+  { key: "fiscal_year", label: "Fiscal Year", defaultDirection: "desc", type: "number", accessor: (s) => s.fiscal_year },
 ]
 
 // Centriyon status pill — coloured dot + label, keyed by session status.
@@ -64,6 +76,7 @@ export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
   const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
+  const sort = useSort(SORT_FIELDS)
   const [startTarget, setStartTarget] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
@@ -166,8 +179,10 @@ export default function DepartmentDashboard() {
   const departmentLabel =
     sessions.length > 0 ? sessions[0].department_name : "Your"
 
-  const visibleSessions =
-    filter === "all" ? sessions : sessions.filter((s) => s.status === filter)
+  // filter → sort → render. Status counts stay on the unsorted list.
+  const visibleSessions = sort.sort(
+    filter === "all" ? sessions : sessions.filter((s) => s.status === filter),
+  )
   const countFor = (f: StatusFilter) =>
     f === "all" ? sessions.length : sessions.filter((s) => s.status === f).length
 
@@ -207,9 +222,10 @@ export default function DepartmentDashboard() {
           </span>
         </div>
 
-        {/* Status filter chips */}
+        {/* Status filter chips + sort */}
         {sessions.length > 0 && (
-          <div className="mb-6 flex flex-wrap gap-2">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
             {FILTERS.map((f) => {
               const active = filter === f.value
               const count = countFor(f.value)
@@ -236,6 +252,8 @@ export default function DepartmentDashboard() {
                 </button>
               )
             })}
+            </div>
+            <SortControl size="sm" fields={SORT_FIELDS} value={sort.state} onSelect={sort.onSelect} />
           </div>
         )}
 

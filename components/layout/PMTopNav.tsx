@@ -78,7 +78,7 @@ export function PMTopNav() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-slate-50">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 text-xs font-semibold text-white">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#3535b5] text-xs font-semibold text-white">
                   {getInitials(user.full_name)}
                 </div>
                 <div className="text-left leading-tight">
