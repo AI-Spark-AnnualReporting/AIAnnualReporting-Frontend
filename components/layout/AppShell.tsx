@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (user?.role === "project_manager") {
     return (
-      <div className="flex h-screen overflow-hidden bg-[#f5f6fc]">
+      <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <PMSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <PMTopNav />
@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (user?.role === "department_user") {
     return (
-      <div className="flex h-screen overflow-hidden bg-[#f5f6fc]">
+      <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <DeptSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <DeptTopNav />
