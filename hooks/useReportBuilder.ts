@@ -30,6 +30,19 @@ export function usePMCycleSections(cycleId: string) {
   })
 }
 
+// The company's previous manual-section content, used to pre-fill the
+// human-voice sections in the builder. Company-scoped — companyId comes from
+// the authenticated user (/auth/me). Read-only. Cached longer than the cycle
+// queries — prior-cycle content doesn't change during a build session.
+export function usePreviousManualSections(companyId: string | null | undefined) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_COMPANY_PREV_MANUAL(companyId ?? ""),
+    queryFn: () => pmApi.previousManualSections(companyId as string),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
 // Shared error shape. apiClient normalizes errors to { message, status, ... } but
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash

@@ -26,6 +26,9 @@ export interface User {
   full_name: string
   role: UserRole
   status: UserStatus
+  // The user's company (UUID). Present for PMs/admins via /auth/me; used to
+  // scope company-level endpoints like previous manual sections.
+  company_id?: string | null
   department?: string | null
   department_id?: string | null
   phone?: string | null

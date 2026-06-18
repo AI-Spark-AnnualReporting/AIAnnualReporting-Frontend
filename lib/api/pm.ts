@@ -44,6 +44,33 @@ export interface PreviousBriefResponse {
   source_fiscal_year: number | null
 }
 
+// Previous manual sections lookup — pre-fill source for the human-voice
+// (manual) sections of the report builder. Company-scoped: resolved from this
+// company's most recent prior cycle that had each section filled. `source`
+// tells the UI where the content came from and is the only field to branch on.
+export type PreviousManualSource =
+  | "previous_cycle"
+  | "company_description"
+  | "none"
+
+export interface PreviousManualSection {
+  section_code: string
+  section_number: number
+  title: string
+  mode: string // always "manual"
+  has_data: boolean
+  content: string | null
+  source: PreviousManualSource
+  source_cycle_id: string | null
+  fiscal_year: number | null
+}
+
+export interface PreviousManualSectionsResponse {
+  success: boolean
+  company_id: string
+  sections: PreviousManualSection[]
+}
+
 // PM kickoff brief — submitted after cycle is active
 export interface KickoffBriefPayload {
   cycle_id: string
@@ -92,6 +119,20 @@ export const pmApi = {
   previousBrief: async (cycleId: string): Promise<PreviousBriefResponse> => {
     const { data } = await apiClient.get<PreviousBriefResponse>(
       `/pm/cycles/${cycleId}/previous-brief`,
+    )
+    return data
+  },
+
+  // Fetch the company's previous manual-section content to pre-fill the
+  // human-voice sections in the report builder. Company-scoped: the companyId
+  // comes from the authenticated user (/auth/me). A PM may only pass their own
+  // companyId (403 otherwise); admins may pass any. Read-only suggestions — the
+  // PM still edits and saves each section via saveManualContent.
+  previousManualSections: async (
+    companyId: string,
+  ): Promise<PreviousManualSectionsResponse> => {
+    const { data } = await apiClient.get<PreviousManualSectionsResponse>(
+      `/pm/companies/${companyId}/manual-sections/previous`,
     )
     return data
   },

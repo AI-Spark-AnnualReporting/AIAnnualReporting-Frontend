@@ -8,6 +8,7 @@ import {
   LockOpen,
   PenLine,
   Save,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,9 +16,11 @@ import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import {
   useLockSection,
+  usePreviousManualSections,
   useSaveManualContent,
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
+import { useAuth } from "@/contexts/AuthContext"
 import { cn, formatDateTime } from "@/lib/utils"
 import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
 import type { ContentLanguage, CycleReportSection } from "@/types"
@@ -44,12 +47,43 @@ export function ManualSection({
   const langWarning = languageMismatchWarning(draft, contentLanguage)
   const langOk = isLanguageAcceptable(draft, contentLanguage)
 
+  // The company's previous manual content, used to pre-fill empty sections.
+  // companyId comes from the authenticated user (/auth/me) — a PM is scoped to
+  // their own company. The query no-ops until the user (and id) resolve.
+  const { user } = useAuth()
+  const { data: previous } = usePreviousManualSections(user?.company_id)
+  const prevSection = previous?.sections.find(
+    (s) => s.section_code === sectionCode,
+  )
+  // Only suggest a pre-fill when there's prior content AND nothing is saved yet.
+  const suggestion =
+    !saved.trim() && prevSection?.has_data && prevSection.content
+      ? prevSection
+      : null
+
   // Re-seed the draft when the server content changes externally (e.g. after
   // unlocking, or switching sections in the builder).
   const [prevSaved, setPrevSaved] = useState(saved)
   if (prevSaved !== saved) {
     setPrevSaved(saved)
     setDraft(saved)
+  }
+
+  // Auto-seed the empty editor with the company's previous content for this
+  // section. Runs once per section (guarded by seededFor) and only while the
+  // editor is still untouched (draft === saved) and nothing is saved — so it
+  // never clobbers in-progress typing or saved content. The seeded draft is
+  // intentionally dirty so the PM can review and Save it. Pre-fill, not
+  // auto-save: this never writes to the server on its own.
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+  if (
+    suggestion &&
+    seededFor !== sectionCode &&
+    draft === saved &&
+    !saved.trim()
+  ) {
+    setSeededFor(sectionCode)
+    setDraft(suggestion.content ?? "")
   }
 
   const save = useSaveManualContent(cycleId)
@@ -112,6 +146,31 @@ export function ManualSection({
               the content below and click Save.
             </span>
           </div>
+
+          {/* Pre-fill notice: shown while the editor holds unsaved suggested
+              content seeded from the company's prior data. The copy depends on
+              where that content came from — branch on `source`. */}
+          {suggestion && dirty && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+              <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                {suggestion.source === "previous_cycle" ? (
+                  <>
+                    Pre-filled from
+                    {suggestion.fiscal_year
+                      ? ` FY${suggestion.fiscal_year}`
+                      : " a previous cycle"}
+                    . Review and edit before saving.
+                  </>
+                ) : (
+                  <>
+                    Seeded from the company profile — please review and rewrite
+                    before saving.
+                  </>
+                )}
+              </span>
+            </div>
+          )}
 
           <div className="space-y-2">
             <label
