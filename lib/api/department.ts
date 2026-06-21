@@ -42,7 +42,9 @@ export interface ExtractedAnswer {
   question_id: string
   question: string
   extracted_answer: string
-  status: "found" | "not_found"
+  // "found" = freshly extracted this run, "already_answered" = preserved from a
+  // previous run/edit, "not_found" = no supporting document covered it.
+  status: "found" | "not_found" | "already_answered"
 }
 
 export interface ExtractAnswersResponse {

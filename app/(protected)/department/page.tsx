@@ -156,6 +156,9 @@ export default function DepartmentDashboard() {
         total_questions: result.total_questions,
         found_count: result.found_count,
         not_found_count: result.not_found_count,
+        already_answered_count: result.extracted_answers.filter(
+          (a) => a.status === "already_answered"
+        ).length,
       })
       // Let the success state breathe before entering the workspace.
       setTimeout(() => router.push(`/department/sessions/${sessionId}`), 2200)

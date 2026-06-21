@@ -13,8 +13,13 @@ import { cn } from "@/lib/utils"
 
 export interface ExtractionResult {
   total_questions: number
+  // found_count includes already_answered items (backend convention):
+  // found_count + not_found_count === total_questions.
   found_count: number
   not_found_count: number
+  // How many questions were already answered before this run. Defaults to 0 for
+  // callers that don't supply it.
+  already_answered_count?: number
 }
 
 const STAGES = [
@@ -48,6 +53,49 @@ const STAGES = [
 const STAGE_MS = 2600
 
 /**
+ * Derive the success title + sub-copy from the extraction counts. `found_count`
+ * includes answers that were already filled in from a previous run, so we report
+ * the *newly* extracted count to avoid overstating what changed.
+ */
+function extractionSummary(result: ExtractionResult): { title: string; sub: string } {
+  const total = result.total_questions
+  const alreadyDone = result.already_answered_count ?? 0
+  const newlyFound = result.found_count - alreadyDone
+  const notFound = result.not_found_count
+  const plural = (n: number) => (n === 1 ? "" : "s")
+
+  // Every question was already answered → nothing new to extract.
+  if (total > 0 && alreadyDone === total) {
+    return {
+      title: "Nothing new to extract",
+      sub: "All your questions were already answered — nothing new to extract.",
+    }
+  }
+
+  if (newlyFound > 0 && notFound > 0) {
+    return {
+      title: "All set — your answers are ready!",
+      sub: `We drafted ${newlyFound} new answer${plural(newlyFound)}. ${notFound} still need${
+        notFound === 1 ? "s" : ""
+      } a supporting document.`,
+    }
+  }
+
+  if (newlyFound > 0) {
+    return {
+      title: "All set — your answers are ready!",
+      sub: `We drafted ${newlyFound} new answer${plural(newlyFound)}. Let's review them together.`,
+    }
+  }
+
+  // Ran, but the new document(s) covered nothing.
+  return {
+    title: "No new answers found",
+    sub: "We couldn't find any new answers in your documents — you can still answer each question manually.",
+  }
+}
+
+/**
  * Full-screen animated loader shown while the backend uploads documents and
  * extracts answers for the department user. It cycles through friendly stage
  * messages while work runs; once `result` is supplied it flips to a success
@@ -67,12 +115,12 @@ export function ExtractionLoader({ result }: { result: ExtractionResult | null }
 
   const current = STAGES[stage]
   const Icon = done ? CheckCircle2 : current.icon
-  const title = done ? "All set — your answers are ready!" : current.title
-  const sub = done
-    ? `We drafted answers for ${result.found_count} of ${result.total_questions} question${
-        result.total_questions === 1 ? "" : "s"
-      }. Let's review them together.`
-    : current.sub
+
+  // Build the success copy from the *newly* extracted count rather than the raw
+  // found_count, which also includes answers preserved from a previous run.
+  const summary = done && result ? extractionSummary(result) : null
+  const title = done ? summary!.title : current.title
+  const sub = done ? summary!.sub : current.sub
   const progress = done ? 100 : Math.round(((stage + 1) / STAGES.length) * 100)
   const swapKey = done ? "done" : `stage-${stage}`
 
