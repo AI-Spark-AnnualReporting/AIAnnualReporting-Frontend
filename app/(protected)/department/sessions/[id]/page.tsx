@@ -1035,7 +1035,7 @@ export default function SessionWorkspacePage({
       {/* ── Upload supporting documents — same upload + AI extraction as the
           dashboard Start Session popup ── */}
       <Dialog open={uploadOpen} onOpenChange={(o) => { if (!o) closeUploadDialog() }}>
-        <DialogContent className="max-w-lg rounded-2xl border-slate-200">
+        <DialogContent className="flex max-h-[85vh] max-w-lg flex-col rounded-2xl border-slate-200">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-slate-900">Upload Supporting Documents</DialogTitle>
             <DialogDescription className="text-slate-500">
@@ -1045,7 +1045,7 @@ export default function SessionWorkspacePage({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
+          <div className="flex min-h-0 flex-1 flex-col space-y-3">
             <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
@@ -1069,26 +1069,33 @@ export default function SessionWorkspacePage({
                 <p className="mt-1 text-xs text-slate-500">PDF, DOCX, DOC, TXT</p>
               </button>
             ) : (
-              <div className="space-y-2">
-                {docCheck.docs.map((d, i) => (
-                  <DocFileRow
-                    key={`${d.file.name}-${i}`}
-                    name={d.file.name}
-                    sizeKB={d.file.size / 1024}
-                    lang={d.lang}
-                    onRemove={() => docCheck.removeAt(i)}
-                  />
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-slate-200 bg-white"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <FileUp className="mr-2 h-3.5 w-3.5" />
-                  Add more
-                </Button>
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="-mr-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-2">
+                  {docCheck.docs.map((d, i) => (
+                    <DocFileRow
+                      key={`${d.file.name}-${i}`}
+                      name={d.file.name}
+                      sizeKB={d.file.size / 1024}
+                      lang={d.lang}
+                      onRemove={() => docCheck.removeAt(i)}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-200 bg-white"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileUp className="mr-2 h-3.5 w-3.5" />
+                    Add more
+                  </Button>
+                  <span className="text-xs text-slate-400">
+                    {docCheck.docs.length} file{docCheck.docs.length === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
             )}
           </div>
