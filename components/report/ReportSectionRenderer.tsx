@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { knowledgeBaseApi } from "@/lib/api/knowledge-base"
 import { cn, formatFileSize } from "@/lib/utils"
+import { stripDuplicateTitle, toArabicDigits } from "@/lib/report-format"
 import type { FinalReportSection } from "@/types"
 
 interface ReportSectionRendererProps {
   section: FinalReportSection
   index: number
+  // True for Arabic cycles — lay out headings/numbers RTL to match the report.
+  isArabic?: boolean
 }
 
 // Renders one body section of the final report. Switches on section.type:
@@ -21,7 +24,14 @@ interface ReportSectionRendererProps {
 export function ReportSectionRenderer({
   section,
   index,
+  isArabic = false,
 }: ReportSectionRendererProps) {
+  // Mirror the backend dedup: the stored content leads with its own heading that
+  // repeats the section title (already shown by SectionTitle), so strip it.
+  const body =
+    section.content != null
+      ? stripDuplicateTitle(section.content, section.title)
+      : section.content
   return (
     <section
       id={section.section_code}
@@ -30,10 +40,10 @@ export function ReportSectionRenderer({
         index > 0 && "print:break-before-page",
       )}
     >
-      <SectionTitle title={section.title} index={index} />
+      <SectionTitle title={section.title} index={index} isArabic={isArabic} />
       {section.type === "narrative" ? (
-        section.content && section.content.trim() ? (
-          <ProsePreview content={section.content} />
+        body && body.trim() ? (
+          <ProsePreview content={body} dir={isArabic ? "rtl" : "ltr"} />
         ) : (
           <p className="text-sm text-muted-foreground italic">
             This section has no content.
@@ -50,11 +60,25 @@ export function ReportSectionRenderer({
   )
 }
 
-function SectionTitle({ title, index }: { title: string; index: number }) {
+function SectionTitle({
+  title,
+  index,
+  isArabic,
+}: {
+  title: string
+  index: number
+  isArabic?: boolean
+}) {
+  const num = String(index + 1).padStart(2, "0")
+  // dir="rtl" reverses the flex row so the number (first in DOM) sits on the
+  // right of the title — matching the downloaded Arabic report.
   return (
-    <h2 className="text-2xl font-semibold mb-4 flex items-baseline gap-3">
+    <h2
+      dir={isArabic ? "rtl" : "ltr"}
+      className="text-2xl font-semibold mb-4 flex items-baseline gap-3"
+    >
       <span className="text-muted-foreground tabular-nums text-base font-normal">
-        {String(index + 1).padStart(2, "0")}
+        {isArabic ? toArabicDigits(num) : num}
       </span>
       <span>{title}</span>
     </h2>

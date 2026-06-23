@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils"
 interface ProsePreviewProps {
   content: string
   className?: string
+  // When "rtl", the whole markdown block lays out right-to-left so its headings
+  // and lists right-align — used for Arabic report content.
+  dir?: "ltr" | "rtl"
 }
 
 // Crude detector — same pattern as the dept draft + PM session pages. If the
@@ -41,16 +44,19 @@ function makeHeadingRenderer(content: string): Components {
   }
 }
 
-export function ProsePreview({ content, className }: ProsePreviewProps) {
+export function ProsePreview({ content, className, dir }: ProsePreviewProps) {
   const trimmed = content.trim()
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
+  const style = dir === "rtl" ? { textAlign: "right" as const } : undefined
   return looksLikeHtml ? (
     <div
+      dir={dir}
+      style={style}
       className={cn("prose prose-sm max-w-none", className)}
       dangerouslySetInnerHTML={{ __html: content }}
     />
   ) : (
-    <div className={cn("prose prose-sm max-w-none", className)}>
+    <div dir={dir} style={style} className={cn("prose prose-sm max-w-none", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)

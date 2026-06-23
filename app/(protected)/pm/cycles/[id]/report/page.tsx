@@ -30,7 +30,7 @@ import {
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { formatDateTime } from "@/lib/utils"
-import type { CompanyProfile, Sector } from "@/types"
+import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
 export default function FinalReportPage({
   params,
@@ -51,6 +51,7 @@ interface DashboardData {
     fiscal_year?: number
     company_profile?: CompanyProfile | null
     sector?: Sector | null
+    content_language?: ContentLanguage
   }
 }
 
