@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import { cn } from "@/lib/utils"
+import { normalizeMarkdownTables } from "@/lib/report-format"
 
 interface ProsePreviewProps {
   content: string
@@ -56,17 +57,24 @@ export function ProsePreview({ content, className, dir }: ProsePreviewProps) {
       dangerouslySetInnerHTML={{ __html: content }}
     />
   ) : (
-    <div dir={dir} style={style} className={cn("prose prose-sm max-w-none", className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)
-        // into real elements; rehypeSanitize then strips anything unsafe so only
-        // benign markup survives. Order matters: raw must run before sanitize.
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
-        components={makeHeadingRenderer(content)}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
+    (() => {
+      // Insert the GFM delimiter row the AI omits so pipe tables render as
+      // tables instead of a run of literal "|" text.
+      const md = normalizeMarkdownTables(content)
+      return (
+        <div dir={dir} style={style} className={cn("prose prose-sm max-w-none", className)}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)
+            // into real elements; rehypeSanitize then strips anything unsafe so only
+            // benign markup survives. Order matters: raw must run before sanitize.
+            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            components={makeHeadingRenderer(md)}
+          >
+            {md}
+          </ReactMarkdown>
+        </div>
+      )
+    })()
   )
 }

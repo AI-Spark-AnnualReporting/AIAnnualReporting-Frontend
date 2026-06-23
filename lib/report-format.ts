@@ -36,3 +36,58 @@ export function stripDuplicateTitle(
 export function toArabicDigits(s: string | number): string {
   return String(s).replace(/[0-9]/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)])
 }
+
+// A trimmed line that looks like a GFM table row: starts with "|" and has at
+// least two pipes (so a header/data row, not a stray "a | b" in prose).
+function isPipeRow(line: string): boolean {
+  const t = line.trim()
+  return t.startsWith("|") && (t.match(/\|/g) || []).length >= 2
+}
+
+// A GFM delimiter row, e.g. "| --- | :--: |". Every cell is dashes with
+// optional leading/trailing colons.
+function isDelimiterRow(line: string): boolean {
+  const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|")
+  return cells.length > 0 && cells.every((c) => /^\s*:?-+:?\s*$/.test(c))
+}
+
+function cellCount(line: string): number {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").length
+}
+
+// remark-gfm only renders a pipe table when its header is immediately followed
+// by a delimiter row ("| --- | --- |"). The AI-generated section content omits
+// that row, so the preview would otherwise show the table as a run of literal
+// "|" text. The backend report renderer inserts the delimiter; this mirrors it
+// for the on-screen preview. Tables that already have a delimiter row, and lone
+// pipe lines, are left untouched.
+export function normalizeMarkdownTables(content: string): string {
+  if (!content || content.indexOf("|") === -1) return content
+  const lines = content.split("\n")
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (isPipeRow(lines[i])) {
+      // Gather the contiguous block of pipe rows.
+      let j = i
+      while (j < lines.length && isPipeRow(lines[j])) j++
+      const block = lines.slice(i, j)
+      if (block.length >= 2 && !isDelimiterRow(block[1])) {
+        // GFM is lenient about a missing blank line before a table, but adding
+        // one keeps the header from being absorbed into preceding prose.
+        if (out.length && out[out.length - 1].trim() !== "") out.push("")
+        out.push(block[0])
+        const n = Math.max(cellCount(block[0]), 1)
+        out.push("| " + Array(n).fill("---").join(" | ") + " |")
+        for (let k = 1; k < block.length; k++) out.push(block[k])
+      } else {
+        for (const b of block) out.push(b)
+      }
+      i = j
+    } else {
+      out.push(lines[i])
+      i++
+    }
+  }
+  return out.join("\n")
+}
