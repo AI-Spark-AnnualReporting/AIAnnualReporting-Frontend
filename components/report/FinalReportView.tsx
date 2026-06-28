@@ -5,6 +5,7 @@ import { ReportSectionRenderer } from "@/components/report/ReportSectionRenderer
 import { COMPANY_PROFILES, SECTORS } from "@/lib/constants"
 import type {
   CompanyProfile,
+  ContentLanguage,
   FinalReport,
   Sector,
 } from "@/types"
@@ -14,6 +15,7 @@ interface CycleMeta {
   fiscal_year?: number
   company_profile?: CompanyProfile | null
   sector?: Sector | null
+  content_language?: ContentLanguage
 }
 
 interface FinalReportViewProps {
@@ -28,15 +30,19 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
     .filter((s) => s.type !== "auto")
     .sort((a, b) => a.order - b.order)
 
+  // Same flag the backend uses to right-align Arabic headings & numbers.
+  const isArabic = cycle?.content_language === "arabic"
+
   return (
     <article className="mx-auto max-w-3xl px-6 py-10 space-y-12 print:max-w-none print:px-0 print:py-0 print:space-y-0">
       <CoverBlock report={report} cycle={cycle} />
-      <ExecutiveSummary content={report.executive_summary} />
+      <ExecutiveSummary content={report.executive_summary} isArabic={isArabic} />
       {bodySections.map((section, i) => (
         <ReportSectionRenderer
           key={section.section_code}
           section={section}
           index={i}
+          isArabic={isArabic}
         />
       ))}
       {bodySections.some((s) => s.type === "attachment") && (
@@ -90,12 +96,23 @@ function CoverBlock({
   )
 }
 
-function ExecutiveSummary({ content }: { content: string | null }) {
+function ExecutiveSummary({
+  content,
+  isArabic,
+}: {
+  content: string | null
+  isArabic: boolean
+}) {
   if (!content || !content.trim()) return null
   return (
     <section className="print:break-before-page">
-      <h2 className="text-2xl font-semibold mb-4">Executive Summary</h2>
-      <ProsePreview content={content} />
+      <h2
+        dir={isArabic ? "rtl" : "ltr"}
+        className="text-2xl font-semibold mb-4"
+      >
+        Executive Summary
+      </h2>
+      <ProsePreview content={content} dir={isArabic ? "rtl" : "ltr"} />
     </section>
   )
 }
