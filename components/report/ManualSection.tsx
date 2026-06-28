@@ -51,7 +51,8 @@ export function ManualSection({
   // companyId comes from the authenticated user (/auth/me) — a PM is scoped to
   // their own company. The query no-ops until the user (and id) resolve.
   const { user } = useAuth()
-  const { data: previous } = usePreviousManualSections(user?.company_id)
+  const { data: previous, isLoading: previousLoading } =
+    usePreviousManualSections(user?.company_id, contentLanguage)
   const prevSection = previous?.sections.find(
     (s) => s.section_code === sectionCode,
   )
@@ -93,6 +94,13 @@ export function ManualSection({
   const dirty = draft !== saved
   const trimmed = draft.trim()
   const isLocked = section.status === "locked"
+
+  // While the previous-content query is in flight for an empty, untouched
+  // section, show an interactive loader so the PM knows a pre-fill might be
+  // arriving (and doesn't start typing into what's about to be replaced). Only
+  // relevant when nothing is saved and the editor is still empty — a populated
+  // section never auto-seeds, so there's nothing to wait for.
+  const prefilling = previousLoading && !saved.trim() && !draft.trim()
 
   if (isLocked) {
     return (
@@ -147,6 +155,17 @@ export function ManualSection({
             </span>
           </div>
 
+          {/* Pre-fill loader: the previous-content query is still running for an
+              empty section, so a suggestion may be about to seed the editor.
+              Surface it so the PM waits instead of typing into a field that's
+              about to be overwritten. */}
+          {prefilling && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>Checking for previous content to pre-fill…</span>
+            </div>
+          )}
+
           {/* Pre-fill notice: shown while the editor holds unsaved suggested
               content seeded from the company's prior data. The copy depends on
               where that content came from — branch on `source`. */}
@@ -183,9 +202,18 @@ export function ManualSection({
               id="manual-section-content"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Write the content for this section…"
+              placeholder={
+                prefilling
+                  ? "Checking for previous content…"
+                  : "Write the content for this section…"
+              }
               rows={14}
               dir={isRtl ? "rtl" : "ltr"}
+              // Lock the editor while the pre-fill query is in flight so the PM
+              // can't start typing into a field that's about to be seeded — which
+              // would otherwise silently drop the suggestion (the auto-seed only
+              // fires while the editor is still empty).
+              disabled={prefilling}
               className={cn("rounded-xl text-sm leading-relaxed", isRtl && "text-right")}
             />
             {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
