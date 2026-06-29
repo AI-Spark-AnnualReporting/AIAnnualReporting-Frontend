@@ -48,7 +48,7 @@ type AssignmentCard = DepartmentDashboardData["assignments"][number]
 
 const SORT_FIELDS: SortField<AssignmentCard>[] = [
   { key: "updated_at", label: "Last Modified", defaultDirection: "desc", type: "date", accessor: (s) => s.updated_at },
-  { key: "submission_deadline", label: "Deadline", defaultDirection: "asc", type: "date", accessor: (s) => s.submission_deadline },
+  { key: "questions_deadline", label: "Deadline", defaultDirection: "asc", type: "date", accessor: (s) => s.questions_deadline },
   { key: "fiscal_year", label: "Fiscal Year", defaultDirection: "desc", type: "number", accessor: (s) => s.fiscal_year },
 ]
 
@@ -333,13 +333,14 @@ export default function DepartmentDashboard() {
                   </div>
 
                   {/* Deadline */}
-                  <div className="mt-4 flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
-                    <span className={cn("text-slate-500", isOverdue && "font-medium text-red-600")}>
-                      Deadline: {formatDate(session.submission_deadline)}
-                      {isOverdue && " — Overdue"}
-                    </span>
-                  </div>
+                  {session.questions_deadline && (
+                    <div className="mt-4 flex items-center gap-2 text-sm">
+                      <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
+                      <span className="text-slate-500">
+                        Questions deadline: <span className="font-medium text-slate-700">{formatDate(session.questions_deadline)}</span>
+                      </span>
+                    </div>
+                  )}
 
                   {/* Action */}
                   <div className="mt-5">
