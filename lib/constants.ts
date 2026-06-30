@@ -131,4 +131,7 @@ export const QUERY_KEYS = {
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],
+  HOD_SESSIONS: (status?: string) => ["hod", "sessions", status ?? "all"],
+  HOD_SESSION: (id: string) => ["hod", "session", id],
+  HOD_ASSIGNABLE: (id: string) => ["hod", "session", id, "assignable"],
 } as const

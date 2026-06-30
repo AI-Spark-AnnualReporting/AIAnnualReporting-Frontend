@@ -64,7 +64,9 @@ export function DeptTopNav() {
                 </div>
                 <div className="text-left leading-tight">
                   <p className="text-sm font-semibold text-slate-900">{user.full_name}</p>
-                  <p className="text-xs text-slate-500">Department User</p>
+                  <p className="text-xs text-slate-500">
+                    {user.role === "hod" ? "Head of Department" : "Department User"}
+                  </p>
                 </div>
               </button>
             </DropdownMenuTrigger>
