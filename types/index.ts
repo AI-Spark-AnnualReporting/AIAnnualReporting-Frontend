@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "project_manager" | "department_user"
+export type UserRole = "admin" | "project_manager" | "hod" | "department_user"
 export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =
