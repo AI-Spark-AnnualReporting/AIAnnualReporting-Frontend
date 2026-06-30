@@ -4,6 +4,7 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, SectionMode,
+  ContentLanguage,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -130,11 +131,24 @@ export const pmApi = {
   // comes from the authenticated user (/auth/me). A PM may only pass their own
   // companyId (403 otherwise); admins may pass any. Read-only suggestions — the
   // PM still edits and saves each section via saveManualContent.
+  //
+  // contentLanguage is the language of the report being created (the cycle's
+  // content_language). The backend returns only previous content authored in
+  // cycles of that language — an English report is never pre-filled with Arabic
+  // content (and vice versa). Must be exactly "english"/"arabic" (the enum);
+  // anything else → 422. Omitting it falls back to latest content of any
+  // language, so always send it. When the company has no previous content in the
+  // requested language, sections come back with has_data:false / source:"none"
+  // (the about_company fallback to the company description is language-neutral).
   previousManualSections: async (
     companyId: string,
+    contentLanguage?: ContentLanguage,
   ): Promise<PreviousManualSectionsResponse> => {
     const { data } = await apiClient.get<PreviousManualSectionsResponse>(
       `/pm/companies/${companyId}/manual-sections/previous`,
+      contentLanguage
+        ? { params: { content_language: contentLanguage } }
+        : undefined,
     )
     return data
   },

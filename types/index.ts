@@ -192,6 +192,11 @@ export interface FinalReportSection {
   section_code: string
   title: string
   order: number
+  // Authoritative top-level section number from the backend's canonical
+  // numbering scheme (e.g. "9"). null for auto sections (cover/TOC). The
+  // hierarchical numbers (incl. sub-headings) live in FinalReport.outline; this
+  // flat field is the top-level fallback when no outline is present.
+  number: string | number | null
   content?: string
   document?: {
     document_id: string
@@ -199,6 +204,16 @@ export interface FinalReportSection {
     file_type: string
     file_size?: number
   }
+}
+
+// One heading in the report's canonical outline, in document order. `number` is
+// the hierarchical label ("9", "9.1", "10.1"); `level` is 1 for top-level
+// sections and 2+ for sub-headings. Computed by the same backend code that
+// numbers the DOCX/PDF, so the web preview can't drift from the document.
+export interface OutlineEntry {
+  level: number
+  number: string
+  title: string
 }
 
 export interface FinalReport {
@@ -209,6 +224,10 @@ export interface FinalReport {
   status: string
   generated_at: string | null
   sections: FinalReportSection[]
+  // Flat, document-order list of every numbered heading (Executive Summary
+  // through the last sub-heading). Optional — absent on older backends, in
+  // which case the preview falls back to the per-section `number` field.
+  outline?: OutlineEntry[]
 }
 
 // Readiness of a cycle to enter the Report Builder.
