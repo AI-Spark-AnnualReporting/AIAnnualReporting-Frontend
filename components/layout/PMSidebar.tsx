@@ -3,31 +3,27 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { usePMReviewQueue } from "@/hooks/useSessions"
 import { getInitials, cn } from "@/lib/utils"
 import {
   LayoutGrid,
   RefreshCw,
-  ClipboardCheck,
   BookOpen,
   LogOut,
 } from "lucide-react"
 
+// Reviewing department submissions now belongs to the HOD, so the PM no longer
+// has a "Pending Reviews" surface.
 const NAV = [
   { href: "/pm", label: "Dashboard", icon: LayoutGrid, exact: true },
   { href: "/pm/cycles", label: "All Cycles", icon: RefreshCw },
-  { href: "/pm/reviews", label: "Pending Reviews", icon: ClipboardCheck, badge: "reviews" as const },
   { href: "/pm/documents", label: "Document Bank", icon: BookOpen },
 ]
 
 export function PMSidebar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
-  const { data: reviewQueue } = usePMReviewQueue()
 
   if (!user) return null
-
-  const pendingReviews = reviewQueue?.length ?? 0
 
   function isActive(href: string, exact?: boolean): boolean {
     if (exact) return pathname === href
@@ -75,11 +71,6 @@ export function PMSidebar() {
                 )}
                 <Icon className={cn("h-3.5 w-3.5 shrink-0", active ? "text-white" : "text-white/60")} />
                 <span className="flex-1">{item.label}</span>
-                {item.badge === "reviews" && pendingReviews > 0 && (
-                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-md bg-white/20 px-1 text-[10px] font-semibold text-white">
-                    {pendingReviews}
-                  </span>
-                )}
               </Link>
             )
           })}

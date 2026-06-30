@@ -54,13 +54,11 @@ export default function PMDashboard() {
           accent="indigo"
         />
         <PMStatCard
-          title="Pending Reviews"
+          title="Awaiting HOD Approval"
           value={pendingReviews}
-          description="Submissions to review"
+          description="Submissions with department HODs"
           icon={ClipboardCheck}
           accent="amber"
-          highlight
-          valueClassName="text-amber-500"
         />
         <PMStatCard
           title="Recent Submissions"
