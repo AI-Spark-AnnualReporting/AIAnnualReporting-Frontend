@@ -3,6 +3,7 @@ export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =
   | "assigned"
+  | "hod_curation"
   | "not_started"
   | "in_progress"
   | "submitted"
@@ -270,6 +271,8 @@ export interface SessionSummary {
   user_id?: string
   user_name?: string
   user_email?: string
+  hod_user_id?: string
+  hod_name?: string
   status: SessionStatus
   progress_percentage: number
   submitted_at?: string

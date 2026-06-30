@@ -55,6 +55,7 @@ const SORT_FIELDS: SortField<AssignmentCard>[] = [
 // Centriyon status pill — coloured dot + label, keyed by session status.
 const STATUS_PILL: Record<SessionStatus, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  hod_curation:{ label: "With HOD",      dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
   submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
