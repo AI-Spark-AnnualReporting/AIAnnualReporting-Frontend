@@ -384,6 +384,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     const when =
       daysLeft === null ? `for the ${cycleName} report`
       : daysLeft < 0 ? `for the ${cycleName} report, which is now overdue (was due ${submissionDeadline ? formatDate(submissionDeadline) : "recently"})`
+      : daysLeft === 0 ? `for the ${cycleName} report — it's due today (${submissionDeadline ? formatDate(submissionDeadline) : "today"})`
       : `for the ${cycleName} report, due ${submissionDeadline ? formatDate(submissionDeadline) : "soon"}${daysLeft <= 7 ? ` — only ${daysLeft} day${daysLeft === 1 ? "" : "s"} away` : ""}`
     const lead =
       deadlineUrgency === "overdue" || deadlineUrgency === "soon"
@@ -418,6 +419,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     const due =
       daysLeft === null ? ""
       : daysLeft < 0 ? ` It is now overdue (was due ${submissionDeadline ? formatDate(submissionDeadline) : "recently"}).`
+      : daysLeft === 0 ? ` It is due today (${submissionDeadline ? formatDate(submissionDeadline) : "today"}).`
       : ` It is due ${submissionDeadline ? formatDate(submissionDeadline) : "soon"}${daysLeft <= 7 ? ` — ${daysLeft} day${daysLeft === 1 ? "" : "s"} away` : ""}.`
     await sendReminder.mutateAsync({
       user_ids: ids,
