@@ -4,7 +4,7 @@ import { use, useRef, useState, useEffect } from "react"
 import {
   usePMCycleDashboard, useSendReminder, useGenerateReport,
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
-  useEscalations, useBulkReminder, usePreviousBrief,
+  useEscalations, useBulkReminder, usePreviousBrief, useSetQuestionsDeadline,
 } from "@/hooks/useSessions"
 import { useBuildReadiness } from "@/hooks/useReportBuilder"
 import { PageHeader } from "@/components/ui/page-header"
@@ -32,11 +32,12 @@ import {
 import { documentsApi } from "@/lib/api/documents"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { pmApi } from "@/lib/api/pm"
+import { Input } from "@/components/ui/input"
 import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
   AlertTriangle, BookOpen, CheckCircle2, Clock, RefreshCw, Sparkles,
   FileUp, Zap, AlertOctagon, BellRing, Trophy, ShieldAlert,
-  ListChecks, ClipboardCheck, Hammer, ArrowRight,
+  ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
@@ -50,6 +51,7 @@ interface PMCycleDashboardData {
     cycle_name?: string
     status?: string
     submission_deadline?: string
+    questions_deadline?: string | null
     fiscal_year?: number
     project_manager_id?: string
     kickoff_brief?: string | null
@@ -79,6 +81,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const { data: escalationsData } = useEscalations(id)
   const bulkReminder = useBulkReminder()
   const { data: readiness } = useBuildReadiness(id)
+  const setQuestionsDeadline = useSetQuestionsDeadline(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
   // Bumped on every pick/replace/remove so a stale in-flight language check
@@ -93,6 +96,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [reportId, setReportId] = useState<string | null>(null)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
+
+  // Questions deadline
+  const [questionsDeadlineInput, setQuestionsDeadlineInput] = useState("")
 
   // Escalation dialog
   const [escalationTarget, setEscalationTarget] = useState<SessionSummary | null>(null)
@@ -151,6 +157,15 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     if (isForceKickoff) setBriefOpen(true)
   }, [isForceKickoff])
 
+  // Sync the questions deadline input from server data on first load.
+  // Don't overwrite while the user is actively editing (mutation pending).
+  useEffect(() => {
+    if (!setQuestionsDeadline.isPending) {
+      setQuestionsDeadlineInput(pmDashRaw?.cycle?.questions_deadline?.slice(0, 10) ?? "")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pmDashRaw?.cycle?.questions_deadline])
+
   // Pre-fill the strategic brief from the company's most recent prior cycle.
   // Only fetch while the dialog is open and the cycle has no brief yet (a new
   // kickoff). A non-200 surfaces as no data here, so the field just stays empty.
@@ -201,6 +216,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     departments.length > 0 && departments.some((d) => d.status !== "not_started")
 
   const submissionDeadline = pmDash?.cycle?.submission_deadline
+  const questionsDeadlineSaved = pmDash?.cycle?.questions_deadline ?? null
+  const todayIso = new Date().toISOString().slice(0, 10)
+
   const isOverdue = (row: SessionSummary) =>
     !!submissionDeadline &&
     new Date() > new Date(submissionDeadline) &&
@@ -228,11 +246,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     setDocLangChecking(false)
     docCheckSeq.current++
     setKickoffTimedOut(false)
+    setQuestionsDeadlineInput("")
   }
 
   const handleSubmitKickoff = async () => {
     if (!briefText.trim()) {
       toast.error("Please write the strategic brief before submitting")
+      return
+    }
+    if (!questionsDeadlineInput) {
+      toast.error("Please set a questions deadline before submitting")
       return
     }
     setSubmittingKickoff(true)
@@ -259,6 +282,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       // Optional info toast when the backend enriched the brief with AI context
       if (result?.enrichment_applied) {
         toast.info("Brief was expanded with AI context to improve question quality.")
+      }
+
+      // If the PM set a questions deadline, save it now (non-blocking — a failure
+      // here doesn't roll back the kickoff, which already succeeded).
+      if (questionsDeadlineInput) {
+        try {
+          await pmApi.setQuestionsDeadline(cycleId, questionsDeadlineInput)
+        } catch {
+          toast.error("Kickoff submitted, but questions deadline could not be saved — update it from the cycle page.")
+        }
       }
 
       // Questions are generated regardless of brief quality, so always close the
@@ -722,6 +755,42 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           )}
       </div>
+
+      {/* ── Questions Deadline (post-kickoff editor) ── */}
+      {hasKickoff && (
+        <div className="rounded-xl border bg-card px-6 py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <Calendar className="h-4 w-4 text-amber-600" />
+              <span className="text-sm font-medium">Questions Deadline</span>
+              {questionsDeadlineSaved && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                  {formatDate(questionsDeadlineSaved)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Input
+                type="date"
+                value={questionsDeadlineInput}
+                min={todayIso}
+                onChange={(e) => setQuestionsDeadlineInput(e.target.value)}
+                className="w-40 h-8 text-sm"
+              />
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={setQuestionsDeadline.isPending || !questionsDeadlineInput}
+                onClick={() => setQuestionsDeadline.mutate(questionsDeadlineInput)}
+              >
+                {setQuestionsDeadline.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : questionsDeadlineSaved ? "Update" : "Set"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Workflow Pipeline ── */}
       {departments.length > 0 && (
@@ -1340,6 +1409,24 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
+          {/* Questions Deadline */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              Questions Deadline <span className="text-destructive ml-0.5">*</span>
+            </Label>
+            <Input
+              type="date"
+              value={questionsDeadlineInput}
+              min={todayIso}
+              onChange={(e) => setQuestionsDeadlineInput(e.target.value)}
+              className="w-44"
+            />
+            <p className="text-xs text-muted-foreground">
+              The date by which department users must complete their questions. Department users will be notified when set.
+            </p>
+          </div>
+
           {/* Divider with OR */}
           <div className="relative my-1">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
@@ -1469,7 +1556,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )}
             <Button
               onClick={handleSubmitKickoff}
-              disabled={submittingKickoff || !briefText.trim() || kickoffTimedOut || !kickoffLangOk || docLangChecking || !!docLangWarning}
+              disabled={submittingKickoff || !briefText.trim() || !questionsDeadlineInput || kickoffTimedOut || !kickoffLangOk || docLangChecking || !!docLangWarning}
             >
               {submittingKickoff
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />

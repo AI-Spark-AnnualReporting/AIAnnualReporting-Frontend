@@ -76,6 +76,7 @@ export interface Cycle {
   start_date: string
   end_date: string
   submission_deadline: string
+  questions_deadline?: string | null
   status: CycleStatus
   project_manager_id?: string
   pm_name?: string
@@ -340,6 +341,7 @@ export interface DepartmentDashboard {
     cycle_name: string
     fiscal_year: number
     submission_deadline: string
+    questions_deadline?: string | null
     status: SessionStatus
     progress_percentage: number
     has_questions: boolean

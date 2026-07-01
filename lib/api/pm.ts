@@ -266,6 +266,18 @@ export const pmApi = {
     return data
   },
 
+  // Set or clear the questions deadline for a cycle.
+  // Pass null to clear. Returns the updated cycle + notified_count.
+  setQuestionsDeadline: async (
+    cycleId: string,
+    deadline: string | null,
+  ): Promise<{ message: string; cycle_id: string; questions_deadline: string | null; notified_count: number }> => {
+    const { data } = await apiClient.put(`/pm/cycles/${cycleId}/questions-deadline`, {
+      questions_deadline: deadline,
+    })
+    return data
+  },
+
   // Whether a cycle is ready to enter the Report Builder.
   buildReadiness: async (cycleId: string): Promise<BuildReadiness> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/build-readiness`)

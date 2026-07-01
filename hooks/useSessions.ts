@@ -365,3 +365,21 @@ export function useBulkReminder() {
     },
   })
 }
+
+export function useSetQuestionsDeadline(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (deadline: string | null) => pmApi.setQuestionsDeadline(cycleId, deadline),
+    onSuccess: (data, deadline) => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
+      qc.invalidateQueries({ queryKey: ["pm", "dashboard"] })
+      const msg = deadline
+        ? `Questions deadline set${data.notified_count > 0 ? ` — ${data.notified_count} department user${data.notified_count !== 1 ? "s" : ""} notified` : ""}`
+        : "Questions deadline cleared"
+      toast.success(msg)
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to update questions deadline")
+    },
+  })
+}
