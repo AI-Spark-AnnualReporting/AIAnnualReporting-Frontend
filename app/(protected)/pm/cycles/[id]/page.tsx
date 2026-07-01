@@ -91,6 +91,10 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const [reminderTarget, setReminderTarget] = useState<SessionSummary | null>(null)
   const [reminderMsg, setReminderMsg] = useState("")
   const [reminderPriority, setReminderPriority] = useState("normal")
+  // Nudge-HOD dialog — a deadline-aware reminder pointed at a department's HOD.
+  const [hodNudgeTarget, setHodNudgeTarget] = useState<SessionSummary | null>(null)
+  const [hodNudgeMsg, setHodNudgeMsg] = useState("")
+  const [hodNudgePriority, setHodNudgePriority] = useState("normal")
   const [reportResult, setReportResult] = useState<string | null>(null)
   // ID of the most recently generated report — needed to download the .docx.
   const [reportId, setReportId] = useState<string | null>(null)
@@ -228,6 +232,33 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const allDone =
     departments.length > 0 &&
     departments.every((d) => ["submitted", "approved"].includes(d.status))
+
+  // Deadline urgency — drives the nudge's default priority + the dialog/banner chip.
+  const deadlineDate = submissionDeadline ? new Date(submissionDeadline) : null
+  const daysLeft = deadlineDate
+    ? Math.ceil((deadlineDate.getTime() - Date.now()) / 86_400_000)
+    : null
+  const deadlineUrgency =
+    daysLeft === null ? "none"
+    : daysLeft < 0 ? "overdue"
+    : daysLeft <= 2 ? "soon"
+    : daysLeft <= 7 ? "near"
+    : "ok"
+  const urgencyPriority =
+    deadlineUrgency === "overdue" || deadlineUrgency === "soon" ? "urgent"
+    : deadlineUrgency === "near" ? "high"
+    : "normal"
+  const deadlineChip =
+    daysLeft === null ? null
+    : daysLeft < 0 ? { label: `Overdue by ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? "" : "s"}`, cls: "bg-red-100 text-red-700" }
+    : daysLeft === 0 ? { label: "Due today", cls: "bg-red-100 text-red-700" }
+    : daysLeft <= 2 ? { label: `Due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`, cls: "bg-amber-100 text-amber-700" }
+    : { label: `Due in ${daysLeft} days`, cls: "bg-slate-100 text-slate-600" }
+
+  // Departments where the HOD is the blocker — questions to curate or answers to approve.
+  const hodBlocked = departments.filter(
+    (d) => (d.status === "hod_curation" || d.status === "submitted") && d.hod_user_id,
+  )
 
   const escalations: { id?: string; reason?: string; message?: string; priority?: string; created_at?: string; department_name?: string }[] =
     Array.isArray(escalationsData)
@@ -372,6 +403,65 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     })
     setReminderTarget(null)
     setReminderMsg("")
+  }
+
+  // ── Nudge HOD (deadline-aware reminder to a department's HOD) ──
+  const firstName = (full?: string | null) => (full || "").trim().split(/\s+/)[0] || "there"
+
+  const hodNudgeMessageFor = (d: SessionSummary) => {
+    const who = firstName(d.hod_name)
+    const what =
+      d.status === "hod_curation"
+        ? `review and approve the AI-generated questions for ${d.department_name} and assign a team member`
+        : `review and approve ${d.department_name}'s submitted answers`
+    const when =
+      daysLeft === null ? `for the ${cycleName} report`
+      : daysLeft < 0 ? `for the ${cycleName} report, which is now overdue (was due ${submissionDeadline ? formatDate(submissionDeadline) : "recently"})`
+      : daysLeft === 0 ? `for the ${cycleName} report — it's due today (${submissionDeadline ? formatDate(submissionDeadline) : "today"})`
+      : `for the ${cycleName} report, due ${submissionDeadline ? formatDate(submissionDeadline) : "soon"}${daysLeft <= 7 ? ` — only ${daysLeft} day${daysLeft === 1 ? "" : "s"} away` : ""}`
+    const lead =
+      deadlineUrgency === "overdue" || deadlineUrgency === "soon"
+        ? "we're up against the deadline"
+        : "we're working toward the deadline"
+    return `Hi ${who}, ${lead} — please ${what} ${when}. Thanks for keeping things on track!`
+  }
+
+  const openHodNudge = (d: SessionSummary) => {
+    setHodNudgeTarget(d)
+    setHodNudgeMsg(hodNudgeMessageFor(d))
+    setHodNudgePriority(urgencyPriority)
+  }
+
+  const handleSendHodNudge = async () => {
+    if (!hodNudgeTarget?.hod_user_id || !hodNudgeMsg.trim()) return
+    await sendReminder.mutateAsync({
+      user_ids: [hodNudgeTarget.hod_user_id],
+      title: `Action needed: ${cycleName}`,
+      message: hodNudgeMsg,
+      priority: hodNudgePriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
+    })
+    setHodNudgeTarget(null)
+    setHodNudgeMsg("")
+  }
+
+  const handleNudgeAllHods = async () => {
+    const ids = Array.from(new Set(hodBlocked.map((d) => d.hod_user_id).filter(Boolean) as string[]))
+    if (ids.length === 0) return
+    const due =
+      daysLeft === null ? ""
+      : daysLeft < 0 ? ` It is now overdue (was due ${submissionDeadline ? formatDate(submissionDeadline) : "recently"}).`
+      : daysLeft === 0 ? ` It is due today (${submissionDeadline ? formatDate(submissionDeadline) : "today"}).`
+      : ` It is due ${submissionDeadline ? formatDate(submissionDeadline) : "soon"}${daysLeft <= 7 ? ` — ${daysLeft} day${daysLeft === 1 ? "" : "s"} away` : ""}.`
+    await sendReminder.mutateAsync({
+      user_ids: ids,
+      title: `Action needed: ${cycleName}`,
+      message: `Please review and approve your department's pending items for the ${cycleName} report so we can build the final report.${due}`,
+      priority: urgencyPriority as "low" | "normal" | "high" | "urgent",
+      related_type: "cycle",
+      related_id: id,
+    })
   }
 
   const handleCreateEscalation = async () => {
@@ -588,14 +678,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       header: "Actions",
       cell: (row) => (
         <div className="flex gap-2 flex-wrap">
-          {/* Review button for submitted sessions */}
-          {row.status === "submitted" && (
-            <Link href={`/pm/sessions/${row.session_id}`}>
-              <Button size="sm" variant="outline">
-                <Eye className="h-3 w-3 mr-1" /> Review
-              </Button>
-            </Link>
-          )}
+          {/* Submitted sessions are reviewed by the department HOD — PM has no action */}
           {row.status === "approved" && (
             <Link href={`/pm/sessions/${row.session_id}`}>
               <Button
@@ -632,6 +715,15 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 <ShieldAlert className="h-3 w-3 mr-1" /> Escalate
               </Button>
             </>
+          )}
+          {(row.status === "hod_curation" || row.status === "submitted") && row.hod_user_id && (
+            <Button
+              size="sm" variant="outline"
+              onClick={() => openHodNudge(row)}
+              className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+            >
+              <BellRing className="h-3 w-3 mr-1" /> Nudge HOD
+            </Button>
           )}
         </div>
       ),
@@ -699,25 +791,23 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <p className="text-sm text-muted-foreground">
                 Assemble this cycle&apos;s annual report section by section.
               </p>
-              {readiness?.can_build ? (
+              {!readiness?.sections_resolved ? (
                 <p className="text-xs text-muted-foreground mt-1">
-                  {readiness.departments_approved} of {readiness.departments_total}{" "}
-                  departments approved.
+                  Report sections haven&apos;t been set up for this cycle yet.
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Report sections haven&apos;t been set up for this cycle yet.
+                  {readiness.departments_approved} of {readiness.departments_total}{" "}
+                  departments approved by their HOD.
                 </p>
               )}
             </div>
           </div>
           {(() => {
-            const sectionsReady = !!readiness?.can_build
             const total = readiness?.departments_total ?? 0
             const approved = readiness?.departments_approved ?? 0
-            const allApproved = sectionsReady && total > 0 && approved === total
 
-            if (allApproved) {
+            if (readiness?.can_build) {
               return (
                 <Link href={`/pm/cycles/${id}/plan`}>
                   <Button>
@@ -728,11 +818,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               )
             }
 
-            const tooltip = !sectionsReady
+            const tooltip = !readiness?.sections_resolved
               ? "Report sections haven't been set up for this cycle yet"
               : total === 0
                 ? "No departments assigned to this cycle yet"
-                : `Available once all departments are approved (${approved} of ${total} so far)`
+                : `Available once every department's HOD has approved (${approved} of ${total} so far)`
 
             return (
               <Button disabled title={tooltip}>
@@ -742,15 +832,15 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )
           })()}
         </div>
-        {readiness?.can_build &&
+        {readiness?.sections_resolved &&
           (readiness.departments_total ?? 0) > 0 &&
           readiness.departments_approved < readiness.departments_total && (
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>
                 {readiness.departments_approved === 0
-                  ? "No department content is approved yet — approve all department submissions to open the Report Builder."
-                  : `${readiness.departments_approved} of ${readiness.departments_total} departments approved — the Report Builder unlocks once every department is approved.`}
+                  ? "No department has been approved by its HOD yet — the Report Builder unlocks once every department's HOD has approved."
+                  : `${readiness.departments_approved} of ${readiness.departments_total} departments approved by their HOD — the Report Builder unlocks once every department is approved.`}
               </span>
             </div>
           )}
@@ -874,7 +964,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           <div>
             <p className="font-semibold text-green-900 text-base">All departments have submitted!</p>
             <p className="text-sm text-green-800 mt-0.5">
-              Review and approve the submissions, then generate the final consolidated report.
+              Now with their HODs for approval — the report builder unlocks once every department&apos;s HOD has approved.
             </p>
           </div>
         </div>
@@ -1008,12 +1098,14 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <span className={cn("text-sm font-semibold tabular-nums", pctTone)}>{pct}%</span>
-                      {d.status === "submitted" && (
-                        <Link href={`/pm/sessions/${d.session_id}`}>
-                          <Button size="sm" variant="outline" className="h-7 text-xs">
-                            <Eye className="h-3 w-3 mr-1" /> Review
-                          </Button>
-                        </Link>
+                      {(d.status === "hod_curation" || d.status === "submitted") && d.hod_user_id && (
+                        <Button
+                          size="sm" variant="outline"
+                          onClick={() => openHodNudge(d)}
+                          className="h-7 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                        >
+                          <BellRing className="h-3 w-3 mr-1" /> Nudge HOD
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -1055,18 +1147,31 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* ── Pending Review Alert ── */}
-      {needsReview.length > 0 && (
-        <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      {/* ── Waiting on department HODs (read-only for the PM, but nudgeable) ── */}
+      {hodBlocked.length > 0 && (
+        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-800">
-              {needsReview.length} submission{needsReview.length !== 1 ? "s" : ""} awaiting your review
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-800">
+              {hodBlocked.length} department{hodBlocked.length !== 1 ? "s" : ""} waiting on their HOD
+              {deadlineChip && (
+                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", deadlineChip.cls)}>
+                  {deadlineChip.label}
+                </span>
+              )}
             </p>
             <p className="text-sm text-amber-700 mt-0.5">
-              {needsReview.map((d) => d.department_name).join(", ")}
+              {hodBlocked.map((d) => d.department_name).join(", ")}
             </p>
           </div>
+          <Button
+            size="sm"
+            onClick={handleNudgeAllHods}
+            disabled={sendReminder.isPending}
+            className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            <BellRing className="h-3.5 w-3.5 mr-1.5" /> Nudge all HODs
+          </Button>
         </div>
       )}
 
@@ -1685,6 +1790,62 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             <Button variant="outline" onClick={() => setReminderTarget(null)}>Cancel</Button>
             <Button onClick={handleSendReminder} disabled={!reminderMsg || sendReminder.isPending}>
               {sendReminder.isPending ? "Sending…" : "Send Reminder"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Nudge HOD Dialog ── */}
+      <Dialog open={!!hodNudgeTarget} onOpenChange={(o) => !o && setHodNudgeTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nudge HOD — {hodNudgeTarget?.department_name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2.5 text-xs text-indigo-800">
+              <BellRing className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {hodNudgeTarget?.hod_name ? <b>{hodNudgeTarget.hod_name}</b> : "The HOD"}{" "}
+                {hodNudgeTarget?.status === "hod_curation"
+                  ? "needs to review the questions and assign a team member."
+                  : "needs to review and approve the submitted answers."}
+              </span>
+              {deadlineChip && (
+                <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold", deadlineChip.cls)}>
+                  {deadlineChip.label}
+                </span>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={hodNudgeMsg}
+                onChange={(e) => setHodNudgeMsg(e.target.value)}
+                rows={5}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select value={hodNudgePriority} onValueChange={setHodNudgePriority}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHodNudgeTarget(null)}>Cancel</Button>
+            <Button
+              onClick={handleSendHodNudge}
+              disabled={!hodNudgeMsg.trim() || sendReminder.isPending}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              <BellRing className="mr-2 h-4 w-4" />
+              {sendReminder.isPending ? "Sending…" : "Send nudge"}
             </Button>
           </DialogFooter>
         </DialogContent>

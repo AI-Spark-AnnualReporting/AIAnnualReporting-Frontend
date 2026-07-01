@@ -3,25 +3,20 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
+import { useHODSessions } from "@/hooks/useHod"
 import { getInitials, cn } from "@/lib/utils"
-import {
-  LayoutGrid,
-  RefreshCw,
-  BookOpen,
-  LogOut,
-} from "lucide-react"
+import { LayoutGrid, ClipboardCheck, LogOut } from "lucide-react"
 
-// Reviewing department submissions now belongs to the HOD, so the PM no longer
-// has a "Pending Reviews" surface.
 const NAV = [
-  { href: "/pm", label: "Dashboard", icon: LayoutGrid, exact: true },
-  { href: "/pm/cycles", label: "All Cycles", icon: RefreshCw },
-  { href: "/pm/documents", label: "Document Bank", icon: BookOpen },
+  { href: "/hod", label: "Dashboard", icon: LayoutGrid, exact: true },
+  { href: "/hod/reviews", label: "Review Answers", icon: ClipboardCheck, badge: "reviews" as const },
 ]
 
-export function PMSidebar() {
+export function HODSidebar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
+  const { data: submitted } = useHODSessions("submitted")
+  const pendingReviews = submitted?.length ?? 0
 
   if (!user) return null
 
@@ -42,14 +37,14 @@ export function PMSidebar() {
         </div>
         <div className="leading-tight">
           <p className="text-[13px] font-extrabold tracking-[-0.2px] text-white">Centriyon</p>
-          <p className="text-[9px] text-white/30">PM Workspace</p>
+          <p className="text-[9px] text-white/30">HOD Workspace</p>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-2">
         <p className="px-4 pb-1.5 pt-3.5 text-[9px] font-bold uppercase tracking-[0.8px] text-white/30">
-          Reporting
+          Department
         </p>
         <div className="space-y-0.5">
           {NAV.map((item) => {
@@ -71,6 +66,11 @@ export function PMSidebar() {
                 )}
                 <Icon className={cn("h-3.5 w-3.5 shrink-0", active ? "text-white" : "text-white/60")} />
                 <span className="flex-1">{item.label}</span>
+                {item.badge === "reviews" && pendingReviews > 0 && (
+                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-md bg-white/20 px-1 text-[10px] font-semibold text-white">
+                    {pendingReviews}
+                  </span>
+                )}
               </Link>
             )
           })}
@@ -85,7 +85,7 @@ export function PMSidebar() {
           </div>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-[11px] font-bold text-white/80">{user.full_name}</p>
-            <p className="truncate text-[9px] text-white/30">Project Manager</p>
+            <p className="truncate text-[9px] text-white/30">Head of Department</p>
           </div>
           <button
             onClick={logout}
