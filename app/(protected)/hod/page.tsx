@@ -122,7 +122,8 @@ function SessionCard({ s }: { s: HODSession }) {
   } else {
     pct = ["submitted", "approved"].includes(status) ? 100 : s.progress_percentage ?? 0
     progressLabel =
-      status === "submitted" ? `Submitted by ${assignee} — awaiting review`
+      status === "assigned" ? "Waiting for the Project Manager to start the cycle"
+      : status === "submitted" ? `Submitted by ${assignee} — awaiting review`
       : status === "approved" ? `Approved · ${assignee}`
       : status === "in_progress" ? `${assignee} is answering`
       : status === "reopened" ? `Sent back to ${assignee}`
@@ -189,6 +190,7 @@ function SessionCard({ s }: { s: HODSession }) {
 }
 
 const STATUS_META: Record<string, { label: string; badge: string; bar: string }> = {
+  assigned: { label: "Awaiting kickoff", badge: "bg-slate-100 text-slate-600", bar: "bg-slate-300" },
   hod_curation: { label: "Needs your review", badge: "bg-amber-50 text-amber-700", bar: "bg-indigo-500" },
   not_started: { label: "Awaiting start", badge: "bg-slate-100 text-slate-600", bar: "bg-slate-400" },
   in_progress: { label: "In progress", badge: "bg-blue-50 text-blue-600", bar: "bg-indigo-500" },
