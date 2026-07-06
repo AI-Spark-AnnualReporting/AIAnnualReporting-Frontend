@@ -230,6 +230,19 @@ export function usePMCycleDashboard(cycleId: string) {
   })
 }
 
+// Strategic Brief wizard — Step 1 questionnaire. Read-only: there is no
+// answer-save endpoint yet, so callers keep answers in local component state.
+// retry:false so a 403/404 surfaces immediately instead of retrying 3x.
+export function useSurveyQuestions(cycleId: string) {
+  return useQuery({
+    queryKey: ["pm", "survey-questions", cycleId],
+    queryFn: () => pmApi.getSurveyQuestions(cycleId),
+    enabled: !!cycleId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
 // Previous kickoff brief — used to pre-fill the strategic-brief textarea.
 // `enabled` gates the fetch (e.g. only when the kickoff dialog is open).
 // A non-200 is treated as non-fatal upstream; here we just don't retry so a

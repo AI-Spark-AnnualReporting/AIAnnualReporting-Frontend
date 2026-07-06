@@ -72,6 +72,26 @@ export interface PreviousManualSectionsResponse {
   sections: PreviousManualSection[]
 }
 
+// GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
+// Strategic Brief wizard. Order is stable per cycle (safe to index by
+// position for a stepper). `options: null` means a plain free-text question;
+// `options: string[]` means chip-select, and the LAST string is always the
+// "Other" escape hatch that reveals a free-text box. `source` is informational
+// only (template vs AI-generated) — don't group or branch on it.
+export interface SurveyQuestion {
+  id: string
+  text: string
+  source: "template" | "generated"
+  options: string[] | null
+}
+
+export interface SurveyQuestionsResponse {
+  success: boolean
+  cycle_id: string
+  total: number
+  questions: SurveyQuestion[]
+}
+
 // PM kickoff brief — submitted after cycle is active
 export interface KickoffBriefPayload {
   cycle_id: string
@@ -149,6 +169,17 @@ export const pmApi = {
       contentLanguage
         ? { params: { content_language: contentLanguage } }
         : undefined,
+    )
+    return data
+  },
+
+  // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.
+  // 403 → PM doesn't own this cycle; 404 → cycle not found (also returned for
+  // cross-tenant access — treat both the same as "not found"). 200 with
+  // total:0 means the question set hasn't been generated yet (not an error).
+  getSurveyQuestions: async (cycleId: string): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.get<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/survey-questions`,
     )
     return data
   },
