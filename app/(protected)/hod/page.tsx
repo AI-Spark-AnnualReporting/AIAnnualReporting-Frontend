@@ -128,9 +128,11 @@ function SessionCard({ s }: { s: HODSession }) {
       : status === "in_progress" ? `${assignee} is answering`
       : status === "reopened" ? `Sent back to ${assignee}`
       : `Assigned to ${assignee} · waiting to start`
-    // A submitted session is yours to review — surface the action on the card too.
-    if (status === "submitted") {
-      action = { href: `/hod/sessions/${s.session_id}/review`, label: "Review" }
+    // Every cycle is openable: a submitted session is yours to review; every other
+    // stage opens the same page read-only so an HOD can always look, never edit.
+    action = {
+      href: `/hod/sessions/${s.session_id}/review`,
+      label: status === "submitted" ? "Review" : "View",
     }
   }
 

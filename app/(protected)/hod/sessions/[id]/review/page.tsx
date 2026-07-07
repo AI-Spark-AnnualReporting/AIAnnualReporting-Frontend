@@ -10,9 +10,22 @@ import { cn } from "@/lib/utils"
 const isNA = (a: string) => a.trim().toUpperCase().startsWith("N/A")
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  assigned: { label: "Awaiting kickoff", cls: "bg-slate-100 text-slate-600" },
+  not_started: { label: "Awaiting start", cls: "bg-slate-100 text-slate-600" },
+  in_progress: { label: "In progress", cls: "bg-blue-50 text-blue-600" },
   submitted: { label: "Submitted — awaiting your review", cls: "bg-amber-50 text-amber-700" },
   approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700" },
   reopened: { label: "Sent back for changes", cls: "bg-rose-50 text-rose-600" },
+}
+
+// Footer note shown when there is nothing for the HOD to action (any status but
+// "submitted"). Keeps the page read-only while explaining what stage the cycle is at.
+const VIEW_ONLY_NOTE: Record<string, string> = {
+  approved: "You’ve approved this submission — it’s included in the report.",
+  reopened: "You sent this back — waiting for the team member to resubmit.",
+  in_progress: "Your team member is still working on their answers.",
+  not_started: "Assigned to your team member — they haven’t started answering yet.",
+  assigned: "Waiting for the Project Manager to start this cycle.",
 }
 
 export default function HODReviewPage() {
@@ -60,7 +73,7 @@ export default function HODReviewPage() {
     <div className="mx-auto max-w-3xl pb-28">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <button onClick={() => router.push("/hod/reviews")} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+        <button onClick={() => router.push(isSubmitted ? "/hod/reviews" : "/hod")} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="min-w-0">
@@ -150,9 +163,7 @@ export default function HODReviewPage() {
         </div>
       ) : (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-500">
-          {session.status === "approved"
-            ? "You’ve approved this submission — it’s included in the report."
-            : "You sent this back — waiting for the team member to resubmit."}
+          {VIEW_ONLY_NOTE[session.status] ?? "You sent this back — waiting for the team member to resubmit."}
         </div>
       )}
 
