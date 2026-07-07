@@ -191,6 +191,7 @@ export interface CycleBriefFields {
   fiscal_year?: number
   kickoff_brief?: string | null
   initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+  questions_deadline?: string | null
 }
 
 // PM kickoff brief — submitted after cycle is active

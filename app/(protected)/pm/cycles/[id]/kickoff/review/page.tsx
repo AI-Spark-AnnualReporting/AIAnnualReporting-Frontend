@@ -10,11 +10,15 @@ import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefSto
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { cn } from "@/lib/utils"
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
+import { cn, formatDate } from "@/lib/utils"
 import { toast } from "sonner"
 import {
-  ArrowLeft, Check, CheckCircle2, Eye, Layers, Loader2, Pencil, Plus, RefreshCw,
+  ArrowLeft, CalendarClock, Check, CheckCircle2, Eye, Layers, Loader2, Pencil, Plus, RefreshCw,
   Send, ShieldAlert, Sparkles, Target, X,
 } from "lucide-react"
 
@@ -300,6 +304,42 @@ export default function ReviewBriefPage({
   const deleteTheme = (idx: number) => {
     if (!result) return
     commitThemes(result.themes.filter((_, i) => i !== idx), true)
+  }
+
+  // ── Approve & use → set the questions deadline ────────────────────────────
+  // Approving the brief opens a modal that requires a questions deadline (the
+  // date departments must answer their assigned questions by) before the cycle
+  // moves forward. The date is persisted via PUT questions-deadline; only then
+  // does the flow continue to the cycle dashboard.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const [approveOpen, setApproveOpen] = useState(false)
+  const [deadlineInput, setDeadlineInput] = useState("")
+  const [approving, setApproving] = useState(false)
+
+  const openApprove = () => {
+    // Pre-fill with an already-saved deadline if the cycle has one.
+    setDeadlineInput(cycle?.questions_deadline?.slice(0, 10) ?? "")
+    setApproveOpen(true)
+  }
+
+  // A valid deadline is required and must not be in the past.
+  const deadlineValid = !!deadlineInput && deadlineInput >= todayIso
+
+  const confirmApprove = async () => {
+    if (!deadlineValid || approving) return
+    setApproving(true)
+    try {
+      await pmApi.setQuestionsDeadline(id, deadlineInput)
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
+      toast.success(`Deadline set — departments must answer by ${formatDate(deadlineInput)}.`)
+      setApproveOpen(false)
+      // Destination for the post-approval step isn't finalized yet — send the
+      // PM to an "under development" placeholder so the flow completes cleanly.
+      router.push(`/pm/cycles/${id}/kickoff/done`)
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't set the deadline.")
+      setApproving(false)
+    }
   }
 
   // Prefer the cycle's actual name; fall back to a fiscal-year label only if
@@ -594,8 +634,8 @@ export default function ReviewBriefPage({
               </Button>
             )}
             <Button
-              disabled
-              title="Coming soon"
+              disabled={phase !== "result"}
+              onClick={openApprove}
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
               <CheckCircle2 className="h-4 w-4" /> Approve &amp; use
@@ -603,7 +643,123 @@ export default function ReviewBriefPage({
           </div>
         </div>
       </div>
+
+      {/* ── Approve & use → questions-deadline modal ── */}
+      <ApproveDeadlineDialog
+        open={approveOpen}
+        onOpenChange={(o) => {
+          if (approving) return // don't dismiss mid-request
+          setApproveOpen(o)
+        }}
+        value={deadlineInput}
+        onChange={setDeadlineInput}
+        min={todayIso}
+        valid={deadlineValid}
+        submitting={approving}
+        onConfirm={confirmApprove}
+        cycleLabel={fiscalLabel}
+      />
     </div>
+  )
+}
+
+/* ── Approve & use — questions-deadline modal ────────────────────────────────
+   Blocks the cycle from moving forward until the PM commits a date by which
+   departments must answer their assigned questions. Past dates are rejected
+   (the input's min + a guarded confirm button), so there is no way to advance
+   without a valid future-or-today deadline. */
+function ApproveDeadlineDialog({
+  open,
+  onOpenChange,
+  value,
+  onChange,
+  min,
+  valid,
+  submitting,
+  onConfirm,
+  cycleLabel,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  value: string
+  onChange: (value: string) => void
+  min: string
+  valid: boolean
+  submitting: boolean
+  onConfirm: () => void
+  cycleLabel: string
+}) {
+  // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
+  const isPast = !!value && value < min
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md gap-0 overflow-hidden p-0" hideClose={submitting}>
+        {/* Themed header band */}
+        <DialogHeader className="space-y-3 border-b bg-indigo-50 px-6 py-5 text-left">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+            <CalendarClock className="h-5 w-5" />
+          </span>
+          <div className="space-y-1">
+            <DialogTitle className="text-indigo-900">Set the questions deadline</DialogTitle>
+            <p className="text-sm text-indigo-700/80">
+              Approving locks in the brief for <span className="font-medium">{cycleLabel}</span>.
+              Choose the date every department must answer its assigned questions by — they&apos;ll
+              be notified straight away.
+            </p>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-2 px-6 py-5">
+          <label htmlFor="questions-deadline" className="text-sm font-medium text-foreground">
+            Questions deadline
+          </label>
+          <Input
+            id="questions-deadline"
+            type="date"
+            value={value}
+            min={min}
+            disabled={submitting}
+            onChange={(e) => onChange(e.target.value)}
+            className={cn(
+              "h-11",
+              isPast && "border-destructive focus-visible:ring-destructive",
+            )}
+          />
+          {isPast ? (
+            <p className="text-xs font-medium text-destructive">
+              The deadline can&apos;t be in the past. Pick today or a later date.
+            </p>
+          ) : valid ? (
+            <p className="text-xs text-muted-foreground">
+              Departments must answer by{" "}
+              <span className="font-medium text-foreground">{formatDate(value)}</span>.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              A deadline is required before the cycle can move forward.
+            </p>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2 border-t bg-muted/30 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={!valid || submitting}
+            className="bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            {submitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Setting deadline…</>
+            ) : (
+              <><CheckCircle2 className="h-4 w-4" /> Approve &amp; continue</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
