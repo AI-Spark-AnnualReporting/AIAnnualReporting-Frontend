@@ -92,6 +92,107 @@ export interface SurveyQuestionsResponse {
   questions: SurveyQuestion[]
 }
 
+// POST /pm/cycles/{id}/generate-brief — Strategic Brief wizard Step 2.
+// One entry per ANSWERED question only (unanswered ones may be omitted — no
+// server-side required-count check, that gate is frontend-only). question_id
+// must be an id from the survey-questions response; unrecognized ids are
+// silently dropped server-side. For a multi-select chip question, join every
+// selected option (plus any free text) into one comma-separated string.
+export interface GenerateBriefAnswer {
+  question_id: string
+  answer: string
+}
+
+export interface GenerateBriefPayload {
+  answers: GenerateBriefAnswer[]
+}
+
+// A theme now carries its own short keyword set (3-6 items) instead of a prose
+// description. The report-level `keywords` (below) is a separate, overall set.
+export interface BriefTheme {
+  title: string
+  keywords: string[]
+}
+
+// A success response with an empty strategic_brief is a SOFT FAILURE (the LLM
+// step failed server-side) — treat it like an error, not an empty result.
+export interface GenerateBriefResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+  themes: BriefTheme[]
+  keywords: string[]
+}
+
+// POST /pm/cycles/{id}/brief-document — optional supporting doc for the brief.
+// One doc per cycle (each upload REPLACES the previous), stored only — no AI,
+// no brief returned. generate-brief later reads whatever doc is on the cycle.
+export interface BriefDocument {
+  document_id: string
+  filename: string
+  document_purpose?: string
+  file_size?: number
+  word_count?: number
+}
+
+export interface UploadBriefDocumentResponse {
+  success: boolean
+  cycle_id: string
+  documents_uploaded: number
+  documents: BriefDocument[]
+  message?: string
+}
+
+// POST /pm/cycles/{id}/brief/refine and /themes/refine — the "Refine with AI"
+// assistants. Send the CURRENT on-screen content + a free-text instruction; the
+// LLM returns the complete revised version (already saved server-side). If it
+// couldn't apply the instruction it returns the input unchanged (still 200).
+export interface RefineBriefPayload {
+  strategic_brief: string
+  instruction: string
+}
+export interface RefineBriefResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+}
+export interface RefineThemesPayload {
+  themes: BriefTheme[]
+  instruction: string
+}
+export interface RefineThemesResponse {
+  success: boolean
+  cycle_id: string
+  themes: BriefTheme[]
+}
+
+// PUT /pm/cycles/{id}/save-brief-and-themes — persists the PM's MANUAL edits
+// (brief text, theme add/delete/rename, keyword chips). Partial: send only the
+// changed field(s). Omitted/null = leave as-is; a present value replaces it;
+// empty string/array clears it. `themes` must be the WHOLE current list, not a
+// patch. The response is always the full resulting state.
+export interface SaveBriefAndThemesPayload {
+  strategic_brief?: string
+  themes?: BriefTheme[]
+  keywords?: string[]
+}
+export interface SaveBriefAndThemesResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+  themes: BriefTheme[]
+  keywords: string[]
+}
+
+// The subset of cycle fields the brief wizard needs to detect a
+// previously-generated (persisted) brief on reload, without re-calling the AI.
+export interface CycleBriefFields {
+  cycle_name?: string
+  fiscal_year?: number
+  kickoff_brief?: string | null
+  initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+}
+
 // PM kickoff brief — submitted after cycle is active
 export interface KickoffBriefPayload {
   cycle_id: string
@@ -180,6 +281,80 @@ export const pmApi = {
   getSurveyQuestions: async (cycleId: string): Promise<SurveyQuestionsResponse> => {
     const { data } = await apiClient.get<SurveyQuestionsResponse>(
       `/pm/cycles/${cycleId}/survey-questions`,
+    )
+    return data
+  },
+
+  // Strategic Brief wizard Step 2 — one synchronous call, no job id/polling.
+  // 2-3 sequential LLM calls server-side with no output token cap, so this can
+  // run well past the "typical" case — generous timeout to match the other
+  // multi-LLM-call endpoints in this file (buildPlan, assembleReport, etc.).
+  generateBrief: async (
+    cycleId: string,
+    payload: GenerateBriefPayload,
+  ): Promise<GenerateBriefResponse> => {
+    const { data } = await apiClient.post<GenerateBriefResponse>(
+      `/pm/cycles/${cycleId}/generate-brief`,
+      payload,
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  // Persist manual (non-AI) edits to the brief/themes. Partial payload; the
+  // response is the full resulting state. Fast DB write, no AI.
+  saveBriefAndThemes: async (
+    cycleId: string,
+    payload: SaveBriefAndThemesPayload,
+  ): Promise<SaveBriefAndThemesResponse> => {
+    const { data } = await apiClient.put<SaveBriefAndThemesResponse>(
+      `/pm/cycles/${cycleId}/save-brief-and-themes`,
+      payload,
+    )
+    return data
+  },
+
+  // "Refine with AI" — Strategic Brief. Send the live textarea content + a
+  // free-text instruction; returns the complete revised brief (already saved).
+  refineBrief: async (
+    cycleId: string,
+    payload: RefineBriefPayload,
+  ): Promise<RefineBriefResponse> => {
+    const { data } = await apiClient.post<RefineBriefResponse>(
+      `/pm/cycles/${cycleId}/brief/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // "Refine with AI" — Themes. Send the live themes + instruction; returns the
+  // COMPLETE new theme set (may add/remove/rename) — overwrite the whole list.
+  refineThemes: async (
+    cycleId: string,
+    payload: RefineThemesPayload,
+  ): Promise<RefineThemesResponse> => {
+    const { data } = await apiClient.post<RefineThemesResponse>(
+      `/pm/cycles/${cycleId}/themes/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // Upload an optional supporting document for the strategic brief. Multipart,
+  // field name MUST be "file". Content-Type is deleted so axios sets the
+  // multipart boundary itself. Replaces any prior brief doc on the cycle.
+  uploadBriefDocument: async (
+    cycleId: string,
+    file: File,
+  ): Promise<UploadBriefDocumentResponse> => {
+    const form = new FormData()
+    form.append("file", file)
+    const { data } = await apiClient.post<UploadBriefDocumentResponse>(
+      `/pm/cycles/${cycleId}/brief-document`,
+      form,
+      { headers: { "Content-Type": undefined }, timeout: 120000 },
     )
     return data
   },

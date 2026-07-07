@@ -1,14 +1,23 @@
 "use client"
 
-import { use, useMemo, useState } from "react"
+import { use, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { usePMCycleDashboard, useSurveyQuestions } from "@/hooks/useSessions"
-import { SurveyQuestion } from "@/lib/api/pm"
+import { pmApi, SurveyQuestion, CycleBriefFields, GenerateBriefAnswer } from "@/lib/api/pm"
+import { documentsApi } from "@/lib/api/documents"
+import { storeKickoffAnswers } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { ArrowLeft, Check, CheckCircle2, Clock, ShieldAlert, Sparkles } from "lucide-react"
+import {
+  AlertTriangle, ArrowLeft, Check, CheckCircle2, Clock, FileText, Loader2,
+  ShieldAlert, Sparkles, Upload, X,
+} from "lucide-react"
+
+const ALLOWED_BRIEF_EXTS = [".pdf", ".docx", ".doc", ".txt"]
+const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 1: Questionnaire
@@ -21,9 +30,9 @@ import { ArrowLeft, Check, CheckCircle2, Clock, ShieldAlert, Sparkles } from "lu
    - `options: null` → plain free-text box, no chips.
    - Order is stable per cycle, so questions are safely indexed by position.
 
-   Read-only for now: there is no answer-save endpoint, so answers only live in
-   local state. "Generate brief" has no backend yet either, so it stays
-   disabled — see the TODO on the button below.
+   Answers only live in local state (no answer-save endpoint) until "Generate
+   brief" is clicked, at which point they're handed to Step 2
+   (kickoff/review) via sessionStorage — see lib/kickoffBriefStorage.
 ──────────────────────────────────────────────────────────────────────────── */
 
 /** Per-question answer. `selected` holds every preset chip the PM has toggled
@@ -52,6 +61,7 @@ export default function KickoffQuestionnairePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const router = useRouter()
   const { data: pmData, isLoading: cycleLoading } = usePMCycleDashboard(id)
   const {
     data: surveyData,
@@ -66,10 +76,82 @@ export default function KickoffQuestionnairePage({
   // another." Position is the one thing the API contract actually promises.
   const [answers, setAnswers] = useState<Record<number, Answer>>({})
 
-  const cycle = (pmData as { cycle?: { cycle_name?: string; fiscal_year?: number; kickoff_brief?: string | null } } | undefined)?.cycle
-  const fiscalLabel = cycle?.fiscal_year
-    ? `FY${cycle.fiscal_year} Annual Report`
-    : cycle?.cycle_name ?? "Annual Report"
+  // Optional strategic-brief document. Uploaded immediately on pick to
+  // POST /pm/cycles/{id}/brief-document (replaces any prior doc on the cycle).
+  // generate-brief later reads whatever doc is on the cycle, so we must wait
+  // for a successful upload before allowing "Generate brief".
+  const [briefFile, setBriefFile] = useState<File | null>(null)
+  const [uploadState, setUploadState] = useState<"idle" | "uploading" | "done" | "error">("idle")
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  // Id of the currently-attached doc — needed to DELETE it on remove.
+  const [briefDocId, setBriefDocId] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  // Guards against a slow upload landing after the file was replaced/removed.
+  const uploadSeq = useRef(0)
+
+  const uploadBrief = async (file: File) => {
+    const seq = ++uploadSeq.current
+    setUploadState("uploading")
+    setUploadError(null)
+    try {
+      const res = await pmApi.uploadBriefDocument(id, file)
+      if (seq !== uploadSeq.current) return // superseded by a newer pick/remove
+      setBriefDocId(res.documents?.[0]?.document_id ?? null)
+      setUploadState("done")
+    } catch (err) {
+      if (seq !== uploadSeq.current) return
+      // The apiClient interceptor surfaces the backend `detail` as `message`.
+      setUploadError((err as { message?: string })?.message || "Upload failed. Please try again.")
+      setUploadState("error")
+    }
+  }
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Clear the input so the same filename can be re-picked after a remove.
+    if (fileRef.current) fileRef.current.value = ""
+    if (!file) return
+
+    const nameLower = file.name.toLowerCase()
+    if (!ALLOWED_BRIEF_EXTS.some((ext) => nameLower.endsWith(ext))) {
+      setBriefFile(file)
+      uploadSeq.current++ // cancel any in-flight upload
+      setUploadState("error")
+      setUploadError("Unsupported file type — please upload a PDF, DOCX, DOC, or TXT.")
+      return
+    }
+    if (file.size > MAX_BRIEF_BYTES) {
+      setBriefFile(file)
+      uploadSeq.current++
+      setUploadState("error")
+      setUploadError("File is too large — the maximum size is 20 MB.")
+      return
+    }
+    setBriefFile(file)
+    uploadBrief(file)
+  }
+
+  const removeBrief = () => {
+    uploadSeq.current++ // ignore any in-flight upload result
+    // Detach the doc from the cycle so generate-brief won't keep using it.
+    // Fire-and-forget: the UI clears immediately; a failed delete is logged.
+    if (briefDocId) {
+      documentsApi.remove(briefDocId).catch((err) => {
+        console.error("[brief-document] delete failed", err)
+      })
+    }
+    setBriefFile(null)
+    setBriefDocId(null)
+    setUploadState("idle")
+    setUploadError(null)
+  }
+
+  const cycle = (pmData as { cycle?: CycleBriefFields } | undefined)?.cycle
+  // Prefer the cycle's actual name; fall back to a fiscal-year label only if
+  // the name is missing.
+  const fiscalLabel =
+    cycle?.cycle_name ??
+    (cycle?.fiscal_year ? `FY${cycle.fiscal_year} Annual Report` : "Annual Report")
 
   // Until a kickoff brief exists, the cycle dashboard immediately redirects back
   // here (it can't be managed yet) — so "Back" must exit to the cycles list
@@ -100,6 +182,31 @@ export default function KickoffQuestionnairePage({
   // free-text questions AND as the always-available "Other…" detail.
   const setFreeText = (index: number, value: string) =>
     setAnswers((prev) => ({ ...prev, [index]: { selected: prev[index]?.selected ?? [], freeText: value } }))
+
+  const allAnswered = total > 0 && answeredCount === total
+  // Block generation while an attached doc is still uploading — generate-brief
+  // reads the cycle's doc, so it must land first. (An upload error doesn't
+  // block: the doc simply isn't attached and generation proceeds without it.)
+  const canGenerate = allAnswered && uploadState !== "uploading"
+
+  // One entry per ANSWERED question — unanswered ones are omitted (no
+  // server-side required-count check). Multi-select chips + any "Other" text
+  // are joined into a single comma-separated string per the API contract.
+  const buildAnswersPayload = (): GenerateBriefAnswer[] =>
+    questions.reduce<GenerateBriefAnswer[]>((acc, q, i) => {
+      const a = answers[i]
+      if (!a) return acc
+      const parts = [...a.selected, a.freeText.trim()].filter(Boolean)
+      if (parts.length === 0) return acc
+      acc.push({ question_id: q.id, answer: parts.join(", ") })
+      return acc
+    }, [])
+
+  const handleGenerate = () => {
+    if (!canGenerate) return
+    storeKickoffAnswers(id, buildAnswersPayload())
+    router.push(`/pm/cycles/${id}/kickoff/review`)
+  }
 
   if (cycleLoading || questionsLoading) return <PageLoader />
 
@@ -279,6 +386,105 @@ export default function KickoffQuestionnairePage({
                 )
               })}
             </div>
+
+            {/* Optional strategic-brief upload */}
+            <div
+              className={cn(
+                "rounded-2xl border border-dashed p-4",
+                uploadState === "error"
+                  ? "border-destructive/40 bg-destructive/5"
+                  : "border-indigo-200 bg-indigo-50/30",
+              )}
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                className="hidden"
+                onChange={handleFilePick}
+              />
+              {briefFile ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={cn(
+                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+                      uploadState === "error"
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-indigo-100 text-indigo-600",
+                    )}
+                  >
+                    {uploadState === "uploading" ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : uploadState === "error" ? (
+                      <AlertTriangle className="h-5 w-5" />
+                    ) : uploadState === "done" ? (
+                      <CheckCircle2 className="h-5 w-5 text-green-600" />
+                    ) : (
+                      <FileText className="h-5 w-5" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{briefFile.name}</p>
+                    <p
+                      className={cn(
+                        "text-xs",
+                        uploadState === "error" ? "text-destructive" : "text-muted-foreground",
+                      )}
+                    >
+                      {uploadState === "uploading"
+                        ? "Uploading…"
+                        : uploadState === "error"
+                          ? uploadError
+                          : uploadState === "done"
+                            ? "Attached — will guide the AI-drafted brief"
+                            : "Optional supporting brief"}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={uploadState === "uploading"}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    Replace
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={removeBrief}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" /> Remove
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+                      <FileText className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        Attach a strategic brief{" "}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Already have one? Upload it to guide the draft — PDF, DOCX, DOC, or TXT.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    <Upload className="h-4 w-4" /> Upload file
+                  </Button>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -300,14 +506,24 @@ export default function KickoffQuestionnairePage({
                 {answeredCount}/{total} answered
               </span>
             )}
-            {/* TODO: no brief-generation endpoint exists yet — button stays
-                disabled until a backend is available to wire it to. */}
             <Button
-              disabled
-              title="Brief generation isn't available yet"
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+              title={
+                !allAnswered
+                  ? "Answer every question to continue"
+                  : uploadState === "uploading"
+                    ? "Wait for the document to finish uploading"
+                    : undefined
+              }
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              <Sparkles className="h-4 w-4" /> Generate brief
+              {uploadState === "uploading" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Generate brief
             </Button>
           </div>
         </div>
