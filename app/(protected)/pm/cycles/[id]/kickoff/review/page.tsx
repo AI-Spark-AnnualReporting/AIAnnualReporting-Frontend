@@ -8,6 +8,7 @@ import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, BriefTheme, CycleBriefFields, GenerateBriefAnswer } from "@/lib/api/pm"
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
+import { IntelligenceLoader } from "@/components/pm/intelligence-loader"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -314,7 +315,12 @@ export default function ReviewBriefPage({
   const todayIso = new Date().toISOString().slice(0, 10)
   const [approveOpen, setApproveOpen] = useState(false)
   const [deadlineInput, setDeadlineInput] = useState("")
+  // How many questions to generate per department (5-20, backend default 12).
+  const [numQuestions, setNumQuestions] = useState(12)
   const [approving, setApproving] = useState(false)
+  // After the deadline is saved, we generate questions (POST /pm/kickoff) behind
+  // a full-screen loader, then land on /pm.
+  const [generating, setGenerating] = useState(false)
 
   const openApprove = () => {
     // Pre-fill with an already-saved deadline if the cycle has one.
@@ -333,11 +339,27 @@ export default function ReviewBriefPage({
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
       toast.success(`Deadline set — departments must answer by ${formatDate(deadlineInput)}.`)
       setApproveOpen(false)
-      // Destination for the post-approval step isn't finalized yet — send the
-      // PM to an "under development" placeholder so the flow completes cleanly.
-      router.push(`/pm/cycles/${id}/kickoff/done`)
     } catch (err) {
       toast.error((err as { message?: string })?.message || "Couldn't set the deadline.")
+      setApproving(false)
+      return
+    }
+
+    // Deadline saved — now kick off AI question generation (POST /pm/kickoff)
+    // behind the "Building your intelligence dashboard" loader. num_questions is
+    // sent here, not on the deadline endpoint. On success, land on /pm.
+    setGenerating(true)
+    try {
+      await pmApi.submitKickoff({
+        cycle_id: id,
+        strategic_brief: result?.brief ?? "",
+        num_questions: numQuestions,
+      })
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
+      router.push("/pm")
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't generate questions.")
+      setGenerating(false)
       setApproving(false)
     }
   }
@@ -353,6 +375,7 @@ export default function ReviewBriefPage({
   const hardError = errorStatus
 
   if (phase === "idle") return <PageLoader />
+  if (generating) return <IntelligenceLoader />
 
   return (
     <div>
@@ -658,6 +681,8 @@ export default function ReviewBriefPage({
         submitting={approving}
         onConfirm={confirmApprove}
         cycleLabel={fiscalLabel}
+        numQuestions={numQuestions}
+        onNumQuestionsChange={setNumQuestions}
       />
     </div>
   )
@@ -678,6 +703,8 @@ function ApproveDeadlineDialog({
   submitting,
   onConfirm,
   cycleLabel,
+  numQuestions,
+  onNumQuestionsChange,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -688,6 +715,8 @@ function ApproveDeadlineDialog({
   submitting: boolean
   onConfirm: () => void
   cycleLabel: string
+  numQuestions: number
+  onNumQuestionsChange: (n: number) => void
 }) {
   // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
   const isPast = !!value && value < min
@@ -740,6 +769,38 @@ function ApproveDeadlineDialog({
               A deadline is required before the cycle can move forward.
             </p>
           )}
+        </div>
+
+        {/* Questions-per-department slider (5-20, backend default 12) */}
+        <div className="space-y-2 border-t px-6 py-5">
+          <div className="flex items-center justify-between">
+            <label htmlFor="num-questions" className="text-sm font-medium text-foreground">
+              Questions per department:{" "}
+              <span className="tabular-nums text-foreground">{numQuestions}</span>
+            </label>
+            {numQuestions === 12 && (
+              <span className="text-xs text-muted-foreground">(default)</span>
+            )}
+          </div>
+          <input
+            id="num-questions"
+            type="range"
+            min={5}
+            max={20}
+            step={1}
+            value={numQuestions}
+            disabled={submitting}
+            onChange={(e) => onNumQuestionsChange(parseInt(e.target.value, 10))}
+            className="h-1.5 w-full cursor-pointer accent-indigo-600"
+          />
+          <div className="flex justify-between text-[10px] tabular-nums text-muted-foreground">
+            <span>5</span>
+            <span>12</span>
+            <span>20</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            How many questions the AI generates for each department.
+          </p>
         </div>
 
         <DialogFooter className="gap-2 border-t bg-muted/30 px-6 py-4">
