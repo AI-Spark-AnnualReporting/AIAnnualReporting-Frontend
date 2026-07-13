@@ -11,7 +11,10 @@ import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { KickoffBuildLoader } from "@/components/pm/kickoff-build-loader"
+import { ThemeChipCard } from "@/components/report/ThemeChipCard"
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -314,6 +317,8 @@ export default function ReviewBriefPage({
   const todayIso = new Date().toISOString().slice(0, 10)
   const [approveOpen, setApproveOpen] = useState(false)
   const [deadlineInput, setDeadlineInput] = useState("")
+  // How many questions to generate per department (backend range 5–20, default 12).
+  const [numQuestions, setNumQuestions] = useState(12)
   const [approving, setApproving] = useState(false)
 
   const openApprove = () => {
@@ -322,22 +327,52 @@ export default function ReviewBriefPage({
     setApproveOpen(true)
   }
 
-  // A valid deadline is required and must not be in the past.
+  // Both fields are mandatory before approve: a valid future/today deadline AND
+  // a question count within the backend's accepted 5–20 range.
   const deadlineValid = !!deadlineInput && deadlineInput >= todayIso
+  const numQuestionsValid = numQuestions >= 5 && numQuestions <= 20
+  const approveValid = deadlineValid && numQuestionsValid
 
+  // Approve kicks off the cycle for real: it fires the AI question-generation
+  // pipeline for every department (POST /pm/kickoff) using the approved brief and
+  // the chosen question count, then persists the deadline. The full-screen
+  // KickoffLoader covers the wait, and on success the PM lands on the cycle
+  // dashboard where the freshly generated department sessions appear.
   const confirmApprove = async () => {
-    if (!deadlineValid || approving) return
+    if (!approveValid || !result?.brief || approving) return
     setApproving(true)
     try {
-      await pmApi.setQuestionsDeadline(id, deadlineInput)
+      // 1) Generate the questions. This is the long call (~up to 3 min).
+      await pmApi.submitKickoff({
+        cycle_id: id,
+        strategic_brief: result.brief,
+        num_questions: numQuestions,
+      })
+
+      // 2) Persist the deadline — non-blocking. The kickoff already succeeded, so
+      // a deadline-save failure only warns; it doesn't roll anything back.
+      try {
+        await pmApi.setQuestionsDeadline(id, deadlineInput)
+      } catch {
+        toast.error("Questions generated, but the deadline couldn't be saved — set it from the cycle page.")
+      }
+
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
-      toast.success(`Deadline set — departments must answer by ${formatDate(deadlineInput)}.`)
+      toast.success(`Kickoff complete — departments must answer by ${formatDate(deadlineInput)}.`)
       setApproveOpen(false)
-      // Destination for the post-approval step isn't finalized yet — send the
-      // PM to an "under development" placeholder so the flow completes cleanly.
-      router.push(`/pm/cycles/${id}/kickoff/done`)
+      router.push(`/pm/cycles/${id}`)
     } catch (err) {
-      toast.error((err as { message?: string })?.message || "Couldn't set the deadline.")
+      // A timeout aborts client-side while the backend is (very likely) still
+      // generating. Resubmitting would fire a DUPLICATE kickoff, so don't
+      // re-enable — send the PM to the dashboard to check instead.
+      const msg = (err as { message?: string })?.message ?? ""
+      if (/timeout|ECONNABORTED/i.test(msg)) {
+        toast.message("Questions may still be generating — check the cycle dashboard in a moment.")
+        setApproveOpen(false)
+        router.push(`/pm/cycles/${id}`)
+        return
+      }
+      toast.error(msg || "Couldn't kick off the cycle.")
       setApproving(false)
     }
   }
@@ -589,7 +624,7 @@ export default function ReviewBriefPage({
                   <p className="text-sm text-muted-foreground">No themes were proposed.</p>
                 )}
                 {result.themes.map((theme, i) => (
-                  <ThemeCard
+                  <ThemeChipCard
                     key={i}
                     index={i}
                     theme={theme}
@@ -655,10 +690,17 @@ export default function ReviewBriefPage({
         onChange={setDeadlineInput}
         min={todayIso}
         valid={deadlineValid}
+        canApprove={approveValid}
+        numQuestions={numQuestions}
+        onNumQuestionsChange={setNumQuestions}
         submitting={approving}
         onConfirm={confirmApprove}
         cycleLabel={fiscalLabel}
       />
+
+      {/* Full-screen loader while the kickoff pipeline generates questions.
+          Sits above the (still-open) dialog via its own fixed inset-0 z-[100]. */}
+      {approving && <KickoffBuildLoader />}
     </div>
   )
 }
@@ -675,6 +717,9 @@ function ApproveDeadlineDialog({
   onChange,
   min,
   valid,
+  canApprove,
+  numQuestions,
+  onNumQuestionsChange,
   submitting,
   onConfirm,
   cycleLabel,
@@ -685,6 +730,9 @@ function ApproveDeadlineDialog({
   onChange: (value: string) => void
   min: string
   valid: boolean
+  canApprove: boolean
+  numQuestions: number
+  onNumQuestionsChange: (value: number) => void
   submitting: boolean
   onConfirm: () => void
   cycleLabel: string
@@ -742,13 +790,44 @@ function ApproveDeadlineDialog({
           )}
         </div>
 
+        {/* Questions per department — drives num_questions on the kickoff call. */}
+        <div className="space-y-2 border-t px-6 py-5">
+          <div className="flex items-center justify-between">
+            <Label>
+              Questions per department:{" "}
+              <span className="tabular-nums text-foreground">{numQuestions}</span>
+            </Label>
+            {numQuestions === 12 && (
+              <span className="text-xs text-muted-foreground">(default)</span>
+            )}
+          </div>
+          <input
+            type="range"
+            min={5}
+            max={20}
+            step={1}
+            value={numQuestions}
+            disabled={submitting}
+            onChange={(e) => onNumQuestionsChange(parseInt(e.target.value, 10))}
+            className="h-1.5 w-full cursor-pointer accent-indigo-600"
+          />
+          <div className="flex justify-between text-[10px] tabular-nums text-muted-foreground">
+            <span>5</span>
+            <span>12</span>
+            <span>20</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Each department gets its own tailored set of this many questions.
+          </p>
+        </div>
+
         <DialogFooter className="gap-2 border-t bg-muted/30 px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
           <Button
             onClick={onConfirm}
-            disabled={!valid || submitting}
+            disabled={!canApprove || submitting}
             className="bg-indigo-600 text-white hover:bg-indigo-700"
           >
             {submitting ? (
@@ -867,93 +946,6 @@ function RefinePanel({
   )
 }
 
-/* ── Theme card — title + editable keyword chips ─────────────────────────── */
-function ThemeCard({
-  index,
-  theme,
-  onTitleChange,
-  onAddKeyword,
-  onRemoveKeyword,
-  onRemove,
-}: {
-  index: number
-  theme: BriefTheme
-  onTitleChange: (value: string) => void
-  onAddKeyword: (keyword: string) => void
-  onRemoveKeyword: (keywordIndex: number) => void
-  onRemove: () => void
-}) {
-  const [draft, setDraft] = useState("")
-
-  const commitDraft = () => {
-    if (draft.trim()) onAddKeyword(draft)
-    setDraft("")
-  }
-
-  return (
-    <div className="relative rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 pr-9">
-      {/* Remove theme */}
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove theme"
-        className="absolute right-3 top-3 text-muted-foreground/40 transition-colors hover:text-destructive"
-      >
-        <X className="h-4 w-4" />
-      </button>
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-semibold text-indigo-600">
-          {index + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          {/* Seamless inline-editable title */}
-          <input
-            type="text"
-            value={theme.title}
-            onChange={(e) => onTitleChange(e.target.value)}
-            className="w-full border-0 bg-transparent p-0 text-sm font-semibold text-foreground outline-none"
-          />
-          {/* Editable keyword chips */}
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {theme.keywords.map((kw, k) => (
-              <span
-                key={k}
-                className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-700"
-              >
-                {kw}
-                <button
-                  type="button"
-                  onClick={() => onRemoveKeyword(k)}
-                  className="text-indigo-400 transition-colors hover:text-indigo-700"
-                  aria-label={`Remove ${kw}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-            {/* Add-keyword input — commits on Enter, comma, or blur */}
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === ",") {
-                  e.preventDefault()
-                  commitDraft()
-                } else if (e.key === "Backspace" && draft === "" && theme.keywords.length > 0) {
-                  onRemoveKeyword(theme.keywords.length - 1)
-                }
-              }}
-              onBlur={commitDraft}
-              placeholder="Add keyword…"
-              className="min-w-[8rem] flex-1 border-0 bg-transparent px-1 py-1 text-xs outline-none placeholder:text-muted-foreground/60"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 /* ── Two-step progress indicator (mirrors Step 1's) ──────────────────────── */
 function Stepper({ current }: { current: 1 | 2 }) {

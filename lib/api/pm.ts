@@ -114,6 +114,14 @@ export interface BriefTheme {
   keywords: string[]
 }
 
+// A "suggested theme" now carries a keyword set — the SAME shape as BriefTheme.
+// It's a separate cycle column (`suggested_themes`) from
+// `initial_themes_and_keywords`, but rendered identically (title + keyword chips).
+export interface SuggestedTheme {
+  title: string
+  keywords: string[]
+}
+
 // A success response with an empty strategic_brief is a SOFT FAILURE (the LLM
 // step failed server-side) — treat it like an error, not an empty result.
 export interface GenerateBriefResponse {
@@ -122,6 +130,8 @@ export interface GenerateBriefResponse {
   strategic_brief: string
   themes: BriefTheme[]
   keywords: string[]
+  // NEW — description-based themes, stored server-side on the cycle.
+  suggested_themes?: SuggestedTheme[]
 }
 
 // POST /pm/cycles/{id}/brief-document — optional supporting doc for the brief.
@@ -165,6 +175,18 @@ export interface RefineThemesResponse {
   cycle_id: string
   themes: BriefTheme[]
 }
+// POST /pm/cycles/{id}/suggested-themes/refine — the "Refine with AI" assistant
+// for the description-based suggested themes. Send the live list + instruction;
+// returns the COMPLETE revised set (already saved server-side).
+export interface RefineSuggestedThemesPayload {
+  suggested_themes: SuggestedTheme[]
+  instruction: string
+}
+export interface RefineSuggestedThemesResponse {
+  success: boolean
+  cycle_id: string
+  suggested_themes: SuggestedTheme[]
+}
 
 // PUT /pm/cycles/{id}/save-brief-and-themes — persists the PM's MANUAL edits
 // (brief text, theme add/delete/rename, keyword chips). Partial: send only the
@@ -175,6 +197,8 @@ export interface SaveBriefAndThemesPayload {
   strategic_brief?: string
   themes?: BriefTheme[]
   keywords?: string[]
+  // NEW — send the WHOLE suggested_themes list; omitted = left as-is.
+  suggested_themes?: SuggestedTheme[]
 }
 export interface SaveBriefAndThemesResponse {
   success: boolean
@@ -182,6 +206,7 @@ export interface SaveBriefAndThemesResponse {
   strategic_brief: string
   themes: BriefTheme[]
   keywords: string[]
+  suggested_themes: SuggestedTheme[]
 }
 
 // The subset of cycle fields the brief wizard needs to detect a
@@ -191,6 +216,7 @@ export interface CycleBriefFields {
   fiscal_year?: number
   kickoff_brief?: string | null
   initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+  suggested_themes?: SuggestedTheme[] | null
   questions_deadline?: string | null
 }
 
@@ -337,6 +363,20 @@ export const pmApi = {
   ): Promise<RefineThemesResponse> => {
     const { data } = await apiClient.post<RefineThemesResponse>(
       `/pm/cycles/${cycleId}/themes/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // "Refine with AI" — Suggested (description-based) themes. Send the live list
+  // + instruction; returns the COMPLETE revised set (already saved server-side).
+  refineSuggestedThemes: async (
+    cycleId: string,
+    payload: RefineSuggestedThemesPayload,
+  ): Promise<RefineSuggestedThemesResponse> => {
+    const { data } = await apiClient.post<RefineSuggestedThemesResponse>(
+      `/pm/cycles/${cycleId}/suggested-themes/refine`,
       payload,
       { timeout: 60000 },
     )

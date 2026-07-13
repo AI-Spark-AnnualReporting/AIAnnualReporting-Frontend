@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -31,15 +31,17 @@ import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
-import { ThemeEditor } from "@/components/report/ThemeEditor"
+import { InitialThemesPicker } from "@/components/report/InitialThemesPicker"
+import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
 import {
   useBuildPlan,
   useLockPlan,
   usePMCycleSections,
   usePlan,
+  useUpdatePlan,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { pmApi } from "@/lib/api/pm"
+import { pmApi, type BriefTheme, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import { isTableOfContentsSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
@@ -48,6 +50,7 @@ import type {
   CycleReportSection,
   FeederMapEntry,
   PlanResponse,
+  ReportTheme,
 } from "@/types"
 
 type Step = 1 | 2
@@ -66,7 +69,12 @@ export default function PlanReviewPage({
 }
 
 interface PMDashboardData {
-  cycle?: { cycle_name?: string; content_language?: ContentLanguage }
+  cycle?: {
+    cycle_name?: string
+    content_language?: ContentLanguage
+    initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+    suggested_themes?: SuggestedTheme[] | null
+  }
   departments?: Array<{ department_code: string; department_name: string }>
 }
 
@@ -74,8 +82,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const [step, setStep] = useState<Step>(1)
   // The lock is authoritative on the server (`plan.sections_locked`). Once set,
   // the blueprint is frozen one-way: no reordering, removing, source editing,
-  // theme/headline edits, or regeneration. There is no unlock.
-  const lockPlan = useLockPlan(cycleId)
+  // theme/headline edits, or regeneration. There is no unlock. Locking now
+  // happens at "Start Building" (see StartBuildingAction), not when advancing.
 
   const planQuery = usePlan(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
@@ -91,6 +99,9 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     department_code: d.department_code,
     department_name: d.department_name,
   }))
+  // Themes generated during the Strategic Brief flow (persisted on the cycle).
+  const initialThemes = pmData?.cycle?.initial_themes_and_keywords?.themes ?? []
+  const suggestedThemes = pmData?.cycle?.suggested_themes ?? []
 
   const plan = planQuery.data
   const planMissing =
@@ -146,13 +157,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           needsSource={needsSource}
           locked={sectionsLocked}
           lockedAt={plan.sections_locked_at}
-          locking={lockPlan.isPending}
           isRtl={isRtl}
-          onLock={async () => {
-            // Persist the lock first; only advance once the server confirms.
-            await lockPlan.mutateAsync()
-            setStep(2)
-          }}
           onContinue={() => setStep(2)}
         />
       ) : (
@@ -160,7 +165,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           cycleId={cycleId}
           plan={plan}
           sections={sections}
-          locked={sectionsLocked}
+          initialThemes={initialThemes}
+          suggestedThemes={suggestedThemes}
           isRtl={isRtl}
           onBack={() => setStep(1)}
         />
@@ -226,7 +232,7 @@ function StepIndicator({
           n={1}
           icon={Layers}
           label="Sections"
-          sublabel="Review, source and lock"
+          sublabel="Review & source"
           state={step1State}
           onClick={() => onStep(1)}
         />
@@ -340,9 +346,7 @@ function SectionsStep({
   needsSource,
   locked,
   lockedAt,
-  locking,
   isRtl,
-  onLock,
   onContinue,
 }: {
   cycleId: string
@@ -352,9 +356,7 @@ function SectionsStep({
   needsSource: number
   locked: boolean
   lockedAt: string | null
-  locking: boolean
   isRtl: boolean
-  onLock: () => void
   onContinue: () => void
 }) {
   const canLock = needsSource === 0 && sections.length > 0
@@ -416,17 +418,13 @@ function SectionsStep({
                   Assign a source to every flagged section to continue.
                 </span>
               )}
+              {/* Advancing no longer locks — the plan is locked at "Start Building". */}
               <Button
-                onClick={onLock}
-                disabled={!canLock || locking}
+                onClick={onContinue}
+                disabled={!canLock}
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
-                {locking ? (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                ) : (
-                  <Lock className="mr-1.5 h-4 w-4" />
-                )}
-                Lock sections
+                Continue
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </>
@@ -443,24 +441,79 @@ function ThemesStep({
   cycleId,
   plan,
   sections,
-  locked,
+  initialThemes,
+  suggestedThemes,
   isRtl,
   onBack,
 }: {
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
-  locked: boolean
+  initialThemes: BriefTheme[]
+  suggestedThemes: SuggestedTheme[]
   isRtl: boolean
   onBack: () => void
 }) {
+  // Selection drives which themes become the report's themes (plan.themes) on
+  // Start Building. Two independent sets keyed by title (one per list) — the two
+  // lists are separate cycle columns and never mutate each other.
+  const [selectedInitial, setSelectedInitial] = useState<Set<string>>(new Set())
+  const [selectedSuggested, setSelectedSuggested] = useState<Set<string>>(new Set())
+  const seededRef = useRef(false)
+
+  // Seed selection once themes arrive: pre-select any theme already present in
+  // the current plan.themes (by title) so re-entering the step is idempotent.
+  useEffect(() => {
+    if (seededRef.current) return
+    if (initialThemes.length === 0 && suggestedThemes.length === 0) return
+    seededRef.current = true
+    const planTitles = new Set((plan.themes ?? []).map((t) => t.title))
+    setSelectedInitial(
+      new Set(initialThemes.filter((t) => planTitles.has(t.title)).map((t) => t.title)),
+    )
+    setSelectedSuggested(
+      new Set(suggestedThemes.filter((t) => planTitles.has(t.title)).map((t) => t.title)),
+    )
+  }, [initialThemes, suggestedThemes, plan.themes])
+
+  const toggleIn = (setter: (fn: (prev: Set<string>) => Set<string>) => void) => (title: string) =>
+    setter((prev) => {
+      const next = new Set(prev)
+      if (next.has(title)) next.delete(title)
+      else next.add(title)
+      return next
+    })
+
+  // Selected themes → report themes. Suggested map directly; initial themes carry
+  // keywords, joined into a description so they fit the ReportTheme shape.
+  const selectedThemes: ReportTheme[] = [
+    ...initialThemes
+      .filter((t) => selectedInitial.has(t.title))
+      .map((t) => ({ title: t.title, description: t.keywords.join(", ") })),
+    ...suggestedThemes
+      .filter((t) => selectedSuggested.has(t.title))
+      .map((t) => ({ title: t.title, description: t.description })),
+  ]
+
   return (
     <section className="space-y-5">
+      {/* Initial Themes — from the brief, view-only + selectable. */}
       <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <ThemeEditor
+        <InitialThemesPicker
+          themes={initialThemes}
+          selected={selectedInitial}
+          onToggle={toggleIn(setSelectedInitial)}
+          isRtl={isRtl}
+        />
+      </div>
+
+      {/* Suggested Themes — cycle.suggested_themes: editable + AI-refine + selectable. */}
+      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <SuggestedThemesEditor
           cycleId={cycleId}
-          themes={plan.themes ?? []}
-          readOnly={locked}
+          themes={suggestedThemes}
+          selected={selectedSuggested}
+          onToggle={toggleIn(setSelectedSuggested)}
           isRtl={isRtl}
         />
       </div>
@@ -474,7 +527,12 @@ function ThemesStep({
           <ArrowLeft className="mr-1.5 h-4 w-4" />
           Back to sections
         </Button>
-        <StartBuildingAction cycleId={cycleId} plan={plan} sections={sections} />
+        <StartBuildingAction
+          cycleId={cycleId}
+          plan={plan}
+          sections={sections}
+          selectedThemes={selectedThemes}
+        />
       </div>
     </section>
   )
@@ -486,15 +544,32 @@ function StartBuildingAction({
   cycleId,
   plan,
   sections,
+  selectedThemes,
 }: {
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
+  selectedThemes: ReportTheme[]
 }) {
   const router = useRouter()
   const qc = useQueryClient()
+  const updatePlan = useUpdatePlan(cycleId)
+  const lockPlan = useLockPlan(cycleId)
+  const alreadyLocked = plan.sections_locked
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
   const disabled = needsSource > 0
+
+  // Persist the PM's theme selection as the report's themes (plan.themes) before
+  // building. Skipped when nothing is selected so we never wipe existing themes.
+  // A locked plan may reject the update — proceed with the existing themes.
+  const persistSelectedThemes = async () => {
+    if (selectedThemes.length === 0) return
+    try {
+      await updatePlan.mutateAsync({ themes: selectedThemes })
+    } catch {
+      /* handled by the hook's error toast; don't block the build */
+    }
+  }
 
   const [running, setRunning] = useState(false)
   const [total, setTotal] = useState(0)
@@ -529,6 +604,19 @@ function StartBuildingAction({
   const totalWork = eligibleToGenerate.length
 
   const onStart = async () => {
+    // 1) Save the theme selection to plan.themes while the plan is still
+    //    unlocked (a locked plan would reject the update).
+    await persistSelectedThemes()
+    // 2) Lock the plan — this is the one-way freeze that used to live on Step 1.
+    //    Abort the build if it fails (the hook already surfaces the error).
+    if (!alreadyLocked) {
+      try {
+        await lockPlan.mutateAsync()
+      } catch {
+        return
+      }
+    }
+    // 3) Proceed with the build.
     if (totalWork === 0) {
       router.push(`/pm/cycles/${cycleId}/build`)
       return
@@ -571,7 +659,7 @@ function StartBuildingAction({
   return (
     <>
       <Button
-        disabled={disabled || running}
+        disabled={disabled || running || lockPlan.isPending}
         onClick={onStart}
         className="bg-indigo-600 text-white hover:bg-indigo-700"
         title={
