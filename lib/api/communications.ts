@@ -210,7 +210,160 @@ export interface SendMessageResponse {
   message: ThreadMessage
 }
 
+// The caller's company profile on the Centrion backend. Only the display
+// fields the External-email preview needs are typed here.
+export interface CentrionCompany {
+  id: string
+  name: string
+  headquarter_city?: string | null
+  website_url?: string | null
+  reporting_currency?: string | null
+}
+
+// ── History tab: email sends + publications ────────────────────────────────
+export type EmailAudience = "external" | "internal"
+export type EmailSendStatus = "tracked" | "scheduled" | "draft"
+
+export interface EmailSendsStats {
+  emails_sent_ytd: number
+  external_count: number
+  internal_count: number
+  avg_open_rate: number
+  industry_open_rate: number
+  open_rate_vs_industry: number
+  report_download_rate: number
+  avg_time_on_report_seconds: number
+  time_on_report_qoq_seconds: number | null
+}
+
+// metrics is a different shape per audience_type.
+export type EmailSendMetrics =
+  | { opened_pct: number; downloaded_pct: number } // external
+  | { read_count: number; approved_count: number; total: number } // internal
+
+export interface EmailSend {
+  id: string
+  subject: string
+  audience_type: EmailAudience
+  audience_label: string
+  status: EmailSendStatus
+  sent_at: string | null
+  scheduled_at: string | null
+  recipient_count: number
+  report: { id: string; title: string } | null
+  metrics: EmailSendMetrics
+}
+
+export interface EmailSendsResponse {
+  stats: EmailSendsStats
+  sends: EmailSend[]
+}
+
+export interface SendRecipientHeader {
+  id: string
+  subject: string
+  audience_type: EmailAudience
+  sent_at: string | null
+  recipient_count: number
+}
+
+export interface SendRecipient {
+  name: string
+  org: string | null
+  contact: string | null
+  opened_at: string | null
+  downloaded: boolean
+  time_on_report_seconds: number | null
+  approved_at: string | null
+}
+
+export interface SendRecipientsResponse {
+  send: SendRecipientHeader
+  recipients: SendRecipient[]
+}
+
+export interface Publication {
+  id: string
+  report: { id: string; title: string; report_type: string; period: string } | null
+  channel: string
+  jurisdiction: string | null
+  visibility: string
+  watermarked: boolean
+  published_at?: string | null
+  published_by: { full_name: string } | null
+}
+
+export interface PublicationsResponse {
+  stats: { total: number } & Record<string, number>
+  publications: Publication[]
+}
+
+// ── Compose modal: draft / send ────────────────────────────────────────────
+export interface ComposeRecipient {
+  name: string
+  org?: string | null
+  contact?: string | null
+  email?: string | null
+}
+
+export interface EmailSendSavePayload {
+  subject: string
+  audience_type: EmailAudience
+  audience_label?: string
+  body?: string
+  report_id?: string | null
+  status: EmailSendStatus
+  scheduled_at?: string | null
+  recipients?: ComposeRecipient[]
+}
+
+export interface EmailSendDetail {
+  id: string
+  subject: string
+  body: string | null
+  audience_type: EmailAudience
+  audience_label: string
+  status: EmailSendStatus
+  scheduled_at: string | null
+  report: {
+    id: string
+    title: string
+    pdf_path: string | null
+    page_count: number | null
+    file_size_mb: number | null
+  } | null
+  recipients: ComposeRecipient[]
+}
+
+export interface CreateEmailSendResponse {
+  send: EmailSendDetail
+  recipient_count: number
+}
+
+export interface UpdateEmailSendResponse {
+  send: EmailSendDetail
+}
+
+export interface DraftListItem {
+  id: string
+  subject: string
+  recipient_count: number
+  report: { id: string; title: string; period?: string } | null
+  updated_at: string
+}
+
+export interface DraftListResponse {
+  drafts: DraftListItem[]
+}
+
 export const communicationsApi = {
+  // Company profile for the signed-in user (company derived from the JWT).
+  // Used to fill the External-email preview (name, city, currency, sender).
+  getMyCompany: async (): Promise<CentrionCompany> => {
+    const { data } = await commClient.get(`/companies/me`)
+    return data
+  },
+
   // Communication list. limit (1–200, default 50) / offset (default 0) only
   // needed for pagination.
   listThreads: async (params?: {
@@ -276,6 +429,68 @@ export const communicationsApi = {
   // Start a thread on a report with a first message + optional mentions.
   startThread: async (body: StartThreadBody): Promise<StartThreadResponse> => {
     const { data } = await commClient.post(`/communications/threads`, body)
+    return data
+  },
+
+  // ── History tab ──────────────────────────────────────────────────────────
+  // Email sends + header stats. `audience` filters the list only; stats always
+  // cover everything so the header stays stable while toggling.
+  emailSends: async (audience?: EmailAudience | "all"): Promise<EmailSendsResponse> => {
+    const { data } = await commClient.get(`/communications/history/email-sends`, {
+      params: audience && audience !== "all" ? { audience } : undefined,
+    })
+    return data
+  },
+
+  // Per-recipient drill-down for one send.
+  sendRecipients: async (sendId: string): Promise<SendRecipientsResponse> => {
+    const { data } = await commClient.get(
+      `/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients`,
+    )
+    return data
+  },
+
+  // CSV export — carries the Bearer token via commClient; returns a Blob.
+  sendRecipientsCsv: async (sendId: string): Promise<Blob> => {
+    const { data } = await commClient.get(
+      `/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients.csv`,
+      { responseType: "blob" },
+    )
+    return data
+  },
+
+  // Publications list + stats. Empty until reports are published.
+  publications: async (): Promise<PublicationsResponse> => {
+    const { data } = await commClient.get(`/communications/history/publications`)
+    return data
+  },
+
+  // ── Compose: draft / send ────────────────────────────────────────────────
+  // Create a send row (first Save draft OR first Send).
+  createEmailSend: async (body: EmailSendSavePayload): Promise<CreateEmailSendResponse> => {
+    const { data } = await commClient.post(`/communications/history/email-sends`, body)
+    return data
+  },
+
+  // Update an existing draft. All fields optional; `recipients` replaces the
+  // whole list. 409 if the row is already tracked/scheduled.
+  updateEmailSend: async (id: string, body: Partial<EmailSendSavePayload>): Promise<UpdateEmailSendResponse> => {
+    const { data } = await commClient.patch(
+      `/communications/history/email-sends/${encodeURIComponent(id)}`,
+      body,
+    )
+    return data
+  },
+
+  // Reopen a draft — prefill the editor. `report.pdf_path` may be null.
+  getEmailSend: async (id: string): Promise<EmailSendDetail> => {
+    const { data } = await commClient.get(`/communications/history/email-sends/${encodeURIComponent(id)}`)
+    return data
+  },
+
+  // Saved drafts (only surface for drafts — they're not in the History list).
+  drafts: async (): Promise<DraftListResponse> => {
+    const { data } = await commClient.get(`/communications/history/drafts`)
     return data
   },
 }
