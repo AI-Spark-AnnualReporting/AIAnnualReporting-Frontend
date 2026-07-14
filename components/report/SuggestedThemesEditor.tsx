@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Check, Loader2, Plus, ShieldAlert, Sparkles } from "lucide-react"
+import { Check, Loader2, Lock, Plus, ShieldAlert, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RefineAssistant } from "@/components/report/RefineAssistant"
 import { ThemeChipCard } from "@/components/report/ThemeChipCard"
@@ -19,37 +19,42 @@ const SUGGESTED_CHIPS = [
   "Add a digital theme",
 ]
 
-// Old cycles may return items missing `keywords` (generated under the previous
-// {title, description} shape). Default to [] so nothing crashes on render.
+// Old cycles may return items missing `keywords` (legacy shape) or `selected`
+// (added later). Default keywords to [] and selected to true so nothing crashes
+// and legacy themes render as checked.
 function normalize(list: SuggestedTheme[]): SuggestedTheme[] {
-  return list.map((t) => ({ title: t.title, keywords: t.keywords ?? [] }))
+  return list.map((t) => ({
+    title: t.title,
+    keywords: t.keywords ?? [],
+    selected: t.selected ?? true,
+  }))
 }
 
 function serialize(list: SuggestedTheme[]) {
-  return list.map((t) => `${t.title}¦${(t.keywords ?? []).join(",")}`).join("§")
+  return list
+    .map((t) => `${t.title}¦${(t.keywords ?? []).join(",")}¦${t.selected !== false}`)
+    .join("§")
 }
 
 /**
  * Editable + AI-refinable + selectable list of the cycle's `suggested_themes`
- * ({title, keywords[]} — the SAME shape as the initial themes). Mirrors the
- * Strategic Brief page's themes mechanics: manual edits auto-save (debounced
- * typing, immediate add/remove) via `save-brief-and-themes`; "Refine with AI"
- * calls `suggested-themes/refine` (already persisted server-side). The selection
- * checkbox drives which themes become the report's themes (owned by the parent).
+ * ({title, keywords[], selected}). Mirrors the Strategic Brief page's themes
+ * mechanics: manual edits auto-save (debounced typing, immediate add/remove) via
+ * `save-brief-and-themes`; "Refine with AI" calls `suggested-themes/refine`
+ * (already persisted server-side). The selection checkbox toggles `selected` and
+ * persists immediately — the backend injects only checked themes into the prompt.
  */
 export function SuggestedThemesEditor({
   cycleId,
   themes,
-  selected,
-  onToggle,
   isRtl,
+  readOnly,
 }: {
   cycleId: string
   themes: SuggestedTheme[]
-  /** Titles currently selected. */
-  selected: Set<string>
-  onToggle: (title: string) => void
   isRtl?: boolean
+  /** Locked plan → view-only (no edit/refine/add/toggle). */
+  readOnly?: boolean
 }) {
   const qc = useQueryClient()
   const [list, setList] = useState<SuggestedTheme[]>(() => normalize(themes))
@@ -58,12 +63,15 @@ export function SuggestedThemesEditor({
   const [refining, setRefining] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Re-seed from the server when it changes (e.g. after refine/reload) and the
-  // user has no unsaved edits.
-  const [prevKey, setPrevKey] = useState(serialize(themes))
-  const currentKey = serialize(themes)
-  if (prevKey !== currentKey) {
-    setPrevKey(currentKey)
+  // Seed from the server only until the user starts editing. Every save
+  // invalidates the cycle query, so reseeding after the first edit would let a
+  // debounced save's refetch clobber in-progress typing (title "stuck" after a
+  // keystroke). Once `touched`, local state is authoritative.
+  const [touched, setTouched] = useState(false)
+  const [seededKey, setSeededKey] = useState(serialize(themes))
+  const incomingKey = serialize(themes)
+  if (!touched && seededKey !== incomingKey) {
+    setSeededKey(incomingKey)
     setList(normalize(themes))
   }
 
@@ -101,7 +109,7 @@ export function SuggestedThemesEditor({
 
   const commit = (next: SuggestedTheme[], immediate: boolean) => {
     setList(next)
-    setPrevKey(serialize(next)) // our own edit is the new baseline; don't reseed over it
+    setTouched(true) // local edits are authoritative — stop reseeding from the server
     if (immediate) saveNow(next)
     else saveDebounced(next)
   }
@@ -129,9 +137,18 @@ export function SuggestedThemesEditor({
 
   const addTheme = () => {
     if (list.length >= MAX_THEMES) return
-    commit([...list, { title: "", keywords: [] }], true)
+    commit([...list, { title: "", keywords: [], selected: true }], true)
   }
   const removeTheme = (i: number) => commit(list.filter((_, idx) => idx !== i), true)
+
+  // Toggle "select to include" — persists `selected` immediately.
+  const toggleSelected = (i: number) =>
+    commit(
+      list.map((t, idx) => (idx === i ? { ...t, selected: t.selected === false } : t)),
+      true,
+    )
+
+  const selectedCount = list.filter((t) => t.selected !== false).length
 
   const refineWith = async (instruction: string): Promise<boolean> => {
     if (refining) return false
@@ -144,7 +161,7 @@ export function SuggestedThemesEditor({
       })
       const next = normalize(data.suggested_themes ?? [])
       setList(next)
-      setPrevKey(serialize(next))
+      setSeededKey(serialize(next)) // refined set is authoritative; don't reseed over it
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] }) // already saved
       return true
     } catch (err) {
@@ -163,30 +180,39 @@ export function SuggestedThemesEditor({
             Suggested Themes
           </span>
           <span className="text-xs text-muted-foreground">
-            Edit or refine, then select to include · {list.length} of {MAX_THEMES}
+            {readOnly
+              ? `${selectedCount} of ${list.length} selected`
+              : `Edit or refine, then select to include · ${selectedCount} of ${list.length} selected`}
           </span>
-          <SaveIndicator state={saveState} />
+          {!readOnly && <SaveIndicator state={saveState} />}
         </div>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            onClick={() => setRefineOpen((o) => !o)}
-            className={cn(
-              "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
-              refineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
-            )}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> Refine with AI
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={addTheme}
-            disabled={list.length >= MAX_THEMES}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add theme
-          </Button>
-        </div>
+        {readOnly ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+            <Lock className="h-3 w-3" />
+            Locked
+          </span>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => setRefineOpen((o) => !o)}
+              className={cn(
+                "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
+                refineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
+              )}
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Refine with AI
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={addTheme}
+              disabled={list.length >= MAX_THEMES}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add theme
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -199,8 +225,9 @@ export function SuggestedThemesEditor({
             index={i}
             theme={theme}
             isRtl={isRtl}
-            selected={selected.has(theme.title)}
-            onToggleSelect={() => onToggle(theme.title)}
+            readOnly={readOnly}
+            selected={theme.selected !== false}
+            onToggleSelect={() => toggleSelected(i)}
             onTitleChange={(v) => updateTitle(i, v)}
             onAddKeyword={(kw) => addKeyword(i, kw)}
             onRemoveKeyword={(kwIdx) => removeKeyword(i, kwIdx)}
@@ -209,7 +236,7 @@ export function SuggestedThemesEditor({
         ))}
       </div>
 
-      {refineOpen && (
+      {!readOnly && refineOpen && (
         <RefineAssistant
           chips={SUGGESTED_CHIPS}
           loading={refining}

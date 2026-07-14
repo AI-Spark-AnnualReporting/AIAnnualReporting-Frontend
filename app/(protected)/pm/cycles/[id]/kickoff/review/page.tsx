@@ -22,7 +22,7 @@ import { cn, formatDate } from "@/lib/utils"
 import { toast } from "sonner"
 import {
   ArrowLeft, CalendarClock, Check, CheckCircle2, Eye, Layers, Loader2, Pencil, Plus, RefreshCw,
-  Send, ShieldAlert, Sparkles, Target, X,
+  Send, ShieldAlert, Sparkles, Target,
 } from "lucide-react"
 
 // Quick-instruction chips — identical to typing the same text into the box.

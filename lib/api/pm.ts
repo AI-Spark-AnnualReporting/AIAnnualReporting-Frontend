@@ -109,9 +109,12 @@ export interface GenerateBriefPayload {
 
 // A theme now carries its own short keyword set (3-6 items) instead of a prose
 // description. The report-level `keywords` (below) is a separate, overall set.
+// `selected` (default true when missing) controls whether the theme is injected
+// into the section-writing prompt.
 export interface BriefTheme {
   title: string
   keywords: string[]
+  selected?: boolean
 }
 
 // A "suggested theme" now carries a keyword set — the SAME shape as BriefTheme.
@@ -120,6 +123,7 @@ export interface BriefTheme {
 export interface SuggestedTheme {
   title: string
   keywords: string[]
+  selected?: boolean
 }
 
 // A success response with an empty strategic_brief is a SOFT FAILURE (the LLM

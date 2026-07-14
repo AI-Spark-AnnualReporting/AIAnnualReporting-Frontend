@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useRef, useState } from "react"
+import { use, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -38,7 +38,6 @@ import {
   useLockPlan,
   usePMCycleSections,
   usePlan,
-  useUpdatePlan,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, type BriefTheme, type SuggestedTheme } from "@/lib/api/pm"
@@ -50,7 +49,6 @@ import type {
   CycleReportSection,
   FeederMapEntry,
   PlanResponse,
-  ReportTheme,
 } from "@/types"
 
 type Step = 1 | 2
@@ -167,6 +165,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           sections={sections}
           initialThemes={initialThemes}
           suggestedThemes={suggestedThemes}
+          locked={sectionsLocked}
           isRtl={isRtl}
           onBack={() => setStep(1)}
         />
@@ -443,6 +442,7 @@ function ThemesStep({
   sections,
   initialThemes,
   suggestedThemes,
+  locked,
   isRtl,
   onBack,
 }: {
@@ -451,58 +451,22 @@ function ThemesStep({
   sections: CycleReportSection[]
   initialThemes: BriefTheme[]
   suggestedThemes: SuggestedTheme[]
+  locked: boolean
   isRtl: boolean
   onBack: () => void
 }) {
-  // Selection drives which themes become the report's themes (plan.themes) on
-  // Start Building. Two independent sets keyed by title (one per list) — the two
-  // lists are separate cycle columns and never mutate each other.
-  const [selectedInitial, setSelectedInitial] = useState<Set<string>>(new Set())
-  const [selectedSuggested, setSelectedSuggested] = useState<Set<string>>(new Set())
-  const seededRef = useRef(false)
-
-  // Seed selection once themes arrive: pre-select any theme already present in
-  // the current plan.themes (by title) so re-entering the step is idempotent.
-  useEffect(() => {
-    if (seededRef.current) return
-    if (initialThemes.length === 0 && suggestedThemes.length === 0) return
-    seededRef.current = true
-    const planTitles = new Set((plan.themes ?? []).map((t) => t.title))
-    setSelectedInitial(
-      new Set(initialThemes.filter((t) => planTitles.has(t.title)).map((t) => t.title)),
-    )
-    setSelectedSuggested(
-      new Set(suggestedThemes.filter((t) => planTitles.has(t.title)).map((t) => t.title)),
-    )
-  }, [initialThemes, suggestedThemes, plan.themes])
-
-  const toggleIn = (setter: (fn: (prev: Set<string>) => Set<string>) => void) => (title: string) =>
-    setter((prev) => {
-      const next = new Set(prev)
-      if (next.has(title)) next.delete(title)
-      else next.add(title)
-      return next
-    })
-
-  // Selected themes → report themes. Suggested map directly; initial themes carry
-  // keywords, joined into a description so they fit the ReportTheme shape.
-  const selectedThemes: ReportTheme[] = [
-    ...initialThemes
-      .filter((t) => selectedInitial.has(t.title))
-      .map((t) => ({ title: t.title, description: t.keywords.join(", ") })),
-    ...suggestedThemes
-      .filter((t) => selectedSuggested.has(t.title))
-      .map((t) => ({ title: t.title, description: t.description })),
-  ]
-
+  // Selection now lives on each theme as a persisted `selected` flag (toggled +
+  // saved inside the editors below). The backend reads those flags directly, so
+  // this step no longer tracks selection or writes plan.themes. Once the plan is
+  // locked (Start Building), both editors render view-only.
   return (
     <section className="space-y-5">
-      {/* Initial Themes — from the brief, view-only + selectable. */}
+      {/* Initial Themes — from the brief, view-only + selectable (persists selected). */}
       <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
         <InitialThemesPicker
+          cycleId={cycleId}
           themes={initialThemes}
-          selected={selectedInitial}
-          onToggle={toggleIn(setSelectedInitial)}
+          readOnly={locked}
           isRtl={isRtl}
         />
       </div>
@@ -512,8 +476,7 @@ function ThemesStep({
         <SuggestedThemesEditor
           cycleId={cycleId}
           themes={suggestedThemes}
-          selected={selectedSuggested}
-          onToggle={toggleIn(setSelectedSuggested)}
+          readOnly={locked}
           isRtl={isRtl}
         />
       </div>
@@ -527,12 +490,7 @@ function ThemesStep({
           <ArrowLeft className="mr-1.5 h-4 w-4" />
           Back to sections
         </Button>
-        <StartBuildingAction
-          cycleId={cycleId}
-          plan={plan}
-          sections={sections}
-          selectedThemes={selectedThemes}
-        />
+        <StartBuildingAction cycleId={cycleId} plan={plan} sections={sections} />
       </div>
     </section>
   )
@@ -544,32 +502,17 @@ function StartBuildingAction({
   cycleId,
   plan,
   sections,
-  selectedThemes,
 }: {
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
-  selectedThemes: ReportTheme[]
 }) {
   const router = useRouter()
   const qc = useQueryClient()
-  const updatePlan = useUpdatePlan(cycleId)
   const lockPlan = useLockPlan(cycleId)
   const alreadyLocked = plan.sections_locked
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
   const disabled = needsSource > 0
-
-  // Persist the PM's theme selection as the report's themes (plan.themes) before
-  // building. Skipped when nothing is selected so we never wipe existing themes.
-  // A locked plan may reject the update — proceed with the existing themes.
-  const persistSelectedThemes = async () => {
-    if (selectedThemes.length === 0) return
-    try {
-      await updatePlan.mutateAsync({ themes: selectedThemes })
-    } catch {
-      /* handled by the hook's error toast; don't block the build */
-    }
-  }
 
   const [running, setRunning] = useState(false)
   const [total, setTotal] = useState(0)
@@ -604,11 +547,9 @@ function StartBuildingAction({
   const totalWork = eligibleToGenerate.length
 
   const onStart = async () => {
-    // 1) Save the theme selection to plan.themes while the plan is still
-    //    unlocked (a locked plan would reject the update).
-    await persistSelectedThemes()
-    // 2) Lock the plan — this is the one-way freeze that used to live on Step 1.
-    //    Abort the build if it fails (the hook already surfaces the error).
+    // Lock the plan — the one-way freeze that used to live on Step 1. Theme
+    // selection is already persisted per-theme, so there's nothing else to save.
+    // Abort the build if the lock fails (the hook already surfaces the error).
     if (!alreadyLocked) {
       try {
         await lockPlan.mutateAsync()
@@ -616,7 +557,6 @@ function StartBuildingAction({
         return
       }
     }
-    // 3) Proceed with the build.
     if (totalWork === 0) {
       router.push(`/pm/cycles/${cycleId}/build`)
       return

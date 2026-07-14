@@ -19,6 +19,11 @@ export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
+// Analyze-mode only (null for other modes):
+//   "ready"   → findings present in `content`.
+//   "pending" → analysis not run yet.
+//   "no_data" → a run was attempted but found nothing to analyze.
+export type SectionAnalysisState = "ready" | "pending" | "no_data"
 
 export interface User {
   id?: string
@@ -121,6 +126,9 @@ export interface CycleReportSection {
   // Generate-mode content. Populated after the LLM pass for generate sections;
   // null on pending generate sections and irrelevant for attach/auto.
   content: string | null
+  // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
+  // modes and for older responses (treat missing as "pending").
+  analysis_state?: SectionAnalysisState | null
 }
 
 export interface ResolveSectionsResponse {
