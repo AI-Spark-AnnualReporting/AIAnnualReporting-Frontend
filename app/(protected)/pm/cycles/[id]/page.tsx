@@ -1,6 +1,7 @@
 "use client"
 
 import { use, useRef, useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import {
   usePMCycleDashboard, useSendReminder, useGenerateReport,
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
@@ -72,6 +73,7 @@ interface PMCycleDashboardData {
 
 export default function PMCyclePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const router = useRouter()
   const { data: pmData, isLoading, refetch: refetchPM, isFetching } = usePMCycleDashboard(id)
   const sendReminder = useSendReminder()
   const generateReport = useGenerateReport()
@@ -157,9 +159,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     !hasKickoffRaw &&
     (cycleStatusRaw === "draft" || cycleStatusRaw === "active")
 
+  // A cycle with no kickoff brief can't be managed yet — send the PM straight to
+  // the full-page Strategic Brief & Themes questionnaire instead of the old modal.
   useEffect(() => {
-    if (isForceKickoff) setBriefOpen(true)
-  }, [isForceKickoff])
+    if (isForceKickoff) router.replace(`/pm/cycles/${id}/kickoff`)
+  }, [isForceKickoff, id, router])
 
   // Sync the questions deadline input from server data on first load.
   // Don't overwrite while the user is actively editing (mutation pending).
@@ -754,7 +758,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setBriefOpen(true)}
+                onClick={() => router.push(`/pm/cycles/${id}/kickoff`)}
                 disabled={hasKickoff}
                 title={hasKickoff ? "Kickoff brief already submitted for this cycle" : undefined}
               >

@@ -30,4 +30,11 @@ export const documentsApi = {
     )
     return data
   },
+
+  // Delete a stored document by id (DELETE /documents/{id}). Used to detach an
+  // uploaded strategic-brief doc when the PM removes it without replacing —
+  // otherwise the doc stays on the cycle and generate-brief keeps using it.
+  remove: async (documentId: string): Promise<void> => {
+    await apiClient.delete(`/documents/${documentId}`)
+  },
 }

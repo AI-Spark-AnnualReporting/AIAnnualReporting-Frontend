@@ -19,6 +19,8 @@ interface ThemeEditorProps {
   readOnly?: boolean
   /** Arabic cycles render theme titles/descriptions right-to-left. */
   isRtl?: boolean
+  /** Section heading (default "Themes"). */
+  label?: string
 }
 
 function themesEqual(a: ReportTheme[], b: ReportTheme[]) {
@@ -28,7 +30,7 @@ function themesEqual(a: ReportTheme[], b: ReportTheme[]) {
   )
 }
 
-export function ThemeEditor({ cycleId, themes, readOnly, isRtl }: ThemeEditorProps) {
+export function ThemeEditor({ cycleId, themes, readOnly, isRtl, label = "Themes" }: ThemeEditorProps) {
   const [draft, setDraft] = useState<ReportTheme[]>(themes)
   const [errors, setErrors] = useState<Record<number, string>>({})
   const update = useUpdatePlan(cycleId)
@@ -46,7 +48,7 @@ export function ThemeEditor({ cycleId, themes, readOnly, isRtl }: ThemeEditorPro
 
   // Locked plan → present themes as polished read-only cards, not dull
   // disabled form fields.
-  if (readOnly) return <LockedThemes themes={themes} isRtl={isRtl} />
+  if (readOnly) return <LockedThemes themes={themes} isRtl={isRtl} label={label} />
 
   const dirty = !themesEqual(draft, themes)
 
@@ -107,7 +109,7 @@ export function ThemeEditor({ cycleId, themes, readOnly, isRtl }: ThemeEditorPro
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Themes
+            {label}
           </span>
           <span className="text-xs text-muted-foreground">
             {draft.length} of {MAX_THEMES}
@@ -241,12 +243,20 @@ function ThemeCard({
 // Read-only presentation shown once the plan is locked. The narrative is final,
 // so render each theme as a clean, fully-readable card instead of a disabled
 // input/textarea pair.
-function LockedThemes({ themes, isRtl }: { themes: ReportTheme[]; isRtl?: boolean }) {
+function LockedThemes({
+  themes,
+  isRtl,
+  label = "Themes",
+}: {
+  themes: ReportTheme[]
+  isRtl?: boolean
+  label?: string
+}) {
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Themes
+          {label}
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
           <Lock className="h-3 w-3" />

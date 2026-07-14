@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload } from "@/lib/api/department"
-import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession } from "@/lib/api/pm"
+import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession, GenerateBriefPayload } from "@/lib/api/pm"
 import { KickoffBriefResponse, PMDashboard } from "@/types"
 import { toast } from "sonner"
 import { isDocumentLanguageError } from "@/lib/lang"
@@ -227,6 +227,33 @@ export function usePMCycleDashboard(cycleId: string) {
     staleTime: 0,
     refetchInterval: 5_000,      // poll every 5 s — quick pickup of dept submissions
     refetchIntervalInBackground: false,
+  })
+}
+
+// Strategic Brief wizard — Step 1 questionnaire. Read-only: there is no
+// answer-save endpoint yet, so callers keep answers in local component state.
+// retry:false so a 403/404 surfaces immediately instead of retrying 3x.
+export function useSurveyQuestions(cycleId: string) {
+  return useQuery({
+    queryKey: ["pm", "survey-questions", cycleId],
+    queryFn: () => pmApi.getSurveyQuestions(cycleId),
+    enabled: !!cycleId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
+// Strategic Brief wizard Step 2 — generates (or regenerates) the brief +
+// themes from the questionnaire answers. Bust the cycle dashboard cache on
+// success so kickoff_brief / initial_themes_and_keywords are fresh on reload.
+export function useGenerateBrief() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ cycleId, payload }: { cycleId: string; payload: GenerateBriefPayload }) =>
+      pmApi.generateBrief(cycleId, payload),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", vars.cycleId] })
+    },
   })
 }
 
