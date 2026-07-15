@@ -7,6 +7,7 @@ import { PMSidebar } from "@/components/layout/PMSidebar"
 import { PMTopNav } from "@/components/layout/PMTopNav"
 import { DeptSidebar } from "@/components/layout/DeptSidebar"
 import { DeptTopNav } from "@/components/layout/DeptTopNav"
+import { HODSidebar } from "@/components/layout/HODSidebar"
 
 /**
  * Chooses the app shell by role. Project Managers and Department Users get the
@@ -34,6 +35,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <DeptSidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <DeptTopNav />
+          <main className="flex-1 overflow-y-auto">
+            <div className="px-8 py-8">{children}</div>
+          </main>
+        </div>
+      </div>
+    )
+  }
+
+  if (user?.role === "hod") {
+    return (
+      <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
+        <HODSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <DeptTopNav />
           <main className="flex-1 overflow-y-auto">

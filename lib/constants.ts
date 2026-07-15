@@ -127,8 +127,11 @@ export const QUERY_KEYS = {
   PM_AVAILABLE_OPTIONAL: (cycleId: string) => ["pm", "cycle", cycleId, "optional-available"],
   PM_ASSEMBLY_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "assembly-readiness"],
   PM_FINAL_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report"],
-  PM_COMPANY_PREV_MANUAL: (companyId: string) => ["pm", "company", companyId, "manual-sections", "previous"],
+  PM_COMPANY_PREV_MANUAL: (companyId: string, contentLanguage?: string) => ["pm", "company", companyId, "manual-sections", "previous", contentLanguage ?? "any"],
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],
+  HOD_SESSIONS: (status?: string) => ["hod", "sessions", status ?? "all"],
+  HOD_SESSION: (id: string) => ["hod", "session", id],
+  HOD_ASSIGNABLE: (id: string) => ["hod", "session", id, "assignable"],
 } as const

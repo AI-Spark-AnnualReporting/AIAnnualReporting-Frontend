@@ -26,6 +26,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 const ROLE_ROUTES: Record<UserRole, string> = {
   admin: "/admin",
   project_manager: "/pm",
+  hod: "/hod",
   department_user: "/department",
 }
 

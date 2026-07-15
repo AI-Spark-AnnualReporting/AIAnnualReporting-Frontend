@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import { DepartmentDashboard, Session } from "@/types"
+import { DepartmentDashboard, Session, SessionOutline } from "@/types"
 
 export interface SubmitAnswersPayload {
   answers: {
@@ -42,7 +42,9 @@ export interface ExtractedAnswer {
   question_id: string
   question: string
   extracted_answer: string
-  status: "found" | "not_found"
+  // "found" = freshly extracted this run, "already_answered" = preserved from a
+  // previous run/edit, "not_found" = no supporting document covered it.
+  status: "found" | "not_found" | "already_answered"
 }
 
 export interface ExtractAnswersResponse {
@@ -54,6 +56,19 @@ export interface ExtractAnswersResponse {
   found_count: number
   not_found_count: number
   message: string
+}
+
+// GET .../outline → the outline (null until generated) plus whether it can
+// still be edited. `editable` is false once the draft is generated.
+export interface GetOutlineResponse {
+  outline: SessionOutline | null
+  editable: boolean
+}
+
+// PATCH .../outline body — rename one or more titles by id (headings or
+// subheadings). We PATCH a single id per blur, so `titles` usually has one entry.
+export interface PatchOutlineTitlesPayload {
+  titles: { id: string; title: string }[]
 }
 
 export const departmentApi = {
@@ -88,6 +103,39 @@ export const departmentApi = {
       payload
     )
     return data
+  },
+
+  // Fetch the current outline + editability. Returns { outline, editable };
+  // `outline` is null until Generate Outline is run.
+  getOutline: async (sessionId: string): Promise<GetOutlineResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/outline`
+    )
+    return data
+  },
+
+  // Build (or rebuild) the outline from the session's answers. LLM call —
+  // raise the timeout like extractAnswers/generateDraft so it isn't cut off.
+  generateOutline: async (sessionId: string): Promise<{ outline: SessionOutline; step: string }> => {
+    const { data } = await apiClient.post(
+      `/department/sessions/${sessionId}/generate-outline`,
+      undefined,
+      { timeout: 120000 } // 2 min — LLM builds the outline
+    )
+    return data
+  },
+
+  // Rename one (or more) heading/subheading titles by id. Returns the full outline.
+  patchOutlineTitles: async (
+    sessionId: string,
+    payload: PatchOutlineTitlesPayload
+  ): Promise<SessionOutline> => {
+    const { data } = await apiClient.patch(
+      `/department/sessions/${sessionId}/outline`,
+      payload
+    )
+    // Backend returns the full outline; tolerate a { outline } wrapper too.
+    return data?.outline ?? data
   },
 
   uploadDocument: async (sessionId: string, file: File) => {

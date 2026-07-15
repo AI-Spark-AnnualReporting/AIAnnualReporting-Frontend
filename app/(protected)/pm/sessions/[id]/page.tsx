@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -366,7 +367,7 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
               <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: content }} />
             ) : (
               <div className="prose prose-sm max-w-none">
-                <ReactMarkdown>{content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>
             )
           })() : (

@@ -7,11 +7,23 @@ import { Button } from "@/components/ui/button"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { knowledgeBaseApi } from "@/lib/api/knowledge-base"
 import { cn, formatFileSize } from "@/lib/utils"
+import {
+  prefixHeadingNumbers,
+  stripDuplicateTitle,
+  toArabicDigits,
+} from "@/lib/report-format"
 import type { FinalReportSection } from "@/types"
 
 interface ReportSectionRendererProps {
   section: FinalReportSection
   index: number
+  // Canonical top-level number for this section ("9"); null → no prefix.
+  number: string | null
+  // Canonical numbers for this section's sub-headings ("9.1", "9.2"), in
+  // document order — applied to the content's headings top-to-bottom.
+  subNumbers: string[]
+  // True for Arabic cycles — lay out headings/numbers RTL to match the report.
+  isArabic?: boolean
 }
 
 // Renders one body section of the final report. Switches on section.type:
@@ -21,7 +33,25 @@ interface ReportSectionRendererProps {
 export function ReportSectionRenderer({
   section,
   index,
+  number,
+  subNumbers,
+  isArabic = false,
 }: ReportSectionRendererProps) {
+  // Mirror the backend dedup: the stored content leads with its own heading that
+  // repeats the section title (already shown by SectionTitle), so strip it.
+  const stripped =
+    section.content != null
+      ? stripDuplicateTitle(section.content, section.title)
+      : section.content
+  // Number the remaining sub-headings from the canonical outline. Arabic reports
+  // use Arabic-Indic digits, matching the section number above and the document.
+  const body =
+    stripped != null
+      ? prefixHeadingNumbers(
+          stripped,
+          isArabic ? subNumbers.map(toArabicDigits) : subNumbers,
+        )
+      : stripped
   return (
     <section
       id={section.section_code}
@@ -30,10 +60,10 @@ export function ReportSectionRenderer({
         index > 0 && "print:break-before-page",
       )}
     >
-      <SectionTitle title={section.title} index={index} />
+      <SectionTitle title={section.title} number={number} isArabic={isArabic} />
       {section.type === "narrative" ? (
-        section.content && section.content.trim() ? (
-          <ProsePreview content={section.content} />
+        body && body.trim() ? (
+          <ProsePreview content={body} dir={isArabic ? "rtl" : "ltr"} />
         ) : (
           <p className="text-sm text-muted-foreground italic">
             This section has no content.
@@ -50,12 +80,29 @@ export function ReportSectionRenderer({
   )
 }
 
-function SectionTitle({ title, index }: { title: string; index: number }) {
+function SectionTitle({
+  title,
+  number,
+  isArabic,
+}: {
+  title: string
+  // Authoritative number from the backend ("9"); null → render no prefix.
+  number: string | null
+  isArabic?: boolean
+}) {
+  const num = number
+  // dir="rtl" reverses the flex row so the number (first in DOM) sits on the
+  // right of the title — matching the downloaded Arabic report.
   return (
-    <h2 className="text-2xl font-semibold mb-4 flex items-baseline gap-3">
-      <span className="text-muted-foreground tabular-nums text-base font-normal">
-        {String(index + 1).padStart(2, "0")}
-      </span>
+    <h2
+      dir={isArabic ? "rtl" : "ltr"}
+      className="text-2xl font-semibold mb-4 flex items-baseline gap-3"
+    >
+      {num != null && (
+        <span className="text-muted-foreground tabular-nums text-base font-normal">
+          {isArabic ? toArabicDigits(num) : num}
+        </span>
+      )}
       <span>{title}</span>
     </h2>
   )

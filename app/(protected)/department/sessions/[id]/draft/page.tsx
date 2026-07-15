@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { TONE_OPTIONS } from "@/lib/constants"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   ArrowLeft,
   Sparkles,
@@ -256,7 +257,7 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
                     />
                   ) : (
                     <div className="prose prose-sm max-w-none prose-slate">
-                      <ReactMarkdown>{effectiveDraft}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{effectiveDraft}</ReactMarkdown>
                     </div>
                   )
                 ) : (

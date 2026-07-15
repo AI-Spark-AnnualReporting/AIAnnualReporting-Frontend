@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload } from "@/lib/api/department"
-import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession } from "@/lib/api/pm"
+import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload, PatchOutlineTitlesPayload } from "@/lib/api/department"
+import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession, GenerateBriefPayload } from "@/lib/api/pm"
 import { KickoffBriefResponse, PMDashboard } from "@/types"
 import { toast } from "sonner"
 import { isDocumentLanguageError } from "@/lib/lang"
@@ -61,6 +61,61 @@ export function useGenerateDraft() {
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to generate draft")
     },
+  })
+}
+
+// ── Outline (before draft) ──────────────────────────────────────────────────
+
+/**
+ * Fetch the session's outline + editability. Key: ["session", id, "outline"].
+ * Background refetches are disabled so a window-focus/reconnect refetch can't
+ * swap titles out from under a field the user is editing — the outline only
+ * changes through this user's own generate/regenerate/rename actions.
+ */
+export function useOutline(sessionId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "outline"],
+    queryFn: () => departmentApi.getOutline(sessionId),
+    enabled: !!sessionId,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+}
+
+/**
+ * Build (or rebuild) the outline from answers. No onError toast here — the
+ * page special-cases `400 no_answers` with its own message. Invalidates the
+ * outline + session caches on success.
+ */
+export function useGenerateOutline() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => departmentApi.generateOutline(sessionId),
+    onSuccess: (_data, sessionId) => {
+      qc.invalidateQueries({ queryKey: ["session", sessionId, "outline"] })
+      qc.invalidateQueries({ queryKey: ["session", sessionId] })
+    },
+  })
+}
+
+// Shared mutation key so the outline page can gate "Continue" on in-flight
+// saves via useIsMutating({ mutationKey: OUTLINE_PATCH_KEY }).
+export const OUTLINE_PATCH_KEY = ["patchOutlineTitles"] as const
+
+/**
+ * Rename a heading/subheading title (single-id PATCH, save-as-you-type). We do
+ * NOT write the response into the outline cache: the DB is the source of truth
+ * and the editing field already holds the latest value locally. Keeping the
+ * `title` prop stable while typing means a save echo can never clobber an
+ * in-progress edit. No onError toast — the card reverts the field and toasts
+ * based on the error code.
+ */
+export function usePatchOutlineTitles() {
+  return useMutation({
+    mutationKey: OUTLINE_PATCH_KEY,
+    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: PatchOutlineTitlesPayload }) =>
+      departmentApi.patchOutlineTitles(sessionId, payload),
   })
 }
 
@@ -230,6 +285,33 @@ export function usePMCycleDashboard(cycleId: string) {
   })
 }
 
+// Strategic Brief wizard — Step 1 questionnaire. Read-only: there is no
+// answer-save endpoint yet, so callers keep answers in local component state.
+// retry:false so a 403/404 surfaces immediately instead of retrying 3x.
+export function useSurveyQuestions(cycleId: string) {
+  return useQuery({
+    queryKey: ["pm", "survey-questions", cycleId],
+    queryFn: () => pmApi.getSurveyQuestions(cycleId),
+    enabled: !!cycleId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
+// Strategic Brief wizard Step 2 — generates (or regenerates) the brief +
+// themes from the questionnaire answers. Bust the cycle dashboard cache on
+// success so kickoff_brief / initial_themes_and_keywords are fresh on reload.
+export function useGenerateBrief() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ cycleId, payload }: { cycleId: string; payload: GenerateBriefPayload }) =>
+      pmApi.generateBrief(cycleId, payload),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", vars.cycleId] })
+    },
+  })
+}
+
 // Previous kickoff brief — used to pre-fill the strategic-brief textarea.
 // `enabled` gates the fetch (e.g. only when the kickoff dialog is open).
 // A non-200 is treated as non-fatal upstream; here we just don't retry so a
@@ -362,6 +444,24 @@ export function useBulkReminder() {
     onSuccess: () => toast.success("Reminders sent to all pending departments"),
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to send bulk reminders")
+    },
+  })
+}
+
+export function useSetQuestionsDeadline(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (deadline: string | null) => pmApi.setQuestionsDeadline(cycleId, deadline),
+    onSuccess: (data, deadline) => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
+      qc.invalidateQueries({ queryKey: ["pm", "dashboard"] })
+      const msg = deadline
+        ? `Questions deadline set${data.notified_count > 0 ? ` — ${data.notified_count} department user${data.notified_count !== 1 ? "s" : ""} notified` : ""}`
+        : "Questions deadline cleared"
+      toast.success(msg)
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Failed to update questions deadline")
     },
   })
 }

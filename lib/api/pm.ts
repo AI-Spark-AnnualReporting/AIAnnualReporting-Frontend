@@ -4,6 +4,7 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, SectionMode,
+  ContentLanguage,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -71,6 +72,158 @@ export interface PreviousManualSectionsResponse {
   sections: PreviousManualSection[]
 }
 
+// GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
+// Strategic Brief wizard. Order is stable per cycle (safe to index by
+// position for a stepper). `options: null` means a plain free-text question;
+// `options: string[]` means chip-select, and the LAST string is always the
+// "Other" escape hatch that reveals a free-text box. `source` is informational
+// only (template vs AI-generated) — don't group or branch on it.
+export interface SurveyQuestion {
+  id: string
+  text: string
+  source: "template" | "generated"
+  options: string[] | null
+}
+
+export interface SurveyQuestionsResponse {
+  success: boolean
+  cycle_id: string
+  total: number
+  questions: SurveyQuestion[]
+}
+
+// POST /pm/cycles/{id}/generate-brief — Strategic Brief wizard Step 2.
+// One entry per ANSWERED question only (unanswered ones may be omitted — no
+// server-side required-count check, that gate is frontend-only). question_id
+// must be an id from the survey-questions response; unrecognized ids are
+// silently dropped server-side. For a multi-select chip question, join every
+// selected option (plus any free text) into one comma-separated string.
+export interface GenerateBriefAnswer {
+  question_id: string
+  answer: string
+}
+
+export interface GenerateBriefPayload {
+  answers: GenerateBriefAnswer[]
+}
+
+// A theme now carries its own short keyword set (3-6 items) instead of a prose
+// description. The report-level `keywords` (below) is a separate, overall set.
+// `selected` (default true when missing) controls whether the theme is injected
+// into the section-writing prompt.
+export interface BriefTheme {
+  title: string
+  keywords: string[]
+  selected?: boolean
+}
+
+// A "suggested theme" now carries a keyword set — the SAME shape as BriefTheme.
+// It's a separate cycle column (`suggested_themes`) from
+// `initial_themes_and_keywords`, but rendered identically (title + keyword chips).
+export interface SuggestedTheme {
+  title: string
+  keywords: string[]
+  selected?: boolean
+}
+
+// A success response with an empty strategic_brief is a SOFT FAILURE (the LLM
+// step failed server-side) — treat it like an error, not an empty result.
+export interface GenerateBriefResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+  themes: BriefTheme[]
+  keywords: string[]
+  // NEW — description-based themes, stored server-side on the cycle.
+  suggested_themes?: SuggestedTheme[]
+}
+
+// POST /pm/cycles/{id}/brief-document — optional supporting doc for the brief.
+// One doc per cycle (each upload REPLACES the previous), stored only — no AI,
+// no brief returned. generate-brief later reads whatever doc is on the cycle.
+export interface BriefDocument {
+  document_id: string
+  filename: string
+  document_purpose?: string
+  file_size?: number
+  word_count?: number
+}
+
+export interface UploadBriefDocumentResponse {
+  success: boolean
+  cycle_id: string
+  documents_uploaded: number
+  documents: BriefDocument[]
+  message?: string
+}
+
+// POST /pm/cycles/{id}/brief/refine and /themes/refine — the "Refine with AI"
+// assistants. Send the CURRENT on-screen content + a free-text instruction; the
+// LLM returns the complete revised version (already saved server-side). If it
+// couldn't apply the instruction it returns the input unchanged (still 200).
+export interface RefineBriefPayload {
+  strategic_brief: string
+  instruction: string
+}
+export interface RefineBriefResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+}
+export interface RefineThemesPayload {
+  themes: BriefTheme[]
+  instruction: string
+}
+export interface RefineThemesResponse {
+  success: boolean
+  cycle_id: string
+  themes: BriefTheme[]
+}
+// POST /pm/cycles/{id}/suggested-themes/refine — the "Refine with AI" assistant
+// for the description-based suggested themes. Send the live list + instruction;
+// returns the COMPLETE revised set (already saved server-side).
+export interface RefineSuggestedThemesPayload {
+  suggested_themes: SuggestedTheme[]
+  instruction: string
+}
+export interface RefineSuggestedThemesResponse {
+  success: boolean
+  cycle_id: string
+  suggested_themes: SuggestedTheme[]
+}
+
+// PUT /pm/cycles/{id}/save-brief-and-themes — persists the PM's MANUAL edits
+// (brief text, theme add/delete/rename, keyword chips). Partial: send only the
+// changed field(s). Omitted/null = leave as-is; a present value replaces it;
+// empty string/array clears it. `themes` must be the WHOLE current list, not a
+// patch. The response is always the full resulting state.
+export interface SaveBriefAndThemesPayload {
+  strategic_brief?: string
+  themes?: BriefTheme[]
+  keywords?: string[]
+  // NEW — send the WHOLE suggested_themes list; omitted = left as-is.
+  suggested_themes?: SuggestedTheme[]
+}
+export interface SaveBriefAndThemesResponse {
+  success: boolean
+  cycle_id: string
+  strategic_brief: string
+  themes: BriefTheme[]
+  keywords: string[]
+  suggested_themes: SuggestedTheme[]
+}
+
+// The subset of cycle fields the brief wizard needs to detect a
+// previously-generated (persisted) brief on reload, without re-calling the AI.
+export interface CycleBriefFields {
+  cycle_name?: string
+  fiscal_year?: number
+  kickoff_brief?: string | null
+  initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+  suggested_themes?: SuggestedTheme[] | null
+  questions_deadline?: string | null
+}
+
 // PM kickoff brief — submitted after cycle is active
 export interface KickoffBriefPayload {
   cycle_id: string
@@ -130,11 +283,123 @@ export const pmApi = {
   // comes from the authenticated user (/auth/me). A PM may only pass their own
   // companyId (403 otherwise); admins may pass any. Read-only suggestions — the
   // PM still edits and saves each section via saveManualContent.
+  //
+  // contentLanguage is the language of the report being created (the cycle's
+  // content_language). The backend returns only previous content authored in
+  // cycles of that language — an English report is never pre-filled with Arabic
+  // content (and vice versa). Must be exactly "english"/"arabic" (the enum);
+  // anything else → 422. Omitting it falls back to latest content of any
+  // language, so always send it. When the company has no previous content in the
+  // requested language, sections come back with has_data:false / source:"none"
+  // (the about_company fallback to the company description is language-neutral).
   previousManualSections: async (
     companyId: string,
+    contentLanguage?: ContentLanguage,
   ): Promise<PreviousManualSectionsResponse> => {
     const { data } = await apiClient.get<PreviousManualSectionsResponse>(
       `/pm/companies/${companyId}/manual-sections/previous`,
+      contentLanguage
+        ? { params: { content_language: contentLanguage } }
+        : undefined,
+    )
+    return data
+  },
+
+  // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.
+  // 403 → PM doesn't own this cycle; 404 → cycle not found (also returned for
+  // cross-tenant access — treat both the same as "not found"). 200 with
+  // total:0 means the question set hasn't been generated yet (not an error).
+  getSurveyQuestions: async (cycleId: string): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.get<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/survey-questions`,
+    )
+    return data
+  },
+
+  // Strategic Brief wizard Step 2 — one synchronous call, no job id/polling.
+  // 2-3 sequential LLM calls server-side with no output token cap, so this can
+  // run well past the "typical" case — generous timeout to match the other
+  // multi-LLM-call endpoints in this file (buildPlan, assembleReport, etc.).
+  generateBrief: async (
+    cycleId: string,
+    payload: GenerateBriefPayload,
+  ): Promise<GenerateBriefResponse> => {
+    const { data } = await apiClient.post<GenerateBriefResponse>(
+      `/pm/cycles/${cycleId}/generate-brief`,
+      payload,
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  // Persist manual (non-AI) edits to the brief/themes. Partial payload; the
+  // response is the full resulting state. Fast DB write, no AI.
+  saveBriefAndThemes: async (
+    cycleId: string,
+    payload: SaveBriefAndThemesPayload,
+  ): Promise<SaveBriefAndThemesResponse> => {
+    const { data } = await apiClient.put<SaveBriefAndThemesResponse>(
+      `/pm/cycles/${cycleId}/save-brief-and-themes`,
+      payload,
+    )
+    return data
+  },
+
+  // "Refine with AI" — Strategic Brief. Send the live textarea content + a
+  // free-text instruction; returns the complete revised brief (already saved).
+  refineBrief: async (
+    cycleId: string,
+    payload: RefineBriefPayload,
+  ): Promise<RefineBriefResponse> => {
+    const { data } = await apiClient.post<RefineBriefResponse>(
+      `/pm/cycles/${cycleId}/brief/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // "Refine with AI" — Themes. Send the live themes + instruction; returns the
+  // COMPLETE new theme set (may add/remove/rename) — overwrite the whole list.
+  refineThemes: async (
+    cycleId: string,
+    payload: RefineThemesPayload,
+  ): Promise<RefineThemesResponse> => {
+    const { data } = await apiClient.post<RefineThemesResponse>(
+      `/pm/cycles/${cycleId}/themes/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // "Refine with AI" — Suggested (description-based) themes. Send the live list
+  // + instruction; returns the COMPLETE revised set (already saved server-side).
+  refineSuggestedThemes: async (
+    cycleId: string,
+    payload: RefineSuggestedThemesPayload,
+  ): Promise<RefineSuggestedThemesResponse> => {
+    const { data } = await apiClient.post<RefineSuggestedThemesResponse>(
+      `/pm/cycles/${cycleId}/suggested-themes/refine`,
+      payload,
+      { timeout: 60000 },
+    )
+    return data
+  },
+
+  // Upload an optional supporting document for the strategic brief. Multipart,
+  // field name MUST be "file". Content-Type is deleted so axios sets the
+  // multipart boundary itself. Replaces any prior brief doc on the cycle.
+  uploadBriefDocument: async (
+    cycleId: string,
+    file: File,
+  ): Promise<UploadBriefDocumentResponse> => {
+    const form = new FormData()
+    form.append("file", file)
+    const { data } = await apiClient.post<UploadBriefDocumentResponse>(
+      `/pm/cycles/${cycleId}/brief-document`,
+      form,
+      { headers: { "Content-Type": undefined }, timeout: 120000 },
     )
     return data
   },
@@ -248,6 +513,18 @@ export const pmApi = {
   downloadReportDocx: async (reportId: string): Promise<Blob> => {
     const { data } = await apiClient.get(`/pm/reports/${reportId}/download`, {
       responseType: "blob",
+    })
+    return data
+  },
+
+  // Set or clear the questions deadline for a cycle.
+  // Pass null to clear. Returns the updated cycle + notified_count.
+  setQuestionsDeadline: async (
+    cycleId: string,
+    deadline: string | null,
+  ): Promise<{ message: string; cycle_id: string; questions_deadline: string | null; notified_count: number }> => {
+    const { data } = await apiClient.put(`/pm/cycles/${cycleId}/questions-deadline`, {
+      questions_deadline: deadline,
     })
     return data
   },

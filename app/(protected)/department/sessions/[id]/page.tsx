@@ -27,7 +27,7 @@ import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
-  PanelLeftClose, List, Ban, Info, Save, Download, FileUp,
+  PanelLeftClose, List, Ban, Info, Save, Download, FileUp, ListTree,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import Link from "next/link"
@@ -402,6 +402,9 @@ export default function SessionWorkspacePage({
         total_questions: result.total_questions,
         found_count: result.found_count,
         not_found_count: result.not_found_count,
+        already_answered_count: result.extracted_answers.filter(
+          (a) => a.status === "already_answered"
+        ).length,
       })
       // Let the success state breathe before returning to the workspace.
       setTimeout(() => { setUploading(false); refetch() }, 2200)
@@ -416,19 +419,20 @@ export default function SessionWorkspacePage({
     }
   }
 
-  const handleGenerateDraft = async () => {
-    await generateDraft.mutateAsync(id)
-    router.push(`/department/sessions/${id}/draft`)
+  // Continue to the Outline step. The draft is no longer generated here — the
+  // user reviews/renames the outline first, then generates the draft from there.
+  const handleContinueToOutline = () => {
+    router.push(`/department/sessions/${id}/outline`)
   }
 
-  // From the final question: jump to the draft page for review & submission.
-  // Re-uses the existing draft if one has already been generated.
-  const handleProceedToSubmit = async () => {
+  // From the final question: proceed to review & submission.
+  // If a draft already exists, jump straight to it; otherwise go via the outline.
+  const handleProceedToSubmit = () => {
     if (session?.ai_generated_draft) {
       router.push(`/department/sessions/${id}/draft`)
       return
     }
-    await handleGenerateDraft()
+    handleContinueToOutline()
   }
 
   // ── Early returns ─────────────────────────────────────────────────────────────
@@ -636,18 +640,16 @@ export default function SessionWorkspacePage({
           ) : (
             <Button
               className="h-9 shrink-0 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-              onClick={handleGenerateDraft}
-              disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
+              onClick={handleContinueToOutline}
+              disabled={!canEdit || !meetsAnswerMinimum}
               title={
                 !meetsAnswerMinimum
-                  ? "Answer at least one question before generating draft content"
+                  ? "Answer at least one question before building the outline"
                   : undefined
               }
             >
-              {generateDraft.isPending
-                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                : <Sparkles className="mr-2 h-4 w-4" />}
-              Generate Draft Content
+              <ListTree className="mr-2 h-4 w-4" />
+              Continue
             </Button>
           )}
         </div>
@@ -919,8 +921,14 @@ export default function SessionWorkspacePage({
                         size="sm"
                         className="h-9 rounded-lg bg-indigo-600 px-4 text-xs font-medium text-white hover:bg-indigo-700"
                         onClick={handleSaveAnswer}
-                        disabled={!canEdit || submitAnswers.isPending || !currentAnswerLangOk}
-                        title={!currentAnswerLangOk ? currentAnswerLangWarning ?? undefined : undefined}
+                        disabled={!canEdit || submitAnswers.isPending || !currentAnswerText.trim() || !currentAnswerLangOk}
+                        title={
+                          !currentAnswerText.trim()
+                            ? "Type an answer before saving"
+                            : !currentAnswerLangOk
+                              ? currentAnswerLangWarning ?? undefined
+                              : undefined
+                        }
                       >
                         {submitAnswers.isPending ? (
                           <>
@@ -1026,7 +1034,7 @@ export default function SessionWorkspacePage({
       {/* ── Upload supporting documents — same upload + AI extraction as the
           dashboard Start Session popup ── */}
       <Dialog open={uploadOpen} onOpenChange={(o) => { if (!o) closeUploadDialog() }}>
-        <DialogContent className="max-w-lg rounded-2xl border-slate-200">
+        <DialogContent className="flex max-h-[85vh] max-w-lg flex-col rounded-2xl border-slate-200">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-slate-900">Upload Supporting Documents</DialogTitle>
             <DialogDescription className="text-slate-500">
@@ -1036,7 +1044,7 @@ export default function SessionWorkspacePage({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
+          <div className="flex min-h-0 flex-1 flex-col space-y-3">
             <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
@@ -1060,26 +1068,33 @@ export default function SessionWorkspacePage({
                 <p className="mt-1 text-xs text-slate-500">PDF, DOCX, DOC, TXT</p>
               </button>
             ) : (
-              <div className="space-y-2">
-                {docCheck.docs.map((d, i) => (
-                  <DocFileRow
-                    key={`${d.file.name}-${i}`}
-                    name={d.file.name}
-                    sizeKB={d.file.size / 1024}
-                    lang={d.lang}
-                    onRemove={() => docCheck.removeAt(i)}
-                  />
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-slate-200 bg-white"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <FileUp className="mr-2 h-3.5 w-3.5" />
-                  Add more
-                </Button>
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="-mr-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-2">
+                  {docCheck.docs.map((d, i) => (
+                    <DocFileRow
+                      key={`${d.file.name}-${i}`}
+                      name={d.file.name}
+                      sizeKB={d.file.size / 1024}
+                      lang={d.lang}
+                      onRemove={() => docCheck.removeAt(i)}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-200 bg-white"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileUp className="mr-2 h-3.5 w-3.5" />
+                    Add more
+                  </Button>
+                  <span className="text-xs text-slate-400">
+                    {docCheck.docs.length} file{docCheck.docs.length === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
             )}
           </div>

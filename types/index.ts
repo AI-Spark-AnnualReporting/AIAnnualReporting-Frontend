@@ -1,8 +1,9 @@
-export type UserRole = "admin" | "project_manager" | "department_user"
+export type UserRole = "admin" | "project_manager" | "hod" | "department_user"
 export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =
   | "assigned"
+  | "hod_curation"
   | "not_started"
   | "in_progress"
   | "submitted"
@@ -18,6 +19,11 @@ export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
+// Analyze-mode only (null for other modes):
+//   "ready"   → findings present in `content`.
+//   "pending" → analysis not run yet.
+//   "no_data" → a run was attempted but found nothing to analyze.
+export type SectionAnalysisState = "ready" | "pending" | "no_data"
 
 export interface User {
   id?: string
@@ -76,6 +82,7 @@ export interface Cycle {
   start_date: string
   end_date: string
   submission_deadline: string
+  questions_deadline?: string | null
   status: CycleStatus
   project_manager_id?: string
   pm_name?: string
@@ -119,6 +126,9 @@ export interface CycleReportSection {
   // Generate-mode content. Populated after the LLM pass for generate sections;
   // null on pending generate sections and irrelevant for attach/auto.
   content: string | null
+  // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
+  // modes and for older responses (treat missing as "pending").
+  analysis_state?: SectionAnalysisState | null
 }
 
 export interface ResolveSectionsResponse {
@@ -192,6 +202,11 @@ export interface FinalReportSection {
   section_code: string
   title: string
   order: number
+  // Authoritative top-level section number from the backend's canonical
+  // numbering scheme (e.g. "9"). null for auto sections (cover/TOC). The
+  // hierarchical numbers (incl. sub-headings) live in FinalReport.outline; this
+  // flat field is the top-level fallback when no outline is present.
+  number: string | number | null
   content?: string
   document?: {
     document_id: string
@@ -199,6 +214,16 @@ export interface FinalReportSection {
     file_type: string
     file_size?: number
   }
+}
+
+// One heading in the report's canonical outline, in document order. `number` is
+// the hierarchical label ("9", "9.1", "10.1"); `level` is 1 for top-level
+// sections and 2+ for sub-headings. Computed by the same backend code that
+// numbers the DOCX/PDF, so the web preview can't drift from the document.
+export interface OutlineEntry {
+  level: number
+  number: string
+  title: string
 }
 
 export interface FinalReport {
@@ -209,6 +234,10 @@ export interface FinalReport {
   status: string
   generated_at: string | null
   sections: FinalReportSection[]
+  // Flat, document-order list of every numbered heading (Executive Summary
+  // through the last sub-heading). Optional — absent on older backends, in
+  // which case the preview falls back to the per-section `number` field.
+  outline?: OutlineEntry[]
 }
 
 // Readiness of a cycle to enter the Report Builder.
@@ -270,6 +299,8 @@ export interface SessionSummary {
   user_id?: string
   user_name?: string
   user_email?: string
+  hod_user_id?: string
+  hod_name?: string
   status: SessionStatus
   progress_percentage: number
   submitted_at?: string
@@ -305,6 +336,35 @@ export interface Session {
   submitted_at?: string | null
   review_notes?: string | null
   reviewed_at?: string | null
+  // Position in the department flow. Present once the backend tracks the
+  // outline-before-draft step; the outline read-only gating is driven by the
+  // `editable` flag from GET .../outline, so this field is informational.
+  step?: string
+}
+
+// ── Department session outline (built from answers, before draft) ───────────
+// Distinct from the PM-side FinalReport `OutlineEntry` above. The department
+// user may rename headings/subheadings (title), never add/remove/reorder them.
+// `ai_title` is the original AI-generated label used by the reset control.
+export interface OutlineSubheading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+  question_ids: string[]
+}
+
+export interface OutlineHeading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+  subheadings: OutlineSubheading[]
+}
+
+export interface SessionOutline {
+  version: number
+  headings: OutlineHeading[]
 }
 
 export interface DepartmentDashboard {
@@ -321,6 +381,7 @@ export interface DepartmentDashboard {
     cycle_name: string
     fiscal_year: number
     submission_deadline: string
+    questions_deadline?: string | null
     status: SessionStatus
     progress_percentage: number
     has_questions: boolean
