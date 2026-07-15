@@ -27,7 +27,7 @@ import {
   ArrowLeft, CheckCircle2, Sparkles, ChevronRight, ChevronLeft,
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
-  PanelLeftClose, List, Ban, Info, Save, Download, FileUp,
+  PanelLeftClose, List, Ban, Info, Save, Download, FileUp, ListTree,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import Link from "next/link"
@@ -419,19 +419,20 @@ export default function SessionWorkspacePage({
     }
   }
 
-  const handleGenerateDraft = async () => {
-    await generateDraft.mutateAsync(id)
-    router.push(`/department/sessions/${id}/draft`)
+  // Continue to the Outline step. The draft is no longer generated here — the
+  // user reviews/renames the outline first, then generates the draft from there.
+  const handleContinueToOutline = () => {
+    router.push(`/department/sessions/${id}/outline`)
   }
 
-  // From the final question: jump to the draft page for review & submission.
-  // Re-uses the existing draft if one has already been generated.
-  const handleProceedToSubmit = async () => {
+  // From the final question: proceed to review & submission.
+  // If a draft already exists, jump straight to it; otherwise go via the outline.
+  const handleProceedToSubmit = () => {
     if (session?.ai_generated_draft) {
       router.push(`/department/sessions/${id}/draft`)
       return
     }
-    await handleGenerateDraft()
+    handleContinueToOutline()
   }
 
   // ── Early returns ─────────────────────────────────────────────────────────────
@@ -639,18 +640,16 @@ export default function SessionWorkspacePage({
           ) : (
             <Button
               className="h-9 shrink-0 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-              onClick={handleGenerateDraft}
-              disabled={!canEdit || generateDraft.isPending || !meetsAnswerMinimum}
+              onClick={handleContinueToOutline}
+              disabled={!canEdit || !meetsAnswerMinimum}
               title={
                 !meetsAnswerMinimum
-                  ? "Answer at least one question before generating draft content"
+                  ? "Answer at least one question before building the outline"
                   : undefined
               }
             >
-              {generateDraft.isPending
-                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                : <Sparkles className="mr-2 h-4 w-4" />}
-              Generate Draft Content
+              <ListTree className="mr-2 h-4 w-4" />
+              Continue
             </Button>
           )}
         </div>
