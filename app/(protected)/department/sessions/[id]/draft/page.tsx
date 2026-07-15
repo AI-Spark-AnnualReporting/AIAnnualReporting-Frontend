@@ -1,7 +1,8 @@
 "use client"
 
 import { use, useState } from "react"
-import { useSession, useGenerateDraft, useAdjustTone, useFinalizeSession } from "@/hooks/useSessions"
+import { useSession, useGenerateDraft, useAdjustTone, useFinalizeSession, useOutline } from "@/hooks/useSessions"
+import { OutlineHeadingCard } from "../outline/OutlineHeadingCard"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -20,6 +21,7 @@ import {
   RotateCcw,
   Eye,
   Code2,
+  Lock,
 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -33,6 +35,7 @@ function isHtml(content: string): boolean {
 export default function DraftPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data, isLoading, refetch } = useSession(id)
+  const { data: outlineData } = useOutline(id)
   const generateDraft = useGenerateDraft()
   const adjustTone = useAdjustTone()
   const finalizeSession = useFinalizeSession()
@@ -63,6 +66,13 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   const isReopened = session.status === "reopened"
   // Finalize is only meaningful while drafting or revising a returned submission.
   const canFinalize = session.status === "in_progress" || isReopened
+
+  // Read-only outline shown above the editor (locked once the draft exists).
+  const isRtl = (session.content_language ?? "english") === "arabic"
+  const outline = outlineData?.outline ?? null
+  const outlineHeadings = outline
+    ? [...outline.headings].sort((a, b) => a.order - b.order)
+    : []
 
   const handleRegenerateDraft = async () => {
     await generateDraft.mutateAsync(id)
@@ -246,6 +256,27 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
           </div>
 
           <div className="p-5">
+            {/* Read-only outline — locked once the draft is generated */}
+            {outlineHeadings.length > 0 && (
+              <div className="mb-5 space-y-3 border-b border-slate-100 pb-5">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-3.5 w-3.5 text-slate-400" />
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Outline
+                  </p>
+                </div>
+                {outlineHeadings.map((heading) => (
+                  <OutlineHeadingCard
+                    key={heading.id}
+                    sessionId={id}
+                    heading={heading}
+                    questions={session.questions ?? []}
+                    isRtl={isRtl}
+                    readOnly
+                  />
+                ))}
+              </div>
+            )}
             {previewMode ? (
               /* Rendered HTML / plain-text preview */
               <div className="min-h-[500px] overflow-y-auto">

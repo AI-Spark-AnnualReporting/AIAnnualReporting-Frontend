@@ -336,6 +336,35 @@ export interface Session {
   submitted_at?: string | null
   review_notes?: string | null
   reviewed_at?: string | null
+  // Position in the department flow. Present once the backend tracks the
+  // outline-before-draft step; the outline read-only gating is driven by the
+  // `editable` flag from GET .../outline, so this field is informational.
+  step?: string
+}
+
+// ── Department session outline (built from answers, before draft) ───────────
+// Distinct from the PM-side FinalReport `OutlineEntry` above. The department
+// user may rename headings/subheadings (title), never add/remove/reorder them.
+// `ai_title` is the original AI-generated label used by the reset control.
+export interface OutlineSubheading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+  question_ids: string[]
+}
+
+export interface OutlineHeading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+  subheadings: OutlineSubheading[]
+}
+
+export interface SessionOutline {
+  version: number
+  headings: OutlineHeading[]
 }
 
 export interface DepartmentDashboard {

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload } from "@/lib/api/department"
+import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload, PatchOutlineTitlesPayload } from "@/lib/api/department"
 import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession, GenerateBriefPayload } from "@/lib/api/pm"
 import { KickoffBriefResponse, PMDashboard } from "@/types"
 import { toast } from "sonner"
@@ -61,6 +61,61 @@ export function useGenerateDraft() {
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to generate draft")
     },
+  })
+}
+
+// ── Outline (before draft) ──────────────────────────────────────────────────
+
+/**
+ * Fetch the session's outline + editability. Key: ["session", id, "outline"].
+ * Background refetches are disabled so a window-focus/reconnect refetch can't
+ * swap titles out from under a field the user is editing — the outline only
+ * changes through this user's own generate/regenerate/rename actions.
+ */
+export function useOutline(sessionId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "outline"],
+    queryFn: () => departmentApi.getOutline(sessionId),
+    enabled: !!sessionId,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+}
+
+/**
+ * Build (or rebuild) the outline from answers. No onError toast here — the
+ * page special-cases `400 no_answers` with its own message. Invalidates the
+ * outline + session caches on success.
+ */
+export function useGenerateOutline() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => departmentApi.generateOutline(sessionId),
+    onSuccess: (_data, sessionId) => {
+      qc.invalidateQueries({ queryKey: ["session", sessionId, "outline"] })
+      qc.invalidateQueries({ queryKey: ["session", sessionId] })
+    },
+  })
+}
+
+// Shared mutation key so the outline page can gate "Continue" on in-flight
+// saves via useIsMutating({ mutationKey: OUTLINE_PATCH_KEY }).
+export const OUTLINE_PATCH_KEY = ["patchOutlineTitles"] as const
+
+/**
+ * Rename a heading/subheading title (single-id PATCH, save-as-you-type). We do
+ * NOT write the response into the outline cache: the DB is the source of truth
+ * and the editing field already holds the latest value locally. Keeping the
+ * `title` prop stable while typing means a save echo can never clobber an
+ * in-progress edit. No onError toast — the card reverts the field and toasts
+ * based on the error code.
+ */
+export function usePatchOutlineTitles() {
+  return useMutation({
+    mutationKey: OUTLINE_PATCH_KEY,
+    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: PatchOutlineTitlesPayload }) =>
+      departmentApi.patchOutlineTitles(sessionId, payload),
   })
 }
 
