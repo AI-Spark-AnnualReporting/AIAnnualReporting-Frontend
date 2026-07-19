@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload, PatchOutlineTitlesPayload } from "@/lib/api/department"
 import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, PMCycleSession, GenerateBriefPayload } from "@/lib/api/pm"
-import { KickoffBriefResponse, PMDashboard } from "@/types"
+import { KickoffBriefResponse, PMDashboard, Session } from "@/types"
 import { toast } from "sonner"
 import { isDocumentLanguageError } from "@/lib/lang"
 
@@ -116,6 +116,42 @@ export function usePatchOutlineTitles() {
     mutationKey: OUTLINE_PATCH_KEY,
     mutationFn: ({ sessionId, payload }: { sessionId: string; payload: PatchOutlineTitlesPayload }) =>
       departmentApi.patchOutlineTitles(sessionId, payload),
+  })
+}
+
+// ── Draft working copy ──────────────────────────────────────────────────────
+
+// Shared mutation key so the draft page can gate navigation/finalize on
+// in-flight saves via useIsMutating({ mutationKey: DRAFT_SAVE_KEY }).
+export const DRAFT_SAVE_KEY = ["saveDraft"] as const
+
+/**
+ * Persist the working draft (debounced save-as-you-type).
+ *
+ * We do NOT invalidate ["session", id] — same reasoning as
+ * usePatchOutlineTitles: refetching the whole session (questions + answers +
+ * draft) on every keystroke pause is waste, and a server echo could race a
+ * keystroke. Instead we write back the exact string we just sent, which is
+ * strictly safe — we authored it, so it can't clobber anything — and keeps
+ * other consumers (the workspace's draft nav, the checklist) correct with zero
+ * network. No onError toast: the page renders an inline "Save failed — Retry",
+ * because a toast on every failed keystroke pause would nag.
+ */
+export function useSaveDraft() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationKey: DRAFT_SAVE_KEY,
+    mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) =>
+      departmentApi.saveDraft(sessionId, { content }),
+    onSuccess: (_data, vars) => {
+      qc.setQueryData(
+        ["session", vars.sessionId],
+        (old: { success: boolean; session: Session } | undefined) =>
+          old
+            ? { ...old, session: { ...old.session, draft_content: vars.content } }
+            : old
+      )
+    },
   })
 }
 

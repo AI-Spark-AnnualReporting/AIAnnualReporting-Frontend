@@ -59,10 +59,22 @@ export interface ExtractAnswersResponse {
 }
 
 // GET .../outline → the outline (null until generated) plus whether it can
-// still be edited. `editable` is false once the draft is generated.
+// still be edited. `editable` tracks session status: true until the report is
+// submitted. Generating a draft does NOT lock the outline.
 export interface GetOutlineResponse {
   outline: SessionOutline | null
   editable: boolean
+}
+
+// PUT .../draft body — the full draft text. Empty string is meaningful (the
+// user cleared the editor), so it must be sent, not skipped.
+export interface SaveDraftPayload {
+  content: string
+}
+
+export interface SaveDraftResponse {
+  success: boolean
+  saved_at: string
 }
 
 // PATCH .../outline body — rename one or more titles by id (headings or
@@ -92,7 +104,9 @@ export const departmentApi = {
 
   generateDraft: async (sessionId: string) => {
     const { data } = await apiClient.post(
-      `/department/sessions/${sessionId}/generate-draft`
+      `/department/sessions/${sessionId}/generate-draft`,
+      undefined,
+      { timeout: 300000 } // 5 min — LLM writes the full draft; the 30s default cancels it
     )
     return data
   },
@@ -100,6 +114,20 @@ export const departmentApi = {
   finalize: async (sessionId: string, payload: FinalizePayload) => {
     const { data } = await apiClient.post(
       `/department/sessions/${sessionId}/finalize`,
+      payload
+    )
+    return data
+  },
+
+  // Persist the user's working draft. PUT (not PATCH) because it fully replaces
+  // the text — a retried debounced auto-save is idempotent and can't compound.
+  // 409 { detail: "session_locked" } once the session is submitted.
+  saveDraft: async (
+    sessionId: string,
+    payload: SaveDraftPayload
+  ): Promise<SaveDraftResponse> => {
+    const { data } = await apiClient.put(
+      `/department/sessions/${sessionId}/draft`,
       payload
     )
     return data
