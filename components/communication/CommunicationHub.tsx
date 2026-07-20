@@ -15,7 +15,6 @@ import { formatDistanceToNow } from "date-fns"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/contexts/AuthContext"
-import { centriyonBaseUrl } from "@/lib/centriyon"
 import {
   communicationsApi,
   type ThreadlessReportType,
@@ -1519,6 +1518,9 @@ const ICON_WATERMARK = (
 // Delivery options (track/post/sign-in/watermark) are hidden for now.
 const SHOW_DELIVERY_OPTIONS = false
 
+// Scheduled sends are hidden for now — the composer always sends immediately.
+const SHOW_SCHEDULE = false
+
 function ExternalEmailModal({
   report,
   draftId,
@@ -1541,12 +1543,6 @@ function ExternalEmailModal({
     report ? { id: report.id, title: report.title } : null,
   )
   const [attached, setAttached] = useState(!!report)
-  // These reports live on the Centriyon app, so preview opens them there.
-  const openReport = () => {
-    if (!attachedReport) return
-    const base = centriyonBaseUrl()
-    if (base) window.open(`${base}/reports/${attachedReport.id}`, "_blank", "noopener,noreferrer")
-  }
 
   const [trackOpens, setTrackOpens] = useState(true)
   const [postPortal, setPostPortal] = useState(true)
@@ -1579,19 +1575,35 @@ function ExternalEmailModal({
   const senderEmail = `investor.relations@${companyDomain(company, companyName)}`
 
   // Recipients — full ComposeRecipient rows so drafts round-trip org/contact/email.
-  const [recipients, setRecipients] = useState<
-    { id: string; name: string; org?: string | null; contact?: string | null; email?: string | null }[]
-  >([])
+  type ComposeRow = { id: string; name: string; org?: string | null; contact?: string | null; email?: string | null }
+  const [recipients, setRecipients] = useState<ComposeRow[]>([])
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState("")
+  const makeRecipient = (value: string, index: number): ComposeRow => ({
+    id: `r-${index}-${value}`,
+    name: value,
+    email: value.includes("@") ? value : null,
+  })
   const addRecipient = () => {
     const value = draft.trim()
     if (!value) {
       setAdding(false)
       return
     }
-    setRecipients((prev) => [...prev, { id: `r-${prev.length}-${value}`, name: value, email: value.includes("@") ? value : null }])
+    setRecipients((prev) => [...prev, makeRecipient(value, prev.length)])
     setDraft("")
+  }
+  // The input only commits on Enter/blur, so an address typed and left uncommitted
+  // would be silently dropped when the user goes straight for Send. Flush it here
+  // and return the list to use *now* — `recipients` state won't have updated yet.
+  const commitPendingRecipient = () => {
+    const value = draft.trim()
+    if (!value) return recipients
+    const next = [...recipients, makeRecipient(value, recipients.length)]
+    setRecipients(next)
+    setDraft("")
+    setAdding(false)
+    return next
   }
   const removeRecipient = (id: string) => setRecipients((prev) => prev.filter((r) => r.id !== id))
 
@@ -1651,9 +1663,18 @@ function ExternalEmailModal({
   const subjectEmpty = subject.trim().length === 0
   const scheduleMissing = schedule && !scheduledAt
   const saving = saveSend.isPending
+  // Sending needs somewhere to send to. Drafts don't — a half-filled draft is
+  // the whole point of saving one. A half-typed address counts, so the button
+  // enables as you type rather than only after Enter.
+  const recipientsEmpty = recipients.length === 0 && draft.trim().length === 0
 
   const save = async (status: EmailSendStatus) => {
     if (subjectEmpty || saving || prefillLoading) return
+    const finalRecipients = commitPendingRecipient()
+    if (status !== "draft" && finalRecipients.length === 0) {
+      setFormError("Add at least one recipient.")
+      return
+    }
     if (status === "scheduled" && !scheduledAt) {
       setFormError("Pick a date and time to schedule.")
       return
@@ -1667,7 +1688,7 @@ function ExternalEmailModal({
       report_id: attached && attachedReport ? attachedReport.id : null,
       status,
       scheduled_at: status === "scheduled" ? new Date(scheduledAt).toISOString() : null,
-      recipients: recipients.map((r) => ({ name: r.name, org: r.org, contact: r.contact, email: r.email })),
+      recipients: finalRecipients.map((r) => ({ name: r.name, org: r.org, contact: r.contact, email: r.email })),
     }
     try {
       const send = await saveSend.mutateAsync({ id: sendId ?? undefined, payload })
@@ -1857,14 +1878,10 @@ function ExternalEmailModal({
                 >
                   PDF
                 </span>
-                <button
-                  type="button"
-                  onClick={openReport}
-                  style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-                >
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1D2E" }}>{attachmentName}</div>
-                  <div style={{ fontSize: 11.5, color: "#8890AE", marginTop: 1 }}>Attached automatically · Click to preview</div>
-                </button>
+                  <div style={{ fontSize: 11.5, color: "#8890AE", marginTop: 1 }}>Attached automatically</div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setAttached(false)}
@@ -2022,26 +2039,27 @@ function ExternalEmailModal({
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, fontWeight: 700, color: "#1A1D2E" }}>{attachedReport.title}</span>
-                      <span style={{ fontSize: 11.5, color: "#9BA3C4", marginLeft: 8 }}>Download · PDF</span>
+                      <span style={{ fontSize: 11.5, color: "#9BA3C4", marginLeft: 8 }}>PDF</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={openReport}
+                    {/* Inert on purpose — this panel is a mock of the email, so
+                        the CTA only has to *look* like the one the investor
+                        gets. The live link is built backend-side at send time. */}
+                    <span
                       style={{
                         flexShrink: 0,
+                        display: "inline-block",
                         padding: "7px 14px",
                         borderRadius: 8,
-                        border: "none",
                         background: "#4040C8",
                         color: "#fff",
                         fontSize: 12,
                         fontWeight: 700,
-                        cursor: "pointer",
                         fontFamily: "inherit",
+                        userSelect: "none",
                       }}
                     >
-                      View report
-                    </button>
+                      Download report
+                    </span>
                   </div>
                 )}
 
@@ -2081,16 +2099,20 @@ function ExternalEmailModal({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <Toggle on={schedule} onChange={setSchedule} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#5A6080" }}>Schedule</span>
-            {schedule && (
-              <input
-                type="datetime-local"
-                className="chub-inp"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                style={{ ...INPUT, width: 210, padding: "6px 10px", fontSize: 12.5 }}
-              />
+            {SHOW_SCHEDULE && (
+              <>
+                <Toggle on={schedule} onChange={setSchedule} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#5A6080" }}>Schedule</span>
+                {schedule && (
+                  <input
+                    type="datetime-local"
+                    className="chub-inp"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    style={{ ...INPUT, width: 210, padding: "6px 10px", fontSize: 12.5 }}
+                  />
+                )}
+              </>
             )}
             {formError && <span style={{ fontSize: 11.5, fontWeight: 600, color: "#DC2626" }}>{formError}</span>}
           </div>
@@ -2105,8 +2127,9 @@ function ExternalEmailModal({
             </button>
             <button
               type="button"
-              style={{ ...BTN_PRIMARY, gap: 7, opacity: saving || prefillLoading || subjectEmpty || scheduleMissing ? 0.55 : 1 }}
-              disabled={saving || prefillLoading || subjectEmpty || scheduleMissing}
+              style={{ ...BTN_PRIMARY, gap: 7, opacity: saving || prefillLoading || subjectEmpty || scheduleMissing || recipientsEmpty ? 0.55 : 1 }}
+              disabled={saving || prefillLoading || subjectEmpty || scheduleMissing || recipientsEmpty}
+              title={recipientsEmpty ? "Add at least one recipient" : undefined}
               onClick={() => void save(schedule ? "scheduled" : "tracked")}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
