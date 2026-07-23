@@ -21,8 +21,6 @@ import {
   type ThreadlessReport,
   type CommunicationMember,
   type ThreadSummary,
-  type ThreadDetail,
-  type ThreadMessage,
   type ThreadReport,
   type CentrionCompany,
   type EmailAudience,
@@ -32,6 +30,8 @@ import {
   type EmailSendsResponse,
   type DraftListItem,
 } from "@/lib/api/communications"
+import { ReviewThreadModal } from "@/components/communication/review/ReviewThreadModal"
+import { ReviewerView } from "@/components/communication/review/ReviewerView"
 import {
   useEmailSends,
   useSendRecipients,
@@ -962,285 +962,6 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
             {submitting ? "Starting…" : "Start thread"}
           </button>
         </div>
-      </div>
-    </div>
-  )
-}
-
-function MessageRow({ message }: { message: ThreadMessage }) {
-  const { sender, body, created_at } = message
-  return (
-    <div style={{ display: "flex", gap: 12, padding: "14px 0", borderTop: "1px solid #F4F5FB" }}>
-      <div
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: sender.is_you ? "linear-gradient(150deg,#5B5BF0,#4040C8)" : "#EEEEFF",
-          color: sender.is_you ? "#fff" : "#4040C8",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 12,
-          fontWeight: 800,
-        }}
-      >
-        {initials(sender.full_name)}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#1A1D2E" }}>
-            {sender.full_name}
-            {/* Append " (you)" unless the backend already named the sender "You". */}
-            {sender.is_you && sender.full_name.trim().toLowerCase() !== "you" && " (you)"}
-          </span>
-          <span style={BADGE_GRAY}>{roleLabel(sender.role)}</span>
-          <span style={{ fontSize: 11, color: "#9BA3C4" }}>{relativeTime(created_at)}</span>
-        </div>
-        <div style={{ fontSize: 13, color: "#3A4066", marginTop: 4, lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {body}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ThreadViewModal({ threadId, onClose }: { threadId: string; onClose: () => void }) {
-  const { user } = useAuth()
-
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [thread, setThread] = useState<ThreadDetail | null>(null)
-  const [messages, setMessages] = useState<ThreadMessage[]>([])
-  const [members, setMembers] = useState<CommunicationMember[]>([])
-
-  const [message, setMessage] = useState("")
-  const [mentions, setMentions] = useState<CommunicationMember[]>([])
-  const [sending, setSending] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
-
-  // On open → load thread + members in parallel, and fire read (idempotent).
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      communicationsApi.getThread(threadId),
-      // A members failure shouldn't block the thread from rendering.
-      communicationsApi.members().catch(() => ({ members: [] as CommunicationMember[] })),
-    ])
-      .then(([detail, membersRes]) => {
-        if (cancelled) return
-        setThread(detail.thread)
-        setMessages(detail.messages)
-        setMembers(membersRes.members)
-      })
-      .catch((e) => {
-        if (cancelled) return
-        const s = statusOf(e)
-        if (s === 401) return
-        if (s === 404) {
-          toast.error("That conversation is no longer available")
-          onClose()
-          return
-        }
-        setError("Could not load this conversation. Please try again.")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    // Clear the "N new" badge — idempotent, don't block the view on it.
-    communicationsApi.markThreadRead(threadId).catch(() => {})
-
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId])
-
-  // A reply must be addressed to at least one participant.
-  const hasMessage = message.trim().length > 0
-  const needsRecipient = hasMessage && mentions.length === 0
-  const canSend = hasMessage && mentions.length > 0 && !sending
-
-  const sendReply = async () => {
-    const text = message.trim()
-    if (!text || sending) return
-    if (mentions.length === 0) {
-      setSendError("Add at least one participant with @ before sending.")
-      return
-    }
-    setSending(true)
-    setSendError(null)
-    try {
-      const res = await communicationsApi.sendMessage(threadId, {
-        message: text,
-        mentioned_user_ids: mentions.map((m) => m.id), // UUIDs, not user_id
-      })
-      setMessages((prev) => [...prev, res.message])
-      setMessage("")
-      setMentions([])
-      setSending(false)
-    } catch (e) {
-      const s = statusOf(e)
-      if (s === undefined) {
-        setSendError("Something went wrong. Please try again.")
-        setSending(false)
-        return
-      }
-      switch (s) {
-        case 422:
-          setSendError("Message can't be empty")
-          setSending(false)
-          break
-        case 404:
-          toast.error("That conversation is no longer available")
-          onClose()
-          return
-        case 403:
-          toast.error("One of the mentioned people is no longer available")
-          communicationsApi
-            .members()
-            .then((r) => setMembers(r.members))
-            .catch(() => {})
-          setSending(false)
-          break
-        case 401:
-          setSending(false)
-          break
-        default:
-          setSendError("Something went wrong. Please try again.")
-          setSending(false)
-      }
-    }
-  }
-
-  const report = thread?.report
-  const ownerLabel = thread
-    ? thread.owner
-      ? `${abbreviateName(thread.owner.full_name)}${thread.owner.is_you ? " (you)" : ""}`
-      : "—"
-    : ""
-
-  return (
-    <div style={OVERLAY} onClick={onClose}>
-      <div
-        style={{ ...MODAL, width: 640, maxHeight: "min(86vh, 720px)", display: "flex", flexDirection: "column", overflow: "hidden" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "20px 22px 14px", borderBottom: "1px solid #ECEEF8" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "2px 9px",
-                borderRadius: 20,
-                background: "#F1ECFF",
-                color: "#7C3AED",
-                fontSize: 9.5,
-                fontWeight: 800,
-                letterSpacing: ".6px",
-              }}
-            >
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#7C3AED" }} />
-              INTERNAL
-            </span>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "#1A1D2E", marginTop: 7, letterSpacing: "-.2px" }}>
-              {report ? report.title : "Conversation"}
-            </div>
-            <div style={{ fontSize: 12, color: "#8890AE", marginTop: 3 }}>
-              {thread ? (
-                <>
-                  Owner: {ownerLabel} · {relativeTime(thread.updated_at)}
-                </>
-              ) : (
-                " "
-              )}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              flexShrink: 0,
-              width: 28,
-              height: 28,
-              border: "none",
-              background: "transparent",
-              color: "#9BA3C4",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Message list — show ~5 messages, then scroll (maxHeight ≈ 5 rows). */}
-        <div style={{ flex: 1, maxHeight: 400, overflowY: "auto", padding: "4px 22px 12px" }}>
-          {loading ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "56px 0" }}>
-              <Spinner />
-              <div style={{ fontSize: 12, color: "#9BA3C4", fontWeight: 600 }}>Loading conversation…</div>
-            </div>
-          ) : error ? (
-            <div style={{ padding: "48px 0", textAlign: "center" }}>
-              <div style={{ fontSize: 13, color: "#DC2626" }}>{error}</div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div style={{ padding: "48px 0", textAlign: "center", fontSize: 13, color: "#9BA3C4" }}>
-              No messages yet.
-            </div>
-          ) : (
-            messages.map((m) => <MessageRow key={m.id} message={m} />)
-          )}
-        </div>
-
-        {/* Reply composer */}
-        {!loading && !error && (
-          <div style={{ borderTop: "1px solid #ECEEF8", padding: "14px 22px 18px" }}>
-            <MentionComposer
-              members={members}
-              currentUserId={user?.user_id}
-              message={message}
-              onMessageChange={(v) => {
-                setMessage(v)
-                if (sendError) setSendError(null)
-              }}
-              mentions={mentions}
-              onMentionsChange={setMentions}
-              placeholder="Write a reply…  (type @ to mention)"
-              minHeight={70}
-            />
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: sendError ? "#DC2626" : "#9BA3C4" }}>
-                {sendError ?? (needsRecipient ? "Add at least one participant with @ to send." : "")}
-              </span>
-              <button
-                type="button"
-                style={{ ...BTN_PRIMARY, gap: 7, opacity: canSend ? 1 : 0.55, cursor: canSend ? "pointer" : "not-allowed" }}
-                disabled={!canSend}
-                onClick={sendReply}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M12.5 1.5L6 8M12.5 1.5L8.3 12.5l-2.3-4.5L1.5 5.7 12.5 1.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                </svg>
-                {sending ? "Sending…" : "Send"}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -3060,6 +2781,8 @@ export function CommunicationHub() {
   const [reopenDraftId, setReopenDraftId] = useState<string | null>(null)
   const [showPublish, setShowPublish] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(threadParam)
+  // Reviewer screen, opened from the thread modal's "Open as reviewer".
+  const [reviewThreadId, setReviewThreadId] = useState<string | null>(null)
 
   const [threads, setThreads] = useState<ThreadSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -3133,7 +2856,32 @@ export function CommunicationHub() {
   return (
     <div>
       <style>{SCOPED_CSS}</style>
-      {activeThreadId && <ThreadViewModal threadId={activeThreadId} onClose={closeThread} />}
+      {activeThreadId && (
+        <ReviewThreadModal
+          threadId={activeThreadId}
+          onClose={closeThread}
+          onOpenReview={(id) => {
+            setActiveThreadId(null)
+            setReviewThreadId(id)
+          }}
+        />
+      )}
+      {reviewThreadId && (
+        <ReviewerView
+          threadId={reviewThreadId}
+          onClose={() => {
+            setReviewThreadId(null)
+            if (threadParam) router.replace(pathname)
+            void fetchThreads()
+          }}
+          // Back chevron → return to the thread we came from.
+          onBack={() => {
+            setActiveThreadId(reviewThreadId)
+            setReviewThreadId(null)
+          }}
+          onChanged={() => void fetchThreads()}
+        />
+      )}
       {(externalThread || reopenDraftId) && (
         <ExternalEmailModal
           report={externalThread?.report ?? null}
