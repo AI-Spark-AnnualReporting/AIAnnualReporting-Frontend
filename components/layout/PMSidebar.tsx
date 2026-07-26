@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   RefreshCw,
   BookOpen,
+  Megaphone,
   LogOut,
 } from "lucide-react"
 
@@ -16,6 +17,7 @@ import {
 const NAV = [
   { href: "/pm", label: "Dashboard", icon: LayoutGrid, exact: true },
   { href: "/pm/cycles", label: "All Cycles", icon: RefreshCw },
+  { href: "/pm/communication", label: "Communication Hub", icon: Megaphone },
   { href: "/pm/documents", label: "Document Bank", icon: BookOpen },
 ]
 

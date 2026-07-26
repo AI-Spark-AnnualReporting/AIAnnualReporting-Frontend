@@ -428,6 +428,7 @@ export interface Notification {
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
   related_id?: string
+  action_url?: string
   created_at: string
   is_read: boolean
 }

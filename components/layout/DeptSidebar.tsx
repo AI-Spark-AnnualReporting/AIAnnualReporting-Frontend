@@ -8,12 +8,14 @@ import {
   LayoutGrid,
   MessageSquare,
   BookOpen,
+  Megaphone,
   LogOut,
 } from "lucide-react"
 
 const NAV = [
   { href: "/department", label: "My Sessions", icon: LayoutGrid, exact: true },
   { href: "/department/conversations", label: "Conversations", icon: MessageSquare },
+  { href: "/department/communication", label: "Communication Hub", icon: Megaphone },
   { href: "/department/documents", label: "Document Bank", icon: BookOpen },
 ]
 
