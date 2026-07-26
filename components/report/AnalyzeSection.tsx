@@ -11,6 +11,7 @@ import {
   LockOpen,
   RefreshCw,
   Save,
+  SearchX,
   Trash2,
   X,
 } from "lucide-react"
@@ -52,6 +53,9 @@ export function AnalyzeSection({
   const sectionCode = section.section_code
   const status = section.status
   const content = section.content ?? ""
+  // Analyze pipeline state drives the panel. Missing/undefined → "pending"
+  // (older responses that predate the field).
+  const analysisState = section.analysis_state ?? "pending"
 
   const { data: plan } = usePlan(cycleId)
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
@@ -88,15 +92,7 @@ export function AnalyzeSection({
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
         <div className="px-8 py-6 space-y-5">
-          {status === "pending" ? (
-            <PendingView
-              cycleId={cycleId}
-              feederNames={feederNames}
-              hasFeeders={feederCodes.length > 0}
-              running={runAnalysis.isPending}
-              onRun={() => runAnalysis.mutate({ sectionCode })}
-            />
-          ) : status === "locked" ? (
+          {status === "locked" ? (
             <LockedView
               content={content}
               lockedAt={section.locked_at}
@@ -119,6 +115,23 @@ export function AnalyzeSection({
                 setEditMode(false)
                 setDraft(content)
               }}
+            />
+          ) : analysisState === "no_data" ? (
+            <NoDataView
+              running={runAnalysis.isPending}
+              onRun={() => runAnalysis.mutate({ sectionCode })}
+              onEditManually={() => {
+                setDraft(content)
+                setEditMode(true)
+              }}
+            />
+          ) : analysisState === "pending" ? (
+            <PendingView
+              cycleId={cycleId}
+              feederNames={feederNames}
+              hasFeeders={feederCodes.length > 0}
+              running={runAnalysis.isPending}
+              onRun={() => runAnalysis.mutate({ sectionCode })}
             />
           ) : (
             <DraftingView
@@ -166,6 +179,59 @@ export function AnalyzeSection({
           setClearOpen(false)
         }}
       />
+    </div>
+  )
+}
+
+// A run was attempted but the analyze agent found nothing to work with. Offer a
+// retry and a manual-write fallback instead of leaving a spinner/empty state.
+function NoDataView({
+  running,
+  onRun,
+  onEditManually,
+}: {
+  running: boolean
+  onRun: () => void
+  onEditManually: () => void
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-12 px-4">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
+        {running ? (
+          <Loader2 className="h-7 w-7 text-amber-500 animate-spin" />
+        ) : (
+          <SearchX className="h-7 w-7 text-amber-500" />
+        )}
+      </div>
+      <h2 className="text-lg font-semibold mb-1.5">No data available for analysis</h2>
+      <p className="text-sm text-muted-foreground mb-5 max-w-md leading-relaxed">
+        {running
+          ? "Re-running the analyze agent…"
+          : "The analyze agent ran but found no data to analyze for this section. Try again once the departments have submitted more, or write the findings yourself."}
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button onClick={onRun} disabled={running} variant="outline">
+          {running ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Running…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Run Analysis Again
+            </>
+          )}
+        </Button>
+        <Button
+          onClick={onEditManually}
+          disabled={running}
+          className="bg-indigo-600 text-white hover:bg-indigo-700"
+        >
+          <Edit2 className="h-4 w-4 mr-2" />
+          Edit manually
+        </Button>
+      </div>
     </div>
   )
 }

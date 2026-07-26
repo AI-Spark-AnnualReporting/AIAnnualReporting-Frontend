@@ -19,6 +19,11 @@ export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
+// Analyze-mode only (null for other modes):
+//   "ready"   → findings present in `content`.
+//   "pending" → analysis not run yet.
+//   "no_data" → a run was attempted but found nothing to analyze.
+export type SectionAnalysisState = "ready" | "pending" | "no_data"
 
 export interface User {
   id?: string
@@ -121,6 +126,9 @@ export interface CycleReportSection {
   // Generate-mode content. Populated after the LLM pass for generate sections;
   // null on pending generate sections and irrelevant for attach/auto.
   content: string | null
+  // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
+  // modes and for older responses (treat missing as "pending").
+  analysis_state?: SectionAnalysisState | null
 }
 
 export interface ResolveSectionsResponse {
@@ -323,11 +331,57 @@ export interface Session {
   progress_percentage: number
   questions: Question[]
   answers: Answer[]
+  // The last raw AI output. Provenance only — never carries user edits.
   ai_generated_draft?: string | null
+  // The user's working draft: exactly what the draft editor shows. Written by
+  // generate-draft (alongside ai_generated_draft) and by PUT .../draft, and
+  // nulled on finalize. Read it through `draftContent()` in lib/session.ts,
+  // never directly — the fallback order is what makes reopen correct.
+  draft_content?: string | null
   final_submission?: string | null
   submitted_at?: string | null
   review_notes?: string | null
   reviewed_at?: string | null
+  // Staleness clocks. Compare answers_updated_at against the other two to tell
+  // whether the outline/draft were built from answers the user has since
+  // changed — see isOutlineStale/isDraftStale in lib/session.ts. Null on
+  // sessions predating the backend change (not backfilled), which correctly
+  // reads as "no warning".
+  answers_updated_at?: string | null
+  outline_generated_at?: string | null
+  draft_generated_at?: string | null
+  // Position in the department flow. Informational only: editing is gated on
+  // session status (see lib/session.ts), never on this.
+  step?: string
+}
+
+// ── Department session outline (built from answers, before draft) ───────────
+// Distinct from the PM-side FinalReport `OutlineEntry` above. The department
+// user may rename headings/subheadings (title), never add/remove/reorder them.
+// `ai_title` is the original AI-generated label used by the reset control.
+//
+// IMPORTANT: the backend types this blob as a free-form object and does not
+// validate it — the shape is whatever the LLM emitted. Anything not strictly
+// required to render is optional here and callers must null-guard. Treating this
+// interface as a guarantee has already caused one production crash.
+export interface OutlineSubheading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+}
+
+export interface OutlineHeading {
+  id: string
+  order: number
+  title: string
+  ai_title: string
+  subheadings?: OutlineSubheading[]
+}
+
+export interface SessionOutline {
+  version: number
+  headings: OutlineHeading[]
 }
 
 export interface DepartmentDashboard {

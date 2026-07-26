@@ -1,5 +1,5 @@
 import apiClient from "./client"
-import { DepartmentDashboard, Session } from "@/types"
+import { DepartmentDashboard, Session, SessionOutline } from "@/types"
 
 export interface SubmitAnswersPayload {
   answers: {
@@ -58,6 +58,31 @@ export interface ExtractAnswersResponse {
   message: string
 }
 
+// GET .../outline → the outline (null until generated) plus whether it can
+// still be edited. `editable` tracks session status: true until the report is
+// submitted. Generating a draft does NOT lock the outline.
+export interface GetOutlineResponse {
+  outline: SessionOutline | null
+  editable: boolean
+}
+
+// PUT .../draft body — the full draft text. Empty string is meaningful (the
+// user cleared the editor), so it must be sent, not skipped.
+export interface SaveDraftPayload {
+  content: string
+}
+
+export interface SaveDraftResponse {
+  success: boolean
+  saved_at: string
+}
+
+// PATCH .../outline body — rename one or more titles by id (headings or
+// subheadings). We PATCH a single id per blur, so `titles` usually has one entry.
+export interface PatchOutlineTitlesPayload {
+  titles: { id: string; title: string }[]
+}
+
 export const departmentApi = {
   dashboard: async (): Promise<DepartmentDashboard> => {
     const { data } = await apiClient.get("/department/dashboard")
@@ -79,7 +104,9 @@ export const departmentApi = {
 
   generateDraft: async (sessionId: string) => {
     const { data } = await apiClient.post(
-      `/department/sessions/${sessionId}/generate-draft`
+      `/department/sessions/${sessionId}/generate-draft`,
+      undefined,
+      { timeout: 300000 } // 5 min — LLM writes the full draft; the 30s default cancels it
     )
     return data
   },
@@ -90,6 +117,53 @@ export const departmentApi = {
       payload
     )
     return data
+  },
+
+  // Persist the user's working draft. PUT (not PATCH) because it fully replaces
+  // the text — a retried debounced auto-save is idempotent and can't compound.
+  // 409 { detail: "session_locked" } once the session is submitted.
+  saveDraft: async (
+    sessionId: string,
+    payload: SaveDraftPayload
+  ): Promise<SaveDraftResponse> => {
+    const { data } = await apiClient.put(
+      `/department/sessions/${sessionId}/draft`,
+      payload
+    )
+    return data
+  },
+
+  // Fetch the current outline + editability. Returns { outline, editable };
+  // `outline` is null until Generate Outline is run.
+  getOutline: async (sessionId: string): Promise<GetOutlineResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/outline`
+    )
+    return data
+  },
+
+  // Build (or rebuild) the outline from the session's answers. LLM call —
+  // raise the timeout like extractAnswers/generateDraft so it isn't cut off.
+  generateOutline: async (sessionId: string): Promise<{ outline: SessionOutline; step: string }> => {
+    const { data } = await apiClient.post(
+      `/department/sessions/${sessionId}/generate-outline`,
+      undefined,
+      { timeout: 120000 } // 2 min — LLM builds the outline
+    )
+    return data
+  },
+
+  // Rename one (or more) heading/subheading titles by id. Returns the full outline.
+  patchOutlineTitles: async (
+    sessionId: string,
+    payload: PatchOutlineTitlesPayload
+  ): Promise<SessionOutline> => {
+    const { data } = await apiClient.patch(
+      `/department/sessions/${sessionId}/outline`,
+      payload
+    )
+    // Backend returns the full outline; tolerate a { outline } wrapper too.
+    return data?.outline ?? data
   },
 
   uploadDocument: async (sessionId: string, file: File) => {
