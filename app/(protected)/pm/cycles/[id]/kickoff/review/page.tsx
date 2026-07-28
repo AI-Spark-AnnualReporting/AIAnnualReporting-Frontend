@@ -720,8 +720,6 @@ export default function ReviewBriefPage({
         submitting={approving}
         onConfirm={confirmApprove}
         cycleLabel={fiscalLabel}
-        numQuestions={numQuestions}
-        onNumQuestionsChange={setNumQuestions}
       />
 
       {/* Full-screen loader while the kickoff pipeline generates questions.
@@ -749,8 +747,6 @@ function ApproveDeadlineDialog({
   submitting,
   onConfirm,
   cycleLabel,
-  numQuestions,
-  onNumQuestionsChange,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -764,8 +760,6 @@ function ApproveDeadlineDialog({
   submitting: boolean
   onConfirm: () => void
   cycleLabel: string
-  numQuestions: number
-  onNumQuestionsChange: (n: number) => void
 }) {
   // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
   const isPast = !!value && value < min
