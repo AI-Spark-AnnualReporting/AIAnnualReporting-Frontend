@@ -30,6 +30,14 @@ export interface HODSession {
   progress_percentage?: number | null
   review_notes?: string | null
   submitted_at?: string | null
+  // The department's finalized report, surfaced so the HOD reviews the actual
+  // draft — not only the raw Q&A. Resolve for display via draftContent() in
+  // lib/session.ts (final_submission ?? draft_content ?? ai_generated_draft):
+  // on a submitted session draft_content is nulled and final_submission holds
+  // the text. Returned by GET /hod/sessions/{id} (mirrors GET /pm/sessions/{id}).
+  final_submission?: string | null
+  draft_content?: string | null
+  ai_generated_draft?: string | null
   hod_user_id?: string | null
   user_id?: string | null
   departments?: { department_name?: string; department_code?: string } | null

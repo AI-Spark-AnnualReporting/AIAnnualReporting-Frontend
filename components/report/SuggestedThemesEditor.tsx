@@ -3,21 +3,12 @@
 import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Check, Loader2, Lock, Plus, ShieldAlert, Sparkles } from "lucide-react"
+import { Check, Loader2, Lock, Plus, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { RefineAssistant } from "@/components/report/RefineAssistant"
 import { ThemeChipCard } from "@/components/report/ThemeChipCard"
 import { pmApi, type SuggestedTheme } from "@/lib/api/pm"
-import { cn } from "@/lib/utils"
 
 const MAX_THEMES = 8
-
-const SUGGESTED_CHIPS = [
-  "Add a governance theme",
-  "Tighten the keywords",
-  "Use fewer themes",
-  "Add a digital theme",
-]
 
 // Old cycles may return items missing `keywords` (legacy shape) or `selected`
 // (added later). Default keywords to [] and selected to true so nothing crashes
@@ -40,9 +31,10 @@ function serialize(list: SuggestedTheme[]) {
  * Editable + AI-refinable + selectable list of the cycle's `suggested_themes`
  * ({title, keywords[], selected}). Mirrors the Strategic Brief page's themes
  * mechanics: manual edits auto-save (debounced typing, immediate add/remove) via
- * `save-brief-and-themes`; "Refine with AI" calls `suggested-themes/refine`
- * (already persisted server-side). The selection checkbox toggles `selected` and
- * persists immediately — the backend injects only checked themes into the prompt.
+ * `save-brief-and-themes`; each card's per-theme "Refine with AI" calls
+ * `suggested-themes/refine` scoped to that one theme (already persisted
+ * server-side). The selection checkbox toggles `selected` and persists
+ * immediately — the backend injects only checked themes into the prompt.
  */
 export function SuggestedThemesEditor({
   cycleId,
@@ -59,7 +51,6 @@ export function SuggestedThemesEditor({
   const qc = useQueryClient()
   const [list, setList] = useState<SuggestedTheme[]>(() => normalize(themes))
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
-  const [refineOpen, setRefineOpen] = useState(false)
   const [refining, setRefining] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -150,14 +141,21 @@ export function SuggestedThemesEditor({
 
   const selectedCount = list.filter((t) => t.selected !== false).length
 
-  const refineWith = async (instruction: string): Promise<boolean> => {
+  // Per-theme "Refine with AI". The endpoint only accepts the WHOLE list (and
+  // persists whatever it returns), so — like the kickoff review page — we scope
+  // the change to one theme in the prompt and leave the rest untouched.
+  const refineTheme = async (themeIndex: number, instruction: string): Promise<boolean> => {
     if (refining) return false
     cancelPendingSave() // refine persists authoritatively — drop any stale save
     setRefining(true)
     try {
+      const scoped =
+        `Only modify theme ${themeIndex + 1}` +
+        (list[themeIndex]?.title ? ` ("${list[themeIndex].title}")` : "") +
+        `: ${instruction}. Leave every other theme exactly as it is, in the same order.`
       const data = await pmApi.refineSuggestedThemes(cycleId, {
         suggested_themes: list,
-        instruction,
+        instruction: scoped,
       })
       const next = normalize(data.suggested_themes ?? [])
       setList(next)
@@ -192,26 +190,14 @@ export function SuggestedThemesEditor({
             Locked
           </span>
         ) : (
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => setRefineOpen((o) => !o)}
-              className={cn(
-                "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
-                refineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
-              )}
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Refine with AI
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={addTheme}
-              disabled={list.length >= MAX_THEMES}
-            >
-              <Plus className="h-3.5 w-3.5" /> Add theme
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={addTheme}
+            disabled={list.length >= MAX_THEMES}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add theme
+          </Button>
         )}
       </div>
 
@@ -232,18 +218,10 @@ export function SuggestedThemesEditor({
             onAddKeyword={(kw) => addKeyword(i, kw)}
             onRemoveKeyword={(kwIdx) => removeKeyword(i, kwIdx)}
             onRemove={() => removeTheme(i)}
+            onRefine={(ins) => refineTheme(i, ins)}
           />
         ))}
       </div>
-
-      {!readOnly && refineOpen && (
-        <RefineAssistant
-          chips={SUGGESTED_CHIPS}
-          loading={refining}
-          onSubmit={refineWith}
-          placeholder="e.g. add a governance theme, use fewer themes…"
-        />
-      )}
     </section>
   )
 }

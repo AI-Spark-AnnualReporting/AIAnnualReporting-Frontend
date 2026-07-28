@@ -971,7 +971,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             />
             <PipelineConnector done={(stats?.submitted ?? needsReview.length) > 0 || (stats?.approved ?? approved.length) > 0 || (stats?.reopened ?? reopened.length) > 0} />
 
-            {/* Stage 3 – Submitted (awaiting PM review) */}
+            {/* Stage 3 – Submitted (awaiting HOD review) */}
             <PipelineStage
               icon={ClipboardCheck}
               label="Submitted"
@@ -982,7 +982,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             />
             <PipelineConnector done={(stats?.approved ?? approved.length) > 0} />
 
-            {/* Stage 4 – Needs Changes (PM sent back to dept) */}
+            {/* Stage 4 – Needs Changes (HOD sent back to dept) */}
             <PipelineStage
               icon={Eye}
               label="Needs Changes"

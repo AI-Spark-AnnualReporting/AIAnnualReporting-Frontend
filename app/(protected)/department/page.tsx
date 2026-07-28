@@ -304,17 +304,17 @@ export default function DepartmentDashboard() {
                     <StatusPill status={session.status} />
                   </div>
 
-                  {/* Reopened — show PM feedback when present, otherwise a generic prompt */}
+                  {/* Reopened — show HOD feedback when present, otherwise a generic prompt */}
                   {isReopened && (
                     <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5">
                       <div className="flex items-center gap-2">
                         <RotateCcw className="h-3.5 w-3.5 shrink-0 text-red-600" />
-                        <p className="text-xs font-semibold text-red-800">PM feedback</p>
+                        <p className="text-xs font-semibold text-red-800">Head of Department feedback</p>
                       </div>
                       <p className="mt-1 text-sm text-red-700">
                         {session.review_notes
                           ? session.review_notes
-                          : "PM requested revisions — please update and resubmit."}
+                          : "Your Head of Department requested revisions — please update and resubmit."}
                       </p>
                     </div>
                   )}

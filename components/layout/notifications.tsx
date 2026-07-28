@@ -271,6 +271,11 @@ export function NotificationBell({
       onClick: () => {
         if (!n.is_read) markRead.mutate(n.id)
         setOpen(false)
+        // Deep-link when the backend attached a destination — e.g. a "draft
+        // submitted" notification points the HOD at /hod/sessions/{id}/review.
+        // Guarded to internal paths; comm-thread action_urls are filtered out
+        // above and surfaced as their own richer cards instead.
+        if (n.action_url && n.action_url.startsWith("/")) router.push(n.action_url)
       },
     }
   })
