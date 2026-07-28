@@ -8,10 +8,12 @@ import { pmApi, type BriefTheme } from "@/lib/api/pm"
 import { cn } from "@/lib/utils"
 
 // Legacy themes may miss `keywords`/`selected` — default keywords to [] and
-// selected to true (so legacy themes render as checked).
+// selected to true (so legacy themes render as checked). Spread first: toggling
+// persists this list back via save-brief-and-themes, so any field dropped here
+// (e.g. `summary`) is wiped server-side on the next click.
 function normalize(list: BriefTheme[]): BriefTheme[] {
   return list.map((t) => ({
-    title: t.title,
+    ...t,
     keywords: t.keywords ?? [],
     selected: t.selected ?? true,
   }))
@@ -147,6 +149,11 @@ export function InitialThemesPicker({
                       <span className="italic text-slate-400">Untitled theme</span>
                     )}
                   </h4>
+                  {theme.summary && (
+                    <p className="text-xs leading-relaxed text-slate-500">
+                      {theme.summary}
+                    </p>
+                  )}
                   {(theme.keywords ?? []).length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {theme.keywords.map((kw, k) => (

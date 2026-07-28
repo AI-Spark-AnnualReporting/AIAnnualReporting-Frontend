@@ -4,6 +4,7 @@ import axios, {
   InternalAxiosRequestConfig,
 } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
+import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -51,6 +52,9 @@ apiClient.interceptors.response.use(
       if (!isAuthEndpoint) {
         localStorage.removeItem("access_token")
         localStorage.removeItem("refresh_token")
+        // Remember the page so login lands back here, not on the role home —
+        // an expiry mid-kickoff otherwise loses the PM's place entirely.
+        storePostLoginRedirect(window.location.pathname + window.location.search)
         window.location.href = centriyonLoginUrl()
       }
     }

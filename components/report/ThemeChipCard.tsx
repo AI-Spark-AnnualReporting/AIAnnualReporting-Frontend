@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, X } from "lucide-react"
+import { Check, Loader2, Send, Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
@@ -27,9 +27,11 @@ export function ThemeChipCard({
   onAddKeyword,
   onRemoveKeyword,
   onRemove,
+  onRefine,
 }: {
   index: number
-  theme: { title: string; keywords: string[] }
+  /** `summary` is AI-written and read-only here; absent/"" renders nothing. */
+  theme: { title: string; keywords: string[]; summary?: string }
   isRtl?: boolean
   selected?: boolean
   /** Locked plan → static, non-interactive presentation. */
@@ -39,9 +41,30 @@ export function ThemeChipCard({
   onAddKeyword: (keyword: string) => void
   onRemoveKeyword: (keywordIndex: number) => void
   onRemove: () => void
+  /**
+   * Optional per-theme "Refine with AI". When provided the card grows its own
+   * instruction box; resolve true to clear the input (mirrors the page-level
+   * refine panels). Omitted → no refine control at all.
+   */
+  onRefine?: (instruction: string) => Promise<boolean>
 }) {
   const [draft, setDraft] = useState("")
+  const [refineOpen, setRefineOpen] = useState(false)
+  const [instruction, setInstruction] = useState("")
+  const [refining, setRefining] = useState(false)
   const keywords = theme.keywords ?? []
+  const canRefine = !!onRefine && !readOnly
+
+  const submitRefine = async () => {
+    const value = instruction.trim()
+    if (!value || refining || !onRefine) return
+    setRefining(true)
+    try {
+      if (await onRefine(value)) setInstruction("")
+    } finally {
+      setRefining(false)
+    }
+  }
 
   const commitDraft = () => {
     if (draft.trim()) onAddKeyword(draft)
@@ -54,22 +77,36 @@ export function ThemeChipCard({
     <div
       className={cn(
         "relative rounded-xl border bg-indigo-50/40 p-4 transition-colors",
-        readOnly ? "pr-4" : "pr-9",
+        readOnly ? "pr-4" : canRefine ? "pr-40" : "pr-9",
         selectable && selected
           ? "border-indigo-400 ring-1 ring-indigo-300"
           : "border-indigo-100",
       )}
     >
-      {/* Remove theme (hidden when read-only) */}
+      {/* Per-theme refine + remove (hidden when read-only) */}
       {!readOnly && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remove theme"
-          className="absolute right-3 top-3 text-muted-foreground/40 transition-colors hover:text-destructive"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="absolute right-3 top-2.5 flex items-center gap-2">
+          {canRefine && (
+            <button
+              type="button"
+              onClick={() => setRefineOpen((o) => !o)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-100",
+                refineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
+              )}
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Refine with AI
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Remove theme"
+            className="text-muted-foreground/40 transition-colors hover:text-destructive"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       )}
       <div className="flex items-start gap-3">
         {selectable ? (
@@ -134,6 +171,18 @@ export function ThemeChipCard({
               )}
             />
           )}
+          {/* AI summary — what this theme's keywords reflect */}
+          {theme.summary && (
+            <p
+              dir={isRtl ? "rtl" : "ltr"}
+              className={cn(
+                "mt-1.5 text-xs leading-relaxed text-muted-foreground",
+                isRtl && "text-right",
+              )}
+            >
+              {theme.summary}
+            </p>
+          )}
           {/* Keyword chips */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {keywords.map((kw, k) => (
@@ -175,6 +224,36 @@ export function ThemeChipCard({
               />
             )}
           </div>
+
+          {/* Per-theme AI instruction box */}
+          {canRefine && refineOpen && (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    submitRefine()
+                  }
+                }}
+                disabled={refining}
+                placeholder="e.g. sharpen this theme, add ESG keywords, rename it…"
+                dir={isRtl ? "rtl" : "ltr"}
+                className="min-w-0 flex-1 rounded-full border border-indigo-200 bg-white px-3.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400 disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={submitRefine}
+                disabled={refining || !instruction.trim()}
+                aria-label="Refine this theme"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:bg-indigo-300"
+              >
+                {refining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

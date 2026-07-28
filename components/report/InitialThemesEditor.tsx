@@ -132,7 +132,10 @@ export function InitialThemesEditor({
 
   const onSave = () => {
     if (!validate()) return
+    // Spread first — the payload overwrites the stored list, so a rebuilt
+    // object silently drops `summary` (and anything else added later).
     const clean: BriefTheme[] = draft.map((t) => ({
+      ...t,
       title: t.title.trim(),
       keywords: t.keywords.map((k) => k.trim()).filter(Boolean),
     }))

@@ -210,7 +210,14 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
     isLanguageAcceptable(additionalContext, cycleLang)
   const cycleId = id
 
-  const hasKickoff    = !!(pmDash?.cycle?.kickoff_brief)
+  // `kickoff_brief` is persisted by the BRIEF step (generate-brief /
+  // save-brief-and-themes), not by question generation — so it only means "a
+  // brief exists". Questions exist once a session leaves "assigned" (the
+  // pre-kickoff status). Conflating the two locked cycles out of kickoff
+  // forever when POST /pm/kickoff never completed (e.g. session expired).
+  const hasKickoff         = !!(pmDash?.cycle?.kickoff_brief)
+  const questionsGenerated = departments.some((d) => d.status !== "assigned")
+  const kickoffIncomplete  = hasKickoff && departments.length > 0 && !questionsGenerated
   const needsReview   = departments.filter((d) => d.status === "submitted")
   const reopened      = departments.filter((d) => d.status === "reopened")
   const approved      = departments.filter((d) => d.status === "approved")
@@ -749,24 +756,48 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           </Button>
         </Link>
         <PageHeader
+          className="flex-1"
           title={cycleName}
           description="Track department progress, review submissions, and generate the final report"
           action={
-            <div className="flex gap-2 flex-wrap">
-              <Button variant="ghost" size="icon" onClick={() => refetchPM()} disabled={isFetching} title="Refresh">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="icon" onClick={() => refetchPM()} disabled={isFetching} title="Refresh">
                 <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
               </Button>
+              {/* Three states: no brief → start; brief but no questions →
+                  resume at the approve step; questions generated → done. */}
               <Button
                 variant="outline"
-                onClick={() => router.push(`/pm/cycles/${id}/kickoff`)}
-                disabled={hasKickoff}
-                title={hasKickoff ? "Kickoff brief already submitted for this cycle" : undefined}
+                onClick={() =>
+                  router.push(
+                    kickoffIncomplete
+                      ? `/pm/cycles/${id}/kickoff/review`
+                      : `/pm/cycles/${id}/kickoff`,
+                  )
+                }
+                disabled={questionsGenerated}
+                title={questionsGenerated ? "Questions have already been generated for this cycle" : undefined}
+                className={cn(kickoffIncomplete && "border-amber-300 text-amber-700 hover:bg-amber-50")}
               >
-                {hasKickoff
+                {questionsGenerated
                   ? <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
-                  : <BookOpen className="mr-2 h-4 w-4" />}
-                {hasKickoff ? "Kickoff Submitted" : "Submit Kickoff Brief"}
+                  : kickoffIncomplete
+                    ? <AlertTriangle className="mr-2 h-4 w-4" />
+                    : <BookOpen className="mr-2 h-4 w-4" />}
+                {questionsGenerated
+                  ? "Kickoff Submitted"
+                  : kickoffIncomplete
+                    ? "Resume Kickoff"
+                    : "Submit Kickoff Brief"}
               </Button>
+              {questionsGenerated && (
+                <Link href={`/pm/cycles/${id}/questions`}>
+                  <Button variant="outline">
+                    <ListChecks className="mr-2 h-4 w-4" />
+                    View Questions
+                  </Button>
+                </Link>
+              )}
               {(notStarted.length > 0 || inProgress.length > 0) && (
                 <Button variant="outline" onClick={() => setBulkOpen(true)}>
                   <BellRing className="mr-2 h-4 w-4" />
@@ -850,6 +881,31 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           )}
       </div>
 
+      {/* ── Kickoff never finished ──
+           The brief is saved but POST /pm/kickoff never completed, so no
+           department has questions. Usually an interrupted/expired session.
+           The review step reloads the persisted brief, so "Resume" picks up
+           right at Approve & use. ── */}
+      {kickoffIncomplete && (
+        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-800">Kickoff incomplete</p>
+            <p className="text-sm text-amber-700 mt-0.5">
+              The strategic brief is saved, but questions were never generated for{" "}
+              {departments.length === 1 ? "this department" : `these ${departments.length} departments`}.
+              This usually means the kickoff was interrupted — resume it to generate them.
+            </p>
+          </div>
+          <Link href={`/pm/cycles/${id}/kickoff/review`} className="shrink-0">
+            <Button size="sm" className="bg-amber-600 text-white hover:bg-amber-700">
+              Resume Kickoff
+              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* ── Questions Deadline (post-kickoff editor) ── */}
       {hasKickoff && (
         <div className="rounded-xl border bg-card px-6 py-4">
@@ -897,19 +953,19 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             <PipelineStage
               icon={Sparkles}
               label="Kickoff Brief"
-              count={hasKickoff ? "✓" : "Pending"}
-              done={hasKickoff}
-              active={!hasKickoff}
+              count={questionsGenerated ? "✓" : "Pending"}
+              done={questionsGenerated}
+              active={!questionsGenerated}
               colorClass="purple"
             />
-            <PipelineConnector done={hasKickoff} />
+            <PipelineConnector done={questionsGenerated} />
 
             {/* Stage 2 – In Progress */}
             <PipelineStage
               icon={Clock}
               label="In Progress"
               count={String(stats?.in_progress ?? inProgress.length)}
-              done={(stats?.in_progress ?? inProgress.length) === 0 && departments.length > 0 && hasKickoff}
+              done={(stats?.in_progress ?? inProgress.length) === 0 && departments.length > 0 && questionsGenerated}
               active={(stats?.in_progress ?? inProgress.length) > 0}
               colorClass="blue"
             />
