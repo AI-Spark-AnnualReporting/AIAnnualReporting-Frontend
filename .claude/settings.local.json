@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat \"app/\\(protected\\)/pm/cycles/[id]/page.tsx\")",
+      "Bash(echo \"read exit: $?\")"
+    ]
+  }
+}

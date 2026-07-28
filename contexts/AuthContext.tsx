@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
 import { centriyonLoginUrl } from "@/lib/centriyon"
+import { clearPostLoginRedirect, consumePostLoginRedirect } from "@/lib/postLoginRedirect"
 
 interface AuthContextValue {
   user: User | null
@@ -64,8 +65,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem("refresh_token")
       const userData = await authApi.me()
       setUser(userData)
-      const dest = ROLE_ROUTES[userData.role] ?? "/login"
-      router.push(dest)
+      // A session that expired mid-work left the page behind — resume it.
+      // RouteGuard re-routes if the role can't actually see that page.
+      const back = consumePostLoginRedirect()
+      router.push(back ?? ROLE_ROUTES[userData.role] ?? "/login")
     },
     [router]
   )
@@ -78,6 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
+      // Signing out is deliberate — don't resume the last page on next login.
+      clearPostLoginRedirect()
       setUser(null)
       window.location.href = centriyonLoginUrl()
     }
