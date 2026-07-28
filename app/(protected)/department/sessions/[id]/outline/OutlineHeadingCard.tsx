@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react"
 import { usePatchOutlineTitles } from "@/hooks/useSessions"
-import { OutlineHeading, Question } from "@/types"
+import { OutlineHeading } from "@/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { Check, RotateCcw } from "lucide-react"
+import { Check } from "lucide-react"
 
 // Debounce for save-as-you-type. Renames persist ~0.6s after the last keystroke.
 const AUTOSAVE_MS = 600
@@ -13,37 +13,14 @@ const AUTOSAVE_MS = 600
 interface OutlineHeadingCardProps {
   sessionId: string
   heading: OutlineHeading
-  questions: Question[]
   isRtl: boolean
   /** When true, render plain text with no inputs/controls (draft is generated). */
   readOnly?: boolean
   /** Called when a PATCH returns 409 outline_locked so the page can lock the UI. */
   onLocked?: () => void
-}
-
-/** Muted "N answers" chip; hovering shows the mapped question texts (native title). */
-function AnswerCountChip({
-  questionIds,
-  questions,
-  isRtl,
-}: {
-  questionIds: string[]
-  questions: Question[]
-  isRtl: boolean
-}) {
-  const count = questionIds.length
-  const texts = questionIds
-    .map((qid) => questions.find((q) => q.question_id === qid)?.question)
-    .filter((t): t is string => !!t)
-  return (
-    <span
-      title={texts.length ? texts.join("\n") : undefined}
-      className="inline-flex shrink-0 cursor-default items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500"
-      dir={isRtl ? "rtl" : "ltr"}
-    >
-      {count} {count === 1 ? "answer" : "answers"}
-    </span>
-  )
+  /** Called after any title is successfully renamed, so the page knows the draft
+   *  is now out of date with the outline and should be rebuilt on Continue. */
+  onEdited?: () => void
 }
 
 /**
@@ -56,18 +33,18 @@ function OutlineTitleInput({
   sessionId,
   id,
   title,
-  aiTitle,
   isRtl,
   variant,
   onLocked,
+  onEdited,
 }: {
   sessionId: string
   id: string
   title: string
-  aiTitle: string
   isRtl: boolean
   variant: "heading" | "subheading"
   onLocked?: () => void
+  onEdited?: () => void
 }) {
   // Local-only editing state. The parent remounts this input (via `key`) when
   // the server title changes on regenerate, so there is no prop→state sync to do
@@ -101,6 +78,7 @@ function OutlineTitleInput({
       await patch.mutateAsync({ sessionId, payload: { titles: [{ id, title: trimmed }] } })
       setSaved(trimmed)
       savedValRef.current = trimmed
+      onEdited?.() // draft is now stale relative to the outline
       setShowTick(true)
       if (tickTimer.current) clearTimeout(tickTimer.current)
       tickTimer.current = setTimeout(() => setShowTick(false), 1500)
@@ -144,16 +122,8 @@ function OutlineTitleInput({
     persist(trimmed)
   }
 
-  const resetToAi = () => {
-    if (debounceTimer.current) clearTimeout(debounceTimer.current)
-    setValue(aiTitle)
-    if (aiTitle.trim() === savedValRef.current) return
-    persist(aiTitle.trim())
-  }
-
   const isHeading = variant === "heading"
   const overLimit = value.length > 100
-  const edited = saved !== aiTitle
 
   return (
     <div className="min-w-0 flex-1">
@@ -194,21 +164,11 @@ function OutlineTitleInput({
         />
         {/* Fixed-width status slot keeps every row's input edge aligned */}
         <div className="flex w-6 shrink-0 items-center justify-center">
-          {showTick ? (
+          {showTick && (
             <span title="Saved" className="text-emerald-500">
               <Check className="h-4 w-4" />
             </span>
-          ) : edited ? (
-            <button
-              type="button"
-              title="Reset to the AI-suggested title"
-              onMouseDown={(e) => e.preventDefault()} // don't blur/commit the field first
-              onClick={resetToAi}
-              className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
+          )}
         </div>
       </div>
       {overLimit && (
@@ -254,12 +214,14 @@ function ReadOnlyTitle({
 export function OutlineHeadingCard({
   sessionId,
   heading,
-  questions,
   isRtl,
   readOnly = false,
   onLocked,
+  onEdited,
 }: OutlineHeadingCardProps) {
-  const subheadings = [...heading.subheadings].sort((a, b) => a.order - b.order)
+  // `?? []` because the outline blob is unvalidated LLM output — a heading with
+  // no subheadings may simply omit the key rather than send an empty array.
+  const subheadings = [...(heading.subheadings ?? [])].sort((a, b) => a.order - b.order)
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
@@ -275,10 +237,10 @@ export function OutlineHeadingCard({
             sessionId={sessionId}
             id={heading.id}
             title={heading.title}
-            aiTitle={heading.ai_title}
             isRtl={isRtl}
             variant="heading"
             onLocked={onLocked}
+            onEdited={onEdited}
           />
         )}
       </div>
@@ -301,16 +263,12 @@ export function OutlineHeadingCard({
                   sessionId={sessionId}
                   id={sub.id}
                   title={sub.title}
-                  aiTitle={sub.ai_title}
                   isRtl={isRtl}
                   variant="subheading"
                   onLocked={onLocked}
+                  onEdited={onEdited}
                 />
               )}
-              {/* Fixed chip column so every "N answers" pill lines up */}
-              <div className="flex w-[92px] shrink-0 justify-end">
-                <AnswerCountChip questionIds={sub.question_ids} questions={questions} isRtl={isRtl} />
-              </div>
             </div>
           ))}
         </div>

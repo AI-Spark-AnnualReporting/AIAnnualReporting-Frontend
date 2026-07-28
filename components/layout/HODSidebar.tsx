@@ -5,11 +5,12 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { useHODSessions } from "@/hooks/useHod"
 import { getInitials, cn } from "@/lib/utils"
-import { LayoutGrid, ClipboardCheck, LogOut } from "lucide-react"
+import { LayoutGrid, ClipboardCheck, Megaphone, LogOut } from "lucide-react"
 
 const NAV = [
   { href: "/hod", label: "Dashboard", icon: LayoutGrid, exact: true },
   { href: "/hod/reviews", label: "Review Answers", icon: ClipboardCheck, badge: "reviews" as const },
+  { href: "/hod/communication", label: "Communication Hub", icon: Megaphone },
 ]
 
 export function HODSidebar() {

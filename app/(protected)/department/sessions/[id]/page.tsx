@@ -7,6 +7,7 @@ import {
   languageMismatchWarning,
   isLanguageAcceptable,
 } from "@/lib/lang"
+import { canEditSession, isSessionSubmitted } from "@/lib/session"
 import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
 import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
@@ -51,6 +52,7 @@ const isNotFoundAnswer = (text: string | undefined) =>
 // Centriyon status pill — coloured dot + label, keyed by session status.
 const SESSION_PILL: Record<string, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
+  hod_curation:{ label: "With HOD",      dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
   submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
@@ -168,21 +170,25 @@ export default function SessionWorkspacePage({
   const maxNA = Math.floor(questions.length / 2)
   const naLimitReached = naQuestions.size >= maxNA
   // Draft generation needs at least one REAL answer (N/A answers don't count) —
-  // one is enough to unlock the button.
+  // one is enough to unlock the button. Read from local state, so the CTA
+  // responds to typing before a save lands.
   const realAnsweredCount = questions.filter(
     (q) => answers[q.question_id]?.trim() && !isNAAnswer(answers[q.question_id])
   ).length
   const meetsAnswerMinimum = realAnsweredCount >= 1
+  // Same question, asked of the SERVER. The nav gate uses this rather than
+  // `meetsAnswerMinimum` because local `answers` starts empty and is filled by an
+  // effect, so a server-derived check avoids a frame of wrongly-disabled nav.
+  // It also matches what the outline page itself will find when it loads.
+  const hasServerAnswers = (session?.answers ?? []).some(
+    (a) => a.answer?.trim() && !isNAAnswer(a.answer)
+  )
   const isLastQuestion = questions.length > 0 && currentIndex === questions.length - 1
-  const isSubmitted = session?.status === "submitted" || session?.status === "approved"
+  const isSubmitted = isSessionSubmitted(session?.status)
   const isReopened = session?.status === "reopened"
   const isApproved = session?.status === "approved"
   // Editing/AI/upload allowed in active, revision, or not-yet-started states.
-  // (not_started is included because the backend flips status on first save.)
-  const canEdit =
-    session?.status === "in_progress" ||
-    session?.status === "reopened" ||
-    session?.status === "not_started"
+  const canEdit = canEditSession(session?.status)
 
   // Pre-fill saved answers, and mirror any already-saved N/A answers into local state.
   // The "not found" extraction marker is treated as no answer — it's surfaced in the
@@ -631,27 +637,23 @@ export default function SessionWorkspacePage({
             <LayoutGrid className="mr-2 h-4 w-4" /> Overview
           </Button>
 
-          {session.ai_generated_draft ? (
-            <Link href={`/department/sessions/${id}/draft`}>
-              <Button variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
-                <FileText className="mr-2 h-4 w-4" /> Draft Content
-              </Button>
-            </Link>
-          ) : (
-            <Button
-              className="h-9 shrink-0 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-              onClick={handleContinueToOutline}
-              disabled={!canEdit || !meetsAnswerMinimum}
-              title={
-                !meetsAnswerMinimum
-                  ? "Answer at least one question before building the outline"
-                  : undefined
-              }
-            >
-              <ListTree className="mr-2 h-4 w-4" />
-              Continue
-            </Button>
-          )}
+          {/* One forward action for the whole flow: Continue → the headings step,
+              which then continues to the draft. Gated on having a real answer to
+              build from, not on canEdit — a submitted user may still walk through
+              and view what they sent. */}
+          <Button
+            className="h-9 shrink-0 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={handleContinueToOutline}
+            disabled={!hasServerAnswers}
+            title={
+              !hasServerAnswers
+                ? "Answer at least one question before building the outline"
+                : undefined
+            }
+          >
+            <ListTree className="mr-2 h-4 w-4" />
+            Continue
+          </Button>
         </div>
       </div>
 
@@ -1015,7 +1017,14 @@ export default function SessionWorkspacePage({
                     <Button
                       className="shrink-0 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
                       onClick={handleProceedToSubmit}
-                      disabled={!canEdit || generateDraft.isPending}
+                      // Local (not server) answer state here, so the button
+                      // tracks typing without waiting for a save to land.
+                      disabled={!canEdit || !meetsAnswerMinimum || generateDraft.isPending}
+                      title={
+                        !meetsAnswerMinimum
+                          ? "At least one question needs a real answer — N/A alone isn't enough"
+                          : undefined
+                      }
                     >
                       {generateDraft.isPending
                         ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
