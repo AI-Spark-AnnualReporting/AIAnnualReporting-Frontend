@@ -38,7 +38,7 @@ export function HODSidebar() {
         </div>
         <div className="leading-tight">
           <p className="text-[13px] font-extrabold tracking-[-0.2px] text-white">Centriyon</p>
-          <p className="text-[9px] text-white/30">HOD Workspace</p>
+          <p className="text-[9px] text-white/30">HR Lead Workspace</p>
         </div>
       </div>
 
@@ -86,7 +86,7 @@ export function HODSidebar() {
           </div>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-[11px] font-bold text-white/80">{user.full_name}</p>
-            <p className="truncate text-[9px] text-white/30">Head of Department</p>
+            <p className="truncate text-[9px] text-white/30">HR Lead</p>
           </div>
           <button
             onClick={logout}
