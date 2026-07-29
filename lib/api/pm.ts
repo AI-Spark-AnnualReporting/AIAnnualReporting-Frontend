@@ -111,9 +111,18 @@ export interface GenerateBriefPayload {
 // description. The report-level `keywords` (below) is a separate, overall set.
 // `selected` (default true when missing) controls whether the theme is injected
 // into the section-writing prompt.
+//
+// `summary` is one AI-written sentence describing what the keywords reflect
+// ("" when never generated). It is WRITE-SENSITIVE: save-brief-and-themes and
+// themes/refine overwrite the stored list wholesale and default summary to ""
+// server-side, so a theme sent without it loses its summary. Always spread the
+// existing object (`{ ...theme, title }`) instead of rebuilding it field by
+// field. A manual title/keyword edit keeps the old summary — no AI runs on a
+// plain save; refine regenerates it.
 export interface BriefTheme {
   title: string
   keywords: string[]
+  summary?: string
   selected?: boolean
 }
 

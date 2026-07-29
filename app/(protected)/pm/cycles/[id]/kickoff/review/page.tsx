@@ -8,7 +8,6 @@ import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, BriefTheme, CycleBriefFields, GenerateBriefAnswer } from "@/lib/api/pm"
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
-import { IntelligenceLoader } from "@/components/pm/intelligence-loader"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -28,7 +27,6 @@ import {
 
 // Quick-instruction chips — identical to typing the same text into the box.
 const BRIEF_CHIPS = ["Make it more concise", "Strengthen ESG focus", "More formal tone", "Add a growth angle"]
-const THEME_CHIPS = ["Add a sustainability theme", "Add a digital theme", "Use fewer themes", "Refine the lead theme"]
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 2: Review brief
@@ -159,7 +157,6 @@ export default function ReviewBriefPage({
   // styled), or a raw textarea for editing. The stored value stays plain text.
   const [briefEditing, setBriefEditing] = useState(false)
   const [briefRefineOpen, setBriefRefineOpen] = useState(false)
-  const [themesRefineOpen, setThemesRefineOpen] = useState(false)
   const [briefRefining, setBriefRefining] = useState(false)
   const [themesRefining, setThemesRefining] = useState(false)
 
@@ -194,12 +191,24 @@ export default function ReviewBriefPage({
     }
   }
 
-  const refineThemesWith = async (instruction: string): Promise<boolean> => {
+  // `themeIndex` scopes the instruction to a single theme (the per-card "Refine
+  // with AI"). The endpoint only accepts the WHOLE list — sending just one theme
+  // would persist it as the entire set — so the scoping is done in the prompt.
+  const refineThemesWith = async (
+    instruction: string,
+    themeIndex?: number,
+  ): Promise<boolean> => {
     if (!result || themesRefining) return false
     cancelPendingSave()
     setThemesRefining(true)
     try {
-      const data = await pmApi.refineThemes(id, { themes: result.themes, instruction })
+      const scoped =
+        themeIndex === undefined
+          ? instruction
+          : `Only modify theme ${themeIndex + 1}` +
+            (result.themes[themeIndex]?.title ? ` ("${result.themes[themeIndex].title}")` : "") +
+            `: ${instruction}. Leave every other theme exactly as it is, in the same order.`
+      const data = await pmApi.refineThemes(id, { themes: result.themes, instruction: scoped })
       setResult((prev) => (prev ? { ...prev, themes: data.themes ?? [] } : prev))
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] }) // already saved
       return true
@@ -321,9 +330,6 @@ export default function ReviewBriefPage({
   // How many questions to generate per department (5-20, backend default 12).
   const [numQuestions, setNumQuestions] = useState(12)
   const [approving, setApproving] = useState(false)
-  // After the deadline is saved, we generate questions (POST /pm/kickoff) behind
-  // a full-screen loader, then land on /pm.
-  const [generating, setGenerating] = useState(false)
 
   const openApprove = () => {
     // Pre-fill with an already-saved deadline if the cycle has one.
@@ -378,25 +384,6 @@ export default function ReviewBriefPage({
       }
       toast.error(msg || "Couldn't kick off the cycle.")
       setApproving(false)
-      return
-    }
-
-    // Deadline saved — now kick off AI question generation (POST /pm/kickoff)
-    // behind the "Building your intelligence dashboard" loader. num_questions is
-    // sent here, not on the deadline endpoint. On success, land on /pm.
-    setGenerating(true)
-    try {
-      await pmApi.submitKickoff({
-        cycle_id: id,
-        strategic_brief: result?.brief ?? "",
-        num_questions: numQuestions,
-      })
-      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
-      router.push("/pm")
-    } catch (err) {
-      toast.error((err as { message?: string })?.message || "Couldn't generate questions.")
-      setGenerating(false)
-      setApproving(false)
     }
   }
 
@@ -411,7 +398,6 @@ export default function ReviewBriefPage({
   const hardError = errorStatus
 
   if (phase === "idle") return <PageLoader />
-  if (generating) return <IntelligenceLoader />
 
   return (
     <div>
@@ -627,16 +613,6 @@ export default function ReviewBriefPage({
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => setThemesRefineOpen((o) => !o)}
-                    className={cn(
-                      "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
-                      themesRefineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
-                    )}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" /> Refine with AI
-                  </Button>
                   <Button size="sm" variant="outline" onClick={addTheme}>
                     <Plus className="h-3.5 w-3.5" /> Add theme
                   </Button>
@@ -656,18 +632,11 @@ export default function ReviewBriefPage({
                     onAddKeyword={(kw) => addThemeKeyword(i, kw)}
                     onRemoveKeyword={(kwIdx) => removeThemeKeyword(i, kwIdx)}
                     onRemove={() => deleteTheme(i)}
+                    onRefine={(ins) => refineThemesWith(ins, i)}
                   />
                 ))}
               </div>
 
-              {themesRefineOpen && (
-                <RefinePanel
-                  chips={THEME_CHIPS}
-                  loading={themesRefining}
-                  onSubmit={refineThemesWith}
-                  placeholder="e.g. add a digital theme, use fewer themes, refine the lead…"
-                />
-              )}
             </div>
           </div>
         )}
