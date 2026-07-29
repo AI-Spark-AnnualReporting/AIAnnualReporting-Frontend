@@ -95,7 +95,7 @@ export default function ActivateCyclePage({
             <li>AI generates tailored questions for each department session</li>
             <li>PM submits the kickoff brief to refine AI questions</li>
             <li>Department users answer questions in their workspace</li>
-            <li>PM reviews and approves submissions</li>
+            <li>Each department&apos;s Head of Department reviews and approves submissions</li>
             <li>Final report is generated at cycle close</li>
           </ul>
         </div>

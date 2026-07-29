@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useHODSession, useReviewAnswers } from "@/hooks/useHod"
+import { draftContent } from "@/lib/session"
 import { PageLoader } from "@/components/ui/spinner"
-import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash } from "lucide-react"
+import { ProsePreview } from "@/components/ui/prose-preview"
+import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const isNA = (a: string) => a.trim().toUpperCase().startsWith("N/A")
@@ -36,6 +38,7 @@ export default function HODReviewPage() {
 
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [notes, setNotes] = useState("")
+  const [activeTab, setActiveTab] = useState<"answers" | "draft">("answers")
 
   const questions = useMemo(
     () => [...(session?.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0)),
@@ -58,6 +61,10 @@ export default function HODReviewPage() {
   const dept = session.departments?.department_name || "Department"
   const cycle = session.reporting_cycles?.cycle_name || "Reporting cycle"
   const assignee = session.users?.full_name
+  // final_submission ?? draft_content ?? ai_generated_draft — the finalized
+  // report the department submitted (empty until the backend returns it / the
+  // draft exists, which the Draft tab handles with its own empty state).
+  const draft = draftContent(session)
 
   const approve = () =>
     review.mutate({ action: "approved" }, { onSuccess: () => router.push("/hod/reviews") })
@@ -95,7 +102,31 @@ export default function HODReviewPage() {
         </div>
       )}
 
+      {/* Answers | Draft toggle — the HOD reviews the finalized report, not just
+          the underlying Q&A. */}
+      <div className="mb-4 inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
+        <button
+          onClick={() => setActiveTab("answers")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors",
+            activeTab === "answers" ? "bg-[#4040c8] text-white" : "text-slate-500 hover:bg-slate-50",
+          )}
+        >
+          <ListChecks className="h-3.5 w-3.5" /> Answers
+        </button>
+        <button
+          onClick={() => setActiveTab("draft")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors",
+            activeTab === "draft" ? "bg-[#4040c8] text-white" : "text-slate-500 hover:bg-slate-50",
+          )}
+        >
+          <FileText className="h-3.5 w-3.5" /> Draft report
+        </button>
+      </div>
+
       {/* Read-only Q&A */}
+      {activeTab === "answers" && (
       <div className="space-y-3">
         {questions.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -134,6 +165,28 @@ export default function HODReviewPage() {
           })
         )}
       </div>
+      )}
+
+      {/* Draft report — the finalized submission, via the shared ProsePreview
+          (HTML sanitized, markdown tables normalized, RTL for Arabic). */}
+      {activeTab === "draft" && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          {draft.trim() ? (
+            <ProsePreview
+              content={draft}
+              dir={session.reporting_cycles?.content_language === "arabic" ? "rtl" : "ltr"}
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-12 text-center">
+              <FileText className="h-6 w-6 text-slate-300" />
+              <p className="text-sm font-semibold text-slate-500">No draft to show yet</p>
+              <p className="max-w-xs text-xs text-slate-400">
+                The department&apos;s finalized report will appear here once it&apos;s submitted.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Action bar */}
       {isSubmitted ? (

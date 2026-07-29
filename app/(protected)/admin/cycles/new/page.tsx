@@ -115,7 +115,8 @@ export default function NewCyclePage() {
           <li><strong>Admin creates the cycle</strong> — sets the name, fiscal year, dates, and assigns a Project Manager</li>
           <li><strong>PM configures the cycle</strong> — writes the kickoff brief, adds department timelines, activates it</li>
           <li><strong>Departments answer AI-generated questions</strong> — each department submits their narrative</li>
-          <li><strong>PM reviews & generates the final report</strong></li>
+          <li><strong>HOD reviews each department&apos;s submission</strong> — the Head of Department approves or sends it back</li>
+          <li><strong>PM generates the final report</strong> — from the approved submissions</li>
         </ol>
       </div>
 
