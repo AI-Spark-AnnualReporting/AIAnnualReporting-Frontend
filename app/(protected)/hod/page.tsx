@@ -54,7 +54,7 @@ export default function HODDashboardPage() {
     <div className="mx-auto max-w-6xl space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">HOD Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">HR Lead Dashboard</h1>
         <p className="mt-1.5 text-base text-slate-500">
           Review your department’s questions, then assign a team member to answer them.
         </p>
