@@ -150,7 +150,13 @@ export function useAssignSession(sessionId: string) {
     onSuccess: (session) => {
       qc.setQueryData(QUERY_KEYS.HOD_SESSION(sessionId), session)
       qc.invalidateQueries({ queryKey: ["hod", "sessions"] })
-      toast.success("Questions sent to the team member")
+      // The assignee may be the HOD themselves, who is sent straight to the
+      // department dashboard — without this it can still be inside the 60s
+      // staleTime and render without the session just assigned.
+      qc.invalidateQueries({ queryKey: ["dept", "dashboard"] })
+      // Deliberately neutral: the HOD may have assigned the questions to
+      // themselves rather than to a team member.
+      toast.success("Questions assigned")
     },
     onError: (err: { message?: string }) => toast.error(err?.message || "Failed to assign questions"),
   })

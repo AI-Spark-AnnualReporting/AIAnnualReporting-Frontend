@@ -13,8 +13,9 @@ import {
   useAssignSession,
   HOD_WRITE_KEY,
 } from "@/hooks/useHod"
+import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
-import type { HODQuestion } from "@/lib/api/hod"
+import type { AssignableUser, HODQuestion } from "@/lib/api/hod"
 import {
   ArrowLeft, Check, X, Pencil, Trash2, Plus, RotateCcw, Undo2,
   Loader2, Send, Clock, CheckCircle2,
@@ -260,7 +261,7 @@ export default function HODCuratePage() {
             disabled={!canAssign}
             className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
           >
-            <Send className="h-3.5 w-3.5" /> Assign &amp; send to team member
+            <Send className="h-3.5 w-3.5" /> Assign &amp; send questions
           </button>
         </div>
       </div>
@@ -270,7 +271,9 @@ export default function HODCuratePage() {
           sessionId={id}
           approvedCount={counts.approved}
           onClose={() => setAssignOpen(false)}
-          onAssigned={() => router.push("/hod")}
+          // Self-assigned: go to the department workspace — the same entry point
+          // a department user gets, Start Session dialog and all.
+          onAssigned={(self) => router.push(self ? "/department" : "/hod")}
         />
       )}
     </div>
@@ -306,16 +309,28 @@ function Action({ onClick, icon, label, disabled }: { onClick: () => void; icon:
 }
 
 function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
-  sessionId: string; approvedCount: number; onClose: () => void; onAssigned: () => void
+  sessionId: string; approvedCount: number; onClose: () => void; onAssigned: (self: boolean) => void
 }) {
   const { data: users, isLoading } = useHODAssignableUsers(sessionId)
+  const { user: me } = useAuth()
   const assign = useAssignSession(sessionId)
   const [userId, setUserId] = useState<string | null>(null)
   const [note, setNote] = useState("")
 
+  // The HOD can keep the questions and answer them personally — same flow as a
+  // department user. Listed first, and filtered out of the rest so it can't
+  // appear twice if the backend already returns the HOD as assignable.
+  const choices = useMemo<AssignableUser[]>(() => {
+    const others = (users || []).filter((u) => u.user_id !== me?.user_id)
+    if (!me) return others
+    return [{ user_id: me.user_id, full_name: me.full_name, title: "Answer these questions yourself" }, ...others]
+  }, [users, me])
+
+  const self = !!me && userId === me.user_id
+
   const send = () => {
     if (!userId) return
-    assign.mutate({ user_id: userId, note: note.trim() || undefined }, { onSuccess: onAssigned })
+    assign.mutate({ user_id: userId, note: note.trim() || undefined }, { onSuccess: () => onAssigned(self) })
   }
 
   return (
@@ -324,20 +339,21 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-lg font-extrabold text-[#1A1D2E]">Assign &amp; send questions</h2>
-            <p className="mt-1 text-xs text-slate-500">{approvedCount} approved question{approvedCount === 1 ? "" : "s"} will be sent to the team member you choose.</p>
+            <p className="mt-1 text-xs text-slate-500">{approvedCount} approved question{approvedCount === 1 ? "" : "s"} will go to whoever you choose — a team member, or yourself.</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </div>
 
-        <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Choose a department user</p>
+        <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Choose who answers</p>
         <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">
           {isLoading ? (
             <div className="flex justify-center py-6 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
-          ) : !users?.length ? (
+          ) : !choices.length ? (
             <p className="rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-700">No department users in your department yet. Ask an admin to add one.</p>
           ) : (
-            users.map((u) => {
+            choices.map((u) => {
               const selected = userId === u.user_id
+              const isMe = u.user_id === me?.user_id
               return (
                 <button
                   key={u.user_id}
@@ -348,7 +364,10 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
                     {(u.full_name || "?").split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("")}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-[#1A1D2E]">{u.full_name}</span>
+                    <span className="block truncate text-sm font-bold text-[#1A1D2E]">
+                      {u.full_name}
+                      {isMe && <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">YOU</span>}
+                    </span>
                     {u.title && <span className="block truncate text-xs text-slate-400">{u.title}</span>}
                   </span>
                   <span className={`h-4 w-4 shrink-0 rounded-full border-2 ${selected ? "border-[#4040c8] bg-[#4040c8]" : "border-slate-300"}`} />
@@ -358,7 +377,9 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
           )}
         </div>
 
-        <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-slate-400">Note to the team member <span className="font-medium normal-case text-slate-300">optional</span></p>
+        <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+          {self ? "Note to yourself" : "Note to the team member"} <span className="font-medium normal-case text-slate-300">optional</span>
+        </p>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -375,7 +396,7 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
             className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
           >
             {assign.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-            Send questions
+            {self ? "Start answering" : "Send questions"}
           </button>
         </div>
       </div>

@@ -5,19 +5,29 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { useHODSessions } from "@/hooks/useHod"
 import { getInitials, cn } from "@/lib/utils"
-import { LayoutGrid, ClipboardCheck, Megaphone, LogOut } from "lucide-react"
+import { LayoutGrid, ClipboardCheck, Megaphone, FileText, LogOut, type LucideIcon } from "lucide-react"
 
-const NAV = [
+type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; badge?: "reviews" }
+
+const NAV: NavItem[] = [
   { href: "/hod", label: "Dashboard", icon: LayoutGrid, exact: true },
-  { href: "/hod/reviews", label: "Review Answers", icon: ClipboardCheck, badge: "reviews" as const },
+  { href: "/hod/reviews", label: "Review Answers", icon: ClipboardCheck, badge: "reviews" },
   { href: "/hod/communication", label: "Communication Hub", icon: Megaphone },
 ]
+
+// Shown only once the HOD has kept a session to answer personally — otherwise
+// /department is an empty page and the entry is just noise.
+const MY_SESSIONS: NavItem = { href: "/department", label: "My Sessions", icon: FileText }
 
 export function HODSidebar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
   const { data: submitted } = useHODSessions("submitted")
+  const { data: sessions } = useHODSessions()
   const pendingReviews = submitted?.length ?? 0
+  const hasOwnSessions = !!sessions?.some(
+    (s) => s.user_id === user?.user_id && s.status !== "hod_curation",
+  )
 
   if (!user) return null
 
@@ -48,7 +58,7 @@ export function HODSidebar() {
           Department
         </p>
         <div className="space-y-0.5">
-          {NAV.map((item) => {
+          {(hasOwnSessions ? [...NAV, MY_SESSIONS] : NAV).map((item) => {
             const Icon = item.icon
             const active = isActive(item.href, item.exact)
             return (
