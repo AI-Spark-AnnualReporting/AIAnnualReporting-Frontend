@@ -1,7 +1,10 @@
 "use client"
 
 import Link from "next/link"
+import { useAuth } from "@/contexts/AuthContext"
 import { useHODSessions } from "@/hooks/useHod"
+import { canEditSession } from "@/lib/session"
+import type { SessionStatus } from "@/types"
 import type { HODSession, HODQuestion } from "@/lib/api/hod"
 import { PMStatCard } from "@/components/pm/PMStatCard"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -93,10 +96,14 @@ export default function HODDashboardPage() {
 }
 
 function SessionCard({ s }: { s: HODSession }) {
+  const { user } = useAuth()
   const status = s.status
   const isCuration = status === "hod_curation"
   const t = tally(s)
   const assignee = s.users?.full_name || "a team member"
+  // The HOD kept these questions to answer personally — they get the department
+  // user's workspace, not the read-only review page.
+  const mine = !!user && s.user_id === user.user_id
   const meta = STATUS_META[status] || { label: status, badge: "bg-slate-100 text-slate-600", bar: "bg-slate-400" }
 
   // Progress + label adapt to the stage, but the card structure stays identical.
@@ -121,19 +128,38 @@ function SessionCard({ s }: { s: HODSession }) {
     }
   } else {
     pct = ["submitted", "approved"].includes(status) ? 100 : s.progress_percentage ?? 0
-    progressLabel =
-      status === "assigned" ? "Waiting for the Project Manager to start the cycle"
-      : status === "submitted" ? `Submitted by ${assignee} — awaiting review`
-      : status === "approved" ? `Approved · ${assignee}`
-      : status === "in_progress" ? `${assignee} is answering`
-      : status === "reopened" ? `Sent back to ${assignee}`
-      : `Assigned to ${assignee} · waiting to start`
+    progressLabel = mine
+      ? (
+        status === "assigned" ? "Waiting for the Project Manager to start the cycle"
+        : status === "submitted" ? "You submitted this — approve it or send it back"
+        : status === "approved" ? "Approved · you answered this"
+        : status === "in_progress" ? "You are answering these questions"
+        : status === "reopened" ? "Needs changes — edit and resubmit"
+        : "Assigned to you · waiting to start"
+      )
+      : (
+        status === "assigned" ? "Waiting for the Project Manager to start the cycle"
+        : status === "submitted" ? `Submitted by ${assignee} — awaiting review`
+        : status === "approved" ? `Approved · ${assignee}`
+        : status === "in_progress" ? `${assignee} is answering`
+        : status === "reopened" ? `Sent back to ${assignee}`
+        : `Assigned to ${assignee} · waiting to start`
+      )
     // Every cycle is openable: a submitted session is yours to review; every other
     // stage opens the same page read-only so an HOD can always look, never edit.
-    action = {
-      href: `/hod/sessions/${s.session_id}/review`,
-      label: status === "submitted" ? "Review" : "View",
-    }
+    // The exception is a session the HOD assigned to themselves and can still
+    // edit — that opens the department workspace so they answer it like any
+    // department user. Once submitted it falls back to the review page, which is
+    // how they approve their own work.
+    action = mine && canEditSession(status as SessionStatus)
+      ? {
+          href: `/department/sessions/${s.session_id}`,
+          label: status === "in_progress" ? "Continue" : "Answer",
+        }
+      : {
+          href: `/hod/sessions/${s.session_id}/review`,
+          label: status === "submitted" ? "Review" : "View",
+        }
   }
 
   return (
