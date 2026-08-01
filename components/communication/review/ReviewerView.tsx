@@ -491,6 +491,11 @@ export function ReviewerView({
   const canAct = data?.can_act ?? false
   const canApprove = data?.can_approve ?? false
   const sections = data?.sections ?? []
+  // Once the report is approved (or otherwise finished) the review is over —
+  // reassign / request-changes no longer make sense even though the backend
+  // still reports can_act. Gate the reviewer actions on the review being open.
+  const FINISHED_STATUSES = ["approved", "locked", "published", "complete", "completed"]
+  const reviewClosed = !!report && FINISHED_STATUSES.includes(report.status)
 
   return (
     <div style={{ ...OVERLAY, alignItems: "stretch", justifyContent: "stretch", padding: 10 }} onClick={onClose}>
@@ -548,12 +553,17 @@ export function ReviewerView({
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15.5, fontWeight: 800, color: "#1A1D2E", letterSpacing: "-.2px" }}>Review report</div>
             <div style={{ fontSize: 12, color: "#8890AE", marginTop: 1 }}>
-              {assignedName ? (
+              {!assignedName ? (
+                "Unassigned"
+              ) : assignment?.is_you ? (
                 <>
                   Reviewing as <span style={{ fontWeight: 800, color: "#5A6080" }}>{assignedName}</span>
                 </>
               ) : (
-                "Unassigned"
+                // You're not the assignee — don't imply you are. Name who is.
+                <>
+                  Viewing · assigned to <span style={{ fontWeight: 800, color: "#5A6080" }}>{assignedName}</span>
+                </>
               )}
             </div>
           </div>
@@ -830,12 +840,13 @@ export function ReviewerView({
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "#1A1D2E" }}>
                       {assignedName ?? "Unassigned"}
+                      {assignment?.is_you && " (you)"}
                     </span>
                     <span style={{ display: "block", fontSize: 11.5, color: "#8890AE" }}>Current reviewer</span>
                   </span>
                 </div>
 
-                {canAct && (
+                {canAct && !reviewClosed && (
                   <>
                     <div style={{ ...RAIL_LABEL, marginTop: 16 }}>Reassign to</div>
                     <select
@@ -903,12 +914,51 @@ export function ReviewerView({
                 )}
               </div>
 
-              {/* Actions */}
-              {!canAct ? (
-                <div style={{ fontSize: 12, color: "#8890AE", lineHeight: 1.5, marginTop: "auto" }}>
-                  You&apos;re viewing this review. Only the assigned reviewer can approve, reassign, or request
-                  changes.
+              {/* Actions. Order matters: a finished report is "review complete"
+                  for everyone (the backend also flips can_act to false), so check
+                  that before the not-the-reviewer messaging. */}
+              {reviewClosed ? (
+                <div
+                  style={{
+                    marginTop: "auto",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "13px 15px",
+                    borderRadius: 12,
+                    background: "#ECFDF3",
+                    border: "1px solid #C7EED8",
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+                    <circle cx="10" cy="10" r="8.4" fill="#16A34A" />
+                    <path d="M6.4 10.2l2.4 2.4 4.8-4.8" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 800, color: "#15803D" }}>
+                      Review complete
+                    </span>
+                    <span style={{ display: "block", fontSize: 12, color: "#3F9E66", marginTop: 2, lineHeight: 1.5 }}>
+                      This report has been {report?.status_label?.toLowerCase() ?? "approved"}. No further review
+                      actions are available.
+                    </span>
+                  </span>
                 </div>
+              ) : !canAct ? (
+                assignment?.is_you ? (
+                  // The payload says this assignment is yours, yet the server withheld the
+                  // action gate on an open review — surface that rather than the generic
+                  // read-only line.
+                  <div style={{ fontSize: 12, color: "#B45309", lineHeight: 1.5, marginTop: "auto" }}>
+                    You&apos;re the assigned reviewer, but the review actions aren&apos;t available for this
+                    report right now. Try reloading — if it persists, ask an admin to re-share it.
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#8890AE", lineHeight: 1.5, marginTop: "auto" }}>
+                    You&apos;re viewing this review. Only the assigned reviewer can approve, reassign, or request
+                    changes.
+                  </div>
+                )
               ) : (
                 <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
                   {panel && (
@@ -965,48 +1015,54 @@ export function ReviewerView({
                     <div style={{ fontSize: 11.5, fontWeight: 600, color: "#DC2626" }}>{actionError}</div>
                   )}
 
-                  <button
-                    type="button"
-                    style={{
-                      ...BTN_PRIMARY,
-                      width: "100%",
-                      gap: 8,
-                      padding: "12px 16px",
-                      opacity: canApprove ? 1 : 0.5,
-                      cursor: canApprove ? "pointer" : "not-allowed",
-                    }}
-                    disabled={!canApprove}
-                    onClick={() => {
-                      setPanel("approve")
-                      setNote("")
-                      setActionError(null)
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                      <path d="M3.5 8.4l3 3 6-6.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Approve report
-                  </button>
-                  {!canApprove && (
-                    <div style={{ fontSize: 11.5, color: "#8890AE", lineHeight: 1.45 }}>
-                      Available once the report is in review.
-                    </div>
-                  )}
+                  {/* The triggers hide while a panel is open — the open panel
+                      already carries its own Approve / Send back button. */}
+                  {!panel && (
+                    <>
+                      <button
+                        type="button"
+                        style={{
+                          ...BTN_PRIMARY,
+                          width: "100%",
+                          gap: 8,
+                          padding: "12px 16px",
+                          opacity: canApprove ? 1 : 0.5,
+                          cursor: canApprove ? "pointer" : "not-allowed",
+                        }}
+                        disabled={!canApprove}
+                        onClick={() => {
+                          setPanel("approve")
+                          setNote("")
+                          setActionError(null)
+                        }}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                          <path d="M3.5 8.4l3 3 6-6.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Approve report
+                      </button>
+                      {!canApprove && (
+                        <div style={{ fontSize: 11.5, color: "#8890AE", lineHeight: 1.45 }}>
+                          Available once the report is in review.
+                        </div>
+                      )}
 
-                  <button
-                    type="button"
-                    style={{ ...BTN_SECONDARY, width: "100%", gap: 8, padding: "12px 16px" }}
-                    onClick={() => {
-                      setPanel("send_back")
-                      setNote("")
-                      setActionError(null)
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M9.5 1.9l2.6 2.6-7 7-3.1.5.5-3.1 7-7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                    </svg>
-                    Request changes &amp; reassign
-                  </button>
+                      <button
+                        type="button"
+                        style={{ ...BTN_SECONDARY, width: "100%", gap: 8, padding: "12px 16px" }}
+                        onClick={() => {
+                          setPanel("send_back")
+                          setNote("")
+                          setActionError(null)
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M9.5 1.9l2.6 2.6-7 7-3.1.5.5-3.1 7-7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                        </svg>
+                        Request changes &amp; reassign
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
