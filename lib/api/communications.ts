@@ -524,6 +524,44 @@ export interface ReviewReportSectionsResponse {
   sections: ReviewReportSection[]
   cover_template_key: string | null
   locked: boolean
+  // Quarterly only — the cover page's real values and the report's brand
+  // accents, so the reviewer can render the same document the creator approved.
+  // Absent on the earnings path, which carries its cover inside a section.
+  header?: ReviewReportHeader | null
+  brand?: ReviewReportBrand | null
+}
+
+export interface ReviewReportHeader {
+  company_name?: string | null
+  title?: string | null
+  period_label?: string | null
+  prepared_on?: string | null
+}
+
+export interface ReviewReportBrand {
+  primary?: string | null
+  secondary?: string | null
+}
+
+// GET .../quarterly/{reportId}/assemble returns a leaner section than the
+// earnings one, and hands table content back either as a JSON string or as an
+// already-parsed object/array. Brand sits at the top level on some backends and
+// under `cover` on others — read both.
+interface AssembledSection {
+  section_code: string
+  title: string
+  display_order?: number
+  mode: string
+  content: unknown
+}
+interface AssembledReportResponse {
+  sections?: AssembledSection[]
+  header?: ReviewReportHeader | null
+  brand?: ReviewReportBrand | null
+  cover?: {
+    cover_template_key?: string | null
+    brand?: ReviewReportBrand | null
+  } | null
 }
 
 export const communicationsApi = {
@@ -707,6 +745,63 @@ export const communicationsApi = {
       `/earnings/reports/${encodeURIComponent(reportId)}/sections`,
     )
     return data
+  },
+
+  // An earnings report's cover/brand selection. Only the brand is used here —
+  // it drives the report-content accents, and it's the same source the earnings
+  // preview reads. Works on locked reports.
+  reviewEarningsCoverSelection: async (
+    reportId: string,
+  ): Promise<{ cover_template_key: string | null; brand: ReviewReportBrand | null }> => {
+    const { data } = await commClient.get(
+      `/earnings/reports/${encodeURIComponent(reportId)}/cover-template`,
+    )
+    return {
+      cover_template_key: data?.cover_template_key ?? null,
+      brand: data?.brand ?? null,
+    }
+  },
+
+  // Same thing for a quarterly report, whose body lives behind the quarterly
+  // assemble endpoint — the earnings path above 404s for it. Normalised to the
+  // same response shape so the reviewer screen doesn't care which it got.
+  // Table content may arrive already parsed; stringify it, or every renderer
+  // that calls .trim()/JSON.parse on the content breaks.
+  //
+  // The cover is dropped, matching how the quarterly report itself assembles:
+  // it renders the cover from the response header + template key, never from
+  // the section's content, so nothing reads that content and its shape is
+  // unknown. It carries no reviewable prose either — just company, period, and
+  // a template choice.
+  reviewQuarterlySections: async (
+    companyId: string,
+    reportId: string,
+  ): Promise<ReviewReportSectionsResponse> => {
+    const { data } = await commClient.get<AssembledReportResponse>(
+      `/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/assemble`,
+    )
+    return {
+      sections: (data.sections ?? [])
+        .filter((s) => !/cover/i.test(s.section_code))
+        .map((s) => ({
+          section_code: s.section_code,
+          title: s.title,
+          display_order: s.display_order ?? 0,
+          mode: s.mode,
+          status: "produced",
+          content:
+            s.content == null
+              ? null
+              : typeof s.content === "string"
+                ? s.content
+                : JSON.stringify(s.content),
+          included: true,
+        })),
+      cover_template_key: data.cover?.cover_template_key ?? null,
+      locked: false,
+      header: data.header ?? null,
+      brand: data.brand ?? data.cover?.brand ?? null,
+    }
   },
 
   // Start a thread on a report with a first message + optional mentions.

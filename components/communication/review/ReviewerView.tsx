@@ -1,12 +1,15 @@
 "use client"
 
-import { CSSProperties, useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import {
   communicationsApi,
   type CommunicationMember,
   type ReviewComment,
+  type ReviewReportBrand,
+  type ReviewReportHeader,
   type ReviewReportSection,
+  type ReviewSection,
   type ReviewViewResponse,
 } from "@/lib/api/communications"
 import {
@@ -24,6 +27,9 @@ import {
   relativeTime,
   statusOf,
 } from "./shared"
+import { CoverRenderer } from "./CoverRenderer"
+import { SectionContent } from "./SectionContent"
+import { EarningsSectionContent } from "./EarningsSectionContent"
 
 /**
  * Reviewer screen — the "Open as reviewer" destination.
@@ -44,6 +50,22 @@ import {
 // Report-level comments come back under the JSON key "null".
 const REPORT_LEVEL_KEY = "null"
 
+// Anchors for the in-document sections, so the comments rail can jump to one.
+const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`
+
+// Quarterly reports keep their body behind the quarterly assemble endpoint;
+// every other type reads through the earnings sections endpoint.
+const QUARTERLY = "quarterly"
+
+// Document presentation, matched to the quarterly assembled report so the
+// reviewer reads exactly what the creator approved — same page width,
+// numbering, and brand accents. BRAND resolves against --brand-primary, set on
+// the document wrapper from the report's own brand colours.
+const DOC_WIDTH = 820
+const MONO = "var(--font-dm-mono), 'DM Mono', 'Courier New', monospace"
+const BRAND = "var(--brand-primary, #4040C8)"
+const pad2 = (n: number) => String(n).padStart(2, "0")
+
 const ICON_SHARE = (
   <svg width="17" height="17" viewBox="0 0 18 18" fill="none">
     <circle cx="13.4" cy="4.2" r="2.1" stroke="currentColor" strokeWidth="1.5" />
@@ -58,235 +80,34 @@ const ICON_COMMENT = (
     <path d="M12 8.4a1.4 1.4 0 0 1-1.4 1.4H4.3L1.9 12V3.1a1.4 1.4 0 0 1 1.4-1.4h7.3A1.4 1.4 0 0 1 12 3.1v5.3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
   </svg>
 )
-
-// Split on blank lines into justified paragraphs.
-function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-  const blocks = paragraphs.length ? paragraphs : [text]
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{
-            margin: i === 0 ? 0 : "14px 0 0",
-            fontSize: 14,
-            lineHeight: 1.75,
-            color: "#2A2E47",
-            whiteSpace: "pre-wrap",
-            textAlign: "justify",
-          }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  )
-}
-
-// Structured section payloads arrive as a JSON string. Anything that doesn't
-// parse is prose.
-function tryParseJson(content: string): Record<string, unknown> | undefined {
-  const t = content.trim()
-  if (!t.startsWith("{") && !t.startsWith("[")) return undefined
-  try {
-    const parsed = JSON.parse(t)
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v : null
-}
-
-// Cover payload: { template_key, values: { company_name, title, period_label,
-// tone_label, aggregate_confidence } }
-function CoverBlock({ values }: { values: Record<string, unknown> }) {
-  const company = str(values.company_name)
-  const title = str(values.title)
-  const period = str(values.period_label)
-  const tone = str(values.tone_label)
-  const confidence =
-    typeof values.aggregate_confidence === "number" ? values.aggregate_confidence : null
-
+// `onJump` makes the whole row a target that scrolls the document to the
+// section this comment is on. Omitted for report-level comments (no section to
+// scroll to) and for the rows already rendered inside their own section.
+function CommentRow({
+  comment,
+  showSection,
+  onJump,
+}: {
+  comment: ReviewComment
+  showSection?: boolean
+  onJump?: () => void
+}) {
   return (
     <div
-      style={{
-        borderRadius: 14,
-        padding: "38px 34px",
-        background: "linear-gradient(150deg,#2C2C7A,#4040C8)",
-        color: "#fff",
-      }}
+      style={{ display: "flex", gap: 9, padding: "9px 0", borderTop: "1px solid #F4F5FB", cursor: onJump ? "pointer" : undefined }}
+      {...(onJump && {
+        role: "button",
+        tabIndex: 0,
+        title: `Go to ${comment.section_title ?? "this section"}`,
+        onClick: onJump,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onJump()
+          }
+        },
+      })}
     >
-      {company && (
-        <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".9px", textTransform: "uppercase", opacity: 0.75 }}>
-          {company}
-        </div>
-      )}
-      {title && (
-        <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.15, marginTop: 14, letterSpacing: "-.5px" }}>
-          {title}
-        </div>
-      )}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 18,
-          marginTop: 26,
-          paddingTop: 16,
-          borderTop: "1px solid rgba(255,255,255,.25)",
-          fontSize: 12,
-          opacity: 0.9,
-        }}
-      >
-        {period && <span>Period · {period}</span>}
-        {tone && <span>Tone · {tone.replace(/_/g, " ")}</span>}
-        {confidence != null && <span>Confidence · {confidence}%</span>}
-      </div>
-    </div>
-  )
-}
-
-type MetricRow = {
-  label?: unknown
-  code?: unknown
-  current_display?: unknown
-  prior_display?: unknown
-  change_pct?: unknown
-  confidence?: unknown
-  flag?: unknown
-}
-
-// Table/KPI payload: { title, rows: [{ label, current_display, prior_display,
-// change_pct, confidence, flag }] }
-function MetricTable({ rows }: { rows: MetricRow[] }) {
-  const cell: CSSProperties = {
-    padding: "9px 10px",
-    fontSize: 12.5,
-    color: "#2A2E47",
-    borderBottom: "1px solid #F0F1F8",
-    textAlign: "left",
-  }
-  const head: CSSProperties = {
-    ...cell,
-    fontSize: 10.5,
-    fontWeight: 800,
-    letterSpacing: ".5px",
-    textTransform: "uppercase",
-    color: "#8890AE",
-    borderBottom: "1px solid #E2E4F0",
-  }
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={head}>Metric</th>
-            <th style={{ ...head, textAlign: "right" }}>Current</th>
-            <th style={{ ...head, textAlign: "right" }}>Prior</th>
-            <th style={{ ...head, textAlign: "right" }}>Change</th>
-            <th style={{ ...head, textAlign: "right" }}>Confidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => {
-            const label = str(r.label) ?? str(r.code) ?? "—"
-            const flag = str(r.flag)
-            const confidence = typeof r.confidence === "number" ? `${r.confidence}%` : "—"
-            const change =
-              typeof r.change_pct === "number" ? `${r.change_pct > 0 ? "+" : ""}${r.change_pct}%` : "—"
-            return (
-              <tr key={i}>
-                <td style={{ ...cell, fontWeight: 700 }}>
-                  {label}
-                  {flag && flag !== "ok" && (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        padding: "2px 7px",
-                        borderRadius: 20,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        background: flag === "needs_input" ? "#FEF3C7" : "#FEE2E2",
-                        color: flag === "needs_input" ? "#B45309" : "#B91C1C",
-                      }}
-                    >
-                      {flag.replace(/_/g, " ")}
-                    </span>
-                  )}
-                </td>
-                <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                  {str(r.current_display) ?? "—"}
-                </td>
-                <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#8890AE" }}>
-                  {str(r.prior_display) ?? "—"}
-                </td>
-                <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{change}</td>
-                <td style={{ ...cell, textAlign: "right", color: "#8890AE" }}>{confidence}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function SectionBody({ section }: { section: ReviewReportSection }) {
-  const content = section.content
-  if (!content || !content.trim()) {
-    return (
-      <div style={{ fontSize: 12.5, color: "#9BA3C4", fontStyle: "italic" }}>
-        This section hasn&apos;t been generated yet.
-      </div>
-    )
-  }
-
-  const parsed = tryParseJson(content)
-
-  // Cover — by mode or by section_code, matching how the report itself decides.
-  if (parsed && (section.mode === "cover" || /cover/i.test(section.section_code))) {
-    const values = parsed.values
-    if (values && typeof values === "object") {
-      return <CoverBlock values={values as Record<string, unknown>} />
-    }
-  }
-
-  // Metric tables (table / kpi / trend), detected by payload shape so a mode
-  // we haven't seen still renders rather than dumping JSON.
-  if (parsed && Array.isArray(parsed.rows)) {
-    return <MetricTable rows={parsed.rows as MetricRow[]} />
-  }
-
-  // Parsed to JSON but no renderer matched — show it readably rather than as
-  // one unwrapped line.
-  if (parsed) {
-    return (
-      <pre
-        style={{
-          margin: 0,
-          fontSize: 11.5,
-          lineHeight: 1.6,
-          color: "#4A5170",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        }}
-      >
-        {JSON.stringify(parsed, null, 2)}
-      </pre>
-    )
-  }
-
-  return <Prose text={content} />
-}
-
-function CommentRow({ comment, showSection }: { comment: ReviewComment; showSection?: boolean }) {
-  return (
-    <div style={{ display: "flex", gap: 9, padding: "9px 0", borderTop: "1px solid #F4F5FB" }}>
       <span
         style={{
           width: 26,
@@ -354,6 +175,11 @@ export function ReviewerView({
 
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, ReviewReportSection>>({})
+  // Quarterly only — cover values, chosen cover template, and brand accents for
+  // the document page.
+  const [header, setHeader] = useState<ReviewReportHeader | null>(null)
+  const [brand, setBrand] = useState<ReviewReportBrand | null>(null)
+  const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null)
 
   const [panel, setPanel] = useState<"approve" | "send_back" | null>(null)
   const [note, setNote] = useState("")
@@ -386,25 +212,75 @@ export function ReviewerView({
       .catch(() => {})
   }, [])
 
-  // Pull the report body once we know the report id. Company-scoped on the
-  // backend, so a non-owner reviewer can read it.
-  const reportId = data?.report?.id
+  // The quarterly body endpoint is company-scoped in its path. Resolve the id
+  // from the Centrion JWT rather than the local user, whose company_id is only
+  // populated for PMs/admins — a HOD reviewer would otherwise have none.
+  // The name comes back on the same call and is the cover's fallback company —
+  // /assemble routinely omits `header` entirely.
+  const [centrionCompanyId, setCentrionCompanyId] = useState<string | null>(null)
+  const [centrionCompanyName, setCentrionCompanyName] = useState<string | null>(null)
   useEffect(() => {
-    if (!reportId) return
-    let cancelled = false
     communicationsApi
-      .reviewReportSections(reportId)
+      .getMyCompany()
+      .then((c) => {
+        setCentrionCompanyId(c.id)
+        setCentrionCompanyName(c.name ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Pull the report body once we know the report id and type. Both endpoints
+  // are company-scoped on the backend, so a non-owner reviewer can read them.
+  const reportId = data?.report?.id
+  const reportType = data?.report?.report_type
+  useEffect(() => {
+    if (!reportId || !reportType) return
+    // Wait for the company id rather than firing the earnings path at a
+    // quarterly report, which 404s.
+    if (reportType === QUARTERLY && !centrionCompanyId) return
+    let cancelled = false
+    const load =
+      reportType === QUARTERLY && centrionCompanyId
+        ? communicationsApi.reviewQuarterlySections(centrionCompanyId, reportId)
+        : communicationsApi.reviewReportSections(reportId)
+    load
       .then((res) => {
         if (cancelled) return
         const byCode: Record<string, ReviewReportSection> = {}
         for (const s of res.sections) byCode[s.section_code] = s
         setBodies(byCode)
+        // Only overwrite when this response actually carries the field. The
+        // earnings path returns no header/brand, so assigning unconditionally
+        // would race the cover-selection effect below and null out the brand it
+        // just fetched — whichever request resolved last would win.
+        if (res.header) setHeader(res.header)
+        if (res.brand) setBrand(res.brand)
+        if (res.cover_template_key) setCoverTemplateKey(res.cover_template_key)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [reportId])
+  }, [reportId, reportType, centrionCompanyId])
+
+  // Earnings brand accents. Quarterly gets its brand from /assemble above;
+  // earnings keeps it behind the cover-template endpoint.
+  useEffect(() => {
+    if (!reportId || !reportType || reportType === QUARTERLY) return
+    let cancelled = false
+    communicationsApi
+      .reviewEarningsCoverSelection(reportId)
+      .then((res) => {
+        if (cancelled) return
+        if (res.brand) setBrand(res.brand)
+        // Fallback template key for a cover section whose envelope omits it.
+        if (res.cover_template_key) setCoverTemplateKey(res.cover_template_key)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [reportId, reportType])
 
   const bySection = data?.comments_by_section ?? {}
   const reportLevel = data?.comments_by_section?.[REPORT_LEVEL_KEY] ?? []
@@ -413,6 +289,13 @@ export function ReviewerView({
   const openComposer = (sectionId: string | null) => {
     setComposerFor(sectionId)
     setCommentBody("")
+  }
+
+  // Rail comment → its section in the document. A comment can outlive the
+  // section it was left on (the report was regenerated with a different
+  // outline), so a missing anchor is a no-op rather than a crash.
+  const jumpToSection = (sectionId: string) => {
+    document.getElementById(sectionDomId(sectionId))?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   const postComment = async (sectionId: string | null, sectionTitle: string | null) => {
@@ -490,7 +373,17 @@ export function ReviewerView({
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
   const canAct = data?.can_act ?? false
   const canApprove = data?.can_approve ?? false
-  const sections = data?.sections ?? []
+  // The review payload's section list is earnings-only on the backend — it
+  // comes back empty for a quarterly report even when the report is fully
+  // assembled, which rendered the whole screen as "no generated sections yet".
+  // Fall back to the sections we already fetched for the bodies. Comments key
+  // off section_code either way, so posting and grouping are unaffected.
+  const isQuarterly = reportType === QUARTERLY
+  const sections: ReviewSection[] = data?.sections?.length
+    ? data.sections
+    : Object.values(bodies)
+        .sort((a, b) => a.display_order - b.display_order)
+        .map((s, i) => ({ id: s.section_code, order: i + 1, title: s.title, type: s.mode }))
   // Once the report is approved (or otherwise finished) the review is over —
   // reassign / request-changes no longer make sense even though the backend
   // still reports can_act. Gate the reviewer actions on the review being open.
@@ -645,34 +538,78 @@ export function ReviewerView({
                 </div>
               )}
 
-              {sections.map((s) => {
+              {/* Quarterly cover — page 1. Values come from the assemble
+                  header; the section itself is dropped upstream because the
+                  report never renders its content either. */}
+              {isQuarterly && sections.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 20,
+                    ["--brand-primary" as string]: brand?.primary ?? "#4040C8",
+                    ["--brand-secondary" as string]: brand?.secondary ?? "#4040C8",
+                  }}
+                >
+                  {/* Fed exactly what AssembledReportPage feeds it: header
+                      values only, with the company falling back to the JWT (its
+                      one fallback). Don't substitute the review payload's period
+                      or title — /assemble omits `header`, so that would put
+                      values on this cover that the real cover doesn't show. */}
+                  <CoverRenderer
+                    companyName={header?.company_name ?? centrionCompanyName}
+                    period={header?.period_label ?? null}
+                    title={header?.title ?? null}
+                    preparedOn={header?.prepared_on ?? null}
+                    templateKey={coverTemplateKey}
+                    maxWidth={DOC_WIDTH}
+                  />
+                </div>
+              )}
+
+              {/* The document page itself — one sheet, as the assembled report
+                  renders it. Only when it has something on it, so the empty
+                  state above isn't followed by a blank sheet. */}
+              <div
+                style={{
+                  ["--brand-primary" as string]: brand?.primary ?? "#4040C8",
+                  ["--brand-secondary" as string]: brand?.secondary ?? "#4040C8",
+                  ...(isQuarterly && sections.length > 0
+                    ? { ...CARD, padding: "32px 40px", maxWidth: DOC_WIDTH, margin: "0 auto" }
+                    : {}),
+                }}
+              >
+              {sections.map((s, i) => {
                 const comments = bySection[s.id] ?? []
                 const open = composerFor === s.id
                 // section.id is the report's section_code verbatim.
                 const body = bodies[s.id]
                 return (
-                  <div key={s.id} style={{ marginBottom: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
+                  <div
+                    key={s.id}
+                    id={sectionDomId(s.id)}
+                    style={{ marginBottom: isQuarterly ? 34 : 16, scrollMarginTop: 12 }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: isQuarterly ? 10 : 11, marginBottom: isQuarterly ? 14 : 10 }}>
                       <span
                         style={{
-                          minWidth: 24,
-                          height: 24,
-                          padding: "0 7px",
-                          borderRadius: 7,
                           flexShrink: 0,
-                          background: "#E6E7F5",
-                          color: "#5A6080",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11.5,
-                          fontWeight: 800,
-                          fontVariantNumeric: "tabular-nums",
+                          fontWeight: isQuarterly ? 700 : 800,
+                          ...(isQuarterly
+                            ? { fontFamily: MONO, fontSize: 12, color: BRAND }
+                            : // Earnings preview: faint "01", tabular figures.
+                              { fontSize: 11, color: "#9BA3C4", fontVariantNumeric: "tabular-nums" }),
                         }}
                       >
-                        {s.order}
+                        {pad2(i + 1)}
                       </span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 800, color: "#1A1D2E" }}>
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          fontWeight: 800,
+                          color: BRAND,
+                          ...(isQuarterly ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
+                        }}
+                      >
                         {s.title}
                       </span>
                       {comments.length > 0 && (
@@ -704,9 +641,18 @@ export function ReviewerView({
                       </button>
                     </div>
 
-                    <div style={{ ...CARD, padding: "18px 22px" }}>
+                    {/* Quarterly sits directly on the document page; every
+                        other type keeps its own card. */}
+                    <div style={isQuarterly ? undefined : { ...CARD, padding: "18px 22px" }}>
                       {body ? (
-                        <SectionBody section={body} />
+                        // Quarterly reads through the ported quarterly renderer
+                        // (columns derived from the data, brand-accented figures);
+                        // every other type keeps this file's own SectionBody.
+                        isQuarterly ? (
+                          <SectionContent section={body} />
+                        ) : (
+                          <EarningsSectionContent section={body} coverTemplateKey={coverTemplateKey} />
+                        )
                       ) : (
                         <div style={{ fontSize: 12.5, color: "#9BA3C4", fontStyle: "italic" }}>
                           Section content isn&apos;t available for this report.
@@ -742,9 +688,10 @@ export function ReviewerView({
                   </div>
                 )
               })}
+              </div>
 
               {/* Report-level comments (section_id: null) */}
-              <div style={{ ...CARD, padding: "16px 20px" }}>
+              <div style={{ ...CARD, padding: "16px 20px", maxWidth: isQuarterly ? DOC_WIDTH : undefined, margin: isQuarterly ? "16px auto 0" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: "#1A1D2E" }}>
                     On the report as a whole
@@ -910,7 +857,15 @@ export function ReviewerView({
                     No comments yet. Click &ldquo;Add comment&rdquo; on a section.
                   </div>
                 ) : (
-                  allComments.map((c) => <CommentRow key={c.id} comment={c} showSection />)
+                  allComments.map((c) => (
+                    <CommentRow
+                      key={c.id}
+                      comment={c}
+                      showSection
+                      // Report-level comments have no section to scroll to.
+                      onJump={c.section_id ? () => jumpToSection(c.section_id!) : undefined}
+                    />
+                  ))
                 )}
               </div>
 
