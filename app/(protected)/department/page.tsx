@@ -28,7 +28,7 @@ import {
   ClipboardList, ArrowRight, Bell, Calendar, RotateCcw, Clock, Eye, FileUp,
 } from "lucide-react"
 import Link from "next/link"
-import { formatDate, cn } from "@/lib/utils"
+import { formatDate, cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 
@@ -55,7 +55,7 @@ const SORT_FIELDS: SortField<AssignmentCard>[] = [
 // Centriyon status pill — coloured dot + label, keyed by session status.
 const STATUS_PILL: Record<SessionStatus, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
-  hod_curation:{ label: "With HR Lead",  dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
+  hod_curation:{ label: "",              dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
   submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
@@ -63,12 +63,13 @@ const STATUS_PILL: Record<SessionStatus, { label: string; dot: string; text: str
   reopened:    { label: "Needs Changes", dot: "bg-red-500",     text: "text-red-700",     bg: "bg-red-50" },
 }
 
-function StatusPill({ status }: { status: SessionStatus }) {
+function StatusPill({ status, deptCode }: { status: SessionStatus; deptCode?: string }) {
   const s = STATUS_PILL[status]
+  const label = status === "hod_curation" ? `With ${deptLeadLabel(deptCode)}` : s.label
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.bg, s.text)}>
       <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-      {s.label}
+      {label}
     </span>
   )
 }
@@ -301,7 +302,7 @@ export default function DepartmentDashboard() {
                       <p className="truncate text-lg font-bold text-slate-900">{session.cycle_name}</p>
                       <p className="mt-0.5 text-sm text-slate-500">{session.department_name}</p>
                     </div>
-                    <StatusPill status={session.status} />
+                    <StatusPill status={session.status} deptCode={session.department_code} />
                   </div>
 
                   {/* Reopened — show HOD feedback when present, otherwise a generic prompt */}
@@ -309,12 +310,12 @@ export default function DepartmentDashboard() {
                     <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5">
                       <div className="flex items-center gap-2">
                         <RotateCcw className="h-3.5 w-3.5 shrink-0 text-red-600" />
-                        <p className="text-xs font-semibold text-red-800">Head of Department feedback</p>
+                        <p className="text-xs font-semibold text-red-800">{deptLeadLabel(session.department_code)} feedback</p>
                       </div>
                       <p className="mt-1 text-sm text-red-700">
                         {session.review_notes
                           ? session.review_notes
-                          : "Your Head of Department requested revisions — please update and resubmit."}
+                          : `Your ${deptLeadLabel(session.department_code)} requested revisions — please update and resubmit.`}
                       </p>
                     </div>
                   )}

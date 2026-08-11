@@ -3,7 +3,8 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@/contexts/AuthContext"
-import { getInitials } from "@/lib/utils"
+import { getInitials, deptLeadLabel } from "@/lib/utils"
+import { useHODSessions } from "@/hooks/useHod"
 import { LogOut, User, KeyRound } from "lucide-react"
 import {
   DropdownMenu,
@@ -19,10 +20,16 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
 import { NotificationBell, EscalationBannerStrip } from "@/components/layout/notifications"
+import { BackToCentritonButton } from "@/components/layout/BackToCentritonButton"
 
 export function DeptTopNav() {
   const { user, logout } = useAuth()
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+
+  // Only HODs get a "{code} Lead" title — fetch their sessions (cached, shared
+  // with HODSidebar) just to read the department code off any one of them.
+  const { data: hodSessions } = useHODSessions(undefined, user?.role === "hod")
+  const leadLabel = deptLeadLabel(hodSessions?.[0]?.departments?.department_code)
 
   const { data } = useNotificationsLive()
   const markRead = useMarkNotificationRead()
@@ -48,6 +55,7 @@ export function DeptTopNav() {
       <header className="flex h-[72px] items-center justify-end border-b border-slate-200 bg-white px-8">
         {/* Right cluster */}
         <div className="flex items-center gap-4">
+          <BackToCentritonButton />
           <NotificationBell
             notifications={allNotifications}
             onView={handleView}
@@ -65,7 +73,7 @@ export function DeptTopNav() {
                 <div className="text-left leading-tight">
                   <p className="text-sm font-semibold text-slate-900">{user.full_name}</p>
                   <p className="text-xs text-slate-500">
-                    {user.role === "hod" ? "HR Lead" : "Department User"}
+                    {user.role === "hod" ? leadLabel : "Department User"}
                   </p>
                 </div>
               </button>

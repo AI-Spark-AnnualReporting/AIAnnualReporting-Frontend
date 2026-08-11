@@ -37,7 +37,7 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
-import { cn } from "@/lib/utils"
+import { cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
 
 /** Detect whether content is HTML or plain text */
@@ -230,16 +230,17 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   }
 
   if (submitted || isSubmitted) {
+    const leadLabel = deptLeadLabel(session.department_code)
     const heading = isApproved
       ? "Report Approved!"
       : wasResubmit
       ? "Resubmitted!"
       : "Submission Complete!"
     const message = isApproved
-      ? "Your report has been approved by your Head of Department. No further action is required."
+      ? `Your report has been approved by your ${leadLabel}. No further action is required.`
       : wasResubmit
-      ? "Resubmitted — your revised report is back with your Head of Department for review."
-      : "Your report has been submitted to your Head of Department for review. You will be notified when it's approved."
+      ? `Resubmitted — your revised report is back with your ${leadLabel} for review.`
+      : `Your report has been submitted to your ${leadLabel} for review. You will be notified when it's approved.`
     return (
       <div className="mx-auto max-w-lg space-y-6 py-16 text-center">
         <div className={cn(
@@ -291,11 +292,11 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-amber-800">Revision Requested</p>
             <p className="mt-0.5 text-xs text-amber-700">
-              Update your draft based on your Head of Department&apos;s feedback and resubmit when ready.
+              Update your draft based on your {deptLeadLabel(session.department_code)}&apos;s feedback and resubmit when ready.
             </p>
             {session.review_notes && (
               <div className="mt-2 border-t border-amber-200 pt-2">
-                <p className="text-xs font-semibold text-amber-900">Head of Department Notes:</p>
+                <p className="text-xs font-semibold text-amber-900">{deptLeadLabel(session.department_code)} Notes:</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-amber-800">{session.review_notes}</p>
               </div>
             )}
@@ -560,8 +561,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
           confirm === "regenerate"
             ? "This writes a new draft from your answers and headings. Your current draft — including any edits you've made to it — will be replaced."
             : isReopened
-            ? "Your revised submission will be sent back to your Head of Department for review."
-            : "Once submitted, you won't be able to make changes unless your Head of Department requests revisions."
+            ? `Your revised submission will be sent back to your ${deptLeadLabel(session.department_code)} for review.`
+            : `Once submitted, you won't be able to make changes unless your ${deptLeadLabel(session.department_code)} requests revisions.`
         }
         confirmLabel={
           confirm === "regenerate" ? "Regenerate" : isReopened ? "Resubmit" : "Submit"

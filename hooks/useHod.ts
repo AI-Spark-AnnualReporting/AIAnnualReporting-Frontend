@@ -19,10 +19,11 @@ function serializeWrite<T>(sessionId: string, run: () => Promise<T>): Promise<T>
   return result
 }
 
-export function useHODSessions(status?: string) {
+export function useHODSessions(status?: string, enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.HOD_SESSIONS(status),
     queryFn: () => hodApi.listSessions(status),
+    enabled,
   })
 }
 
