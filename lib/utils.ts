@@ -39,6 +39,13 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// The department head's display title — "CS Lead" for a department whose
+// department_code is "CS", "HR Lead" for "HR", etc. Falls back to a neutral
+// title when the code isn't known yet (e.g. no session loaded).
+export function deptLeadLabel(code?: string | null): string {
+  return code ? `${code} Lead` : "Department Lead"
+}
+
 export function getInitials(name: string): string {
   return name
     .split(" ")

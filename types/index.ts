@@ -325,6 +325,8 @@ export interface Session {
   cycle_id: string
   department_id: string
   department_name: string
+  /** Not always present depending on backend version — used to build the "{code} Lead" label. */
+  department_code?: string
   content_language?: ContentLanguage
   user_id?: string
   status: SessionStatus

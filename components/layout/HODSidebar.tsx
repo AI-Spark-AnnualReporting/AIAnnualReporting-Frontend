@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { useHODSessions } from "@/hooks/useHod"
-import { getInitials, cn } from "@/lib/utils"
+import { getInitials, cn, deptLeadLabel } from "@/lib/utils"
 import { LayoutGrid, ClipboardCheck, Megaphone, FileText, LogOut, type LucideIcon } from "lucide-react"
 
 type NavItem = { href: string; label: string; icon: LucideIcon; exact?: boolean; badge?: "reviews" }
@@ -28,6 +28,9 @@ export function HODSidebar() {
   const hasOwnSessions = !!sessions?.some(
     (s) => s.user_id === user?.user_id && s.status !== "hod_curation",
   )
+  // Every session in this HOD's list belongs to their own department, so the
+  // code on any one of them identifies their department.
+  const leadLabel = deptLeadLabel(sessions?.[0]?.departments?.department_code)
 
   if (!user) return null
 
@@ -48,7 +51,7 @@ export function HODSidebar() {
         </div>
         <div className="leading-tight">
           <p className="text-[13px] font-extrabold tracking-[-0.2px] text-white">Centriyon</p>
-          <p className="text-[9px] text-white/30">HR Lead Workspace</p>
+          <p className="text-[9px] text-white/30">{leadLabel} Workspace</p>
         </div>
       </div>
 
@@ -96,7 +99,7 @@ export function HODSidebar() {
           </div>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-[11px] font-bold text-white/80">{user.full_name}</p>
-            <p className="truncate text-[9px] text-white/30">HR Lead</p>
+            <p className="truncate text-[9px] text-white/30">{leadLabel}</p>
           </div>
           <button
             onClick={logout}
