@@ -31,6 +31,7 @@ import {
   PanelLeftClose, List, Ban, Info, Save, Download, FileUp, ListTree,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
+import { ProsePreview } from "@/components/ui/prose-preview"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -780,9 +781,10 @@ export default function SessionWorkspacePage({
                           AI response
                         </p>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                        {aiResult}
-                      </p>
+                      <ProsePreview
+                        content={aiResult}
+                        className="text-sm leading-relaxed text-slate-700"
+                      />
                       {!isSubmitted && (
                         <div className="mt-3 flex items-center gap-4 border-t border-indigo-100 pt-2.5">
                           <button
@@ -814,9 +816,10 @@ export default function SessionWorkspacePage({
                           Saved answer
                         </p>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                        {storedAnswer}
-                      </p>
+                      <ProsePreview
+                        content={storedAnswer ?? ""}
+                        className="text-sm leading-relaxed text-slate-700"
+                      />
                     </div>
                   ) : hasStoredAnswer ? (
                     <div className="rounded-2xl border border-slate-100 bg-white px-5 py-4 shadow-sm">
@@ -828,9 +831,10 @@ export default function SessionWorkspacePage({
                           Answer from your documents
                         </p>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                        {storedAnswer}
-                      </p>
+                      <ProsePreview
+                        content={storedAnswer ?? ""}
+                        className="text-sm leading-relaxed text-slate-700"
+                      />
                       {!isSubmitted && (
                         <div className="mt-3 flex items-center gap-4 border-t border-slate-100 pt-2.5">
                           <button

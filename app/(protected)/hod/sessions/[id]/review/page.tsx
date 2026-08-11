@@ -150,9 +150,10 @@ export default function HODReviewPage() {
                         <Info className="h-3.5 w-3.5" /> Marked not applicable
                       </p>
                     ) : has ? (
-                      <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
-                        {ans}
-                      </p>
+                      <ProsePreview
+                        content={ans}
+                        className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700"
+                      />
                     ) : (
                       <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-400">
                         <CircleSlash className="h-3.5 w-3.5" /> No answer provided
