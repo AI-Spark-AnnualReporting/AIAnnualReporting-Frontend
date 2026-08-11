@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Loader2, Send, Sparkles, X } from "lucide-react"
+import { Check, Sparkles, X } from "lucide-react"
+import { RoleToggle } from "@/components/report/RoleToggle"
+import { InlineRefineBox } from "@/components/report/InlineRefineBox"
 import { cn } from "@/lib/utils"
 
 /**
@@ -26,6 +28,11 @@ export function ThemeChipCard({
   onTitleChange,
   onAddKeyword,
   onRemoveKeyword,
+  onEditKeyword,
+  role,
+  onRoleChange,
+  roleGroup = "area-of-focus-role",
+  addPlaceholder = "Add keyword…",
   onRemove,
   onRefine,
 }: {
@@ -40,6 +47,17 @@ export function ThemeChipCard({
   onTitleChange: (value: string) => void
   onAddKeyword: (keyword: string) => void
   onRemoveKeyword: (keywordIndex: number) => void
+  /** Provided → each chip's text is inline-editable instead of static. */
+  onEditKeyword?: (keywordIndex: number, value: string) => void
+  /**
+   * Provided → the card shows the area-of-focus role control: a radio for
+   * "primary" (one across the whole list, hence the shared `roleGroup` name)
+   * and a checkbox for "secondary". "none" = not carried forward.
+   */
+  role?: "primary" | "secondary" | "none"
+  onRoleChange?: (role: "primary" | "secondary" | "none") => void
+  roleGroup?: string
+  addPlaceholder?: string
   onRemove: () => void
   /**
    * Optional per-theme "Refine with AI". When provided the card grows its own
@@ -50,21 +68,8 @@ export function ThemeChipCard({
 }) {
   const [draft, setDraft] = useState("")
   const [refineOpen, setRefineOpen] = useState(false)
-  const [instruction, setInstruction] = useState("")
-  const [refining, setRefining] = useState(false)
   const keywords = theme.keywords ?? []
   const canRefine = !!onRefine && !readOnly
-
-  const submitRefine = async () => {
-    const value = instruction.trim()
-    if (!value || refining || !onRefine) return
-    setRefining(true)
-    try {
-      if (await onRefine(value)) setInstruction("")
-    } finally {
-      setRefining(false)
-    }
-  }
 
   const commitDraft = () => {
     if (draft.trim()) onAddKeyword(draft)
@@ -76,11 +81,17 @@ export function ThemeChipCard({
   return (
     <div
       className={cn(
-        "relative rounded-xl border bg-indigo-50/40 p-4 transition-colors",
+        "relative rounded-xl border p-4 transition-colors",
         readOnly ? "pr-4" : canRefine ? "pr-40" : "pr-9",
         selectable && selected
-          ? "border-indigo-400 ring-1 ring-indigo-300"
-          : "border-indigo-100",
+          ? "border-indigo-400 bg-indigo-50/40 ring-1 ring-indigo-300"
+          : // Role mode: an area with role "none" isn't carried forward, so it
+            // reads as muted rather than as a normal card.
+            role === "none"
+            ? "border-dashed border-border bg-muted/20"
+            : role === "primary"
+              ? "border-indigo-500 bg-indigo-50/60 ring-1 ring-indigo-300"
+              : "border-indigo-100 bg-indigo-50/40",
       )}
     >
       {/* Per-theme refine + remove (hidden when read-only) */}
@@ -183,6 +194,11 @@ export function ThemeChipCard({
               {theme.summary}
             </p>
           )}
+          {/* Role — native radio (one primary across all cards) + checkbox */}
+          {onRoleChange && !readOnly && role && (
+            <RoleToggle role={role} group={roleGroup} onChange={onRoleChange} className="mt-2" />
+          )}
+
           {/* Keyword chips */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {keywords.map((kw, k) => (
@@ -190,7 +206,20 @@ export function ThemeChipCard({
                 key={k}
                 className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-700"
               >
-                {kw}
+                {onEditKeyword && !readOnly ? (
+                  // Auto-sized to its content so the pill hugs the text.
+                  <input
+                    type="text"
+                    value={kw}
+                    onChange={(e) => onEditKeyword(k, e.target.value)}
+                    size={Math.max(kw.length, 3)}
+                    dir={isRtl ? "rtl" : "ltr"}
+                    aria-label={`Edit "${kw}"`}
+                    className="border-0 bg-transparent p-0 text-xs font-medium text-indigo-700 outline-none"
+                  />
+                ) : (
+                  kw
+                )}
                 {!readOnly && (
                   <button
                     type="button"
@@ -218,7 +247,7 @@ export function ThemeChipCard({
                   }
                 }}
                 onBlur={commitDraft}
-                placeholder="Add keyword…"
+                placeholder={addPlaceholder}
                 dir={isRtl ? "rtl" : "ltr"}
                 className="min-w-[8rem] flex-1 border-0 bg-transparent px-1 py-1 text-xs outline-none placeholder:text-muted-foreground/60"
               />
@@ -226,33 +255,12 @@ export function ThemeChipCard({
           </div>
 
           {/* Per-theme AI instruction box */}
-          {canRefine && refineOpen && (
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                type="text"
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    submitRefine()
-                  }
-                }}
-                disabled={refining}
-                placeholder="e.g. sharpen this theme, add ESG keywords, rename it…"
-                dir={isRtl ? "rtl" : "ltr"}
-                className="min-w-0 flex-1 rounded-full border border-indigo-200 bg-white px-3.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400 disabled:opacity-60"
-              />
-              <button
-                type="button"
-                onClick={submitRefine}
-                disabled={refining || !instruction.trim()}
-                aria-label="Refine this theme"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:bg-indigo-300"
-              >
-                {refining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              </button>
-            </div>
+          {canRefine && refineOpen && onRefine && (
+            <InlineRefineBox
+              onSubmit={onRefine}
+              isRtl={isRtl}
+              placeholder="e.g. sharpen this theme, add ESG keywords, rename it…"
+            />
           )}
         </div>
       </div>

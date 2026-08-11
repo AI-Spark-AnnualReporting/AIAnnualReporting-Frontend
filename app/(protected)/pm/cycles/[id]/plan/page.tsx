@@ -31,7 +31,7 @@ import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
-import { InitialThemesPicker } from "@/components/report/InitialThemesPicker"
+import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
 import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
 import {
   useBuildPlan,
@@ -40,7 +40,7 @@ import {
   usePlan,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { pmApi, type BriefTheme, type SuggestedTheme } from "@/lib/api/pm"
+import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import { isTableOfContentsSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
@@ -70,7 +70,7 @@ interface PMDashboardData {
   cycle?: {
     cycle_name?: string
     content_language?: ContentLanguage
-    initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+    areas_of_focus?: AreaOfFocus[] | null
     suggested_themes?: SuggestedTheme[] | null
   }
   departments?: Array<{ department_code: string; department_name: string }>
@@ -97,8 +97,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     department_code: d.department_code,
     department_name: d.department_name,
   }))
-  // Themes generated during the Strategic Brief flow (persisted on the cycle).
-  const initialThemes = pmData?.cycle?.initial_themes_and_keywords?.themes ?? []
+  // Areas of focus chosen during the Strategic Brief flow (persisted on the cycle).
+  const areasOfFocus = pmData?.cycle?.areas_of_focus ?? []
   const suggestedThemes = pmData?.cycle?.suggested_themes ?? []
 
   const plan = planQuery.data
@@ -163,7 +163,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           cycleId={cycleId}
           plan={plan}
           sections={sections}
-          initialThemes={initialThemes}
+          areasOfFocus={areasOfFocus}
           suggestedThemes={suggestedThemes}
           locked={sectionsLocked}
           isRtl={isRtl}
@@ -440,7 +440,7 @@ function ThemesStep({
   cycleId,
   plan,
   sections,
-  initialThemes,
+  areasOfFocus,
   suggestedThemes,
   locked,
   isRtl,
@@ -449,7 +449,7 @@ function ThemesStep({
   cycleId: string
   plan: PlanResponse
   sections: CycleReportSection[]
-  initialThemes: BriefTheme[]
+  areasOfFocus: AreaOfFocus[]
   suggestedThemes: SuggestedTheme[]
   locked: boolean
   isRtl: boolean
@@ -461,14 +461,9 @@ function ThemesStep({
   // locked (Start Building), both editors render view-only.
   return (
     <section className="space-y-5">
-      {/* Initial Themes — from the brief, view-only + selectable (persists selected). */}
+      {/* Areas of Focus — from the brief, view-only (the role choice is made there). */}
       <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <InitialThemesPicker
-          cycleId={cycleId}
-          themes={initialThemes}
-          readOnly={locked}
-          isRtl={isRtl}
-        />
+        <AreasOfFocusSummary areas={areasOfFocus} locked={locked} isRtl={isRtl} />
       </div>
 
       {/* Suggested Themes — cycle.suggested_themes: editable + AI-refine + selectable. */}

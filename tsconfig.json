@@ -11,6 +11,9 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // Lets the dependency-free self-checks (e.g. lib/areasOfFocus.test.ts) use
+    // the explicit .ts extension Node needs to run them directly.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [

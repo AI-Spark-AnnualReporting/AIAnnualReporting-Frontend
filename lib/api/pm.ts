@@ -107,28 +107,34 @@ export interface GenerateBriefPayload {
   answers: GenerateBriefAnswer[]
 }
 
-// A theme now carries its own short keyword set (3-6 items) instead of a prose
-// description. The report-level `keywords` (below) is a separate, overall set.
-// `selected` (default true when missing) controls whether the theme is injected
-// into the section-writing prompt.
+// An "area of focus" replaces the old BriefTheme: what was the theme `title` is
+// now the marketing `slogan`, and the `keywords` chips are now `sub_slogans`.
+// The old `selected` boolean is gone — `role` carries it, with "none" meaning
+// not selected.
 //
-// `summary` is one AI-written sentence describing what the keywords reflect
-// ("" when never generated). It is WRITE-SENSITIVE: save-brief-and-themes and
-// themes/refine overwrite the stored list wholesale and default summary to ""
-// server-side, so a theme sent without it loses its summary. Always spread the
-// existing object (`{ ...theme, title }`) instead of rebuilding it field by
-// field. A manual title/keyword edit keeps the old summary — no AI runs on a
+// `summary` is one AI-written sentence describing what the area reflects ("" when
+// never generated). It is WRITE-SENSITIVE: save-brief-and-areas-of-focus and
+// areas-of-focus/refine overwrite the stored list wholesale and default summary
+// to "" server-side, so an area sent without it loses its summary. Always spread
+// the existing object (`{ ...area, slogan }`) instead of rebuilding it field by
+// field. A manual slogan/sub-slogan edit keeps the old summary — no AI runs on a
 // plain save; refine regenerates it.
-export interface BriefTheme {
-  title: string
-  keywords: string[]
-  summary?: string
-  selected?: boolean
-}
+//
+// The shape and the save rule live in lib/areasOfFocus.ts (no imports, so the
+// rule can be run directly against its self-check) and are re-exported here so
+// callers keep importing everything PM-related from one place.
+import type { AreaOfFocus } from "@/lib/areasOfFocus"
 
-// A "suggested theme" now carries a keyword set — the SAME shape as BriefTheme.
-// It's a separate cycle column (`suggested_themes`) from
-// `initial_themes_and_keywords`, but rendered identically (title + keyword chips).
+export type { AreaRole, AreaOfFocus } from "@/lib/areasOfFocus"
+export {
+  MIN_SELECTED_AREAS,
+  MAX_SELECTED_AREAS,
+  roleSelectionSaveable,
+} from "@/lib/areasOfFocus"
+
+// Suggested themes are a DIFFERENT cycle column (`suggested_themes`) on a
+// different screen, and deliberately stay on the older title/keywords/selected
+// shape — the areas-of-focus rename does not apply to them.
 export interface SuggestedTheme {
   title: string
   keywords: string[]
@@ -141,8 +147,9 @@ export interface GenerateBriefResponse {
   success: boolean
   cycle_id: string
   strategic_brief: string
-  themes: BriefTheme[]
-  keywords: string[]
+  // Generation returns 5 areas, all with role "none" — the PM picks before
+  // anything can be saved.
+  areas_of_focus: AreaOfFocus[]
   // NEW — description-based themes, stored server-side on the cycle.
   suggested_themes?: SuggestedTheme[]
 }
@@ -166,7 +173,7 @@ export interface UploadBriefDocumentResponse {
   message?: string
 }
 
-// POST /pm/cycles/{id}/brief/refine and /themes/refine — the "Refine with AI"
+// POST /pm/cycles/{id}/brief/refine and /areas-of-focus/refine — the "Refine with AI"
 // assistants. Send the CURRENT on-screen content + a free-text instruction; the
 // LLM returns the complete revised version (already saved server-side). If it
 // couldn't apply the instruction it returns the input unchanged (still 200).
@@ -179,15 +186,58 @@ export interface RefineBriefResponse {
   cycle_id: string
   strategic_brief: string
 }
-export interface RefineThemesPayload {
-  themes: BriefTheme[]
+// Refine deliberately has NO selection validation — the PM can reword slogans
+// before choosing a primary. It also preserves the primary pick server-side, so
+// never re-apply roles from the response on the client.
+export interface RefineAreasOfFocusPayload {
+  areas_of_focus: AreaOfFocus[]
   instruction: string
 }
-export interface RefineThemesResponse {
+export interface RefineAreasOfFocusResponse {
   success: boolean
   cycle_id: string
-  themes: BriefTheme[]
+  areas_of_focus: AreaOfFocus[]
 }
+// Concept messages — one per area of focus, the brand copy behind each slogan.
+// Just the two fields: there is no role, and no `area_slogan` linking a message
+// back to the area it came from. ORDER is therefore the only thing that carries
+// which message leads — generation returns them primary-area-first — and order
+// survives because every write sends the whole list.
+//
+// Every endpoint returns the WHOLE list and every write takes the WHOLE list —
+// a partial array overwrites what's stored. generate and refine SAVE their
+// result server-side, so don't follow them with a save call.
+//
+// Generation failures come back as 200 with an EMPTY list, not an error status,
+// so callers must check `concept_messages.length` rather than trusting the code.
+export type ConceptRole = "primary" | "secondary"
+
+export interface ConceptMessage {
+  title: string
+  /** First-person brand copy, not an explanation. May hold two paragraphs
+   *  separated by a blank line — render it as prose, edit it in a textarea. */
+  description: string
+  /**
+   * Exactly one message per cycle is "primary". OPTIONAL because the backend
+   * doesn't return it yet — until it does, position stands in (first = primary)
+   * and anything we send here is ignored server-side rather than rejected
+   * (BaseSchema doesn't forbid extra fields). Read it when present, fall back
+   * to position when absent; see primaryIndexOf on the concept-messages screen.
+   */
+  role?: ConceptRole
+}
+
+export interface ConceptMessagesResponse {
+  success: boolean
+  cycle_id: string
+  concept_messages: ConceptMessage[]
+}
+
+export interface RefineConceptMessagesPayload {
+  concept_messages: ConceptMessage[]
+  instruction: string
+}
+
 // POST /pm/cycles/{id}/suggested-themes/refine — the "Refine with AI" assistant
 // for the description-based suggested themes. Send the live list + instruction;
 // returns the COMPLETE revised set (already saved server-side).
@@ -201,24 +251,23 @@ export interface RefineSuggestedThemesResponse {
   suggested_themes: SuggestedTheme[]
 }
 
-// PUT /pm/cycles/{id}/save-brief-and-themes — persists the PM's MANUAL edits
-// (brief text, theme add/delete/rename, keyword chips). Partial: send only the
-// changed field(s). Omitted/null = leave as-is; a present value replaces it;
-// empty string/array clears it. `themes` must be the WHOLE current list, not a
-// patch. The response is always the full resulting state.
-export interface SaveBriefAndThemesPayload {
+// PUT /pm/cycles/{id}/save-brief-and-areas-of-focus — persists the PM's MANUAL
+// edits (brief text, area add/delete, slogan + sub-slogan edits, role changes).
+// Partial: send only the changed field(s). Omitted/null = leave as-is; a present
+// value replaces it; empty string/array clears it. `areas_of_focus` must be the
+// WHOLE current list, not a patch, and must pass `roleSelectionSaveable` or the
+// server answers 422. The response is always the full resulting state.
+export interface SaveBriefAndAreasPayload {
   strategic_brief?: string
-  themes?: BriefTheme[]
-  keywords?: string[]
+  areas_of_focus?: AreaOfFocus[]
   // NEW — send the WHOLE suggested_themes list; omitted = left as-is.
   suggested_themes?: SuggestedTheme[]
 }
-export interface SaveBriefAndThemesResponse {
+export interface SaveBriefAndAreasResponse {
   success: boolean
   cycle_id: string
   strategic_brief: string
-  themes: BriefTheme[]
-  keywords: string[]
+  areas_of_focus: AreaOfFocus[]
   suggested_themes: SuggestedTheme[]
 }
 
@@ -228,7 +277,7 @@ export interface CycleBriefFields {
   cycle_name?: string
   fiscal_year?: number
   kickoff_brief?: string | null
-  initial_themes_and_keywords?: { themes: BriefTheme[]; keywords: string[] } | null
+  areas_of_focus?: AreaOfFocus[] | null
   suggested_themes?: SuggestedTheme[] | null
   questions_deadline?: string | null
 }
@@ -341,14 +390,15 @@ export const pmApi = {
     return data
   },
 
-  // Persist manual (non-AI) edits to the brief/themes. Partial payload; the
-  // response is the full resulting state. Fast DB write, no AI.
-  saveBriefAndThemes: async (
+  // Persist manual (non-AI) edits to the brief/areas of focus. Partial payload;
+  // the response is the full resulting state. Fast DB write, no AI. Sending an
+  // `areas_of_focus` list that fails `roleSelectionSaveable` returns 422.
+  saveBriefAndAreas: async (
     cycleId: string,
-    payload: SaveBriefAndThemesPayload,
-  ): Promise<SaveBriefAndThemesResponse> => {
-    const { data } = await apiClient.put<SaveBriefAndThemesResponse>(
-      `/pm/cycles/${cycleId}/save-brief-and-themes`,
+    payload: SaveBriefAndAreasPayload,
+  ): Promise<SaveBriefAndAreasResponse> => {
+    const { data } = await apiClient.put<SaveBriefAndAreasResponse>(
+      `/pm/cycles/${cycleId}/save-brief-and-areas-of-focus`,
       payload,
     )
     return data
@@ -368,16 +418,64 @@ export const pmApi = {
     return data
   },
 
-  // "Refine with AI" — Themes. Send the live themes + instruction; returns the
-  // COMPLETE new theme set (may add/remove/rename) — overwrite the whole list.
-  refineThemes: async (
+  // "Refine with AI" — Areas of Focus. Send the live list + instruction; returns
+  // the COMPLETE revised set (may add/remove/reword) — overwrite the whole list.
+  // No selection validation here by design, and the server keeps the existing
+  // primary pick, so the response's roles are authoritative.
+  refineAreasOfFocus: async (
     cycleId: string,
-    payload: RefineThemesPayload,
-  ): Promise<RefineThemesResponse> => {
-    const { data } = await apiClient.post<RefineThemesResponse>(
-      `/pm/cycles/${cycleId}/themes/refine`,
+    payload: RefineAreasOfFocusPayload,
+  ): Promise<RefineAreasOfFocusResponse> => {
+    const { data } = await apiClient.post<RefineAreasOfFocusResponse>(
+      `/pm/cycles/${cycleId}/areas-of-focus/refine`,
       payload,
       { timeout: 60000 },
+    )
+    return data
+  },
+
+  // ── Concept messages ──────────────────────────────────────────────────────
+  // Read whatever is stored. Empty list = not generated yet.
+  getConceptMessages: async (cycleId: string): Promise<ConceptMessagesResponse> => {
+    const { data } = await apiClient.get<ConceptMessagesResponse>(
+      `/pm/cycles/${cycleId}/concept-messages`,
+    )
+    return data
+  },
+
+  // Write one message per area of focus, from the areas already on the cycle.
+  // No request body. Slow (LLM) and ALREADY SAVED on return.
+  generateConceptMessages: async (cycleId: string): Promise<ConceptMessagesResponse> => {
+    const { data } = await apiClient.post<ConceptMessagesResponse>(
+      `/pm/cycles/${cycleId}/concept-messages/generate`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  // "Refine with AI" — concept messages. Send the live list + instruction;
+  // returns the COMPLETE revised set, already saved server-side.
+  refineConceptMessages: async (
+    cycleId: string,
+    payload: RefineConceptMessagesPayload,
+  ): Promise<ConceptMessagesResponse> => {
+    const { data } = await apiClient.post<ConceptMessagesResponse>(
+      `/pm/cycles/${cycleId}/concept-messages/refine`,
+      payload,
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  // Persist manual edits. Send the WHOLE list — this replaces what's stored.
+  saveConceptMessages: async (
+    cycleId: string,
+    concept_messages: ConceptMessage[],
+  ): Promise<ConceptMessagesResponse> => {
+    const { data } = await apiClient.put<ConceptMessagesResponse>(
+      `/pm/cycles/${cycleId}/concept-messages`,
+      { concept_messages },
     )
     return data
   },
