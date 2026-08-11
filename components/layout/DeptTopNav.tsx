@@ -20,6 +20,7 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
 import { NotificationBell, EscalationBannerStrip } from "@/components/layout/notifications"
+import { BackToCentritonButton } from "@/components/layout/BackToCentritonButton"
 
 export function DeptTopNav() {
   const { user, logout } = useAuth()
@@ -54,6 +55,7 @@ export function DeptTopNav() {
       <header className="flex h-[72px] items-center justify-end border-b border-slate-200 bg-white px-8">
         {/* Right cluster */}
         <div className="flex items-center gap-4">
+          <BackToCentritonButton />
           <NotificationBell
             notifications={allNotifications}
             onView={handleView}

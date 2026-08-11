@@ -20,6 +20,7 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
 import { NotificationBell, EscalationBannerStrip } from "@/components/layout/notifications"
+import { BackToCentritonButton } from "@/components/layout/BackToCentritonButton"
 
 // Map the current PM route to a breadcrumb leaf label.
 function pageTitle(pathname: string): string {
@@ -67,6 +68,7 @@ export function PMTopNav() {
 
         {/* Right cluster */}
         <div className="flex items-center gap-4">
+          <BackToCentritonButton />
           <NotificationBell
             notifications={allNotifications}
             onView={handleView}
