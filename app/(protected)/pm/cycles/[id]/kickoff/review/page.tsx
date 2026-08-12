@@ -12,10 +12,13 @@ import {
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
-import { KickoffBuildLoader, CONCEPT_MESSAGE_LOADER } from "@/components/pm/kickoff-build-loader"
+import {
+  KickoffBuildLoader, CONCEPT_MESSAGE_LOADER, AREAS_REFRESH_LOADER, BRIEF_LOADER,
+} from "@/components/pm/kickoff-build-loader"
 import { ThemeChipCard } from "@/components/report/ThemeChipCard"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -26,6 +29,52 @@ import {
 
 // Quick-instruction chips — identical to typing the same text into the box.
 const BRIEF_CHIPS = ["Make it more concise", "Strengthen ESG focus", "More formal tone", "Add a growth angle"]
+
+// The areas of focus are derived from the brief, so a refined brief leaves them
+// stale. There's no "regenerate areas from the brief" endpoint — areas-of-focus/
+// refine is the one that rewrites the whole list, so the new brief is handed to
+// it in the instruction rather than relying on it to re-read the stored cycle.
+// Every action that invalidates work already on screen asks first. One dialog,
+// three sets of copy — the wording has to name what specifically gets thrown
+// away, or "are you sure?" just trains people to click through it.
+interface ConsentCopy {
+  title: string
+  description: string
+  confirmLabel: string
+  cancelLabel: string
+  variant: "default" | "destructive"
+}
+
+// Asked on Save — the one point where brief changes (typed or AI-refined) reach
+// the areas of focus. Saving and regenerating are one action: cancelling backs
+// out of both and leaves the edit sitting unsaved in the box.
+const SAVE_BRIEF_CONSENT: ConsentCopy = {
+  title: "Saving will also rewrite the areas of focus",
+  description:
+    "The areas of focus are drawn from the strategic brief, so saving your changes regenerates " +
+    "them to match — that replaces their slogans and sub-slogans, including any you've written " +
+    "by hand. Your Primary and Secondary picks are kept.",
+  confirmLabel: "Save & regenerate areas",
+  cancelLabel: "Cancel",
+  variant: "default",
+}
+
+const REGENERATE_ALL_CONSENT: ConsentCopy = {
+  title: "Start over from the questionnaire?",
+  description:
+    "This rebuilds the strategic brief AND the areas of focus from your original answers. " +
+    "Everything currently on screen is discarded — refinements, manual edits, and your " +
+    "Primary/Secondary selection, which you'll need to make again.",
+  confirmLabel: "Discard & regenerate",
+  cancelLabel: "Keep what I have",
+  variant: "destructive",
+}
+
+const realignAreasInstruction = (brief: string) =>
+  "The strategic brief has been rewritten. Update every area of focus so it reflects the " +
+  "brief below — reword, replace or drop whatever no longer fits, and keep the same number " +
+  "of areas in the same order where they still hold.\n\nUPDATED STRATEGIC BRIEF:\n" +
+  brief
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 2: Review brief
@@ -63,12 +112,6 @@ interface ReviewResult {
 type Phase = "idle" | "loading" | "result" | "soft" | "error"
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "blocked"
-
-const LOADING_STEPS = [
-  "Reading inputs",
-  "Shaping objective & narrative",
-  "Proposing areas of focus",
-] as const
 
 export default function ReviewBriefPage({
   params,
@@ -110,6 +153,7 @@ export default function ReviewBriefPage({
         return
       }
       setResult({ brief: data.strategic_brief, areas: data.areas_of_focus ?? [] })
+      setBriefDirty(false) // whatever was typed is gone with the old brief
       setPhase("result")
     } catch (err) {
       if (seq !== runSeq.current) return
@@ -145,8 +189,11 @@ export default function ReviewBriefPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleLoading])
 
-  const handleRegenerate = () => {
+  // Asked only from the result screen — in the error/soft states this button is
+  // "Try again" and there is nothing on screen to lose.
+  const handleRegenerate = async () => {
     if (!answersRef.current) return
+    if (phase === "result" && !(await askConsent(REGENERATE_ALL_CONSENT))) return
     runGenerate(answersRef.current)
   }
 
@@ -157,6 +204,9 @@ export default function ReviewBriefPage({
   // Brief view mode: rendered markdown by default (bullets/formatting show
   // styled), or a raw textarea for editing. The stored value stays plain text.
   const [briefEditing, setBriefEditing] = useState(false)
+  // Unsent typing in the brief textarea. Cleared wherever the brief is written
+  // to the server or replaced by it (save, refine, regenerate).
+  const [briefDirty, setBriefDirty] = useState(false)
   const [briefRefineOpen, setBriefRefineOpen] = useState(false)
   const [briefRefining, setBriefRefining] = useState(false)
   const [themesRefining, setThemesRefining] = useState(false)
@@ -173,26 +223,59 @@ export default function ReviewBriefPage({
     }
   }
 
-  const refineBriefWith = async (instruction: string): Promise<boolean> => {
-    if (!result || briefRefining) return false
+  // Returns the refined brief so the caller can feed it straight into the areas
+  // regeneration; null on failure.
+  const refineBriefWith = async (instruction: string): Promise<string | null> => {
+    if (!result || briefRefining) return null
     cancelPendingSave() // refine persists authoritatively — drop any stale save
     setBriefRefining(true)
     try {
       const data = await pmApi.refineBrief(id, { strategic_brief: result.brief, instruction })
       const refined = data.strategic_brief ?? ""
-      if (refined.trim() === result.brief.trim()) {
-        toast.info("No changes were applied.")
-      }
+      const changed = refined.trim() !== result.brief.trim()
+      if (!changed) toast.info("No changes were applied.")
       setResult((prev) => (prev ? { ...prev, brief: refined } : prev))
+      // The endpoint persists the brief itself, so this isn't "unsaved" in the
+      // usual sense — it marks that the brief has moved on from the one the
+      // areas of focus were built from, which is what Save resolves.
+      if (changed) setBriefDirty(true)
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] }) // already saved
-      return true
+      return refined
     } catch (err) {
       toast.error((err as { message?: string })?.message || "Couldn't refine the brief.")
-      return false
+      return null
     } finally {
       setBriefRefining(false)
     }
   }
+
+  // ── Consent gate ─────────────────────────────────────────────────────────
+  // Refining the brief also rewrites the areas of focus, which throws away any
+  // wording the PM has already edited by hand — so it's asked for up front. The
+  // resolver is held while the dialog is open, which keeps the assistant's
+  // submit awaiting: cancelling leaves the typed instruction in the box.
+  const [consent, setConsent] = useState<ConsentCopy | null>(null)
+  const consentResolve = useRef<((ok: boolean) => void) | null>(null)
+
+  const askConsent = (copy: ConsentCopy) =>
+    new Promise<boolean>((resolve) => {
+      consentResolve.current = resolve
+      setConsent(copy)
+    })
+
+  const answerConsent = (ok: boolean) => {
+    setConsent(null)
+    consentResolve.current?.(ok)
+    consentResolve.current = null
+  }
+
+  // Refining only drops the new text into the brief box. It does NOT touch the
+  // areas of focus — the PM reads the result, keeps editing if they want, and
+  // Save is the single point where the areas are brought back in line.
+  const [rewritingAreas, setRewritingAreas] = useState(false)
+
+  const submitBriefRefine = async (instruction: string) =>
+    (await refineBriefWith(instruction)) !== null
 
   // `areaIndex` scopes the instruction to a single area (the per-card "Refine
   // with AI"). The endpoint only accepts the WHOLE list — sending just one area
@@ -236,33 +319,14 @@ export default function ReviewBriefPage({
     }
   }
 
-  // Decorative-only step cycling while the request is in flight.
-  const [loadingStep, setLoadingStep] = useState(0)
-  // The backend recently dropped its output-length cap, so generation can now
-  // legitimately run well past "typical" — surface a reassurance message
-  // instead of letting a slow-but-healthy request look frozen.
-  const [takingLong, setTakingLong] = useState(false)
-  useEffect(() => {
-    if (phase !== "loading") {
-      setLoadingStep(0)
-      setTakingLong(false)
-      return
-    }
-    const stepTimer = setInterval(() => {
-      setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1))
-    }, 2200)
-    const longTimer = setTimeout(() => setTakingLong(true), 20_000)
-    return () => {
-      clearInterval(stepTimer)
-      clearTimeout(longTimer)
-    }
-  }, [phase])
-
   // ── Persisting manual edits (PUT save-brief-and-areas-of-focus) ──────────
-  // Debounce continuous typing (brief text, slogans); save discrete actions
-  // (add/delete area, sub-slogan chip, role change) immediately. We keep local
-  // state as the source of truth and don't overwrite it from the response
-  // (which just echoes what we sent) to avoid clobbering an in-progress edit.
+  // Areas of focus autosave: debounced for continuous typing (slogans),
+  // immediate for discrete actions (add/delete area, sub-slogan chip, role).
+  // The BRIEF deliberately does not — it saves on an explicit button, because
+  // saving it also offers to rewrite the areas, and that question can't be
+  // asked mid-keystroke. We keep local state as the source of truth and don't
+  // overwrite it from the response (which just echoes what we sent) to avoid
+  // clobbering an in-progress edit.
   useEffect(() => () => cancelPendingSave(), [])
 
   const runSave = async (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
@@ -291,9 +355,26 @@ export default function ReviewBriefPage({
     }, 800)
   }
 
+  // Typing is local only — nothing reaches the server until Save.
   const updateBrief = (value: string) => {
     setResult((prev) => (prev ? { ...prev, brief: value } : prev))
-    saveDebounced({ strategic_brief: value })
+    setBriefDirty(true)
+  }
+
+  const saveBriefEdit = async () => {
+    if (!result || !briefDirty || saveState === "saving") return
+    const brief = result.brief
+    // Cancel backs out of the whole thing — the edit stays in the box, unsaved.
+    if (!(await askConsent(SAVE_BRIEF_CONSENT))) return
+    setRewritingAreas(true)
+    try {
+      await runSave({ strategic_brief: brief })
+      setBriefDirty(false)
+      setBriefEditing(false)
+      await refineAreasWith(realignAreasInstruction(brief))
+    } finally {
+      setRewritingAreas(false)
+    }
   }
 
   // The server rejects a half-made choice with a 422, so a save is only fired
@@ -392,6 +473,11 @@ export default function ReviewBriefPage({
 
   const goToConceptMessages = async () => {
     if (!areaSelectionValid || buildingConcepts) return
+    // The brief no longer autosaves, so leaving with unsent text would drop it.
+    if (briefDirty) {
+      toast.error("Save your brief changes before continuing.")
+      return
+    }
     setBuildingConcepts(true)
     const next = `/pm/cycles/${id}/kickoff/concept`
     try {
@@ -454,54 +540,6 @@ export default function ReviewBriefPage({
 
         {/* ── Stepper ── */}
         <KickoffStepper current={2} />
-
-        {/* ── Loading ── */}
-        {phase === "loading" && (
-          <div className="flex flex-col items-center gap-6 rounded-2xl border bg-card px-8 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100">
-              <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
-            </div>
-            <div>
-              <p className="text-lg font-semibold text-foreground">Generating your strategic brief…</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {takingLong
-                  ? "Still working — longer briefs can take a little while."
-                  : "This usually takes under a minute."}
-              </p>
-            </div>
-            <div className="w-full max-w-xs space-y-3 text-left">
-              {LOADING_STEPS.map((step, i) => {
-                const done = i < loadingStep
-                const active = i === loadingStep
-                return (
-                  <div key={step} className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-                        done
-                          ? "bg-green-100 text-green-700"
-                          : active
-                            ? "bg-indigo-100 text-indigo-600"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {done ? (
-                        <Check className="h-3 w-3" />
-                      ) : active ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                      )}
-                    </span>
-                    <span className={cn("text-sm", done || active ? "text-foreground" : "text-muted-foreground")}>
-                      {step}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
 
         {/* ── Hard error (403 / 404 / network) ── */}
         {phase === "error" && (
@@ -582,6 +620,26 @@ export default function ReviewBriefPage({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {briefDirty && (
+                    <span className="text-xs font-medium text-amber-600">Unsaved</span>
+                  )}
+                  {/* Only while there's something to save — an always-visible
+                      disabled Save reads as "broken" more than as "nothing to do". */}
+                  {briefDirty && (
+                    <Button
+                      size="sm"
+                      onClick={saveBriefEdit}
+                      disabled={saveState === "saving"}
+                      className="bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      {saveState === "saving" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Save
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -622,7 +680,7 @@ export default function ReviewBriefPage({
                 <RefinePanel
                   chips={BRIEF_CHIPS}
                   loading={briefRefining}
-                  onSubmit={refineBriefWith}
+                  onSubmit={submitBriefRefine}
                   placeholder="e.g. make it more concise, strengthen ESG, add a growth angle…"
                 />
               )}
@@ -753,6 +811,29 @@ export default function ReviewBriefPage({
           </div>
         </div>
       </div>
+
+      {/* One dialog for all three destructive paths — refine, manual edit, and
+          full regeneration — with the copy carried by whoever asked. */}
+      <ConfirmDialog
+        open={consent !== null}
+        onOpenChange={(open) => {
+          if (!open) answerConsent(false)
+        }}
+        title={consent?.title ?? ""}
+        description={consent?.description ?? ""}
+        confirmLabel={consent?.confirmLabel ?? "Confirm"}
+        cancelLabel={consent?.cancelLabel ?? "Cancel"}
+        variant={consent?.variant ?? "default"}
+        onConfirm={() => answerConsent(true)}
+      />
+
+      {/* Full-screen loader for the initial generation — it writes the brief and
+          the first areas of focus in one call. */}
+      {phase === "loading" && <KickoffBuildLoader {...BRIEF_LOADER} />}
+
+      {/* Full-screen loader while the areas are rewritten against a changed
+          brief — same treatment as the other multi-call AI passes. */}
+      {rewritingAreas && <KickoffBuildLoader {...AREAS_REFRESH_LOADER} />}
 
       {/* Full-screen loader while the concept messages are written. Stays up
           through the navigation so Step 3 doesn't flash an empty state. */}

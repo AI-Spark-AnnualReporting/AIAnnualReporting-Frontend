@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Eye, Pencil, Sparkles, Star, X } from "lucide-react"
+import { Eye, Pencil, Sparkles, Star, Target, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,18 +11,23 @@ import { cn } from "@/lib/utils"
 
 /**
  * A concept message: the brand copy behind one area of focus. Title and
- * description are the PM's to edit; the message carries nothing else, so the
- * primary one is simply whichever sits first in the list.
+ * description are the PM's to edit; `areaSlogan` names the area it came from and
+ * is display-only.
  *
- * The description is first-person marketing copy, up to a couple of paragraphs
- * split by a blank line — so it gets the Strategic Brief's Edit/Preview
+ * The description is first-person marketing copy — three paragraphs of 100–120
+ * words split by blank lines — so it gets the Strategic Brief's Edit/Preview
  * treatment (textarea in, rendered paragraphs out) rather than ThemeChipCard's
- * short chips.
+ * short chips. Never render it as one block: it's ~350 words.
+ *
+ * The title is written by the agent FROM the copy (a two-word phrase), so it no
+ * longer echoes the area's slogan — `areaSlogan` is the only link back to the
+ * area, never a title match.
  */
 export function ConceptMessageCard({
   index,
   title,
   description,
+  areaSlogan,
   isPrimary,
   primaryGroup,
   isRtl,
@@ -37,6 +42,9 @@ export function ConceptMessageCard({
   title: string
   /** First-person brand copy; may hold two paragraphs split by a blank line. */
   description: string
+  /** Slogan of the area this message was written from. Read-only, and absent on
+   *  hand-added messages — the row is simply dropped then. */
+  areaSlogan?: string
   /** True for the message at the top of the list. A concept message carries no
    *  role of its own, so position is what marks the primary one. */
   isPrimary: boolean
@@ -73,6 +81,23 @@ export function ConceptMessageCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
+              {/* Sits ABOVE the title: the title is written from the copy and no
+                  longer echoes the slogan, so this is what tells the PM which
+                  area they're reading before they read anything else. */}
+              {areaSlogan?.trim() && (
+                <p
+                  dir={isRtl ? "rtl" : "ltr"}
+                  className={cn(
+                    "mb-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+                    isRtl && "flex-row-reverse text-right",
+                  )}
+                >
+                  <Target className="h-3 w-3 shrink-0" />
+                  <span className="truncate" title={areaSlogan}>
+                    <span className="font-medium">Area of focus:</span> {areaSlogan}
+                  </span>
+                </p>
+              )}
               {/* Title follows the Edit toggle: a heading while previewing, a
                   real bordered field once editing. A borderless always-on input
                   looked like static text, so nobody knew it could be changed. */}
@@ -188,7 +213,9 @@ export function ConceptMessageCard({
                 onChange={(e) => onDescriptionChange(e.target.value)}
                 disabled={disabled}
                 placeholder="Brand copy in the company's voice — leave a blank line between paragraphs."
-                rows={8}
+                // Generated copy is three paragraphs of 100–120 words; 8 rows
+                // turned that into a scroll-to-read box.
+                rows={16}
                 dir={isRtl ? "rtl" : "ltr"}
                 className="bg-white text-sm leading-relaxed"
               />

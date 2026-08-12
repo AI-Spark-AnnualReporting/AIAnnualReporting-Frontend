@@ -23,15 +23,16 @@ import {
    STRATEGIC BRIEF — Step 3: Concept messages
 
    One message per area of focus, written by the concept-message agent.
-   A message is `title` + `description` — first-person brand copy, often two
-   paragraphs split by a blank line — plus an optional `role`.
+   A message is `title` (two words, written FROM the copy — no longer the area's
+   slogan) + `description` (three paragraphs of 100–120 words split by blank
+   lines), plus an optional `role` and the `area_slogan` it was written from
+   (shown on the card, never edited here).
 
    Picking a primary writes BOTH markers: the message is tagged
-   `role: "primary"` (siblings "secondary") and moved to the top. The tag is
-   what should matter, but the backend doesn't return `role` yet and ignores it
-   on save (BaseSchema permits extra fields), so ordering carries the choice in
-   the meantime. Reading prefers the tag and falls back to position, which means
-   this screen needs no change when the field ships.
+   `role: "primary"` (siblings "secondary") and moved to the top. Reading
+   prefers the tag and falls back to position, so messages stored before `role`
+   existed still resolve. Every mutation spreads the message rather than
+   rebuilding it, which is what keeps `area_slogan` alive through a save.
 
    Endpoint contract worth remembering:
      - GET  concept-messages          → whatever is stored; empty = not generated
@@ -426,6 +427,7 @@ export default function ConceptMessagesPage({
                   index={i}
                   title={m.title}
                   description={m.description}
+                  areaSlogan={m.area_slogan}
                   isPrimary={i === primaryIndex}
                   primaryGroup="concept-message-primary"
                   disabled={!!busy}

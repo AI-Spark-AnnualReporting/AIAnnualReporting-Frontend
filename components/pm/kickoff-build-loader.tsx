@@ -67,6 +67,47 @@ export const CONCEPT_MESSAGE_LOADER = {
   ],
 } as const
 
+/** Copy for the initial generate-brief call, which returns BOTH the strategic
+ *  brief and the first set of areas of focus. */
+export const BRIEF_LOADER = {
+  title: "Generating your strategic brief",
+  subtitle: "And the first set of areas of focus to go with it.",
+  stages: [
+    "Reading your answers…",
+    "Reading your supporting document…",
+    "Shaping the objective & narrative…",
+    "Writing the strategic brief…",
+    "Proposing areas of focus…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "This one step writes the brief and proposes your areas of focus together.",
+    "Everything here is a draft — you can edit or refine all of it afterwards.",
+    "Attaching an existing brief on the previous step steers the draft closer to it.",
+    "Regenerating later starts over from your questionnaire answers, not from this draft.",
+  ],
+} as const
+
+/** Copy for the areas-of-focus rewrite that follows a brief change. */
+export const AREAS_REFRESH_LOADER = {
+  title: "Updating your areas of focus",
+  subtitle: "Rewriting them to match your revised strategic brief.",
+  stages: [
+    "Reading the revised brief…",
+    "Checking each area against it…",
+    "Reworking the slogans…",
+    "Refreshing the sub-slogans…",
+    "Tightening the wording…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "Areas of focus are drawn from the brief — a change to one reshapes the other.",
+    "Your Primary and Secondary picks survive the rewrite.",
+    "Every slogan and sub-slogan stays editable afterwards.",
+    "Prefer a smaller change? Refine a single area from its own card instead.",
+  ],
+} as const
+
 export function KickoffBuildLoader({
   title = "Generating your questions",
   subtitle = "Sit tight while we craft a tailored question set for every department.",

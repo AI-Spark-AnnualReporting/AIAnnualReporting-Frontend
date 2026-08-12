@@ -26,8 +26,11 @@ const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
    Questions come live from GET /pm/cycles/{id}/survey-questions (see
    useSurveyQuestions + pmApi.getSurveyQuestions). Nothing here is hardcoded:
    - `total` drives the "X of {total} answered" counter.
-   - `options: string[]` → chip-select; the LAST option is always "Other" and
-     reveals a free-text box when picked.
+   - `options: string[]` → chip-select. Render ALL of them; the API never
+     appends an "Other" entry, so slicing the array drops a real answer. The
+     "Other…" box is ours, drawn alongside. Options that read as full sentences
+     switch that row to stacked full-width checkbox rows (see isLongForm) —
+     the layout follows the CONTENT, never the question id.
    - `options: null` → plain free-text box, no chips.
    - Order is stable per cycle, so questions are safely indexed by position.
 
@@ -50,9 +53,15 @@ interface Answer {
 
 const emptyAnswer: Answer = { selected: [], custom: [], text: "" }
 
-/** The trailing option in a chip-mode question is always the "Other" escape hatch. */
-const otherLabelOf = (q: SurveyQuestion) =>
-  q.options && q.options.length > 0 ? q.options[q.options.length - 1] : null
+/** Sentence-length options shred an inline pill row once they wrap, so they get
+ *  stacked full-width checkbox rows instead. Driven off the option text, so any
+ *  question — template or generated — picks the layout that fits its content. */
+const isLongForm = (q: SurveyQuestion) => (q.options ?? []).some((o) => o.length > 40)
+
+/** Every string in `options` is a real answer — the API never appends an "Other"
+ *  entry (the generator prompt explicitly forbids it). The "Other…" box below the
+ *  options is ours, a UI affordance, so nothing here may be sliced off. */
+const hasOptions = (q: SurveyQuestion) => !!q.options && q.options.length > 0
 
 function isAnswered(a: Answer | undefined) {
   if (!a) return false
@@ -377,8 +386,8 @@ export default function KickoffQuestionnairePage({
                 const a = answers[i] ?? emptyAnswer
                 const isRejected = !!rejected[i]
                 const answered = !isRejected && isAnswered(a)
-                const otherLabel = otherLabelOf(q)
-                const presets = (q.options ?? []).slice(0, -1)
+                const presets = q.options ?? []
+                const longForm = isLongForm(q)
 
                 return (
                   <div
@@ -444,22 +453,44 @@ export default function KickoffQuestionnairePage({
 
                     {/* Chip-select (with inline "Other…" box) or plain free-text.
                         Hidden entirely once rejected — nothing left to answer. */}
-                    {isRejected ? null : otherLabel !== null ? (
-                      <div className="mt-4 flex flex-wrap gap-2 pl-9">
+                    {isRejected ? null : hasOptions(q) ? (
+                      <div
+                        className={cn(
+                          "mt-4 flex gap-2 pl-9",
+                          longForm ? "flex-col items-stretch" : "flex-wrap",
+                        )}
+                      >
                         {presets.map((opt, optIdx) => {
                           const selected = a.selected.includes(opt)
                           return (
                             <button
                               key={optIdx}
                               type="button"
+                              aria-pressed={selected}
                               onClick={() => toggleChip(i, opt)}
                               className={cn(
-                                "rounded-full border px-3.5 py-2 text-sm font-medium transition-colors",
+                                "border text-sm font-medium transition-colors",
+                                longForm
+                                  ? "flex w-full items-start gap-2.5 rounded-xl px-3.5 py-2.5 text-left"
+                                  : "rounded-full px-3.5 py-2",
                                 selected
                                   ? "border-indigo-400 bg-indigo-50 text-indigo-700"
                                   : "border-border bg-background text-foreground hover:border-indigo-300 hover:bg-accent",
                               )}
                             >
+                              {longForm && (
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                                    selected
+                                      ? "border-indigo-500 bg-indigo-600 text-white"
+                                      : "border-muted-foreground/40 bg-background",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </span>
+                              )}
                               {opt}
                             </button>
                           )

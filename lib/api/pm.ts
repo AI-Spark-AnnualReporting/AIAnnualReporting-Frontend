@@ -75,9 +75,18 @@ export interface PreviousManualSectionsResponse {
 // GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
 // Strategic Brief wizard. Order is stable per cycle (safe to index by
 // position for a stepper). `options: null` means a plain free-text question;
-// `options: string[]` means chip-select, and the LAST string is always the
-// "Other" escape hatch that reveals a free-text box. `source` is informational
-// only (template vs AI-generated) — don't group or branch on it.
+// `options: string[]` (up to 6) means chip-select. EVERY string is a real answer
+// to render — the generator prompt forbids an "Other" entry and never appended
+// one, so nothing may be sliced off the array. The "Other…" box under the options
+// is a frontend affordance, not an API value. `source` is informational only
+// (template vs AI-generated) — don't group or branch on it.
+//
+// COUNT AND SHAPE ARE NOT FIXED. Current cycles return 12 questions (9 template
+// + 3 generated, server-shuffled), older ones return 10 — never hardcode either.
+// Nothing may branch on the `t*`/`g*` id: whether a question is free text is
+// `options` being null/empty, and whether it renders as pills or stacked rows is
+// the length of its option strings. t7 used to carry options and now doesn't;
+// t3/t4 options are now full sentences. Both must keep rendering on old cycles.
 export interface SurveyQuestion {
   id: string
   text: string
@@ -199,10 +208,11 @@ export interface RefineAreasOfFocusResponse {
   areas_of_focus: AreaOfFocus[]
 }
 // Concept messages — one per area of focus, the brand copy behind each slogan.
-// Just the two fields: there is no role, and no `area_slogan` linking a message
-// back to the area it came from. ORDER is therefore the only thing that carries
-// which message leads — generation returns them primary-area-first — and order
-// survives because every write sends the whole list.
+// `area_slogan` names the area a message was written from, and `role` marks the
+// one that leads. Both are optional: messages stored before those fields shipped
+// don't carry them, and a message the PM adds by hand has no area at all. Order
+// still backs up `role` (generation returns them primary-area-first) and survives
+// because every write sends the whole list.
 //
 // Every endpoint returns the WHOLE list and every write takes the WHOLE list —
 // a partial array overwrites what's stored. generate and refine SAVE their
@@ -213,18 +223,28 @@ export interface RefineAreasOfFocusResponse {
 export type ConceptRole = "primary" | "secondary"
 
 export interface ConceptMessage {
+  /** A two-word phrase the agent reads off the copy it just wrote — NOT the
+   *  area's slogan, which it used to be. Never match it against the areas list;
+   *  `area_slogan` is the link. */
   title: string
-  /** First-person brand copy, not an explanation. May hold two paragraphs
-   *  separated by a blank line — render it as prose, edit it in a textarea. */
+  /** First-person brand copy, not an explanation: three paragraphs of 100–120
+   *  words separated by blank lines. Split on \n\n and render as separate <p>s
+   *  — as one block it's a ~350-word wall. Edit it in a textarea. */
   description: string
   /**
-   * Exactly one message per cycle is "primary". OPTIONAL because the backend
-   * doesn't return it yet — until it does, position stands in (first = primary)
-   * and anything we send here is ignored server-side rather than rejected
-   * (BaseSchema doesn't forbid extra fields). Read it when present, fall back
-   * to position when absent; see primaryIndexOf on the concept-messages screen.
+   * Exactly one message per cycle is "primary". OPTIONAL — messages written
+   * before the field shipped don't carry it, so read it when present and fall
+   * back to position when absent; see primaryIndexOf on the concept-messages
+   * screen. Position is still written alongside it on every save.
    */
   role?: ConceptRole
+  /**
+   * The slogan of the area of focus this message was written from. Read-only
+   * label — editing it here changes nothing, the areas own their slogans.
+   * Absent on messages the PM adds by hand and on pre-existing ones. Preserve
+   * it on writes (spread the message) or the link back to the area is lost.
+   */
+  area_slogan?: string
 }
 
 export interface ConceptMessagesResponse {
