@@ -20,8 +20,8 @@ import {
   CheckCircle2, Clock, Sparkles, Info, ChevronDown, CircleSlash,
 } from "lucide-react"
 import Link from "next/link"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { ProsePreview } from "@/components/ui/prose-preview"
+import { QuestionText } from "@/components/ui/question-text"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -304,7 +304,9 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                         {idx + 1}
                       </span>
-                      <p className="flex-1 font-medium text-sm leading-relaxed">{q.question}</p>
+                      <p className="flex-1 font-medium text-sm leading-relaxed">
+                        <QuestionText text={q.question} />
+                      </p>
                       {/* Answer status pill */}
                       {na ? (
                         <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
@@ -338,9 +340,10 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                             </span>
                           </div>
                         ) : hasAnswer ? (
-                          <div className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed whitespace-pre-wrap">
-                            {answerText}
-                          </div>
+                          <ProsePreview
+                            content={answerText}
+                            className="ml-9 rounded-md bg-muted/40 p-4 text-sm leading-relaxed"
+                          />
                         ) : (
                           <div className="ml-9 flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-4 py-3 text-sm italic text-muted-foreground">
                             <CircleSlash className="h-4 w-4 shrink-0" />
@@ -360,17 +363,14 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
       {/* ── Draft tab ── */}
       {activeTab === "draft" && (
         <div className="rounded-lg border bg-card p-6">
-          {(session.final_submission || session.ai_generated_draft) ? (() => {
-            const content = session.final_submission || session.ai_generated_draft || ""
-            const html = /<[a-z][\s\S]*>/i.test(content.trim().substring(0, 200))
-            return html ? (
-              <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: content }} />
-            ) : (
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-              </div>
-            )
-          })() : (
+          {(session.final_submission || session.ai_generated_draft) ? (
+            // Shared renderer: sanitizes HTML, repairs pipe tables missing their
+            // delimiter row, and demotes headings so a draft's "#" can't out-size
+            // the page. Replaced a local copy that did none of those.
+            <ProsePreview
+              content={session.final_submission || session.ai_generated_draft || ""}
+            />
+          ) : (
             <EmptyState
               icon={FileText}
               title="No draft yet"

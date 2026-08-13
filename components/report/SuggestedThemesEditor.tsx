@@ -31,7 +31,7 @@ function serialize(list: SuggestedTheme[]) {
  * Editable + AI-refinable + selectable list of the cycle's `suggested_themes`
  * ({title, keywords[], selected}). Mirrors the Strategic Brief page's themes
  * mechanics: manual edits auto-save (debounced typing, immediate add/remove) via
- * `save-brief-and-themes`; each card's per-theme "Refine with AI" calls
+ * `save-brief-and-areas-of-focus`; each card's per-theme "Refine with AI" calls
  * `suggested-themes/refine` scoped to that one theme (already persisted
  * server-side). The selection checkbox toggles `selected` and persists
  * immediately — the backend injects only checked themes into the prompt.
@@ -77,7 +77,7 @@ export function SuggestedThemesEditor({
   const runSave = async (next: SuggestedTheme[]) => {
     setSaveState("saving")
     try {
-      await pmApi.saveBriefAndThemes(cycleId, { suggested_themes: next })
+      await pmApi.saveBriefAndAreas(cycleId, { suggested_themes: next })
       setSaveState("saved")
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
     } catch (err) {

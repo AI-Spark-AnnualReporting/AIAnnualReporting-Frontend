@@ -20,7 +20,7 @@ import { Loader2 } from "lucide-react"
 // Pipeline stages, cycled as the simulated progress climbs. These mirror the
 // kickoff question-generation flow: brief → themes → per-department → drafting →
 // polishing → QA.
-const STAGES = [
+const KICKOFF_STAGES = [
   "Reading your strategic brief…",
   "Identifying key themes & KPIs…",
   "Mapping each department's angle…",
@@ -40,14 +40,84 @@ const WORKING_WORDS = [
 ]
 
 // Rotating "Did you know?" facts shown in the footer card.
-const TIPS = [
+const KICKOFF_TIPS = [
   "Your agents use GRI, IFRS, and SAMA frameworks to generate questions tailored to your sector.",
   "Every department gets its own tailored question set — never copy-pasted.",
   "Naming specific KPIs in your brief helps the AI ask measurable questions.",
   "You can review and edit every question once they're generated.",
 ]
 
-export function KickoffBuildLoader() {
+/** Copy for the concept-message pass — same loader, different narration. */
+export const CONCEPT_MESSAGE_LOADER = {
+  title: "Writing your concept messages",
+  subtitle: "One message per area of focus, in your report's voice.",
+  stages: [
+    "Reading your areas of focus…",
+    "Weighing the primary slogan…",
+    "Shaping each concept…",
+    "Writing the brand copy…",
+    "Tightening the language…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "Each concept message is brand copy written in your company's own voice.",
+    "Your primary area leads — its message is written first and shown at the top.",
+    "Areas you left unmarked don't get a message at all.",
+    "Every title and description is editable once they're written.",
+  ],
+} as const
+
+/** Copy for the initial generate-brief call, which returns BOTH the strategic
+ *  brief and the first set of areas of focus. */
+export const BRIEF_LOADER = {
+  title: "Generating your strategic brief",
+  subtitle: "And the first set of areas of focus to go with it.",
+  stages: [
+    "Reading your answers…",
+    "Reading your supporting document…",
+    "Shaping the objective & narrative…",
+    "Writing the strategic brief…",
+    "Proposing areas of focus…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "This one step writes the brief and proposes your areas of focus together.",
+    "Everything here is a draft — you can edit or refine all of it afterwards.",
+    "Attaching an existing brief on the previous step steers the draft closer to it.",
+    "Regenerating later starts over from your questionnaire answers, not from this draft.",
+  ],
+} as const
+
+/** Copy for the areas-of-focus rewrite that follows a brief change. */
+export const AREAS_REFRESH_LOADER = {
+  title: "Updating your areas of focus",
+  subtitle: "Rewriting them to match your revised strategic brief.",
+  stages: [
+    "Reading the revised brief…",
+    "Checking each area against it…",
+    "Reworking the slogans…",
+    "Tightening the wording…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "Areas of focus are drawn from the brief — a change to one reshapes the other.",
+    "Your Primary and Secondary picks survive the rewrite.",
+    "Every slogan stays editable afterwards.",
+    "Prefer a smaller change? Refine a single area from its own card instead.",
+  ],
+} as const
+
+export function KickoffBuildLoader({
+  title = "Generating your questions",
+  subtitle = "Sit tight while we craft a tailored question set for every department.",
+  stages = KICKOFF_STAGES,
+  tips = KICKOFF_TIPS,
+}: {
+  title?: string
+  subtitle?: string
+  stages?: readonly string[]
+  tips?: readonly string[]
+} = {}) {
   const [mounted, setMounted] = useState(false)
   const [progress, setProgress] = useState(8)
   const [wordIdx, setWordIdx] = useState(0)
@@ -75,14 +145,14 @@ export function KickoffBuildLoader() {
     return () => clearInterval(id)
   }, [])
   useEffect(() => {
-    const id = setInterval(() => setTipIdx((i) => (i + 1) % TIPS.length), 6500)
+    const id = setInterval(() => setTipIdx((i) => (i + 1) % tips.length), 6500)
     return () => clearInterval(id)
-  }, [])
+  }, [tips.length])
 
   if (!mounted) return null
 
   const pct = Math.round(progress)
-  const stageIdx = Math.min(STAGES.length - 1, Math.floor(progress / (100 / STAGES.length)))
+  const stageIdx = Math.min(stages.length - 1, Math.floor(progress / (100 / stages.length)))
 
   return createPortal(
     <div
@@ -120,12 +190,8 @@ export function KickoffBuildLoader() {
         </div>
 
         {/* heading + subtitle */}
-        <h2 className="mt-5 text-xl font-bold text-indigo-700">
-          Generating your questions
-        </h2>
-        <p className="mt-1 text-xs text-slate-400">
-          Sit tight while we craft a tailored question set for every department.
-        </p>
+        <h2 className="mt-5 text-xl font-bold text-indigo-700">{title}</h2>
+        <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
 
         {/* current stage */}
         <p
@@ -133,7 +199,7 @@ export function KickoffBuildLoader() {
           className="mt-6 text-sm font-semibold text-slate-800"
           style={{ animation: "kbl-fade 0.4s ease-out" }}
         >
-          {STAGES[stageIdx]}
+          {stages[stageIdx]}
         </p>
 
         {/* playful working word */}
@@ -165,7 +231,7 @@ export function KickoffBuildLoader() {
             style={{ animation: "kbl-fade 0.4s ease-out" }}
           >
             <span className="font-semibold text-slate-700">Did you know?</span>{" "}
-            {TIPS[tipIdx]}
+            {tips[tipIdx]}
           </p>
         </div>
       </div>

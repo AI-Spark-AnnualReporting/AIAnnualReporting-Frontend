@@ -16,6 +16,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
 import type { AssignableUser, HODQuestion } from "@/lib/api/hod"
+import { QuestionTag } from "@/components/ui/question-text"
+import { QUESTION_PLACEHOLDER, TOPIC_PLACEHOLDER, joinQuestion, splitQuestion } from "@/lib/questionText"
 import {
   ArrowLeft, Check, X, Pencil, Trash2, Plus, RotateCcw, Undo2,
   Loader2, Send, Clock, CheckCircle2,
@@ -46,9 +48,12 @@ export default function HODCuratePage() {
     prevWriting.current = writing
   }, [writing, id, qc])
 
+  // Topic and question are typed apart and stored joined ("Topic — question").
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTopic, setEditTopic] = useState("")
   const [editText, setEditText] = useState("")
   const [adding, setAdding] = useState(false)
+  const [newTopic, setNewTopic] = useState("")
   const [newText, setNewText] = useState("")
   const [assignOpen, setAssignOpen] = useState(false)
 
@@ -82,16 +87,22 @@ export default function HODCuratePage() {
   const setStatus = (questionId: string, review_status: "pending" | "approved" | "rejected") =>
     review.mutate({ questionId, body: { review_status } })
 
-  const startEdit = (q: HODQuestion) => { setEditingId(q.question_id); setEditText(q.question) }
+  const startEdit = (q: HODQuestion) => {
+    const { topic, question } = splitQuestion(q.question)
+    setEditingId(q.question_id)
+    setEditTopic(topic ?? "")
+    setEditText(question)
+  }
   const saveEdit = (questionId: string) => {
-    const text = editText.trim()
-    if (!text) return
+    const text = joinQuestion(editTopic, editText)
+    if (!editText.trim()) return
     setEditingId(null) // close immediately; the optimistic update shows the new text
     review.mutate({ questionId, body: { text } })
   }
   const submitAdd = () => {
-    const text = newText.trim()
-    if (!text) return
+    const text = joinQuestion(newTopic, newText)
+    if (!newText.trim()) return
+    setNewTopic("")
     setNewText("")
     setAdding(false) // close immediately; the optimistic update appends the question
     addQ.mutate(text)
@@ -152,6 +163,7 @@ export default function HODCuratePage() {
       <div className="space-y-3">
         {questions.map((q) => {
           const status = reviewOf(q)
+          const { topic, question } = splitQuestion(q.question)
           const editing = editingId === q.question_id
           const border = status === "approved" ? "border-l-emerald-400" : status === "rejected" ? "border-l-rose-400" : "border-l-amber-400"
           return (
@@ -161,14 +173,26 @@ export default function HODCuratePage() {
                   {q.order}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <StatusPill status={status} />
+                  {/* Topic tag left, review status right — the status is the
+                      thing being acted on here, so it sits at the edge. */}
+                  <div className="flex items-start justify-between gap-2">
+                    {topic ? <QuestionTag topic={topic} /> : <span />}
+                    <StatusPill status={status} />
+                  </div>
                   {editing ? (
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-2">
+                      <input
+                        value={editTopic}
+                        onChange={(e) => setEditTopic(e.target.value)}
+                        placeholder={TOPIC_PLACEHOLDER}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-[#1A1D2E] outline-none focus:border-[#4040c8] focus:ring-2 focus:ring-[#4040c8]/20"
+                      />
                       <textarea
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
                         rows={3}
                         autoFocus
+                        placeholder={QUESTION_PLACEHOLDER}
                         className="w-full resize-y rounded-lg border border-[#4040c8] p-3 text-sm text-[#1A1D2E] outline-none focus:ring-2 focus:ring-[#4040c8]/20"
                       />
                       <div className="mt-2 flex justify-end gap-2">
@@ -180,7 +204,7 @@ export default function HODCuratePage() {
                     </div>
                   ) : (
                     <p className={`mt-2 text-sm leading-relaxed ${status === "rejected" ? "text-slate-400 line-through" : "text-[#1A1D2E]"}`}>
-                      {q.question}
+                      {question}
                     </p>
                   )}
 
@@ -223,16 +247,25 @@ export default function HODCuratePage() {
         {/* Add a question */}
         {adding ? (
           <div className="rounded-2xl border border-[#4040c8] bg-white p-4">
+            <input
+              value={newTopic}
+              onChange={(e) => setNewTopic(e.target.value)}
+              autoFocus
+              placeholder={TOPIC_PLACEHOLDER}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-[#1A1D2E] outline-none focus:border-[#4040c8] focus:ring-2 focus:ring-[#4040c8]/20"
+            />
             <textarea
               value={newText}
               onChange={(e) => setNewText(e.target.value)}
               rows={3}
-              autoFocus
-              placeholder="Type the new question…"
-              className="w-full resize-y rounded-lg border border-slate-200 p-3 text-sm text-[#1A1D2E] outline-none focus:border-[#4040c8] focus:ring-2 focus:ring-[#4040c8]/20"
+              placeholder={QUESTION_PLACEHOLDER}
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 p-3 text-sm text-[#1A1D2E] outline-none focus:border-[#4040c8] focus:ring-2 focus:ring-[#4040c8]/20"
             />
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              The topic becomes the question&apos;s tag.
+            </p>
             <div className="mt-2 flex justify-end gap-2">
-              <button onClick={() => { setAdding(false); setNewText("") }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+              <button onClick={() => { setAdding(false); setNewTopic(""); setNewText("") }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
               <button onClick={submitAdd} disabled={!newText.trim()} className="rounded-lg bg-[#4040c8] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40">Add question</button>
             </div>
           </div>

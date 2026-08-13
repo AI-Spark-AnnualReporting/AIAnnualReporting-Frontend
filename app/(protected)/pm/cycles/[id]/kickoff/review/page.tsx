@@ -5,28 +5,76 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { pmApi, BriefTheme, CycleBriefFields, GenerateBriefAnswer } from "@/lib/api/pm"
+import {
+  pmApi, AreaOfFocus, AreaRole, CycleBriefFields, GenerateBriefAnswer,
+  roleSelectionSaveable, MIN_SELECTED_AREAS, MAX_SELECTED_AREAS,
+} from "@/lib/api/pm"
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { KickoffBuildLoader } from "@/components/pm/kickoff-build-loader"
-import { ThemeChipCard } from "@/components/report/ThemeChipCard"
+import { KickoffStepper } from "@/components/pm/kickoff-stepper"
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import { cn, formatDate } from "@/lib/utils"
+  KickoffBuildLoader, CONCEPT_MESSAGE_LOADER, AREAS_REFRESH_LOADER, BRIEF_LOADER,
+} from "@/components/pm/kickoff-build-loader"
+import { ThemeChipCard } from "@/components/report/ThemeChipCard"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
-  ArrowLeft, CalendarClock, Check, CheckCircle2, Eye, Layers, Loader2, Pencil, Plus, RefreshCw,
+  ArrowLeft, Check, CheckCircle2, Eye, Loader2, Megaphone, Pencil, Plus, RefreshCw,
   Send, ShieldAlert, Sparkles, Target,
 } from "lucide-react"
 
 // Quick-instruction chips — identical to typing the same text into the box.
 const BRIEF_CHIPS = ["Make it more concise", "Strengthen ESG focus", "More formal tone", "Add a growth angle"]
+
+// The areas of focus are derived from the brief, so a refined brief leaves them
+// stale. There's no "regenerate areas from the brief" endpoint — areas-of-focus/
+// refine is the one that rewrites the whole list, so the new brief is handed to
+// it in the instruction rather than relying on it to re-read the stored cycle.
+// Every action that invalidates work already on screen asks first. One dialog,
+// three sets of copy — the wording has to name what specifically gets thrown
+// away, or "are you sure?" just trains people to click through it.
+interface ConsentCopy {
+  title: string
+  description: string
+  confirmLabel: string
+  cancelLabel: string
+  variant: "default" | "destructive"
+}
+
+// Asked on Save — the one point where brief changes (typed or AI-refined) reach
+// the areas of focus. Saving and regenerating are one action: cancelling backs
+// out of both and leaves the edit sitting unsaved in the box.
+const SAVE_BRIEF_CONSENT: ConsentCopy = {
+  title: "Saving will also rewrite the areas of focus",
+  description:
+    "The areas of focus are drawn from the strategic brief, so saving your changes regenerates " +
+    "them to match — that replaces their slogans, including any you've written " +
+    "by hand. Your Primary and Secondary picks are kept.",
+  confirmLabel: "Save & regenerate areas",
+  cancelLabel: "Cancel",
+  variant: "default",
+}
+
+const REGENERATE_ALL_CONSENT: ConsentCopy = {
+  title: "Start over from the questionnaire?",
+  description:
+    "This rebuilds the strategic brief AND the areas of focus from your original answers. " +
+    "Everything currently on screen is discarded — refinements, manual edits, and your " +
+    "Primary/Secondary selection, which you'll need to make again.",
+  confirmLabel: "Discard & regenerate",
+  cancelLabel: "Keep what I have",
+  variant: "destructive",
+}
+
+const realignAreasInstruction = (brief: string) =>
+  "The strategic brief has been rewritten. Update every area of focus so it reflects the " +
+  "brief below — reword, replace or drop whatever no longer fits, and keep the same number " +
+  "of areas in the same order where they still hold.\n\nUPDATED STRATEGIC BRIEF:\n" +
+  brief
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 2: Review brief
@@ -39,7 +87,7 @@ const BRIEF_CHIPS = ["Make it more concise", "Strengthen ESG focus", "More forma
      - A fresh "Generate brief" click from Step 1 leaves a one-shot trigger in
        sessionStorage → auto-fire generation and show the loading screen.
      - Otherwise, fall back to whatever the cycle already has persisted
-       (cycle.kickoff_brief / initial_themes_and_keywords) so a reload doesn't
+       (cycle.kickoff_brief / areas_of_focus) so a reload doesn't
        re-run the AI.
      - Neither present → nothing to review; bounce back to Step 1.
 
@@ -50,7 +98,7 @@ const BRIEF_CHIPS = ["Make it more concise", "Strengthen ESG focus", "More forma
 
 interface ReviewResult {
   brief: string
-  themes: BriefTheme[]
+  areas: AreaOfFocus[]
 }
 
 // Drives the whole screen with ONE explicit value instead of a react-query
@@ -63,11 +111,7 @@ interface ReviewResult {
 //   error   → hard failure (403/404/network/timeout)
 type Phase = "idle" | "loading" | "result" | "soft" | "error"
 
-const LOADING_STEPS = [
-  "Reading inputs",
-  "Shaping objective & narrative",
-  "Proposing themes",
-] as const
+type SaveState = "idle" | "saving" | "saved" | "error" | "blocked"
 
 export default function ReviewBriefPage({
   params,
@@ -108,7 +152,8 @@ export default function ReviewBriefPage({
         setPhase("soft")
         return
       }
-      setResult({ brief: data.strategic_brief, themes: data.themes ?? [] })
+      setResult({ brief: data.strategic_brief, areas: data.areas_of_focus ?? [] })
+      setBriefDirty(false) // whatever was typed is gone with the old brief
       setPhase("result")
     } catch (err) {
       if (seq !== runSeq.current) return
@@ -134,7 +179,7 @@ export default function ReviewBriefPage({
       answersRef.current = pendingAnswers // available for Regenerate if present
       setResult({
         brief: cycle.kickoff_brief,
-        themes: cycle.initial_themes_and_keywords?.themes ?? [],
+        areas: cycle.areas_of_focus ?? [],
       })
       setPhase("result")
       return
@@ -144,8 +189,11 @@ export default function ReviewBriefPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleLoading])
 
-  const handleRegenerate = () => {
+  // Asked only from the result screen — in the error/soft states this button is
+  // "Try again" and there is nothing on screen to lose.
+  const handleRegenerate = async () => {
     if (!answersRef.current) return
+    if (phase === "result" && !(await askConsent(REGENERATE_ALL_CONSENT))) return
     runGenerate(answersRef.current)
   }
 
@@ -156,12 +204,17 @@ export default function ReviewBriefPage({
   // Brief view mode: rendered markdown by default (bullets/formatting show
   // styled), or a raw textarea for editing. The stored value stays plain text.
   const [briefEditing, setBriefEditing] = useState(false)
+  // Unsent typing in the brief textarea. Cleared wherever the brief is written
+  // to the server or replaced by it (save, refine, regenerate).
+  const [briefDirty, setBriefDirty] = useState(false)
   const [briefRefineOpen, setBriefRefineOpen] = useState(false)
   const [briefRefining, setBriefRefining] = useState(false)
   const [themesRefining, setThemesRefining] = useState(false)
 
   // Manual-edit persistence state (used by the edit handlers + refine cancel).
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  // "blocked" = edits are held locally because the areas-of-focus selection is
+  // half-made and the server would 422 it.
+  const [saveState, setSaveState] = useState<SaveState>("idle")
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelPendingSave = () => {
     if (saveTimer.current) {
@@ -170,89 +223,116 @@ export default function ReviewBriefPage({
     }
   }
 
-  const refineBriefWith = async (instruction: string): Promise<boolean> => {
-    if (!result || briefRefining) return false
+  // Returns the refined brief so the caller can feed it straight into the areas
+  // regeneration; null on failure.
+  const refineBriefWith = async (instruction: string): Promise<string | null> => {
+    if (!result || briefRefining) return null
     cancelPendingSave() // refine persists authoritatively — drop any stale save
     setBriefRefining(true)
     try {
       const data = await pmApi.refineBrief(id, { strategic_brief: result.brief, instruction })
       const refined = data.strategic_brief ?? ""
-      if (refined.trim() === result.brief.trim()) {
-        toast.info("No changes were applied.")
-      }
+      const changed = refined.trim() !== result.brief.trim()
+      if (!changed) toast.info("No changes were applied.")
       setResult((prev) => (prev ? { ...prev, brief: refined } : prev))
+      // The endpoint persists the brief itself, so this isn't "unsaved" in the
+      // usual sense — it marks that the brief has moved on from the one the
+      // areas of focus were built from, which is what Save resolves.
+      if (changed) setBriefDirty(true)
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] }) // already saved
-      return true
+      return refined
     } catch (err) {
       toast.error((err as { message?: string })?.message || "Couldn't refine the brief.")
-      return false
+      return null
     } finally {
       setBriefRefining(false)
     }
   }
 
-  // `themeIndex` scopes the instruction to a single theme (the per-card "Refine
-  // with AI"). The endpoint only accepts the WHOLE list — sending just one theme
+  // ── Consent gate ─────────────────────────────────────────────────────────
+  // Refining the brief also rewrites the areas of focus, which throws away any
+  // wording the PM has already edited by hand — so it's asked for up front. The
+  // resolver is held while the dialog is open, which keeps the assistant's
+  // submit awaiting: cancelling leaves the typed instruction in the box.
+  const [consent, setConsent] = useState<ConsentCopy | null>(null)
+  const consentResolve = useRef<((ok: boolean) => void) | null>(null)
+
+  const askConsent = (copy: ConsentCopy) =>
+    new Promise<boolean>((resolve) => {
+      consentResolve.current = resolve
+      setConsent(copy)
+    })
+
+  const answerConsent = (ok: boolean) => {
+    setConsent(null)
+    consentResolve.current?.(ok)
+    consentResolve.current = null
+  }
+
+  // Refining only drops the new text into the brief box. It does NOT touch the
+  // areas of focus — the PM reads the result, keeps editing if they want, and
+  // Save is the single point where the areas are brought back in line.
+  const [rewritingAreas, setRewritingAreas] = useState(false)
+
+  const submitBriefRefine = async (instruction: string) =>
+    (await refineBriefWith(instruction)) !== null
+
+  // `areaIndex` scopes the instruction to a single area (the per-card "Refine
+  // with AI"). The endpoint only accepts the WHOLE list — sending just one area
   // would persist it as the entire set — so the scoping is done in the prompt.
-  const refineThemesWith = async (
+  // Refine is deliberately NOT gated on the selection rules: the PM can reword
+  // slogans before picking a primary. The server preserves the roles, so the
+  // response is taken as-is rather than re-applying roles locally.
+  const refineAreasWith = async (
     instruction: string,
-    themeIndex?: number,
+    areaIndex?: number,
   ): Promise<boolean> => {
     if (!result || themesRefining) return false
     cancelPendingSave()
     setThemesRefining(true)
     try {
       const scoped =
-        themeIndex === undefined
+        areaIndex === undefined
           ? instruction
-          : `Only modify theme ${themeIndex + 1}` +
-            (result.themes[themeIndex]?.title ? ` ("${result.themes[themeIndex].title}")` : "") +
-            `: ${instruction}. Leave every other theme exactly as it is, in the same order.`
-      const data = await pmApi.refineThemes(id, { themes: result.themes, instruction: scoped })
-      setResult((prev) => (prev ? { ...prev, themes: data.themes ?? [] } : prev))
+          : `Only modify area of focus ${areaIndex + 1}` +
+            (result.areas[areaIndex]?.slogan ? ` ("${result.areas[areaIndex].slogan}")` : "") +
+            `: ${instruction}. Leave every other area exactly as it is, in the same order.`
+      const data = await pmApi.refineAreasOfFocus(id, {
+        areas_of_focus: result.areas,
+        instruction: scoped,
+      })
+      // A soft failure answers 200 with an EMPTY list — taking it at face value
+      // would wipe the PM's areas, so keep what's on screen and say so.
+      const refined = data.areas_of_focus ?? []
+      if (refined.length === 0) {
+        toast.error("Refine came back empty — your areas of focus are unchanged.")
+        return false
+      }
+      setResult((prev) => (prev ? { ...prev, areas: refined } : prev))
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] }) // already saved
       return true
     } catch (err) {
-      toast.error((err as { message?: string })?.message || "Couldn't refine the themes.")
+      toast.error((err as { message?: string })?.message || "Couldn't refine the areas of focus.")
       return false
     } finally {
       setThemesRefining(false)
     }
   }
 
-  // Decorative-only step cycling while the request is in flight.
-  const [loadingStep, setLoadingStep] = useState(0)
-  // The backend recently dropped its output-length cap, so generation can now
-  // legitimately run well past "typical" — surface a reassurance message
-  // instead of letting a slow-but-healthy request look frozen.
-  const [takingLong, setTakingLong] = useState(false)
-  useEffect(() => {
-    if (phase !== "loading") {
-      setLoadingStep(0)
-      setTakingLong(false)
-      return
-    }
-    const stepTimer = setInterval(() => {
-      setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1))
-    }, 2200)
-    const longTimer = setTimeout(() => setTakingLong(true), 20_000)
-    return () => {
-      clearInterval(stepTimer)
-      clearTimeout(longTimer)
-    }
-  }, [phase])
-
-  // ── Persisting manual edits (PUT save-brief-and-themes) ──────────────────
-  // Debounce continuous typing (brief text, theme titles); save discrete
-  // actions (add/delete theme, keyword chip) immediately. We keep local state
-  // as the source of truth and don't overwrite it from the response (which
-  // just echoes what we sent) to avoid clobbering an in-progress edit.
+  // ── Persisting manual edits (PUT save-brief-and-areas-of-focus) ──────────
+  // Areas of focus autosave: debounced for continuous typing (slogans),
+  // immediate for discrete actions (add/delete area, role).
+  // The BRIEF deliberately does not — it saves on an explicit button, because
+  // saving it also offers to rewrite the areas, and that question can't be
+  // asked mid-keystroke. We keep local state as the source of truth and don't
+  // overwrite it from the response (which just echoes what we sent) to avoid
+  // clobbering an in-progress edit.
   useEffect(() => () => cancelPendingSave(), [])
 
-  const runSave = async (payload: { strategic_brief?: string; themes?: BriefTheme[] }) => {
+  const runSave = async (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
     setSaveState("saving")
     try {
-      await pmApi.saveBriefAndThemes(id, payload)
+      await pmApi.saveBriefAndAreas(id, payload)
       setSaveState("saved")
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
     } catch (err) {
@@ -261,12 +341,12 @@ export default function ReviewBriefPage({
     }
   }
 
-  const saveNow = (payload: { strategic_brief?: string; themes?: BriefTheme[] }) => {
+  const saveNow = (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
     cancelPendingSave()
     runSave(payload)
   }
 
-  const saveDebounced = (payload: { strategic_brief?: string; themes?: BriefTheme[] }) => {
+  const saveDebounced = (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
     setSaveState("saving")
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
@@ -275,115 +355,122 @@ export default function ReviewBriefPage({
     }, 800)
   }
 
+  // Typing is local only — nothing reaches the server until Save.
   const updateBrief = (value: string) => {
     setResult((prev) => (prev ? { ...prev, brief: value } : prev))
-    saveDebounced({ strategic_brief: value })
+    setBriefDirty(true)
   }
 
-  const commitThemes = (nextThemes: BriefTheme[], immediate: boolean) => {
-    setResult((prev) => (prev ? { ...prev, themes: nextThemes } : prev))
-    if (immediate) saveNow({ themes: nextThemes })
-    else saveDebounced({ themes: nextThemes })
+  const saveBriefEdit = async () => {
+    if (!result || !briefDirty || saveState === "saving") return
+    const brief = result.brief
+    // Cancel backs out of the whole thing — the edit stays in the box, unsaved.
+    if (!(await askConsent(SAVE_BRIEF_CONSENT))) return
+    setRewritingAreas(true)
+    try {
+      await runSave({ strategic_brief: brief })
+      setBriefDirty(false)
+      setBriefEditing(false)
+      await refineAreasWith(realignAreasInstruction(brief))
+    } finally {
+      setRewritingAreas(false)
+    }
   }
 
-  const updateThemeTitle = (idx: number, value: string) => {
-    if (!result) return
-    commitThemes(result.themes.map((t, i) => (i === idx ? { ...t, title: value } : t)), false)
+  // The server rejects a half-made choice with a 422, so a save is only fired
+  // once the list is persistable. While it isn't, edits stay local and the
+  // indicator says so — the next valid change sends the WHOLE list, which
+  // carries those earlier edits with it.
+  const commitAreas = (next: AreaOfFocus[], immediate: boolean) => {
+    setResult((prev) => (prev ? { ...prev, areas: next } : prev))
+    if (!roleSelectionSaveable(next)) {
+      cancelPendingSave()
+      setSaveState("blocked")
+      return
+    }
+    if (immediate) saveNow({ areas_of_focus: next })
+    else saveDebounced({ areas_of_focus: next })
   }
-  const removeThemeKeyword = (idx: number, kwIdx: number) => {
+
+  const areas = result?.areas ?? []
+  const selectedAreaCount = areas.filter((a) => a.role !== "none").length
+  // Approve needs a COMPLETE choice — "everything untouched" is persistable but
+  // is not a decision, so it can't move the cycle forward.
+  const areaSelectionValid = selectedAreaCount > 0 && roleSelectionSaveable(areas)
+
+  const setAreaRole = (idx: number, role: AreaRole) => {
     if (!result) return
-    commitThemes(
-      result.themes.map((t, i) =>
-        i === idx ? { ...t, keywords: t.keywords.filter((_, k) => k !== kwIdx) } : t,
+    if (
+      role !== "none" &&
+      areas[idx]?.role === "none" &&
+      selectedAreaCount >= MAX_SELECTED_AREAS
+    ) {
+      toast.error(`Only ${MAX_SELECTED_AREAS} areas of focus can be carried forward — drop one first.`)
+      return
+    }
+    commitAreas(
+      areas.map((a, i) =>
+        i === idx
+          ? { ...a, role }
+          : // Primary is exclusive: whoever held it becomes secondary.
+            role === "primary" && a.role === "primary"
+            ? { ...a, role: "secondary" }
+            : a,
       ),
       true,
     )
   }
-  const addThemeKeyword = (idx: number, raw: string) => {
+
+  const updateSlogan = (idx: number, value: string) => {
     if (!result) return
-    const kw = raw.trim()
-    if (!kw) return
-    const existing = result.themes[idx].keywords
-    if (existing.some((k) => k.toLowerCase() === kw.toLowerCase())) return
-    commitThemes(
-      result.themes.map((t, i) => (i === idx ? { ...t, keywords: [...t.keywords, kw] } : t)),
-      true,
-    )
+    commitAreas(areas.map((a, i) => (i === idx ? { ...a, slogan: value } : a)), false)
   }
-  const addTheme = () => {
+  const addArea = () => {
+    if (!result || areas.length >= MAX_SELECTED_AREAS) return
+    commitAreas([...areas, { slogan: "", sub_slogans: [], role: "none" }], true)
+  }
+  const deleteArea = (idx: number) => {
     if (!result) return
-    commitThemes([...result.themes, { title: "", keywords: [] }], true)
-  }
-  const deleteTheme = (idx: number) => {
-    if (!result) return
-    commitThemes(result.themes.filter((_, i) => i !== idx), true)
+    commitAreas(areas.filter((_, i) => i !== idx), true)
   }
 
-  // ── Approve & use → set the questions deadline ────────────────────────────
-  // Approving the brief opens a modal that requires a questions deadline (the
-  // date departments must answer their assigned questions by) before the cycle
-  // moves forward. The date is persisted via PUT questions-deadline; only then
-  // does the flow continue to the cycle dashboard.
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const [approveOpen, setApproveOpen] = useState(false)
-  const [deadlineInput, setDeadlineInput] = useState("")
-  // How many questions to generate per department (5-20, backend default 12).
-  const [numQuestions, setNumQuestions] = useState(12)
-  const [approving, setApproving] = useState(false)
+  // "Approve & use" no longer ends the wizard — it writes the concept messages
+  // for the areas just approved, then advances to Step 3 (which owns the
+  // deadline modal and the kickoff pipeline).
+  //
+  // Generating HERE rather than on arrival means the PM waits behind a loader
+  // that explains itself instead of landing on an empty screen with a button.
+  const [buildingConcepts, setBuildingConcepts] = useState(false)
 
-  const openApprove = () => {
-    // Pre-fill with an already-saved deadline if the cycle has one.
-    setDeadlineInput(cycle?.questions_deadline?.slice(0, 10) ?? "")
-    setApproveOpen(true)
-  }
-
-  // Both fields are mandatory before approve: a valid future/today deadline AND
-  // a question count within the backend's accepted 5–20 range.
-  const deadlineValid = !!deadlineInput && deadlineInput >= todayIso
-  const numQuestionsValid = numQuestions >= 5 && numQuestions <= 20
-  const approveValid = deadlineValid && numQuestionsValid
-
-  // Approve kicks off the cycle for real: it fires the AI question-generation
-  // pipeline for every department (POST /pm/kickoff) using the approved brief and
-  // the chosen question count, then persists the deadline. The full-screen
-  // KickoffLoader covers the wait, and on success the PM lands on the cycle
-  // dashboard where the freshly generated department sessions appear.
-  const confirmApprove = async () => {
-    if (!approveValid || !result?.brief || approving) return
-    setApproving(true)
+  const goToConceptMessages = async () => {
+    if (!areaSelectionValid || buildingConcepts) return
+    // The brief no longer autosaves, so leaving with unsent text would drop it.
+    if (briefDirty) {
+      toast.error("Save your brief changes before continuing.")
+      return
+    }
+    setBuildingConcepts(true)
+    const next = `/pm/cycles/${id}/kickoff/concept`
     try {
-      // 1) Generate the questions. This is the long call (~up to 3 min).
-      await pmApi.submitKickoff({
-        cycle_id: id,
-        strategic_brief: result.brief,
-        num_questions: numQuestions,
-      })
-
-      // 2) Persist the deadline — non-blocking. The kickoff already succeeded, so
-      // a deadline-save failure only warns; it doesn't roll anything back.
-      try {
-        await pmApi.setQuestionsDeadline(id, deadlineInput)
-      } catch {
-        toast.error("Questions generated, but the deadline couldn't be saved — set it from the cycle page.")
-      }
-
-      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
-      toast.success(`Kickoff complete — departments must answer by ${formatDate(deadlineInput)}.`)
-      setApproveOpen(false)
-      router.push(`/pm/cycles/${id}`)
-    } catch (err) {
-      // A timeout aborts client-side while the backend is (very likely) still
-      // generating. Resubmitting would fire a DUPLICATE kickoff, so don't
-      // re-enable — send the PM to the dashboard to check instead.
-      const msg = (err as { message?: string })?.message ?? ""
-      if (/timeout|ECONNABORTED/i.test(msg)) {
-        toast.message("Questions may still be generating — check the cycle dashboard in a moment.")
-        setApproveOpen(false)
-        router.push(`/pm/cycles/${id}`)
+      // Coming back through Step 2 must not overwrite messages the PM has
+      // already edited — only generate when there's nothing stored.
+      const existing = await pmApi.getConceptMessages(id)
+      if (existing.concept_messages?.length) {
+        router.push(next)
         return
       }
-      toast.error(msg || "Couldn't kick off the cycle.")
-      setApproving(false)
+      // Soft failure is a 200 with an empty list, so check the length. Step 3
+      // has its own Generate button, so it's still a fine place to land.
+      const data = await pmApi.generateConceptMessages(id)
+      if (!data.concept_messages?.length) {
+        toast.error("Couldn't write the concept messages — you can retry on the next screen.")
+      }
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
+      router.push(next)
+    } catch (err) {
+      // Nothing was created, so stay put and let them press Approve again.
+      toast.error((err as { message?: string })?.message || "Couldn't write the concept messages.")
+      setBuildingConcepts(false)
     }
   }
 
@@ -414,7 +501,7 @@ export default function ReviewBriefPage({
               Cycle Setup
             </p>
             <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
-              Strategic Brief &amp; Themes
+              Strategic Brief &amp; Areas of Focus
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {fiscalLabel} · Set the strategic direction before departments begin.
@@ -423,55 +510,7 @@ export default function ReviewBriefPage({
         </div>
 
         {/* ── Stepper ── */}
-        <Stepper current={2} />
-
-        {/* ── Loading ── */}
-        {phase === "loading" && (
-          <div className="flex flex-col items-center gap-6 rounded-2xl border bg-card px-8 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100">
-              <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
-            </div>
-            <div>
-              <p className="text-lg font-semibold text-foreground">Generating your strategic brief…</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {takingLong
-                  ? "Still working — longer briefs can take a little while."
-                  : "This usually takes under a minute."}
-              </p>
-            </div>
-            <div className="w-full max-w-xs space-y-3 text-left">
-              {LOADING_STEPS.map((step, i) => {
-                const done = i < loadingStep
-                const active = i === loadingStep
-                return (
-                  <div key={step} className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-                        done
-                          ? "bg-green-100 text-green-700"
-                          : active
-                            ? "bg-indigo-100 text-indigo-600"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {done ? (
-                        <Check className="h-3 w-3" />
-                      ) : active ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                      )}
-                    </span>
-                    <span className={cn("text-sm", done || active ? "text-foreground" : "text-muted-foreground")}>
-                      {step}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        <KickoffStepper current={2} />
 
         {/* ── Hard error (403 / 404 / network) ── */}
         {phase === "error" && (
@@ -552,6 +591,26 @@ export default function ReviewBriefPage({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {briefDirty && (
+                    <span className="text-xs font-medium text-amber-600">Unsaved</span>
+                  )}
+                  {/* Only while there's something to save — an always-visible
+                      disabled Save reads as "broken" more than as "nothing to do". */}
+                  {briefDirty && (
+                    <Button
+                      size="sm"
+                      onClick={saveBriefEdit}
+                      disabled={saveState === "saving"}
+                      className="bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      {saveState === "saving" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Save
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -592,47 +651,87 @@ export default function ReviewBriefPage({
                 <RefinePanel
                   chips={BRIEF_CHIPS}
                   loading={briefRefining}
-                  onSubmit={refineBriefWith}
+                  onSubmit={submitBriefRefine}
                   placeholder="e.g. make it more concise, strengthen ESG, add a growth angle…"
                 />
               )}
             </div>
 
-            {/* Themes */}
+            {/* Areas of Focus */}
             <div className="rounded-2xl border bg-card p-5 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
-                    <Layers className="h-5 w-5" />
+                    <Megaphone className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="font-semibold text-foreground">Themes</p>
+                    <p className="font-semibold text-foreground">Areas of Focus</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      Recurring threads the narrative will weave throughout.
+                      Mark {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} slogans to carry forward —
+                      exactly one Primary, the rest Secondary. Anything left unmarked is dropped.
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={addTheme}>
-                    <Plus className="h-3.5 w-3.5" /> Add theme
+                <div className="flex items-center gap-3">
+                  <span
+                    className={cn(
+                      "text-xs font-medium tabular-nums",
+                      areaSelectionValid ? "text-muted-foreground" : "text-amber-600",
+                    )}
+                  >
+                    {selectedAreaCount === 0
+                      ? "nothing marked yet"
+                      : `${areas.filter((a) => a.role === "primary").length} primary · ${
+                          areas.filter((a) => a.role === "secondary").length
+                        } secondary`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={addArea}
+                    disabled={areas.length >= MAX_SELECTED_AREAS}
+                    title={
+                      areas.length >= MAX_SELECTED_AREAS
+                        ? `At most ${MAX_SELECTED_AREAS} areas of focus`
+                        : undefined
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add area of focus
                   </Button>
                 </div>
               </div>
 
+              {!areaSelectionValid && areas.length > 0 && (
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+                  {selectedAreaCount === 0
+                    ? `Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} areas of focus — exactly one Primary — to continue.`
+                    : areas.filter((a) => a.role === "primary").length !== 1
+                      ? "Pick exactly one Primary slogan to continue."
+                      : selectedAreaCount < MIN_SELECTED_AREAS
+                        ? `Mark at least ${MIN_SELECTED_AREAS} areas of focus to continue.`
+                        : `Mark no more than ${MAX_SELECTED_AREAS} areas of focus to continue.`}
+                </p>
+              )}
+
               <div className="mt-4 space-y-3">
-                {result.themes.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No themes were proposed.</p>
+                {areas.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No areas of focus were proposed.</p>
                 )}
-                {result.themes.map((theme, i) => (
+                {areas.map((area, i) => (
                   <ThemeChipCard
                     key={i}
                     index={i}
-                    theme={theme}
-                    onTitleChange={(v) => updateThemeTitle(i, v)}
-                    onAddKeyword={(kw) => addThemeKeyword(i, kw)}
-                    onRemoveKeyword={(kwIdx) => removeThemeKeyword(i, kwIdx)}
-                    onRemove={() => deleteTheme(i)}
-                    onRefine={(ins) => refineThemesWith(ins, i)}
+                    // The card speaks title/keywords for both this screen and the
+                    // suggested-themes one; areas of focus map onto it here.
+                    // Sub-slogans stay on the record but are never shown — no
+                    // keywords, no keyword handlers.
+                    theme={{ title: area.slogan, keywords: [], summary: area.summary }}
+                    role={area.role}
+                    onRoleChange={(r) => setAreaRole(i, r)}
+                    roleGroup="area-of-focus-primary"
+                    onTitleChange={(v) => updateSlogan(i, v)}
+                    onRemove={() => deleteArea(i)}
+                    onRefine={(ins) => refineAreasWith(ins, i)}
                   />
                 ))}
               </div>
@@ -662,183 +761,66 @@ export default function ReviewBriefPage({
               </Button>
             )}
             <Button
-              disabled={phase !== "result"}
-              onClick={openApprove}
+              disabled={phase !== "result" || !areaSelectionValid || buildingConcepts}
+              onClick={goToConceptMessages}
+              title={
+                phase === "result" && !areaSelectionValid
+                  ? `Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} areas of focus, with one Primary, first`
+                  : undefined
+              }
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              <CheckCircle2 className="h-4 w-4" /> Approve &amp; use
+              {buildingConcepts ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Approve &amp; use
             </Button>
           </div>
         </div>
       </div>
 
-      {/* ── Approve & use → questions-deadline modal ── */}
-      <ApproveDeadlineDialog
-        open={approveOpen}
-        onOpenChange={(o) => {
-          if (approving) return // don't dismiss mid-request
-          setApproveOpen(o)
+      {/* One dialog for all three destructive paths — refine, manual edit, and
+          full regeneration — with the copy carried by whoever asked. */}
+      <ConfirmDialog
+        open={consent !== null}
+        onOpenChange={(open) => {
+          if (!open) answerConsent(false)
         }}
-        value={deadlineInput}
-        onChange={setDeadlineInput}
-        min={todayIso}
-        valid={deadlineValid}
-        canApprove={approveValid}
-        numQuestions={numQuestions}
-        onNumQuestionsChange={setNumQuestions}
-        submitting={approving}
-        onConfirm={confirmApprove}
-        cycleLabel={fiscalLabel}
+        title={consent?.title ?? ""}
+        description={consent?.description ?? ""}
+        confirmLabel={consent?.confirmLabel ?? "Confirm"}
+        cancelLabel={consent?.cancelLabel ?? "Cancel"}
+        variant={consent?.variant ?? "default"}
+        onConfirm={() => answerConsent(true)}
       />
 
-      {/* Full-screen loader while the kickoff pipeline generates questions.
-          Sits above the (still-open) dialog via its own fixed inset-0 z-[100]. */}
-      {approving && <KickoffBuildLoader />}
+      {/* Full-screen loader for the initial generation — it writes the brief and
+          the first areas of focus in one call. */}
+      {phase === "loading" && <KickoffBuildLoader {...BRIEF_LOADER} />}
+
+      {/* Full-screen loader while the areas are rewritten against a changed
+          brief — same treatment as the other multi-call AI passes. */}
+      {rewritingAreas && <KickoffBuildLoader {...AREAS_REFRESH_LOADER} />}
+
+      {/* Full-screen loader while the concept messages are written. Stays up
+          through the navigation so Step 3 doesn't flash an empty state. */}
+      {buildingConcepts && <KickoffBuildLoader {...CONCEPT_MESSAGE_LOADER} />}
     </div>
   )
 }
 
-/* ── Approve & use — questions-deadline modal ────────────────────────────────
-   Blocks the cycle from moving forward until the PM commits a date by which
-   departments must answer their assigned questions. Past dates are rejected
-   (the input's min + a guarded confirm button), so there is no way to advance
-   without a valid future-or-today deadline. */
-function ApproveDeadlineDialog({
-  open,
-  onOpenChange,
-  value,
-  onChange,
-  min,
-  valid,
-  canApprove,
-  numQuestions,
-  onNumQuestionsChange,
-  submitting,
-  onConfirm,
-  cycleLabel,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  value: string
-  onChange: (value: string) => void
-  min: string
-  valid: boolean
-  canApprove: boolean
-  numQuestions: number
-  onNumQuestionsChange: (value: number) => void
-  submitting: boolean
-  onConfirm: () => void
-  cycleLabel: string
-}) {
-  // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
-  const isPast = !!value && value < min
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md gap-0 overflow-hidden p-0" hideClose={submitting}>
-        {/* Themed header band */}
-        <DialogHeader className="space-y-3 border-b bg-indigo-50 px-6 py-5 text-left">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
-            <CalendarClock className="h-5 w-5" />
-          </span>
-          <div className="space-y-1">
-            <DialogTitle className="text-indigo-900">Set the questions deadline</DialogTitle>
-            <p className="text-sm text-indigo-700/80">
-              Approving locks in the brief for <span className="font-medium">{cycleLabel}</span>.
-              Choose the date every department must answer its assigned questions by — they&apos;ll
-              be notified straight away.
-            </p>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-2 px-6 py-5">
-          <label htmlFor="questions-deadline" className="text-sm font-medium text-foreground">
-            Questions deadline
-          </label>
-          <Input
-            id="questions-deadline"
-            type="date"
-            value={value}
-            min={min}
-            disabled={submitting}
-            onChange={(e) => onChange(e.target.value)}
-            className={cn(
-              "h-11",
-              isPast && "border-destructive focus-visible:ring-destructive",
-            )}
-          />
-          {isPast ? (
-            <p className="text-xs font-medium text-destructive">
-              The deadline can&apos;t be in the past. Pick today or a later date.
-            </p>
-          ) : valid ? (
-            <p className="text-xs text-muted-foreground">
-              Departments must answer by{" "}
-              <span className="font-medium text-foreground">{formatDate(value)}</span>.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              A deadline is required before the cycle can move forward.
-            </p>
-          )}
-        </div>
-
-        {/* Questions-per-department slider (5-20, backend default 12) */}
-        <div className="space-y-2 border-t px-6 py-5">
-          <div className="flex items-center justify-between">
-            <label htmlFor="num-questions" className="text-sm font-medium text-foreground">
-              Questions per department:{" "}
-              <span className="tabular-nums text-foreground">{numQuestions}</span>
-            </label>
-            {numQuestions === 12 && (
-              <span className="text-xs text-muted-foreground">(default)</span>
-            )}
-          </div>
-          <input
-            id="num-questions"
-            type="range"
-            min={5}
-            max={20}
-            step={1}
-            value={numQuestions}
-            disabled={submitting}
-            onChange={(e) => onNumQuestionsChange(parseInt(e.target.value, 10))}
-            className="h-1.5 w-full cursor-pointer accent-indigo-600"
-          />
-          <div className="flex justify-between text-[10px] tabular-nums text-muted-foreground">
-            <span>5</span>
-            <span>12</span>
-            <span>20</span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            How many questions the AI generates for each department.
-          </p>
-        </div>
-
-        <DialogFooter className="gap-2 border-t bg-muted/30 px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={onConfirm}
-            disabled={!canApprove || submitting}
-            className="bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            {submitting ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Setting deadline…</>
-            ) : (
-              <><CheckCircle2 className="h-4 w-4" /> Approve &amp; continue</>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 /* ── Save status indicator ───────────────────────────────────────────────── */
-function SaveIndicator({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
+function SaveIndicator({ state }: { state: SaveState }) {
   if (state === "idle") return null
+  if (state === "blocked") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600">
+        <ShieldAlert className="h-3.5 w-3.5" /> Not saved — finish the selection
+      </span>
+    )
+  }
   if (state === "saving") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600">
@@ -936,50 +918,6 @@ function RefinePanel({
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
-    </div>
-  )
-}
-
-
-/* ── Two-step progress indicator (mirrors Step 1's) ──────────────────────── */
-function Stepper({ current }: { current: 1 | 2 }) {
-  const steps = [
-    { n: 1, label: "Questionnaire" },
-    { n: 2, label: "Review brief" },
-  ] as const
-  return (
-    <div className="flex items-center rounded-2xl border bg-card px-5 py-3.5">
-      {steps.map((s, i) => {
-        const active = s.n === current
-        const done = s.n < current
-        return (
-          <div key={s.n} className={cn("flex items-center", i === 0 && "flex-1")}>
-            <span
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
-                active
-                  ? "bg-indigo-600 text-white"
-                  : done
-                    ? "bg-green-500 text-white"
-                    : "bg-muted text-muted-foreground",
-              )}
-            >
-              {done ? <Check className="h-3.5 w-3.5" /> : s.n}
-            </span>
-            <span
-              className={cn(
-                "ml-2 text-sm font-medium",
-                active || done ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {s.label}
-            </span>
-            {i === 0 && (
-              <div className={cn("mx-4 h-px flex-1", current > 1 ? "bg-green-400" : "bg-border")} />
-            )}
-          </div>
-        )
-      })}
     </div>
   )
 }

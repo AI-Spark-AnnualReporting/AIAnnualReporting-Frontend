@@ -211,7 +211,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const cycleId = id
 
   // `kickoff_brief` is persisted by the BRIEF step (generate-brief /
-  // save-brief-and-themes), not by question generation — so it only means "a
+  // save-brief-and-areas-of-focus), not by question generation — so it only means "a
   // brief exists". Questions exist once a session leaves "assigned" (the
   // pre-kickoff status). Conflating the two locked cycles out of kickoff
   // forever when POST /pm/kickoff never completed (e.g. session expired).
