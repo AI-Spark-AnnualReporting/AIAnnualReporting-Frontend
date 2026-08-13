@@ -6,6 +6,7 @@ import { useHODSession, useReviewAnswers } from "@/hooks/useHod"
 import { draftContent } from "@/lib/session"
 import { PageLoader } from "@/components/ui/spinner"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { QuestionText } from "@/components/ui/question-text"
 import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -144,15 +145,18 @@ export default function HODReviewPage() {
                     {idx + 1}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold leading-relaxed text-[#1A1D2E]">{q.question}</p>
+                    <p className="text-sm font-semibold leading-relaxed text-[#1A1D2E]">
+                      <QuestionText text={q.question} />
+                    </p>
                     {na ? (
                       <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
                         <Info className="h-3.5 w-3.5" /> Marked not applicable
                       </p>
                     ) : has ? (
-                      <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
-                        {ans}
-                      </p>
+                      <ProsePreview
+                        content={ans}
+                        className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700"
+                      />
                     ) : (
                       <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-400">
                         <CircleSlash className="h-3.5 w-3.5" /> No answer provided

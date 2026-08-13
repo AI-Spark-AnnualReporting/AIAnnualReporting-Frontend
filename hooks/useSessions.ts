@@ -336,7 +336,7 @@ export function useSurveyQuestions(cycleId: string) {
 
 // Strategic Brief wizard Step 2 — generates (or regenerates) the brief +
 // themes from the questionnaire answers. Bust the cycle dashboard cache on
-// success so kickoff_brief / initial_themes_and_keywords are fresh on reload.
+// success so kickoff_brief / areas_of_focus are fresh on reload.
 export function useGenerateBrief() {
   const qc = useQueryClient()
   return useMutation({

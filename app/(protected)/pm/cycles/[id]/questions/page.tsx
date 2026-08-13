@@ -6,6 +6,7 @@ import { usePMCycleDashboard, usePMSession } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader, Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
+import { QuestionText } from "@/components/ui/question-text"
 import { Button } from "@/components/ui/button"
 import { SessionSummary } from "@/types"
 import { cn } from "@/lib/utils"
@@ -138,7 +139,9 @@ function DepartmentQuestions({
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-semibold text-indigo-600">
                     {i + 1}
                   </span>
-                  <span className="min-w-0 flex-1">{q.question}</span>
+                  <span className="min-w-0 flex-1">
+                    <QuestionText text={q.question} stacked />
+                  </span>
                 </li>
               ))}
             </ol>

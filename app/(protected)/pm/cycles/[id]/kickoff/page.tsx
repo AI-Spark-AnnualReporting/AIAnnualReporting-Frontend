@@ -10,10 +10,11 @@ import { storeKickoffAnswers } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { KickoffStepper } from "@/components/pm/kickoff-stepper"
 import { cn } from "@/lib/utils"
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Clock, FileText, Loader2,
-  ShieldAlert, Sparkles, Upload, X,
+  AlertTriangle, ArrowLeft, Ban, Check, CheckCircle2, Clock, FileText, Loader2,
+  RotateCcw, ShieldAlert, Sparkles, Upload, X,
 } from "lucide-react"
 
 const ALLOWED_BRIEF_EXTS = [".pdf", ".docx", ".doc", ".txt"]
@@ -25,8 +26,11 @@ const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
    Questions come live from GET /pm/cycles/{id}/survey-questions (see
    useSurveyQuestions + pmApi.getSurveyQuestions). Nothing here is hardcoded:
    - `total` drives the "X of {total} answered" counter.
-   - `options: string[]` → chip-select; the LAST option is always "Other" and
-     reveals a free-text box when picked.
+   - `options: string[]` → chip-select. Render ALL of them; the API never
+     appends an "Other" entry, so slicing the array drops a real answer. The
+     "Other…" box is ours, drawn alongside. Options that read as full sentences
+     switch that row to stacked full-width checkbox rows (see isLongForm) —
+     the layout follows the CONTENT, never the question id.
    - `options: null` → plain free-text box, no chips.
    - Order is stable per cycle, so questions are safely indexed by position.
 
@@ -36,23 +40,32 @@ const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
 ──────────────────────────────────────────────────────────────────────────── */
 
 /** Per-question answer. `selected` holds every preset chip the PM has toggled
- *  on (multi-select — any number of chips at once). `freeText` is either the
- *  plain answer (no-options mode) or the independent "Other…" detail, which
- *  can be filled in alongside any number of selected chips. */
+ *  on (multi-select — any number of chips at once). `custom` holds their own
+ *  written-in answers, committed one pill at a time from the "Other…" box.
+ *  `text` is the plain answer (no-options mode) or the uncommitted draft still
+ *  sitting in the "Other…" box — it counts either way, so a PM who types and
+ *  hits Generate without pressing Enter doesn't lose it. */
 interface Answer {
   selected: string[]
-  freeText: string
+  custom: string[]
+  text: string
 }
 
-const emptyAnswer: Answer = { selected: [], freeText: "" }
+const emptyAnswer: Answer = { selected: [], custom: [], text: "" }
 
-/** The trailing option in a chip-mode question is always the "Other" escape hatch. */
-const otherLabelOf = (q: SurveyQuestion) =>
-  q.options && q.options.length > 0 ? q.options[q.options.length - 1] : null
+/** Sentence-length options shred an inline pill row once they wrap, so they get
+ *  stacked full-width checkbox rows instead. Driven off the option text, so any
+ *  question — template or generated — picks the layout that fits its content. */
+const isLongForm = (q: SurveyQuestion) => (q.options ?? []).some((o) => o.length > 40)
+
+/** Every string in `options` is a real answer — the API never appends an "Other"
+ *  entry (the generator prompt explicitly forbids it). The "Other…" box below the
+ *  options is ours, a UI affordance, so nothing here may be sliced off. */
+const hasOptions = (q: SurveyQuestion) => !!q.options && q.options.length > 0
 
 function isAnswered(a: Answer | undefined) {
   if (!a) return false
-  return a.selected.length > 0 || a.freeText.trim().length > 0
+  return a.selected.length > 0 || a.custom.length > 0 || a.text.trim().length > 0
 }
 
 export default function KickoffQuestionnairePage({
@@ -75,6 +88,11 @@ export default function KickoffQuestionnairePage({
   // which showed up as "picking a chip in one question also selects it in
   // another." Position is the one thing the API contract actually promises.
   const [answers, setAnswers] = useState<Record<number, Answer>>({})
+
+  // Questions the PM has rejected — same positional keying as `answers`. A
+  // rejected question drops out of the required count AND out of the payload,
+  // so it never reaches the brief generator or anything downstream of it.
+  const [rejected, setRejected] = useState<Record<number, boolean>>({})
 
   // Optional strategic-brief document. Uploaded immediately on pick to
   // POST /pm/cycles/{id}/brief-document (replaces any prior doc on the cycle).
@@ -162,10 +180,15 @@ export default function KickoffQuestionnairePage({
   const total = surveyData?.total ?? 0
 
   const answeredCount = useMemo(
-    () => questions.reduce((n, _q, i) => n + (isAnswered(answers[i]) ? 1 : 0), 0),
-    [questions, answers],
+    () => questions.reduce((n, _q, i) => n + (!rejected[i] && isAnswered(answers[i]) ? 1 : 0), 0),
+    [questions, answers, rejected],
   )
-  const progressPct = total > 0 ? Math.round((answeredCount / total) * 100) : 0
+  // Rejected questions don't need answering, so they leave the denominator too.
+  const required = useMemo(
+    () => questions.reduce((n, _q, i) => n + (rejected[i] ? 0 : 1), 0),
+    [questions, rejected],
+  )
+  const progressPct = required > 0 ? Math.round((answeredCount / required) * 100) : 0
 
   // Multi-select — toggles one chip on/off without touching any others or the
   // free-text field.
@@ -179,24 +202,82 @@ export default function KickoffQuestionnairePage({
     })
 
   // Free text is fully independent of chip selection — used for plain
-  // free-text questions AND as the always-available "Other…" detail.
-  const setFreeText = (index: number, value: string) =>
-    setAnswers((prev) => ({ ...prev, [index]: { selected: prev[index]?.selected ?? [], freeText: value } }))
+  // free-text questions AND as the "Other…" draft box.
+  const setText = (index: number, value: string) =>
+    setAnswers((prev) => ({ ...prev, [index]: { ...(prev[index] ?? emptyAnswer), text: value } }))
 
-  const allAnswered = total > 0 && answeredCount === total
+  // Commit the "Other…" draft as its own pill (Enter or blur). Duplicates of an
+  // existing pill or preset chip are dropped rather than added twice.
+  const commitCustom = (index: number, presets: string[]) =>
+    setAnswers((prev) => {
+      const current = prev[index] ?? emptyAnswer
+      const value = current.text.trim()
+      if (!value) return prev
+      const dupe =
+        current.custom.includes(value) || presets.includes(value) || current.selected.includes(value)
+      return {
+        ...prev,
+        [index]: {
+          ...current,
+          custom: dupe ? current.custom : [...current.custom, value],
+          text: "",
+        },
+      }
+    })
+
+  // By position, not by value — editing can make two pills identical, and
+  // filtering on value would take both out.
+  const removeCustom = (index: number, customIdx: number) =>
+    setAnswers((prev) => {
+      const current = prev[index] ?? emptyAnswer
+      return { ...prev, [index]: { ...current, custom: current.custom.filter((_, k) => k !== customIdx) } }
+    })
+
+  // A committed pill stays editable — click into it and retype.
+  const editCustom = (index: number, customIdx: number, value: string) =>
+    setAnswers((prev) => {
+      const current = prev[index] ?? emptyAnswer
+      return {
+        ...prev,
+        [index]: { ...current, custom: current.custom.map((v, k) => (k === customIdx ? value : v)) },
+      }
+    })
+
+  // Leaving a pill empty deletes it; otherwise trim what was typed.
+  const commitCustomEdit = (index: number, customIdx: number) =>
+    setAnswers((prev) => {
+      const current = prev[index] ?? emptyAnswer
+      const value = (current.custom[customIdx] ?? "").trim()
+      return {
+        ...prev,
+        [index]: {
+          ...current,
+          custom: value
+            ? current.custom.map((v, k) => (k === customIdx ? value : v))
+            : current.custom.filter((_, k) => k !== customIdx),
+        },
+      }
+    })
+
+  const toggleRejected = (index: number) =>
+    setRejected((prev) => ({ ...prev, [index]: !prev[index] }))
+
+  // `required > 0` also blocks the everything-rejected case, which would
+  // otherwise generate a brief from an empty answer set.
+  const allAnswered = required > 0 && answeredCount === required
   // Block generation while an attached doc is still uploading — generate-brief
   // reads the cycle's doc, so it must land first. (An upload error doesn't
   // block: the doc simply isn't attached and generation proceeds without it.)
   const canGenerate = allAnswered && uploadState !== "uploading"
 
-  // One entry per ANSWERED question — unanswered ones are omitted (no
-  // server-side required-count check). Multi-select chips + any "Other" text
-  // are joined into a single comma-separated string per the API contract.
+  // One entry per ANSWERED question — unanswered and rejected ones are omitted
+  // (no server-side required-count check). Multi-select chips + every custom
+  // pill are joined into a single comma-separated string per the API contract.
   const buildAnswersPayload = (): GenerateBriefAnswer[] =>
     questions.reduce<GenerateBriefAnswer[]>((acc, q, i) => {
       const a = answers[i]
-      if (!a) return acc
-      const parts = [...a.selected, a.freeText.trim()].filter(Boolean)
+      if (!a || rejected[i]) return acc
+      const parts = [...a.selected, ...a.custom, a.text.trim()].filter(Boolean)
       if (parts.length === 0) return acc
       acc.push({ question_id: q.id, answer: parts.join(", ") })
       return acc
@@ -227,7 +308,7 @@ export default function KickoffQuestionnairePage({
               Cycle Setup
             </p>
             <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
-              Strategic Brief &amp; Themes
+              Strategic Brief &amp; Areas of Focus
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {fiscalLabel} · Set the strategic direction before departments begin.
@@ -236,7 +317,7 @@ export default function KickoffQuestionnairePage({
         </div>
 
         {/* ── Stepper ── */}
-        <Stepper current={1} />
+        <KickoffStepper current={1} />
 
         {/* ── Access error (403 / 404) ── */}
         {questionsError && (
@@ -288,7 +369,7 @@ export default function KickoffQuestionnairePage({
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm font-medium text-muted-foreground">
-                  <span className="text-foreground">{answeredCount}</span> of {total} answered
+                  <span className="text-foreground">{answeredCount}</span> of {required} answered
                 </p>
                 <div className="mt-1.5 h-1.5 w-32 overflow-hidden rounded-full bg-muted">
                   <div
@@ -303,15 +384,21 @@ export default function KickoffQuestionnairePage({
             <div className="space-y-4">
               {questions.map((q, i) => {
                 const a = answers[i] ?? emptyAnswer
-                const answered = isAnswered(a)
-                const otherLabel = otherLabelOf(q)
+                const isRejected = !!rejected[i]
+                const answered = !isRejected && isAnswered(a)
+                const presets = q.options ?? []
+                const longForm = isLongForm(q)
 
                 return (
                   <div
                     key={i}
                     className={cn(
                       "rounded-2xl border bg-card p-5 shadow-sm transition-colors",
-                      answered ? "border-indigo-200" : "border-border",
+                      isRejected
+                        ? "border-dashed border-border bg-muted/30"
+                        : answered
+                          ? "border-indigo-200"
+                          : "border-border",
                     )}
                   >
                     {/* Question header */}
@@ -327,45 +414,140 @@ export default function KickoffQuestionnairePage({
                         {i + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold leading-snug text-foreground">{q.text}</p>
+                        <p
+                          className={cn(
+                            "font-semibold leading-snug",
+                            isRejected ? "text-muted-foreground line-through" : "text-foreground",
+                          )}
+                        >
+                          {q.text}
+                        </p>
+                        {isRejected && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Skipped — this question won&apos;t be used in the brief.
+                          </p>
+                        )}
                       </div>
                       {answered && (
                         <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
                           <Check className="h-3 w-3" /> Answered
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => toggleRejected(i)}
+                        title={isRejected ? "Include this question again" : "Reject this question"}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
+                      >
+                        {isRejected ? (
+                          <>
+                            <RotateCcw className="h-3 w-3" /> Undo
+                          </>
+                        ) : (
+                          <>
+                            <Ban className="h-3 w-3" /> Reject
+                          </>
+                        )}
+                      </button>
                     </div>
 
-                    {/* Chip-select (with inline "Other…" pill) or plain free-text */}
-                    {otherLabel !== null ? (
-                      <div className="mt-4 flex flex-wrap gap-2 pl-9">
-                        {(q.options ?? []).slice(0, -1).map((opt, optIdx) => {
+                    {/* Chip-select (with inline "Other…" box) or plain free-text.
+                        Hidden entirely once rejected — nothing left to answer. */}
+                    {isRejected ? null : hasOptions(q) ? (
+                      <div
+                        className={cn(
+                          "mt-4 flex gap-2 pl-9",
+                          longForm ? "flex-col items-stretch" : "flex-wrap",
+                        )}
+                      >
+                        {presets.map((opt, optIdx) => {
                           const selected = a.selected.includes(opt)
                           return (
                             <button
                               key={optIdx}
                               type="button"
+                              aria-pressed={selected}
                               onClick={() => toggleChip(i, opt)}
                               className={cn(
-                                "rounded-full border px-3.5 py-2 text-sm font-medium transition-colors",
+                                "border text-sm font-medium transition-colors",
+                                longForm
+                                  ? "flex w-full items-start gap-2.5 rounded-xl px-3.5 py-2.5 text-left"
+                                  : "rounded-full px-3.5 py-2",
                                 selected
                                   ? "border-indigo-400 bg-indigo-50 text-indigo-700"
                                   : "border-border bg-background text-foreground hover:border-indigo-300 hover:bg-accent",
                               )}
                             >
+                              {longForm && (
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                                    selected
+                                      ? "border-indigo-500 bg-indigo-600 text-white"
+                                      : "border-muted-foreground/40 bg-background",
+                                  )}
+                                >
+                                  {selected && <Check className="h-3 w-3" />}
+                                </span>
+                              )}
                               {opt}
                             </button>
                           )
                         })}
-                        {/* Independent of chip selection — can be filled in alongside any number of picked chips */}
+                        {/* The PM's own answers — as many as they like, each its
+                            own pill, and each still editable after committing.
+                            Keyed by position: keying by value would remount the
+                            input on every keystroke and drop focus. */}
+                        {a.custom.map((value, customIdx) => (
+                          <span
+                            key={customIdx}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-indigo-400 bg-indigo-50 px-3.5 py-2 text-sm font-medium text-indigo-700"
+                          >
+                            <input
+                              type="text"
+                              value={value}
+                              onChange={(e) => editCustom(i, customIdx, e.target.value)}
+                              onBlur={() => commitCustomEdit(i, customIdx)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  e.currentTarget.blur()
+                                }
+                              }}
+                              size={Math.max(value.length, 3)}
+                              aria-label={`Edit answer "${value}"`}
+                              className="border-0 bg-transparent p-0 text-sm font-medium text-indigo-700 outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeCustom(i, customIdx)}
+                              title={`Remove "${value}"`}
+                              className="text-indigo-400 transition-colors hover:text-indigo-700"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
+                        ))}
+                        {/* Independent of chip selection — Enter (or blur) turns the
+                            draft into a pill so the next one can be typed. */}
                         <input
                           type="text"
-                          value={a.freeText}
-                          onChange={(e) => setFreeText(i, e.target.value)}
-                          placeholder="Other…"
+                          value={a.text}
+                          onChange={(e) => setText(i, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === ",") {
+                              e.preventDefault()
+                              commitCustom(i, presets)
+                            } else if (e.key === "Backspace" && !a.text && a.custom.length > 0) {
+                              removeCustom(i, a.custom.length - 1)
+                            }
+                          }}
+                          onBlur={() => commitCustom(i, presets)}
+                          placeholder={a.custom.length > 0 ? "Add another…" : "Other…"}
                           className={cn(
                             "min-w-[7rem] max-w-full rounded-full border px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70",
-                            a.freeText.trim()
+                            a.text.trim()
                               ? "border-indigo-400 bg-indigo-50 text-indigo-700"
                               : "border-dashed border-muted-foreground/40 bg-background focus:border-indigo-400",
                           )}
@@ -374,8 +556,8 @@ export default function KickoffQuestionnairePage({
                     ) : (
                       <div className="mt-4 pl-9">
                         <Textarea
-                          value={a.freeText}
-                          onChange={(e) => setFreeText(i, e.target.value)}
+                          value={a.text}
+                          onChange={(e) => setText(i, e.target.value)}
                           placeholder="Type your answer…"
                           rows={2}
                           className="text-sm"
@@ -503,7 +685,7 @@ export default function KickoffQuestionnairePage({
           <div className="flex items-center gap-4">
             {total > 0 && (
               <span className="text-sm font-medium text-muted-foreground tabular-nums">
-                {answeredCount}/{total} answered
+                {answeredCount}/{required} answered
               </span>
             )}
             <Button
@@ -528,49 +710,6 @@ export default function KickoffQuestionnairePage({
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-/* ── Two-step progress indicator ─────────────────────────────────────────── */
-function Stepper({ current }: { current: 1 | 2 }) {
-  const steps = [
-    { n: 1, label: "Questionnaire" },
-    { n: 2, label: "Review brief" },
-  ] as const
-  return (
-    <div className="flex items-center rounded-2xl border bg-card px-5 py-3.5">
-      {steps.map((s, i) => {
-        const active = s.n === current
-        const done = s.n < current
-        return (
-          <div key={s.n} className={cn("flex items-center", i === 0 && "flex-1")}>
-            <span
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
-                active
-                  ? "bg-indigo-600 text-white"
-                  : done
-                    ? "bg-indigo-100 text-indigo-700"
-                    : "bg-muted text-muted-foreground",
-              )}
-            >
-              {done ? <CheckCircle2 className="h-4 w-4" /> : s.n}
-            </span>
-            <span
-              className={cn(
-                "ml-2 text-sm font-medium",
-                active || done ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {s.label}
-            </span>
-            {i === 0 && (
-              <div className="mx-4 h-px flex-1 bg-border" />
-            )}
-          </div>
-        )
-      })}
     </div>
   )
 }
