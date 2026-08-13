@@ -32,6 +32,8 @@ import {
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { QuestionTag, QuestionText } from "@/components/ui/question-text"
+import { splitQuestion } from "@/lib/questionText"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -140,6 +142,7 @@ export default function SessionWorkspacePage({
   const session = data?.session
   const questions = session?.questions || []
   const currentQ = questions[currentIndex]
+  const currentSplit = splitQuestion(currentQ?.question ?? "")
   const currentIsNA = !!currentQ && naQuestions.has(currentQ.question_id)
   // The answer stored on the server for the current question — the AI extraction
   // on first visit, the user's saved answer afterwards. Shown in the answer card.
@@ -519,7 +522,9 @@ export default function SessionWorkspacePage({
                       {answered ? "Answered" : isNa ? "Not applicable" : "Not answered"}
                     </span>
                   </div>
-                  <p className="line-clamp-3 text-sm leading-relaxed text-slate-700">{q.question}</p>
+                  <p className="line-clamp-3 text-sm leading-relaxed text-slate-700">
+                    <QuestionText text={q.question} />
+                  </p>
                   {answered && (
                     <p className="mt-2 line-clamp-2 text-xs text-slate-400">{answers[q.question_id]}</p>
                   )}
@@ -709,7 +714,7 @@ export default function SessionWorkspacePage({
                             : idx + 1}
                       </div>
                       <p className={cn("line-clamp-2 text-xs leading-relaxed text-slate-600", active && "font-semibold text-slate-900")}>
-                        {q.question}
+                        <QuestionText text={q.question} />
                       </p>
                     </button>
                   )
@@ -757,8 +762,15 @@ export default function SessionWorkspacePage({
                 </div>
 
                 {/* Question */}
-                <h2 className="mt-4 text-2xl font-bold leading-snug text-slate-900">
-                  {currentQ.question}
+                {/* Tag above rather than inline — at 2xl an inline chip fights
+                    the heading. */}
+                {currentSplit.topic && (
+                  <div className="mt-4">
+                    <QuestionTag topic={currentSplit.topic} />
+                  </div>
+                )}
+                <h2 className="mt-2 text-2xl font-bold leading-snug text-slate-900">
+                  {currentSplit.question}
                 </h2>
 
                 {/* ── Answer card — document answer, the user's saved answer, or

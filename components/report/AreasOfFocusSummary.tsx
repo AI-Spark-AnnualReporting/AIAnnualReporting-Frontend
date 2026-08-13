@@ -6,8 +6,10 @@ import { cn } from "@/lib/utils"
 
 /**
  * Read-only presentation of the cycle's areas of focus (`areas_of_focus`) on
- * the plan step: the primary slogan first, then the secondary ones, each with
- * its sub-slogan chips.
+ * the plan step: the primary slogan first, then the secondary ones.
+ *
+ * Sub-slogans are stored but never shown — they're an internal artefact of
+ * generation, not something the reader needs.
  *
  * Nothing is editable here. The primary/secondary choice is made on the
  * Strategic Brief step and the server rejects a half-made one (422), so a
@@ -87,18 +89,6 @@ export function AreasOfFocusSummary({
                   </div>
                   {area.summary && (
                     <p className="text-xs leading-relaxed text-slate-500">{area.summary}</p>
-                  )}
-                  {area.sub_slogans.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {area.sub_slogans.map((s, k) => (
-                        <span
-                          key={k}
-                          className="inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50/60 px-2.5 py-1 text-xs font-medium text-indigo-700"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
                   )}
                 </div>
               </div>

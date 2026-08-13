@@ -45,8 +45,9 @@ export function ThemeChipCard({
   readOnly?: boolean
   onToggleSelect?: () => void
   onTitleChange: (value: string) => void
-  onAddKeyword: (keyword: string) => void
-  onRemoveKeyword: (keywordIndex: number) => void
+  /** Omitted → the card shows no keyword row at all. */
+  onAddKeyword?: (keyword: string) => void
+  onRemoveKeyword?: (keywordIndex: number) => void
   /** Provided → each chip's text is inline-editable instead of static. */
   onEditKeyword?: (keywordIndex: number, value: string) => void
   /**
@@ -72,7 +73,7 @@ export function ThemeChipCard({
   const canRefine = !!onRefine && !readOnly
 
   const commitDraft = () => {
-    if (draft.trim()) onAddKeyword(draft)
+    if (draft.trim()) onAddKeyword?.(draft)
     setDraft("")
   }
 
@@ -199,7 +200,9 @@ export function ThemeChipCard({
             <RoleToggle role={role} group={roleGroup} onChange={onRoleChange} className="mt-2" />
           )}
 
-          {/* Keyword chips */}
+          {/* Keyword chips — omitted entirely when the caller doesn't handle
+              keywords (areas of focus hide their sub-slogans). */}
+          {onAddKeyword && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {keywords.map((kw, k) => (
               <span
@@ -223,7 +226,7 @@ export function ThemeChipCard({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => onRemoveKeyword(k)}
+                    onClick={() => onRemoveKeyword?.(k)}
                     className="text-indigo-400 transition-colors hover:text-indigo-700"
                     aria-label={`Remove ${kw}`}
                   >
@@ -243,7 +246,7 @@ export function ThemeChipCard({
                     e.preventDefault()
                     commitDraft()
                   } else if (e.key === "Backspace" && draft === "" && keywords.length > 0) {
-                    onRemoveKeyword(keywords.length - 1)
+                    onRemoveKeyword?.(keywords.length - 1)
                   }
                 }}
                 onBlur={commitDraft}
@@ -253,6 +256,7 @@ export function ThemeChipCard({
               />
             )}
           </div>
+          )}
 
           {/* Per-theme AI instruction box */}
           {canRefine && refineOpen && onRefine && (

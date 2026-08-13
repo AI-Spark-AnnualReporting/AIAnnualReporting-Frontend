@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { QuestionText } from "@/components/ui/question-text"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -303,7 +304,9 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                         {idx + 1}
                       </span>
-                      <p className="flex-1 font-medium text-sm leading-relaxed">{q.question}</p>
+                      <p className="flex-1 font-medium text-sm leading-relaxed">
+                        <QuestionText text={q.question} />
+                      </p>
                       {/* Answer status pill */}
                       {na ? (
                         <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">

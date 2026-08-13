@@ -96,14 +96,13 @@ export const AREAS_REFRESH_LOADER = {
     "Reading the revised brief…",
     "Checking each area against it…",
     "Reworking the slogans…",
-    "Refreshing the sub-slogans…",
     "Tightening the wording…",
     "Running a final read-through…",
   ],
   tips: [
     "Areas of focus are drawn from the brief — a change to one reshapes the other.",
     "Your Primary and Secondary picks survive the rewrite.",
-    "Every slogan and sub-slogan stays editable afterwards.",
+    "Every slogan stays editable afterwards.",
     "Prefer a smaller change? Refine a single area from its own card instead.",
   ],
 } as const

@@ -52,7 +52,7 @@ const SAVE_BRIEF_CONSENT: ConsentCopy = {
   title: "Saving will also rewrite the areas of focus",
   description:
     "The areas of focus are drawn from the strategic brief, so saving your changes regenerates " +
-    "them to match — that replaces their slogans and sub-slogans, including any you've written " +
+    "them to match — that replaces their slogans, including any you've written " +
     "by hand. Your Primary and Secondary picks are kept.",
   confirmLabel: "Save & regenerate areas",
   cancelLabel: "Cancel",
@@ -321,7 +321,7 @@ export default function ReviewBriefPage({
 
   // ── Persisting manual edits (PUT save-brief-and-areas-of-focus) ──────────
   // Areas of focus autosave: debounced for continuous typing (slogans),
-  // immediate for discrete actions (add/delete area, sub-slogan chip, role).
+  // immediate for discrete actions (add/delete area, role).
   // The BRIEF deliberately does not — it saves on an explicit button, because
   // saving it also offers to rewrite the areas, and that question can't be
   // asked mid-keystroke. We keep local state as the source of truth and don't
@@ -424,35 +424,6 @@ export default function ReviewBriefPage({
   const updateSlogan = (idx: number, value: string) => {
     if (!result) return
     commitAreas(areas.map((a, i) => (i === idx ? { ...a, slogan: value } : a)), false)
-  }
-  const editSubSlogan = (idx: number, subIdx: number, value: string) => {
-    if (!result) return
-    commitAreas(
-      areas.map((a, i) =>
-        i === idx ? { ...a, sub_slogans: a.sub_slogans.map((s, k) => (k === subIdx ? value : s)) } : a,
-      ),
-      false,
-    )
-  }
-  const removeSubSlogan = (idx: number, subIdx: number) => {
-    if (!result) return
-    commitAreas(
-      areas.map((a, i) =>
-        i === idx ? { ...a, sub_slogans: a.sub_slogans.filter((_, k) => k !== subIdx) } : a,
-      ),
-      true,
-    )
-  }
-  const addSubSlogan = (idx: number, raw: string) => {
-    if (!result) return
-    const value = raw.trim()
-    if (!value) return
-    const existing = areas[idx].sub_slogans
-    if (existing.some((s) => s.toLowerCase() === value.toLowerCase())) return
-    commitAreas(
-      areas.map((a, i) => (i === idx ? { ...a, sub_slogans: [...a.sub_slogans, value] } : a)),
-      true,
-    )
   }
   const addArea = () => {
     if (!result || areas.length >= MAX_SELECTED_AREAS) return
@@ -752,15 +723,13 @@ export default function ReviewBriefPage({
                     index={i}
                     // The card speaks title/keywords for both this screen and the
                     // suggested-themes one; areas of focus map onto it here.
-                    theme={{ title: area.slogan, keywords: area.sub_slogans, summary: area.summary }}
+                    // Sub-slogans stay on the record but are never shown — no
+                    // keywords, no keyword handlers.
+                    theme={{ title: area.slogan, keywords: [], summary: area.summary }}
                     role={area.role}
                     onRoleChange={(r) => setAreaRole(i, r)}
                     roleGroup="area-of-focus-primary"
                     onTitleChange={(v) => updateSlogan(i, v)}
-                    onAddKeyword={(s) => addSubSlogan(i, s)}
-                    onRemoveKeyword={(subIdx) => removeSubSlogan(i, subIdx)}
-                    onEditKeyword={(subIdx, v) => editSubSlogan(i, subIdx, v)}
-                    addPlaceholder="Add sub-slogan…"
                     onRemove={() => deleteArea(i)}
                     onRefine={(ins) => refineAreasWith(ins, i)}
                   />
