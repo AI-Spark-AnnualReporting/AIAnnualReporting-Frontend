@@ -54,9 +54,9 @@ export default function PMDashboard() {
           accent="indigo"
         />
         <PMStatCard
-          title="Awaiting HR Lead Approval"
+          title="Awaiting Department Lead Approval"
           value={pendingReviews}
-          description="Submissions with department HR Leads"
+          description="Submissions with department leads"
           icon={ClipboardCheck}
           accent="amber"
         />

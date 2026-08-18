@@ -14,7 +14,7 @@ import { SortControl } from "@/components/ui/sort-control"
 import { useSort } from "@/hooks/useSort"
 import type { SortField } from "@/lib/sort"
 import { ClipboardCheck, Clock, FileText, ArrowRight, Users } from "lucide-react"
-import { formatDate, cn } from "@/lib/utils"
+import { formatDate, cn, deptLeadLabel } from "@/lib/utils"
 
 const reviewOf = (q: HODQuestion) => q.review_status || "pending"
 const WITH_TEAM = ["not_started", "in_progress", "submitted", "reopened"]
@@ -57,7 +57,9 @@ export default function HODDashboardPage() {
     <div className="mx-auto max-w-6xl space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">HR Lead Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+          {deptLeadLabel(all[0]?.departments?.department_code)} Dashboard
+        </h1>
         <p className="mt-1.5 text-base text-slate-500">
           Review your department’s questions, then assign a team member to answer them.
         </p>

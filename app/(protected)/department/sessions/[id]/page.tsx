@@ -36,7 +36,7 @@ import { QuestionTag, QuestionText } from "@/components/ui/question-text"
 import { splitQuestion } from "@/lib/questionText"
 import { dirOf } from "@/lib/lang"
 import Link from "next/link"
-import { cn } from "@/lib/utils"
+import { cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 
@@ -56,7 +56,7 @@ const isNotFoundAnswer = (text: string | undefined) =>
 // Centriyon status pill — coloured dot + label, keyed by session status.
 const SESSION_PILL: Record<string, { label: string; dot: string; text: string; bg: string }> = {
   assigned:    { label: "Assigned",      dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
-  hod_curation:{ label: "With HR Lead",  dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
+  hod_curation:{ label: "",              dot: "bg-violet-500",  text: "text-violet-700",  bg: "bg-violet-50" },
   not_started: { label: "Not Started",   dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-100" },
   in_progress: { label: "In Progress",   dot: "bg-indigo-500",  text: "text-indigo-700",  bg: "bg-indigo-50" },
   submitted:   { label: "Submitted",     dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50" },
@@ -64,12 +64,13 @@ const SESSION_PILL: Record<string, { label: string; dot: string; text: string; b
   reopened:    { label: "Needs Changes", dot: "bg-red-500",     text: "text-red-700",     bg: "bg-red-50" },
 }
 
-function SessionStatusPill({ status }: { status: string }) {
+function SessionStatusPill({ status, deptCode }: { status: string; deptCode?: string }) {
   const s = SESSION_PILL[status] ?? SESSION_PILL.not_started
+  const label = status === "hod_curation" ? `With ${deptLeadLabel(deptCode)}` : s.label
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.bg, s.text)}>
       <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-      {s.label}
+      {label}
     </span>
   )
 }
@@ -595,7 +596,7 @@ export default function SessionWorkspacePage({
           </Button>
 
           <h1 className="ml-1 truncate text-lg font-bold text-slate-900">{session.department_name}</h1>
-          <SessionStatusPill status={session.status} />
+          <SessionStatusPill status={session.status} deptCode={session.department_code} />
           <span className="shrink-0 text-sm text-slate-500">{answeredCount}/{questions.length} answered</span>
         </div>
 

@@ -41,7 +41,7 @@ import {
   ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X,
 } from "lucide-react"
 import Link from "next/link"
-import { formatDate } from "@/lib/utils"
+import { formatDate, deptLeadLabel } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -733,7 +733,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               onClick={() => openHodNudge(row)}
               className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
             >
-              <BellRing className="h-3 w-3 mr-1" /> Nudge HR Lead
+              <BellRing className="h-3 w-3 mr-1" /> Nudge {deptLeadLabel(row.department_code)}
             </Button>
           )}
         </div>
@@ -833,7 +833,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">
                   {readiness.departments_approved} of {readiness.departments_total}{" "}
-                  departments approved by their HR Lead.
+                  departments approved by their Department Lead.
                 </p>
               )}
             </div>
@@ -857,7 +857,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               ? "Report sections haven't been set up for this cycle yet"
               : total === 0
                 ? "No departments assigned to this cycle yet"
-                : `Available once every department's HR Lead has approved (${approved} of ${total} so far)`
+                : `Available once every department's Lead has approved (${approved} of ${total} so far)`
 
             return (
               <Button disabled title={tooltip}>
@@ -874,8 +874,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>
                 {readiness.departments_approved === 0
-                  ? "No department has been approved by its HR Lead yet — the Report Builder unlocks once every department's HR Lead has approved."
-                  : `${readiness.departments_approved} of ${readiness.departments_total} departments approved by their HR Lead — the Report Builder unlocks once every department is approved.`}
+                  ? "No department has been approved by its Lead yet — the Report Builder unlocks once every department's Lead has approved."
+                  : `${readiness.departments_approved} of ${readiness.departments_total} departments approved by their Department Lead — the Report Builder unlocks once every department is approved.`}
               </span>
             </div>
           )}
@@ -1024,7 +1024,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           <div>
             <p className="font-semibold text-green-900 text-base">All departments have submitted!</p>
             <p className="text-sm text-green-800 mt-0.5">
-              Now with their HR Leads for approval — the report builder unlocks once every department&apos;s HR Lead has approved.
+              Now with their Department Leads for approval — the report builder unlocks once every department&apos;s Lead has approved.
             </p>
           </div>
         </div>
@@ -1164,7 +1164,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                           onClick={() => openHodNudge(d)}
                           className="h-7 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                         >
-                          <BellRing className="h-3 w-3 mr-1" /> Nudge HR Lead
+                          <BellRing className="h-3 w-3 mr-1" /> Nudge {deptLeadLabel(d.department_code)}
                         </Button>
                       )}
                     </div>
@@ -1213,7 +1213,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-800">
-              {hodBlocked.length} department{hodBlocked.length !== 1 ? "s" : ""} waiting on their HR Lead
+              {hodBlocked.length} department{hodBlocked.length !== 1 ? "s" : ""} waiting on their Department Lead
               {deadlineChip && (
                 <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", deadlineChip.cls)}>
                   {deadlineChip.label}
@@ -1230,7 +1230,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             disabled={sendReminder.isPending}
             className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
           >
-            <BellRing className="h-3.5 w-3.5 mr-1.5" /> Nudge all HR Leads
+            <BellRing className="h-3.5 w-3.5 mr-1.5" /> Nudge all Department Leads
           </Button>
         </div>
       )}
@@ -1859,13 +1859,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       <Dialog open={!!hodNudgeTarget} onOpenChange={(o) => !o && setHodNudgeTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Nudge HR Lead — {hodNudgeTarget?.department_name}</DialogTitle>
+            <DialogTitle>Nudge {deptLeadLabel(hodNudgeTarget?.department_code)} — {hodNudgeTarget?.department_name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2.5 text-xs text-indigo-800">
               <BellRing className="h-3.5 w-3.5 shrink-0" />
               <span>
-                {hodNudgeTarget?.hod_name ? <b>{hodNudgeTarget.hod_name}</b> : "The HR Lead"}{" "}
+                {hodNudgeTarget?.hod_name ? <b>{hodNudgeTarget.hod_name}</b> : `The ${deptLeadLabel(hodNudgeTarget?.department_code)}`}{" "}
                 {hodNudgeTarget?.status === "hod_curation"
                   ? "needs to review the questions and assign a team member."
                   : "needs to review and approve the submitted answers."}

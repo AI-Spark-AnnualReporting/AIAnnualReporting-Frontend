@@ -23,6 +23,7 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
 import { NotificationBell, EscalationBannerStrip } from "@/components/layout/notifications"
+import { BackToCentritonButton } from "@/components/layout/BackToCentritonButton"
 
 // ── TopNav ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ export function TopNav() {
       <header className="flex h-16 items-center justify-between border-b bg-card px-6">
         <div />
         <div className="flex items-center gap-3">
+          <BackToCentritonButton />
           <NotificationBell
             notifications={allNotifications}
             onView={handleView}
