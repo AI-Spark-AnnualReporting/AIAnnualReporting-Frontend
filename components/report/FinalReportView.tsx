@@ -140,7 +140,10 @@ function ExecutiveSummary({
             {isArabic ? toArabicDigits(number) : number}
           </span>
         )}
-        <span>Executive Summary</span>
+        {/* Must stay identical to EXEC_SUMMARY_LABEL_AR in the backend's
+            markdown_text.py — the PDF/DOCX and the TOC use that wording, and a
+            different one here makes the preview disagree with the document. */}
+        <span>{isArabic ? "الملخص التنفيذي" : "Executive Summary"}</span>
       </h2>
       <ProsePreview content={content} dir={isArabic ? "rtl" : "ltr"} />
     </section>
