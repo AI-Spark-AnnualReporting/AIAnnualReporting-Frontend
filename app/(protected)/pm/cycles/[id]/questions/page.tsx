@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader, Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { QuestionText } from "@/components/ui/question-text"
+import { dirOf } from "@/lib/lang"
 import { Button } from "@/components/ui/button"
 import { SessionSummary } from "@/types"
 import { cn } from "@/lib/utils"
@@ -134,6 +135,8 @@ function DepartmentQuestions({
               {questions.map((q, i) => (
                 <li
                   key={q.question_id}
+                  // dir on the row: for Arabic the number chip moves to the right.
+                  dir={dirOf(q.question)}
                   className="flex gap-3 rounded-xl border border-indigo-100 bg-white px-4 py-3 text-sm leading-relaxed"
                 >
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-semibold text-indigo-600">

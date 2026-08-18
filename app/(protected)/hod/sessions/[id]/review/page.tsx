@@ -7,6 +7,7 @@ import { draftContent } from "@/lib/session"
 import { PageLoader } from "@/components/ui/spinner"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { QuestionText } from "@/components/ui/question-text"
+import { dirOf } from "@/lib/lang"
 import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -139,14 +140,14 @@ export default function HODReviewPage() {
             const has = !!ans.trim()
             const na = has && isNA(ans)
             return (
-              <div key={q.question_id} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div key={q.question_id} dir={dirOf(q.question)} className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex items-start gap-3">
                   <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[11px] font-bold text-slate-500">
                     {idx + 1}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold leading-relaxed text-[#1A1D2E]">
-                      <QuestionText text={q.question} />
+                      <QuestionText text={q.question} stacked />
                     </p>
                     {na ? (
                       <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">

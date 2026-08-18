@@ -12,6 +12,7 @@ import {
   type ReviewSection,
   type ReviewViewResponse,
 } from "@/lib/api/communications"
+import { dirOf } from "@/lib/lang"
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -80,6 +81,60 @@ const ICON_COMMENT = (
     <path d="M12 8.4a1.4 1.4 0 0 1-1.4 1.4H4.3L1.9 12V3.1a1.4 1.4 0 0 1 1.4-1.4h7.3A1.4 1.4 0 0 1 12 3.1v5.3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
   </svg>
 )
+
+// Split on blank lines into justified paragraphs.
+function Prose({ text }: { text: string }) {
+  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+  const blocks = paragraphs.length ? paragraphs : [text]
+  return (
+    <>
+      {blocks.map((p, i) => (
+        <p
+          key={i}
+          dir={dirOf(p)}
+          style={{
+            margin: i === 0 ? 0 : "14px 0 0",
+            fontSize: 14,
+            lineHeight: 1.75,
+            color: "#2A2E47",
+            whiteSpace: "pre-wrap",
+            textAlign: "justify",
+          }}
+        >
+          {p}
+        </p>
+      ))}
+    </>
+  )
+}
+
+// Structured section payloads arrive as a JSON string. Anything that doesn't
+// parse is prose.
+function tryParseJson(content: string): Record<string, unknown> | undefined {
+  const t = content.trim()
+  if (!t.startsWith("{") && !t.startsWith("[")) return undefined
+  try {
+    const parsed = JSON.parse(t)
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function str(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v : null
+}
+
+// Cover payload: { template_key, values: { company_name, title, period_label,
+// tone_label, aggregate_confidence } }
+function CoverBlock({ values }: { values: Record<string, unknown> }) {
+  const company = str(values.company_name)
+  const title = str(values.title)
+  const period = str(values.period_label)
+  const tone = str(values.tone_label)
+  const confidence =
+    typeof values.aggregate_confidence === "number" ? values.aggregate_confidence : null
+
 // `onJump` makes the whole row a target that scrolls the document to the
 // section this comment is on. Omitted for report-level comments (no section to
 // scroll to) and for the rows already rendered inside their own section.
@@ -139,7 +194,7 @@ function CommentRow({
             {comment.section_title}
           </div>
         )}
-        <div style={{ fontSize: 12, color: "#3A4066", marginTop: 3, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        <div dir={dirOf(comment.body)} style={{ fontSize: 12, color: "#3A4066", marginTop: 3, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
           {comment.body}
         </div>
       </div>
@@ -583,12 +638,9 @@ export function ReviewerView({
                 // section.id is the report's section_code verbatim.
                 const body = bodies[s.id]
                 return (
-                  <div
-                    key={s.id}
-                    id={sectionDomId(s.id)}
-                    style={{ marginBottom: isQuarterly ? 34 : 16, scrollMarginTop: 12 }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: isQuarterly ? 10 : 11, marginBottom: isQuarterly ? 14 : 10 }}>
+                  <div key={s.id} style={{ marginBottom: 16 }}>
+                    {/* dir on the row so the order chip sits right of an Arabic title. */}
+                    <div dir={dirOf(s.title)} style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
                       <span
                         style={{
                           flexShrink: 0,

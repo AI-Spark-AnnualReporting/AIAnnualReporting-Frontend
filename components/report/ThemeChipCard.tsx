@@ -81,9 +81,12 @@ export function ThemeChipCard({
 
   return (
     <div
+      dir={isRtl ? "rtl" : "ltr"}
       className={cn(
+        // pe-* reserves room for the absolutely-positioned toolbar below; both
+        // are logical, so they land on the same side in Arabic and English.
         "relative rounded-xl border p-4 transition-colors",
-        readOnly ? "pr-4" : canRefine ? "pr-40" : "pr-9",
+        readOnly ? "pe-4" : canRefine ? "pe-40" : "pe-9",
         selectable && selected
           ? "border-indigo-400 bg-indigo-50/40 ring-1 ring-indigo-300"
           : // Role mode: an area with role "none" isn't carried forward, so it
@@ -97,7 +100,7 @@ export function ThemeChipCard({
     >
       {/* Per-theme refine + remove (hidden when read-only) */}
       {!readOnly && (
-        <div className="absolute right-3 top-2.5 flex items-center gap-2">
+        <div className="absolute end-3 top-2.5 flex items-center gap-2">
           {canRefine && (
             <button
               type="button"
@@ -161,13 +164,7 @@ export function ThemeChipCard({
         )}
         <div className="min-w-0 flex-1">
           {readOnly ? (
-            <h4
-              dir={isRtl ? "rtl" : "ltr"}
-              className={cn(
-                "text-sm font-semibold text-foreground",
-                isRtl && "text-right",
-              )}
-            >
+            <h4 className="text-sm font-semibold text-foreground">
               {theme.title || <span className="italic text-slate-400">Untitled theme</span>}
             </h4>
           ) : (
@@ -176,22 +173,12 @@ export function ThemeChipCard({
               type="text"
               value={theme.title}
               onChange={(e) => onTitleChange(e.target.value)}
-              dir={isRtl ? "rtl" : "ltr"}
-              className={cn(
-                "w-full border-0 bg-transparent p-0 text-sm font-semibold text-foreground outline-none",
-                isRtl && "text-right",
-              )}
+              className="w-full border-0 bg-transparent p-0 text-sm font-semibold text-foreground outline-none"
             />
           )}
           {/* AI summary — what this theme's keywords reflect */}
           {theme.summary && (
-            <p
-              dir={isRtl ? "rtl" : "ltr"}
-              className={cn(
-                "mt-1.5 text-xs leading-relaxed text-muted-foreground",
-                isRtl && "text-right",
-              )}
-            >
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
               {theme.summary}
             </p>
           )}
@@ -216,7 +203,6 @@ export function ThemeChipCard({
                     value={kw}
                     onChange={(e) => onEditKeyword(k, e.target.value)}
                     size={Math.max(kw.length, 3)}
-                    dir={isRtl ? "rtl" : "ltr"}
                     aria-label={`Edit "${kw}"`}
                     className="border-0 bg-transparent p-0 text-xs font-medium text-indigo-700 outline-none"
                   />
@@ -251,7 +237,6 @@ export function ThemeChipCard({
                 }}
                 onBlur={commitDraft}
                 placeholder={addPlaceholder}
-                dir={isRtl ? "rtl" : "ltr"}
                 className="min-w-[8rem] flex-1 border-0 bg-transparent px-1 py-1 text-xs outline-none placeholder:text-muted-foreground/60"
               />
             )}

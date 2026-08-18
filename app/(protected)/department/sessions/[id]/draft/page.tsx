@@ -22,8 +22,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { TONE_OPTIONS } from "@/lib/constants"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import {
   ArrowLeft,
   Sparkles,
@@ -37,13 +35,10 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
+import { ProsePreview } from "@/components/ui/prose-preview"
+import { cn } from "@/lib/utils"
 import { cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
-
-/** Detect whether content is HTML or plain text */
-function isHtml(content: string): boolean {
-  return /<[a-z][\s\S]*>/i.test(content.trim().substring(0, 200))
-}
 
 // Quiet enough not to fire mid-sentence, short enough that the residual loss
 // window on a hard tab-close stays about a second. Blur also commits, so most
@@ -434,16 +429,7 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
               /* Rendered HTML / plain-text preview */
               <div className="min-h-[500px] overflow-y-auto">
                 {effectiveDraft ? (
-                  isHtml(effectiveDraft) ? (
-                    <div
-                      className="prose prose-sm max-w-none prose-slate"
-                      dangerouslySetInnerHTML={{ __html: effectiveDraft }}
-                    />
-                  ) : (
-                    <div className="prose prose-sm max-w-none prose-slate">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{effectiveDraft}</ReactMarkdown>
-                    </div>
-                  )
+                  <ProsePreview content={effectiveDraft} className="prose-slate" />
                 ) : (
                   <p className="text-sm italic text-slate-400">
                     No draft content yet — generate a draft from the workspace.

@@ -54,17 +54,18 @@ export function SectionList({ sections, selectedCode, onSelect, isRtl }: Section
             <button
               type="button"
               onClick={() => onSelect(section.section_code)}
+              // dir on the row (not just the title) so the status icon and mode
+              // chip swap sides too.
+              dir={isRtl ? "rtl" : "ltr"}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
+                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-start transition-colors",
                 active ? "bg-slate-100" : "hover:bg-slate-50",
               )}
             >
               <StatusIcon section={section} />
               <span
-                dir={isRtl ? "rtl" : "ltr"}
                 className={cn(
-                  "min-w-0 flex-1 truncate text-sm",
-                  isRtl ? "text-right" : "text-left",
+                  "min-w-0 flex-1 truncate text-sm text-start",
                   active ? "font-semibold text-slate-900" : "text-slate-700",
                 )}
               >
