@@ -9,6 +9,7 @@ import {
   type ReviewReportSection,
   type ReviewViewResponse,
 } from "@/lib/api/communications"
+import { dirOf } from "@/lib/lang"
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -68,6 +69,7 @@ function Prose({ text }: { text: string }) {
       {blocks.map((p, i) => (
         <p
           key={i}
+          dir={dirOf(p)}
           style={{
             margin: i === 0 ? 0 : "14px 0 0",
             fontSize: 14,
@@ -318,7 +320,7 @@ function CommentRow({ comment, showSection }: { comment: ReviewComment; showSect
             {comment.section_title}
           </div>
         )}
-        <div style={{ fontSize: 12, color: "#3A4066", marginTop: 3, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        <div dir={dirOf(comment.body)} style={{ fontSize: 12, color: "#3A4066", marginTop: 3, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
           {comment.body}
         </div>
       </div>
@@ -652,7 +654,8 @@ export function ReviewerView({
                 const body = bodies[s.id]
                 return (
                   <div key={s.id} style={{ marginBottom: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
+                    {/* dir on the row so the order chip sits right of an Arabic title. */}
+                    <div dir={dirOf(s.title)} style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
                       <span
                         style={{
                           minWidth: 24,

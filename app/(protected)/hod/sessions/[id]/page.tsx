@@ -18,6 +18,7 @@ import { QUERY_KEYS } from "@/lib/constants"
 import type { AssignableUser, HODQuestion } from "@/lib/api/hod"
 import { QuestionTag } from "@/components/ui/question-text"
 import { QUESTION_PLACEHOLDER, TOPIC_PLACEHOLDER, joinQuestion, splitQuestion } from "@/lib/questionText"
+import { dirOf } from "@/lib/lang"
 import {
   ArrowLeft, Check, X, Pencil, Trash2, Plus, RotateCcw, Undo2,
   Loader2, Send, Clock, CheckCircle2,
@@ -167,7 +168,7 @@ export default function HODCuratePage() {
           const editing = editingId === q.question_id
           const border = status === "approved" ? "border-l-emerald-400" : status === "rejected" ? "border-l-rose-400" : "border-l-amber-400"
           return (
-            <div key={q.question_id} className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-4 ${border}`}>
+            <div key={q.question_id} dir={dirOf(question)} className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-4 ${border}`}>
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[11px] font-bold text-slate-500">
                   {q.order}

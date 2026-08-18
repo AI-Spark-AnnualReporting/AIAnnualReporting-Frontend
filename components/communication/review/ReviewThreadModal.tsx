@@ -10,6 +10,7 @@ import {
   type ThreadDetailResponse,
   type ThreadMessage,
 } from "@/lib/api/communications"
+import { dirOf } from "@/lib/lang"
 import { AttachedReportCard } from "./AttachedReportCard"
 import {
   BADGE_GRAY,
@@ -119,6 +120,7 @@ function MessageRow({ message }: { message: ThreadMessage }) {
           <span style={{ fontSize: 11.5, color: "#9BA3C4" }}>{relativeTime(created_at)}</span>
         </div>
         <div
+          dir={dirOf(body)}
           style={{
             padding: "10px 13px",
             borderRadius: 10,

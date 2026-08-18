@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useBuildPlan, useUpdatePlan } from "@/hooks/useReportBuilder"
+import { dirOf } from "@/lib/lang"
 
 interface HeadlineBlockProps {
   cycleId: string
@@ -101,7 +102,7 @@ export function HeadlineBlock({ cycleId, headline }: HeadlineBlockProps) {
         </div>
       ) : (
         <div className="group flex items-start gap-3">
-          <h2 className="flex-1 text-2xl font-semibold leading-tight">
+          <h2 dir={dirOf(headline)} className="flex-1 text-2xl font-semibold leading-tight">
             {headline?.trim() || (
               <span className="text-muted-foreground italic font-normal">
                 No headline yet — click edit to add one.
