@@ -52,6 +52,15 @@ export function detectScriptLanguage(
   return "ambiguous"
 }
 
+// Layout direction for a piece of content. Used on the *row container* (not the
+// text element) so the whole row mirrors — number badges, status icons and
+// chips end up on the right for Arabic, matching the downloaded report.
+// Majority-of-letters rather than the strict MIN_CORRECT_RATIO: a two-word
+// Arabic section title still needs to lay out RTL.
+export function dirOf(text: string | null | undefined): "rtl" | "ltr" {
+  return detectScriptLanguage(text ?? "", 1, 0.5) === "arabic" ? "rtl" : "ltr"
+}
+
 // True if the text is OK to submit for `expected`: either too little text to
 // judge, or at least MIN_CORRECT_RATIO of its letters are in `expected`.
 export function isLanguageAcceptable(

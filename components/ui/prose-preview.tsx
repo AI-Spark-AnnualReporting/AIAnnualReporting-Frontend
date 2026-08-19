@@ -12,8 +12,10 @@ interface ProsePreviewProps {
   content: string
   className?: string
   // When "rtl", the whole markdown block lays out right-to-left so its headings
-  // and lists right-align — used for Arabic report content.
-  dir?: "ltr" | "rtl"
+  // and lists right-align — used for Arabic report content. Defaults to "auto",
+  // which lets the browser pick per content when the caller has no cycle
+  // language to hand.
+  dir?: "ltr" | "rtl" | "auto"
 }
 
 // Crude detector — same pattern as the dept draft + PM session pages. If the
@@ -45,7 +47,7 @@ function makeHeadingRenderer(content: string): Components {
   }
 }
 
-export function ProsePreview({ content, className, dir }: ProsePreviewProps) {
+export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewProps) {
   const trimmed = content.trim()
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
   const style = dir === "rtl" ? { textAlign: "right" as const } : undefined

@@ -34,6 +34,7 @@ import { ExtractionLoader, type ExtractionResult } from "@/components/department
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { QuestionTag, QuestionText } from "@/components/ui/question-text"
 import { splitQuestion } from "@/lib/questionText"
+import { dirOf } from "@/lib/lang"
 import Link from "next/link"
 import { cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
@@ -499,7 +500,8 @@ export default function SessionWorkspacePage({
                 <button
                   key={q.question_id}
                   onClick={() => { switchToQuestion(idx); setViewMode("focused") }}
-                  className="rounded-2xl border border-slate-100 bg-white p-5 text-left shadow-sm transition-all hover:shadow-md"
+                  dir={dirOf(q.question)}
+                  className="rounded-2xl border border-slate-100 bg-white p-5 text-start shadow-sm transition-all hover:shadow-md"
                 >
                   <div className="mb-3 flex items-center gap-2">
                     <div className={cn(
@@ -524,7 +526,7 @@ export default function SessionWorkspacePage({
                     </span>
                   </div>
                   <p className="line-clamp-3 text-sm leading-relaxed text-slate-700">
-                    <QuestionText text={q.question} />
+                    <QuestionText text={q.question} stacked />
                   </p>
                   {answered && (
                     <p className="mt-2 line-clamp-2 text-xs text-slate-400">{answers[q.question_id]}</p>
@@ -693,8 +695,9 @@ export default function SessionWorkspacePage({
                     <button
                       key={q.question_id}
                       onClick={() => switchToQuestion(idx)}
+                      dir={dirOf(q.question)}
                       className={cn(
-                        "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors",
+                        "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-start transition-colors",
                         active ? "bg-indigo-50" : "hover:bg-slate-50"
                       )}
                     >
@@ -766,11 +769,14 @@ export default function SessionWorkspacePage({
                 {/* Tag above rather than inline — at 2xl an inline chip fights
                     the heading. */}
                 {currentSplit.topic && (
-                  <div className="mt-4">
+                  <div className="mt-4" dir={dirOf(currentSplit.question)}>
                     <QuestionTag topic={currentSplit.topic} />
                   </div>
                 )}
-                <h2 className="mt-2 text-2xl font-bold leading-snug text-slate-900">
+                <h2
+                  dir={dirOf(currentSplit.question)}
+                  className="mt-2 text-2xl font-bold leading-snug text-slate-900"
+                >
                   {currentSplit.question}
                 </h2>
 

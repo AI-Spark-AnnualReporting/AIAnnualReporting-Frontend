@@ -22,6 +22,7 @@ import {
 import Link from "next/link"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { QuestionText } from "@/components/ui/question-text"
+import { dirOf } from "@/lib/lang"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -299,13 +300,14 @@ export default function SessionReviewPage({ params }: { params: Promise<{ id: st
                     {/* Collapsible header */}
                     <button
                       onClick={() => toggleExpanded(q.question_id)}
-                      className="w-full flex items-start gap-3 p-4 text-left transition-colors hover:bg-accent/50"
+                      dir={dirOf(q.question)}
+                      className="w-full flex items-start gap-3 p-4 text-start transition-colors hover:bg-accent/50"
                     >
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                         {idx + 1}
                       </span>
                       <p className="flex-1 font-medium text-sm leading-relaxed">
-                        <QuestionText text={q.question} />
+                        <QuestionText text={q.question} stacked />
                       </p>
                       {/* Answer status pill */}
                       {na ? (

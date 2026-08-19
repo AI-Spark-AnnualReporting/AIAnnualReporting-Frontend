@@ -175,7 +175,9 @@ function SectionTile({
       {needsSource && (
         <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-amber-400" />
       )}
-      <div className="flex items-start gap-3">
+      {/* dir on the row so the drag handle, the "01" number chip and the badges
+          below mirror to the right for Arabic — not just the title text. */}
+      <div dir={isRtl ? "rtl" : "ltr"} className="flex items-start gap-3">
         {!readOnly && (
           <button
             type="button"
@@ -193,13 +195,7 @@ function SectionTile({
         </span>
 
         <div className="min-w-0 flex-1 space-y-2.5">
-          <h3
-            dir={isRtl ? "rtl" : "ltr"}
-            className={cn(
-              "text-sm font-semibold leading-snug text-slate-900",
-              isRtl ? "text-right" : "text-left",
-            )}
-          >
+          <h3 className="text-sm font-semibold leading-snug text-slate-900 text-start">
             {section.title}
           </h3>
           <div className="flex flex-wrap items-center gap-1.5">
