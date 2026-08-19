@@ -82,59 +82,6 @@ const ICON_COMMENT = (
   </svg>
 )
 
-// Split on blank lines into justified paragraphs.
-function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-  const blocks = paragraphs.length ? paragraphs : [text]
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          dir={dirOf(p)}
-          style={{
-            margin: i === 0 ? 0 : "14px 0 0",
-            fontSize: 14,
-            lineHeight: 1.75,
-            color: "#2A2E47",
-            whiteSpace: "pre-wrap",
-            textAlign: "justify",
-          }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  )
-}
-
-// Structured section payloads arrive as a JSON string. Anything that doesn't
-// parse is prose.
-function tryParseJson(content: string): Record<string, unknown> | undefined {
-  const t = content.trim()
-  if (!t.startsWith("{") && !t.startsWith("[")) return undefined
-  try {
-    const parsed = JSON.parse(t)
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v : null
-}
-
-// Cover payload: { template_key, values: { company_name, title, period_label,
-// tone_label, aggregate_confidence } }
-function CoverBlock({ values }: { values: Record<string, unknown> }) {
-  const company = str(values.company_name)
-  const title = str(values.title)
-  const period = str(values.period_label)
-  const tone = str(values.tone_label)
-  const confidence =
-    typeof values.aggregate_confidence === "number" ? values.aggregate_confidence : null
-
 // `onJump` makes the whole row a target that scrolls the document to the
 // section this comment is on. Omitted for report-level comments (no section to
 // scroll to) and for the rows already rendered inside their own section.
