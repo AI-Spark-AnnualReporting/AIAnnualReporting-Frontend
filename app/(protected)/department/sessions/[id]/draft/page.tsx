@@ -36,7 +36,6 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { cn } from "@/lib/utils"
 import { cn, deptLeadLabel } from "@/lib/utils"
 import { toast } from "sonner"
 
