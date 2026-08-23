@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/communications"
 import { ReviewThreadModal } from "@/components/communication/review/ReviewThreadModal"
 import { ReviewerView } from "@/components/communication/review/ReviewerView"
+import { MemberPicker, detailMessage } from "@/components/communication/review/shared"
 import {
   useEmailSends,
   useSendRecipients,
@@ -342,7 +343,7 @@ function ThreadRow({
   onExternal: (thread: ThreadSummary) => void
   onPublish: () => void
 }) {
-  const { report, owner, last_message, updated_at, unread_count, internal_count } = thread
+  const { report, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at } = thread
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? " (you)" : ""}`
@@ -381,6 +382,40 @@ function ThreadRow({
             <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#F59E0B" }} />
             {report.status_label}
           </span>
+          {is_private && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "2px 9px",
+                borderRadius: 20,
+                background: "#EFF0F7",
+                color: "#5A6080",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {ICON_LOCK}
+              Private
+            </span>
+          )}
+          {removed_at && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 9px",
+                borderRadius: 20,
+                background: "#FDF2F2",
+                color: "#B4232A",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Removed
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: "#8890AE", marginTop: 3 }}>
           Owner: {ownerLabel} · {relativeTime(updated_at)}
@@ -420,7 +455,9 @@ function ThreadRow({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <ChannelBtn icon={ICON_LOCK} label="Internal" count={internal_count} tone="internal" onClick={() => onOpen(thread)} />
-        <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        {!removed_at && (
+          <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
       </div>
     </div>
@@ -432,196 +469,70 @@ function ThreadRow({
    client-side-filtered picker; selecting a member adds a removable chip and
    strips the "@query" from the text. The parent sends mentions.map(m => m.id).
 ─────────────────────────────────────────────────────────────────────────── */
-function MentionComposer({
-  members,
-  currentUserId,
-  message,
-  onMessageChange,
+/* The @mention chips on their own, so a caller can show "who's in this thread"
+   as its own field instead of stacked on top of the textarea. */
+function MentionChips({
   mentions,
   onMentionsChange,
-  placeholder,
-  minHeight = 92,
 }: {
-  members: CommunicationMember[]
-  currentUserId?: string | null
-  message: string
-  onMessageChange: (value: string) => void
   mentions: CommunicationMember[]
   onMentionsChange: (next: CommunicationMember[]) => void
-  placeholder?: string
-  minHeight?: number
 }) {
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
-  const taRef = useRef<HTMLTextAreaElement>(null)
-  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null)
-
-  const matches = useMemo(() => {
-    if (mentionQuery == null) return []
-    const q = mentionQuery.toLowerCase()
-    return members
-      .filter((m) => m.user_id !== currentUserId) // hide self
-      .filter((m) => !mentions.some((x) => x.id === m.id))
-      .filter((m) => m.full_name.toLowerCase().includes(q))
-      .slice(0, 6)
-  }, [mentionQuery, members, currentUserId, mentions])
-
-  const open = mentionQuery != null && matches.length > 0
-
-  // Anchor the dropdown just below the textarea, matched to its width. Rendered
-  // in a portal so it opens downward and is never clipped by the modal.
-  useEffect(() => {
-    if (!open) return
-    const measure = () => {
-      const el = taRef.current
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      setAnchor({ left: r.left, top: r.bottom + 4, width: r.width })
-    }
-    measure()
-    window.addEventListener("resize", measure)
-    window.addEventListener("scroll", measure, true)
-    return () => {
-      window.removeEventListener("resize", measure)
-      window.removeEventListener("scroll", measure, true)
-    }
-  }, [open, message, mentions.length])
-
-  const handleChange = (value: string) => {
-    onMessageChange(value)
-    const m = value.match(/@([\p{L}\p{N}]*)$/u)
-    setMentionQuery(m ? m[1] : null)
-  }
-
-  const add = (member: CommunicationMember) => {
-    if (!mentions.some((x) => x.id === member.id)) onMentionsChange([...mentions, member])
-    onMessageChange(message.replace(/@([\p{L}\p{N}]*)$/u, ""))
-    setMentionQuery(null)
-    taRef.current?.focus()
-  }
-
   const remove = (id: string) => onMentionsChange(mentions.filter((m) => m.id !== id))
-
+  if (mentions.length === 0) return null
   return (
-    <>
-      {mentions.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {mentions.map((m) => (
-            <span
-              key={m.id}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {mentions.map((m) => (
+          <span
+            key={m.id}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 6px 4px 10px",
+              borderRadius: 20,
+              background: "#F1ECFF",
+              color: "#6D28D9",
+              fontSize: 11.5,
+              fontWeight: 700,
+            }}
+          >
+            @{m.full_name}
+            <button
+              type="button"
+              onClick={() => remove(m.id)}
+              aria-label={`Remove ${m.full_name}`}
               style={{
                 display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 6px 4px 10px",
-                borderRadius: 20,
-                background: "#F1ECFF",
-                color: "#6D28D9",
-                fontSize: 11.5,
-                fontWeight: 700,
+                border: "none",
+                background: "transparent",
+                color: "#8B5CF6",
+                cursor: "pointer",
+                padding: 0,
               }}
             >
-              @{m.full_name}
-              <button
-                type="button"
-                onClick={() => remove(m.id)}
-                aria-label={`Remove ${m.full_name}`}
-                style={{
-                  display: "inline-flex",
-                  border: "none",
-                  background: "transparent",
-                  color: "#8B5CF6",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <textarea
-        ref={taRef}
-        className="chub-inp"
-        value={message}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder={placeholder}
-        style={{ ...INPUT, minHeight, resize: "vertical", lineHeight: 1.5 }}
-      />
-
-      {open &&
-        anchor &&
-        createPortal(
-          <div
-            style={{
-              position: "fixed",
-              left: anchor.left,
-              top: anchor.top,
-              width: anchor.width,
-              background: "#fff",
-              border: "1px solid #E2E4F0",
-              borderRadius: 12,
-              boxShadow: "0 12px 32px rgba(26,29,46,.14)",
-              zIndex: 10002, // above the modal overlay (10001)
-              overflow: "hidden",
-              maxHeight: 232,
-              overflowY: "auto",
-            }}
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {matches.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => add(m)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "9px 13px",
-                  border: "none",
-                  borderBottom: "1px solid #F4F5FB",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                <span
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    background: "#EEEEFF",
-                    color: "#4040C8",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontWeight: 800,
-                  }}
-                >
-                  {initials(m.full_name)}
-                </span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: "#1A1D2E" }}>
-                  {m.full_name}
-                </span>
-                {/* Fixed-width column so every role badge starts at the same x. */}
-                <span style={{ flexShrink: 0, width: 128, display: "flex", justifyContent: "flex-start" }}>
-                  <span style={BADGE_GRAY}>{roleLabel(m.role)}</span>
-                </span>
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            </button>
+          </span>
+        ))}
+      </div>
   )
+}
+
+// "Only you and Noura Al Fahad will see this" — the reader must know who can
+// see a private thread before sending, not after.
+function privateRoster(names: string[]): string {
+  const who =
+    names.length === 0
+      ? "you"
+      : names.length === 1
+        ? `you and ${names[0]}`
+        : names.length === 2
+          ? `you, ${names[0]} and ${names[1]}`
+          : `you, ${names[0]}, ${names[1]} and ${names.length - 2} others`
+  return `Only ${who} will see this`
 }
 
 function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated?: () => void }) {
@@ -638,6 +549,8 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   const [message, setMessage] = useState("")
   const [mentions, setMentions] = useState<CommunicationMember[]>([])
+  // Only the mentioned people can see the thread.
+  const [isPrivate, setIsPrivate] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -693,15 +606,22 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   const labelForCode = (code: string) => types.find((t) => t.code === code)?.label ?? code
 
+  // People not already added — the picker's options. Self is excluded: the
+  // backend drops a self-mention anyway.
+  const addableMembers = members.filter(
+    (m) => m.user_id !== user?.user_id && !mentions.some((x) => x.id === m.id),
+  )
+
   const messageEmpty = message.trim().length === 0
-  // A thread must be addressed to at least one participant.
-  const needsRecipient = !messageEmpty && mentions.length === 0
-  const canSubmit = !!reportId && !messageEmpty && mentions.length > 0 && !submitting
+  // Participants are an optional notify on a public thread — everyone in the
+  // company can see it anyway. On a private one they ARE the member list.
+  const privateNeedsParticipants = isPrivate && mentions.length === 0
+  const canSubmit = !!reportId && !messageEmpty && !privateNeedsParticipants && !submitting
 
   const submit = async () => {
     if (!reportId || messageEmpty) return
-    if (mentions.length === 0) {
-      setFormError("Add at least one participant with @ before starting.")
+    if (privateNeedsParticipants) {
+      setFormError("Add at least one participant — a private conversation needs someone in it.")
       return
     }
     setSubmitting(true)
@@ -713,8 +633,13 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
         // Members' UUID `id`s — NOT their usr_ `user_id`. Backend dedupes +
         // drops any self-mention, so no client-side cleanup needed.
         mentioned_user_ids: mentions.map((m) => m.id),
+        ...(isPrivate ? { is_private: true } : {}),
       })
-      toast.success("Thread started", { description: "Your team has been briefed." })
+      toast.success(isPrivate ? "Private thread started" : "Thread started", {
+        description: isPrivate
+          ? "Only the people you mentioned can see it."
+          : "Your team has been briefed.",
+      })
       onCreated?.()
       onClose()
     } catch (e) {
@@ -726,7 +651,9 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
       }
       switch (s) {
         case 422:
-          setFormError("Message can't be empty")
+          // Covers both "message empty" and the private-thread "needs at least
+          // one person" detail, which is written to be shown as-is.
+          setFormError(detailMessage(e, "Message can't be empty"))
           break
         case 404:
           toast.error("That report is no longer available")
@@ -913,32 +840,92 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
                 )}
               </div>
 
-              {/* First message + @mention picker */}
-              <div style={SECTION_LABEL}>START THE THREAD WITH A MESSAGE</div>
+              {/* Who's in the thread — its own field with its own picker. The message box
+                  is plain text; nobody is added by typing in it. */}
+              <div style={SECTION_LABEL}>PARTICIPANTS</div>
 
-              <MentionComposer
-                members={members}
-                currentUserId={user?.user_id}
-                message={message}
-                onMessageChange={(v) => {
-                  setMessage(v)
+              <MentionChips mentions={mentions} onMentionsChange={setMentions} />
+
+              <MemberPicker
+                options={addableMembers}
+                onPick={(m) => {
+                  setMentions([...mentions, m])
                   if (formError) setFormError(null)
                 }}
-                mentions={mentions}
-                onMentionsChange={setMentions}
-                placeholder="Write the first message to the team...  (type @ to mention)"
+                label={
+                  addableMembers.length === 0
+                    ? mentions.length === 0
+                      ? "No one else in your company yet"
+                      : "Everyone is already added"
+                    : "Add someone…"
+                }
               />
 
-              {(formError || needsRecipient) && (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 9,
+                  marginTop: 10,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isPrivate}
+                  onChange={(e) => {
+                    setIsPrivate(e.target.checked)
+                    if (formError) setFormError(null)
+                  }}
+                  style={{ marginTop: 2, width: 15, height: 15, accentColor: "#4040C8", cursor: "pointer" }}
+                />
+                <span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1D2E" }}>Private conversation</span>
+                  <span style={{ fontSize: 12.5, color: "#8890AE" }}> — only the people you add here can see this</span>
+                </span>
+              </label>
+
+              {isPrivate && !formError && (
                 <div
                   style={{
                     fontSize: 11.5,
                     fontWeight: 600,
                     marginTop: 7,
-                    color: formError ? "#DC2626" : "#9BA3C4",
+                    color: mentions.length === 0 ? "#B45309" : "#5A6080",
                   }}
                 >
-                  {formError ?? "Add at least one participant with @ to start."}
+                  {mentions.length === 0
+                    ? "Add at least one participant — a private conversation needs someone in it."
+                    : privateRoster(mentions.map((m) => m.full_name))}
+                </div>
+              )}
+
+              <div style={{ ...SECTION_LABEL, marginTop: 20 }}>MESSAGE</div>
+
+              {/* Plain textarea — participants are picked in their own field above,
+                  so there's no "@" picker to run here. */}
+              <textarea
+                className="chub-inp"
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value)
+                  if (formError) setFormError(null)
+                }}
+                placeholder="Write the first message to the team…"
+                style={{ ...INPUT, minHeight: 92, resize: "vertical", lineHeight: 1.5 }}
+              />
+
+              {formError && (
+                <div
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    marginTop: 7,
+                    color: "#DC2626",
+                  }}
+                >
+                  {formError}
                 </div>
               )}
             </>

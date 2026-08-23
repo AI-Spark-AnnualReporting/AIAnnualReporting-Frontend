@@ -368,3 +368,208 @@ export function MentionComposer({
     </>
   )
 }
+
+/* ── Participants picker ───────────────────────────────────────────────────
+   A native <select> renders its popup outside the modal and can't be clamped
+   to it, so this is a button + the same portal list the @mention picker uses:
+   width sized for the content, height capped at the modal's bottom edge, and
+   scrolling inside once the member list outgrows it.
+─────────────────────────────────────────────────────────────────────────── */
+/* Bottom edge the dropdown must not cross: the nearest scroll/clip ancestor —
+   in practice the modal — falling back to the viewport when there isn't one. */
+function clipBottom(el: HTMLElement): number {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
+      return node.getBoundingClientRect().bottom
+    }
+  }
+  return window.innerHeight
+}
+
+export function MemberPicker({
+  options,
+  onPick,
+  label,
+  compact = false,
+}: {
+  options: CommunicationMember[]
+  onPick: (member: CommunicationMember) => void
+  label: string
+  // Small pill trigger for sitting inside a row, instead of a full-width field.
+  compact?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  // The list lives in a portal, so it isn't inside btnRef — without its own ref
+  // the outside-click handler unmounts a row on mousedown and its click never
+  // lands, which reads as "picking someone does nothing".
+  const listRef = useRef<HTMLDivElement>(null)
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null)
+  const disabled = options.length === 0
+
+  useEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const el = btnRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const top = r.bottom + 4
+      // A compact trigger is a pill a few characters wide — matching it would
+      // squash every name. Size the list for its content and right-align it to
+      // the pill instead, clamped to stay on screen.
+      const width = compact ? Math.min(300, Math.max(240, window.innerWidth - 32)) : r.width
+      const left = compact ? Math.max(16, Math.min(r.right - width, window.innerWidth - width - 16)) : r.left
+      const bottom = Math.min(window.innerHeight, clipBottom(el))
+      setAnchor({ left, top, width, maxHeight: Math.max(120, bottom - top - 12) })
+    }
+    measure()
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!btnRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    window.addEventListener("resize", measure)
+    window.addEventListener("scroll", measure, true)
+    document.addEventListener("mousedown", close)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("resize", measure)
+      window.removeEventListener("scroll", measure, true)
+      document.removeEventListener("mousedown", close)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open, compact])
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={compact ? undefined : "chub-inp"}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        style={
+          compact
+            ? {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                flexShrink: 0,
+                padding: "5px 11px",
+                borderRadius: 20,
+                border: "1px solid #D8DBEC",
+                background: "#fff",
+                color: disabled ? "#9BA3C4" : "#4040C8",
+                fontSize: 11.5,
+                fontWeight: 700,
+                fontFamily: "inherit",
+                cursor: disabled ? "not-allowed" : "pointer",
+              }
+            : {
+                ...INPUT,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                textAlign: "left",
+                fontFamily: "inherit",
+                cursor: disabled ? "not-allowed" : "pointer",
+                color: disabled ? "#9BA3C4" : "#1A1D2E",
+              }
+        }
+      >
+        {label}
+        {!compact && (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, color: "#9BA3C4" }}>
+            <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </button>
+
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            ref={listRef}
+            style={{
+              position: "fixed",
+              left: anchor.left,
+              top: anchor.top,
+              width: anchor.width,
+              background: "#fff",
+              border: "1px solid #E2E4F0",
+              borderRadius: 12,
+              boxShadow: "0 12px 32px rgba(26,29,46,.14)",
+              zIndex: 10002,
+              maxHeight: anchor.maxHeight,
+              overflowX: "hidden",
+              overflowY: "auto",
+            }}
+          >
+            {options.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  onPick(m)
+                  setOpen(false)
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "9px 13px",
+                  border: "none",
+                  borderBottom: "1px solid #F4F5FB",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <span
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: "#EEEEFF",
+                    color: "#4040C8",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                >
+                  {initials(m.full_name)}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#1A1D2E",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {m.full_name}
+                </span>
+                <span style={{ flexShrink: 0, fontSize: 11.5, color: "#8890AE", whiteSpace: "nowrap" }}>
+                  {roleLabel(m.role)}
+                </span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  )
+}

@@ -99,7 +99,10 @@ export interface StartThreadBody {
   report_id: string
   message: string
   // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  // On a private thread these people ARE the members — 422 if empty.
   mentioned_user_ids: string[]
+  // Only the mentioned people can see the thread. Omit for a normal thread.
+  is_private?: boolean
 }
 
 export interface CommunicationThread {
@@ -138,6 +141,9 @@ export interface ThreadReport {
   status_label: string
 }
 
+// The person who STARTED the thread (confirmed with the backend) — not the
+// report's owner, even on a report thread. `can_add_members` is true only for
+// them on a private thread.
 export interface ThreadOwner {
   user_id: string
   full_name: string
@@ -155,6 +161,10 @@ export interface ThreadLastMessage {
 // `owner` and `last_message` can both be null.
 export interface ThreadSummary {
   thread_id: string
+  // Private threads you're not a member of never appear in the list at all.
+  is_private: boolean
+  // Non-null once you've been removed — the row stays, read-only.
+  removed_at: string | null
   report: ThreadReport
   owner: ThreadOwner | null
   // Added alongside the review flow; null when not out for review.
@@ -183,9 +193,9 @@ export interface MessageSender {
   is_you: boolean
 }
 
-// `kind` drives the bubble: "system" renders with the Communication Hub avatar
-// and label (ignore `sender` for the display name — it stays as the actor, for
-// the audit trail); "user" renders as a person.
+// `kind` drives the bubble: "system" lines are rendered with a muted avatar and
+// name the actor (`sender`) — who added or removed someone; "user" renders as a
+// normal person.
 export type ThreadMessageKind = "system" | "user"
 
 export interface ThreadMessage {
@@ -208,8 +218,38 @@ export interface ReviewAssignment {
   assigned_at: string
 }
 
+// A member of a private thread. `id` is the users.id UUID the member endpoints
+// take; `user_id` is the usr_… string (matches MessageSender.user_id) and is
+// what membership comparisons against the mention picker go through.
+export interface ThreadMemberSummary {
+  // The users.id UUID — what BOTH member endpoints take. Not `user_id`: the
+  // usr_… string won't resolve and comes back 403.
+  id: string
+  user_id: string
+  full_name: string
+  role: string
+  is_you: boolean
+}
+
+// Both member calls return this — drop it straight into the strip.
+export interface ThreadMembersResponse {
+  members: ThreadMemberSummary[]
+  can_add_members: boolean
+}
+
 export interface ThreadDetail {
   thread_id: string
+  is_private: boolean
+  // When you were removed from this thread. null = current member. Non-null
+  // means read-only: the backend still serves the thread, cut off at that
+  // moment, and 403s every write.
+  removed_at: string | null
+  // [] on a public thread — render the members strip off this alone, no need
+  // to check is_private first.
+  members: ThreadMemberSummary[]
+  // True only for the creator of a private thread; false for its other members
+  // and on every public thread. Gates who may pull a non-member in.
+  can_add_members: boolean
   report: ThreadReport
   owner: ThreadOwner | null
   assignment: ReviewAssignment | null
@@ -465,6 +505,10 @@ export interface ReviewViewResponse {
   // can_act && !can_approve.
   can_act: boolean
   can_approve: boolean
+  // Same flag the thread payload carries: non-null → you were removed, so the
+  // screen is read-only. `can_comment` is the derived form — use that.
+  removed_at: string | null
+  can_comment: boolean
   // Only the ticked sections (e.g. 11 of 19). Empty when the narrative hasn't
   // been generated — hide the per-section rail.
   sections: ReviewSection[]
@@ -802,6 +846,33 @@ export const communicationsApi = {
       header: data.header ?? null,
       brand: data.brand ?? data.cover?.brand ?? null,
     }
+  },
+
+  // Add people to a private thread. Creator only (403 otherwise); idempotent —
+  // re-adding an existing member is a 200 that changes nothing. The
+  // "X added Y" system line lands on the next message fetch, not in here.
+  addThreadMembers: async (
+    threadId: string,
+    userIds: string[],
+  ): Promise<ThreadMembersResponse> => {
+    const { data } = await commClient.post(
+      `/communications/threads/${encodeURIComponent(threadId)}/members`,
+      { user_ids: userIds },
+    )
+    return data
+  },
+
+  // Remove one person. `userId` is the users.id UUID, NOT the usr_ `user_id`
+  // on ThreadMemberSummary. Creator only · 422 removing yourself, or the last
+  // other person, or on a public thread · 404 if you're not in the thread.
+  removeThreadMember: async (
+    threadId: string,
+    userId: string,
+  ): Promise<ThreadMembersResponse> => {
+    const { data } = await commClient.delete(
+      `/communications/threads/${encodeURIComponent(threadId)}/members/${encodeURIComponent(userId)}`,
+    )
+    return data
   },
 
   // Start a thread on a report with a first message + optional mentions.

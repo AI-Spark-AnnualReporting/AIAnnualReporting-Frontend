@@ -48,6 +48,14 @@ import { EarningsSectionContent } from "./EarningsSectionContent"
  * so iterating it drops the extras for free.
  */
 
+// "23 Aug 2026" for the removed-from-thread banner.
+function formatRemovedOn(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
+}
+
 // Report-level comments come back under the JSON key "null".
 const REPORT_LEVEL_KEY = "null"
 
@@ -134,6 +142,45 @@ function CoverBlock({ values }: { values: Record<string, unknown> }) {
   const tone = str(values.tone_label)
   const confidence =
     typeof values.aggregate_confidence === "number" ? values.aggregate_confidence : null
+
+  return (
+    <div
+      style={{
+        borderRadius: 14,
+        padding: "38px 34px",
+        background: "linear-gradient(150deg,#2C2C7A,#4040C8)",
+        color: "#fff",
+      }}
+    >
+      {company && (
+        <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".9px", textTransform: "uppercase", opacity: 0.75 }}>
+          {company}
+        </div>
+      )}
+      {title && (
+        <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.15, marginTop: 14, letterSpacing: "-.5px" }}>
+          {title}
+        </div>
+      )}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 18,
+          marginTop: 26,
+          paddingTop: 16,
+          borderTop: "1px solid rgba(255,255,255,.25)",
+          fontSize: 12,
+          opacity: 0.9,
+        }}
+      >
+        {period && <span>Period · {period}</span>}
+        {tone && <span>Tone · {tone.replace(/_/g, " ")}</span>}
+        {confidence != null && <span>Confidence · {confidence}%</span>}
+      </div>
+    </div>
+  )
+}
 
 // `onJump` makes the whole row a target that scrolls the document to the
 // section this comment is on. Omitted for report-level comments (no section to
@@ -427,6 +474,10 @@ export function ReviewerView({
   const assignment = data?.assignment ?? null
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
   const canAct = data?.can_act ?? false
+  // Removed from the thread → read the record, add nothing to it. can_act
+  // already folds in the removal, so the approve/reassign buttons need nothing.
+  const canComment = data?.can_comment ?? true
+  const removedAt = data?.removed_at ?? null
   const canApprove = data?.can_approve ?? false
   // The review payload's section list is earnings-only on the backend — it
   // comes back empty for a quarterly report even when the report is fully
@@ -581,15 +632,26 @@ export function ReviewerView({
                   marginBottom: 16,
                 }}
               >
-                Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
-                requested change. When you&apos;re done, approve it or send it back to the creator.
+                {canComment ? (
+                  <>
+                    Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
+                    requested change. When you&apos;re done, approve it or send it back to the creator.
+                  </>
+                ) : (
+                  <>
+                    You were removed from this conversation
+                    {removedAt ? ` on ${formatRemovedOn(removedAt)}` : ""}. You can read what was said up to then.
+                  </>
+                )}
               </div>
 
               {sections.length === 0 && (
                 <div
                   style={{ ...CARD, padding: "28px 20px", textAlign: "center", fontSize: 13, color: "#8890AE", marginBottom: 12 }}
                 >
-                  This report has no generated sections yet — leave a comment on the report as a whole below.
+                  {canComment
+                    ? "This report has no generated sections yet — leave a comment on the report as a whole below."
+                    : "This report has no generated sections yet."}
                 </div>
               )}
 
@@ -686,7 +748,13 @@ export function ReviewerView({
                       <button
                         type="button"
                         onClick={() => (open ? setComposerFor(undefined) : openComposer(s.id))}
-                        style={{ ...BTN_SECONDARY, gap: 7, fontSize: 12.5, padding: "7px 13px" }}
+                        style={{
+                          ...BTN_SECONDARY,
+                          gap: 7,
+                          fontSize: 12.5,
+                          padding: "7px 13px",
+                          display: canComment ? undefined : "none",
+                        }}
                       >
                         <span style={{ color: "#7C3AED", display: "inline-flex" }}>{ICON_COMMENT}</span>
                         {open ? "Cancel" : "Add comment"}
@@ -767,13 +835,15 @@ export function ReviewerView({
                       {reportLevel.length}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    style={BTN_SECONDARY}
-                    onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
-                  >
-                    {composerFor === null ? "Cancel" : "Add comment"}
-                  </button>
+                  {canComment && (
+                    <button
+                      type="button"
+                      style={BTN_SECONDARY}
+                      onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
+                    >
+                      {composerFor === null ? "Cancel" : "Add comment"}
+                    </button>
+                  )}
                 </div>
 
                 {reportLevel.map((c) => (
