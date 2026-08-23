@@ -72,6 +72,14 @@ function listNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
+// System bodies are verb-first predicates now — the header supplies the subject.
+// Rows written before that change still start with the actor's name and end in
+// a full stop; strip both so they don't read "Aizaz · Aizaz removed you.".
+function systemBody(body: string, actor: string): string {
+  const withoutName = body.startsWith(`${actor} `) ? body.slice(actor.length + 1) : body
+  return withoutName.replace(/\.$/, "")
+}
+
 function MessageRow({ message }: { message: ThreadMessage }) {
   const { sender, body, created_at, kind } = message
   const isSystem = kind === "system"
@@ -144,7 +152,7 @@ function MessageRow({ message }: { message: ThreadMessage }) {
             wordBreak: "break-word",
           }}
         >
-          {body}
+          {isSystem ? systemBody(body, sender.full_name) : body}
         </div>
       </div>
     </div>
