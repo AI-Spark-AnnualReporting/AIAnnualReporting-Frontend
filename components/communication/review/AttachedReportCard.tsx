@@ -2,6 +2,7 @@
 
 import { CSSProperties } from "react"
 import type { ThreadReport } from "@/lib/api/communications"
+import { statusPill, isInReview } from "@/lib/report-status"
 
 /**
  * The report a review is about — linked, never copied.
@@ -45,6 +46,7 @@ export function AttachedReportCard({
   onClick?: () => void
 }) {
   const interactive = !!onClick
+  const pill = statusPill(report.status, report.status_label)
 
   const inner = (
     <>
@@ -63,8 +65,28 @@ export function AttachedReportCard({
         {ICON_DOC}
       </span>
       <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-        <span style={{ display: "block", fontSize: 14, fontWeight: 800, color: "#1A1D2E" }}>
-          {reportHeadline(report)}
+        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#1A1D2E" }}>{reportHeadline(report)}</span>
+          {/* "In review" is what the thread itself already says - every other
+              status (draft, approved, locked, published) is news, so show it. */}
+          {!isInReview(report.status) && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "2px 9px",
+                borderRadius: 20,
+                background: pill.bg,
+                color: pill.color,
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: pill.color }} />
+              {pill.text}
+            </span>
+          )}
         </span>
         <span style={{ display: "block", fontSize: 12, color: "#8890AE", marginTop: 2 }}>{subtitle}</span>
       </span>

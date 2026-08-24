@@ -13,6 +13,7 @@ import {
   type ReviewViewResponse,
 } from "@/lib/api/communications"
 import { dirOf } from "@/lib/lang"
+import { statusPill } from "@/lib/report-status"
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -474,21 +475,24 @@ export function ReviewerView({
               )}
             </div>
           </div>
-          {report && (
-            <span
-              style={{
-                flexShrink: 0,
-                padding: "5px 13px",
-                borderRadius: 20,
-                background: "#FEF3C7",
-                color: "#B45309",
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              {report.status_label}
-            </span>
-          )}
+          {report && (() => {
+              const pill = statusPill(report.status, report.status_label)
+              return (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    padding: "5px 13px",
+                    borderRadius: 20,
+                    background: pill.bg,
+                    color: pill.color,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {pill.text}
+                </span>
+              )
+          })()}
           <button
             type="button"
             onClick={onClose}

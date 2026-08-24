@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/communications"
 import { ReviewThreadModal } from "@/components/communication/review/ReviewThreadModal"
 import { ReviewerView } from "@/components/communication/review/ReviewerView"
+import { statusPill, isInReview } from "@/lib/report-status"
 import { MemberPicker, detailMessage } from "@/components/communication/review/shared"
 import {
   useEmailSends,
@@ -263,6 +264,13 @@ const ICON_MAIL = (
     <path d="M2.2 3.8L7 7.4l4.8-3.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
+const ICON_OPEN_REVIEW = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 const ICON_PUBLISH = (
   <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
     <path d="M7 9.5V2.5M4.3 5.2L7 2.4l2.7 2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -336,14 +344,23 @@ function ThreadRow({
   onOpen,
   onExternal,
   onPublish,
+  onReview,
 }: {
   thread: ThreadSummary
   last: boolean
   onOpen: (thread: ThreadSummary) => void
   onExternal: (thread: ThreadSummary) => void
   onPublish: () => void
+  // Opens the reviewer view straight from the row - same action the thread
+  // modal's footer button fires. Only rendered while the report is actually
+  // out for review; the view itself self-gates approve/reassign on can_act.
+  onReview: (thread: ThreadSummary) => void
 }) {
-  const { report, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at } = thread
+  const { report, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread
+
+  // Review is only live while the report is out for review - once it's
+  // approved (or locked/published) there's nothing left to review.
+  const inReview = isInReview(report?.status)
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? " (you)" : ""}`
@@ -366,22 +383,29 @@ function ThreadRow({
           <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1D2E", letterSpacing: "-.1px" }}>
             {report.title}
           </span>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "2px 9px",
-              borderRadius: 20,
-              background: "rgba(245,158,11,.12)",
-              color: "#B45309",
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#F59E0B" }} />
-            {report.status_label}
-          </span>
+          {/* Only "In review" earns a pill in the list - every other status is
+              noise next to the thread's own activity line. */}
+          {inReview && (() => {
+            const pill = statusPill(report.status, report.status_label)
+            return (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "2px 9px",
+                  borderRadius: 20,
+                  background: pill.bg,
+                  color: pill.color,
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: pill.color }} />
+                {pill.text}
+              </span>
+            )
+          })()}
           {is_private && (
             <span
               style={{
@@ -459,6 +483,16 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
+        {inReview && assignment && !removed_at && (
+          <button
+            type="button"
+            style={{ ...BTN_PRIMARY, gap: 7, padding: "7px 13px" }}
+            onClick={() => onReview(thread)}
+          >
+            Open review
+            {ICON_OPEN_REVIEW}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -3009,6 +3043,7 @@ export function CommunicationHub() {
                   onOpen={openThread}
                   onExternal={(t) => setExternalThread(t)}
                   onPublish={() => setShowPublish(true)}
+                  onReview={(t) => setReviewThreadId(t.thread_id)}
                 />
               ))}
             </div>
