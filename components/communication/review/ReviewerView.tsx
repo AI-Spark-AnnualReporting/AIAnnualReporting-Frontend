@@ -215,14 +215,6 @@ export function ReviewerView({
     void load()
   }, [load])
 
-  // The reassign dropdown needs the member list.
-  useEffect(() => {
-    communicationsApi
-      .members()
-      .then((r) => setMembers(r.members))
-      .catch(() => {})
-  }, [])
-
   // The quarterly body endpoint is company-scoped in its path. Resolve the id
   // from the Centrion JWT rather than the local user, whose company_id is only
   // populated for PMs/admins — a HOD reviewer would otherwise have none.
@@ -244,6 +236,17 @@ export function ReviewerView({
   // are company-scoped on the backend, so a non-owner reviewer can read them.
   const reportId = data?.report?.id
   const reportType = data?.report?.report_type
+
+  // The reassign dropdown needs the member list - scoped to this report, since
+  // handing the review to someone who cannot open it is refused anyway.
+  useEffect(() => {
+    if (!reportId) return
+    communicationsApi
+      .members(reportId)
+      .then((r) => setMembers(r.members))
+      .catch(() => {})
+  }, [reportId])
+
   useEffect(() => {
     if (!reportId || !reportType) return
     // Wait for the company id rather than firing the earnings path at a

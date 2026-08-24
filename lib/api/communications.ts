@@ -676,9 +676,14 @@ export const communicationsApi = {
     return data
   },
 
-  // Members eligible for the @mention picker. Loaded once, filtered client-side.
-  members: async (): Promise<CommunicationMembersResponse> => {
-    const { data } = await commClient.get(`/communications/members`)
+  // Members eligible for the @mention / add-people / reviewer pickers, filtered
+  // client-side from here. `reportId` narrows it to people who can open that
+  // report — pass it whenever the thread or the share is about one, or the
+  // picker offers people whose add (or assignment) the backend will refuse.
+  members: async (reportId?: string): Promise<CommunicationMembersResponse> => {
+    const { data } = await commClient.get(
+      `/communications/members${reportId ? `?report_id=${encodeURIComponent(reportId)}` : ""}`,
+    )
     return data
   },
 

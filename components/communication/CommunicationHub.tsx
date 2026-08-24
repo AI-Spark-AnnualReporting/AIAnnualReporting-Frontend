@@ -360,7 +360,9 @@ function ThreadRow({
 
   // Review is only live while the report is out for review - once it's
   // approved (or locked/published) there's nothing left to review.
-  const inReview = isInReview(report?.status)
+  // The report's status, shown only on the thread that IS the review - a
+  // general thread about the same report is not under review itself.
+  const inReview = isInReview(report?.status) && !!assignment
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? " (you)" : ""}`
@@ -593,12 +595,12 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
     // Mount-only load — state already initializes to loading:true / error:null,
     // so we don't setState synchronously at the top of the effect.
     let cancelled = false
-    Promise.all([communicationsApi.threadlessReports(), communicationsApi.members()])
-      .then(([reportsRes, membersRes]) => {
+    communicationsApi
+      .threadlessReports()
+      .then((reportsRes) => {
         if (cancelled) return
         setTypes(reportsRes.types)
         setReports(reportsRes.reports)
-        setMembers(membersRes.members)
       })
       .catch((e) => {
         if (cancelled) return
@@ -613,6 +615,22 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
     }
   }, [])
 
+  // Only people who can open the chosen report may be mentioned into a thread
+  // about it - the same rule the share modal applies to reviewers. No report
+  // picked yet (or an ad-hoc thread): everyone active in the company.
+  useEffect(() => {
+    let cancelled = false
+    communicationsApi
+      .members(reportId ?? undefined)
+      .then((res) => {
+        if (!cancelled) setMembers(res.members)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [reportId])
+
   const refreshReports = () => {
     setReportId(null)
     communicationsApi
@@ -626,7 +644,7 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   const refreshMembers = () => {
     communicationsApi
-      .members()
+      .members(reportId ?? undefined)
       .then((res) => setMembers(res.members))
       .catch(() => {})
   }
@@ -634,13 +652,35 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
   // Pills stay constant across filters (from `types`); only the list narrows.
   // Only reports you can actually start this kind of conversation on — the tab
   // picks which flag rules a report out.
-  const visibleReports = useMemo(
-    () =>
-      reports
-        .filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread))
-        .filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
-    [reports, typeFilter, isPrivate],
+  const availableReports = useMemo(
+    () => reports.filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread)),
+    [reports, isPrivate],
   )
+
+  const visibleReports = useMemo(
+    () => availableReports.filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
+    [availableReports, typeFilter],
+  )
+
+  // Counted here rather than taken from the API's `types`: the backend counts a
+  // report that can still take EITHER kind of thread, so a report that already
+  // has a general one was still adding to its pill on the General tab - a "- 1"
+  // over an empty list. A type with nothing left to start on drops out.
+  const typePills = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const r of availableReports) counts.set(r.report_type, (counts.get(r.report_type) ?? 0) + 1)
+    return types
+      .filter((t) => counts.has(t.code))
+      .map((t) => ({ ...t, count: counts.get(t.code) as number }))
+  }, [types, availableReports])
+
+  // Switching tabs can empty the type you had picked - fall back to All rather
+  // than leaving a filter selected that rules everything out.
+  useEffect(() => {
+    if (typeFilter !== ALL_FILTER && !typePills.some((t) => t.code === typeFilter)) {
+      setTypeFilter(ALL_FILTER)
+    }
+  }, [typePills, typeFilter])
 
   const labelForCode = (code: string) => types.find((t) => t.code === code)?.label ?? code
 
@@ -813,6 +853,9 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
                         setFormError(null)
                         // The list is about to change under it.
                         setReportId(null)
+                        // A general thread carries no guest list - don't send
+                        // one picked while the Private tab was open.
+                        if (!tab.priv) setMentions([])
                       }}
                       style={{
                         flex: 1,
@@ -847,7 +890,7 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
               {/* Report type pills — always from `types`; "All" clears the filter. */}
               <div style={SECTION_LABEL}>REPORT TYPE</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginBottom: 20 }}>
-                {[{ code: ALL_FILTER, label: "All", count: null as number | null }, ...types].map((t) => {
+                {[{ code: ALL_FILTER, label: "All", count: null as number | null }, ...typePills].map((t) => {
                   const active = t.code === typeFilter
                   return (
                     <button
@@ -939,40 +982,46 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
                 )}
               </div>
 
-              {/* Who's in the thread — its own field with its own picker. The message box
-                  is plain text; nobody is added by typing in it. */}
-              <div style={SECTION_LABEL}>PARTICIPANTS</div>
+              {/* Participants are a PRIVATE thread's guest list — on a general
+                  thread there is nobody to pick: everyone who can open the
+                  report is in it already. Its own field with its own picker;
+                  the message box is plain text, nobody is added by typing. */}
+              {isPrivate && (
+                <>
+                  <div style={SECTION_LABEL}>PARTICIPANTS</div>
 
-              <MentionChips mentions={mentions} onMentionsChange={setMentions} />
+                  <MentionChips mentions={mentions} onMentionsChange={setMentions} />
 
-              <MemberPicker
-                options={addableMembers}
-                onPick={(m) => {
-                  setMentions([...mentions, m])
-                  if (formError) setFormError(null)
-                }}
-                label={
-                  addableMembers.length === 0
-                    ? mentions.length === 0
-                      ? "No one else in your company yet"
-                      : "Everyone is already added"
-                    : "Add someone…"
-                }
-              />
+                  <MemberPicker
+                    options={addableMembers}
+                    onPick={(m) => {
+                      setMentions([...mentions, m])
+                      if (formError) setFormError(null)
+                    }}
+                    label={
+                      addableMembers.length === 0
+                        ? mentions.length === 0
+                          ? "No one else in your company yet"
+                          : "Everyone is already added"
+                        : "Add someone…"
+                    }
+                  />
 
-              {isPrivate && !formError && (
-                <div
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    marginTop: 7,
-                    color: mentions.length === 0 ? "#B45309" : "#5A6080",
-                  }}
-                >
-                  {mentions.length === 0
-                    ? "Add at least one participant — a private conversation needs someone in it."
-                    : privateRoster(mentions.map((m) => m.full_name))}
-                </div>
+                  {!formError && (
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        marginTop: 7,
+                        color: mentions.length === 0 ? "#B45309" : "#5A6080",
+                      }}
+                    >
+                      {mentions.length === 0
+                        ? "Add at least one participant — a private conversation needs someone in it."
+                        : privateRoster(mentions.map((m) => m.full_name))}
+                    </div>
+                  )}
+                </>
               )}
 
               <div style={{ ...SECTION_LABEL, marginTop: 20 }}>MESSAGE</div>
