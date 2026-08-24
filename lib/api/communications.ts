@@ -71,6 +71,10 @@ export interface ThreadlessReport {
   period: string
   status: string
   created_at: string
+  // One general thread and one private thread per person, per report.
+  // Which flag disables the row depends on the Private tickbox.
+  has_general_thread: boolean
+  has_my_private_thread: boolean
 }
 
 export interface ThreadlessReportsResponse {

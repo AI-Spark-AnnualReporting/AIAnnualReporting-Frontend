@@ -598,10 +598,14 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
   }
 
   // Pills stay constant across filters (from `types`); only the list narrows.
+  // Only reports you can actually start this kind of conversation on — the tab
+  // picks which flag rules a report out.
   const visibleReports = useMemo(
     () =>
-      typeFilter === ALL_FILTER ? reports : reports.filter((r) => r.report_type === typeFilter),
-    [reports, typeFilter],
+      reports
+        .filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread))
+        .filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
+    [reports, typeFilter, isPrivate],
   )
 
   const labelForCode = (code: string) => types.find((t) => t.code === code)?.label ?? code
@@ -660,9 +664,17 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
           refreshReports()
           break
         case 409:
-          toast.error("A conversation already exists for this report")
-          setReports((prev) => prev.filter((r) => r.id !== reportId))
-          setReportId(null)
+          // The slot filled up (or the flags were stale). Recoverable: refetch so
+          // the row greys out, and leave the form and the typed message alone.
+          toast.error(
+            detailMessage(
+              e,
+              isPrivate
+                ? "You already have a private conversation on this report"
+                : "This report already has a conversation",
+            ),
+          )
+          refreshReports()
           break
         case 403:
           toast.error("One of the mentioned people is no longer available")
@@ -749,6 +761,55 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
             </div>
           ) : (
             <>
+              {/* General vs private is the first choice — it changes which reports
+                  you can even start on, so the list below follows it. */}
+              <div style={SECTION_LABEL}>CONVERSATION</div>
+              <div style={{ display: "flex", gap: 9, marginBottom: 20 }}>
+                {[
+                  { priv: false, label: "General", hint: "everyone in the company" },
+                  { priv: true, label: "Private", hint: "only the people you add" },
+                ].map((tab) => {
+                  const active = tab.priv === isPrivate
+                  return (
+                    <button
+                      key={tab.label}
+                      type="button"
+                      onClick={() => {
+                        setIsPrivate(tab.priv)
+                        setFormError(null)
+                        // The list is about to change under it.
+                        setReportId(null)
+                      }}
+                      style={{
+                        flex: 1,
+                        textAlign: "left",
+                        padding: "10px 14px",
+                        borderRadius: 12,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        transition: ".15s",
+                        border: active ? "1.5px solid #4040C8" : "1.5px solid #E5E7EF",
+                        background: active ? "#F5F4FF" : "#fff",
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: active ? "#4040C8" : "#1A1D2E",
+                        }}
+                      >
+                        {tab.label}
+                      </span>
+                      <span style={{ display: "block", fontSize: 11.5, color: "#8890AE", marginTop: 1 }}>
+                        {tab.hint}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
               {/* Report type pills — always from `types`; "All" clears the filter. */}
               <div style={SECTION_LABEL}>REPORT TYPE</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginBottom: 20 }}>
@@ -784,7 +845,9 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
               </div>
 
               {/* Reports without a thread yet */}
-              <div style={SECTION_LABEL}>REPORTS WITHOUT A THREAD YET</div>
+              <div style={SECTION_LABEL}>
+                {isPrivate ? "REPORTS YOU CAN START A PRIVATE CONVERSATION ON" : "REPORTS WITHOUT A CONVERSATION YET"}
+              </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
                 {visibleReports.length === 0 ? (
                   <div
@@ -797,7 +860,9 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
                       color: "#9BA3C4",
                     }}
                   >
-                    No reports without a thread yet.
+                    {isPrivate
+                      ? "You already have a private conversation on every report."
+                      : "Every report already has a conversation."}
                   </div>
                 ) : (
                   visibleReports.map((r) => {
@@ -860,31 +925,6 @@ function NewThreadModal({ onClose, onCreated }: { onClose: () => void; onCreated
                     : "Add someone…"
                 }
               />
-
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 9,
-                  marginTop: 10,
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isPrivate}
-                  onChange={(e) => {
-                    setIsPrivate(e.target.checked)
-                    if (formError) setFormError(null)
-                  }}
-                  style={{ marginTop: 2, width: 15, height: 15, accentColor: "#4040C8", cursor: "pointer" }}
-                />
-                <span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1D2E" }}>Private conversation</span>
-                  <span style={{ fontSize: 12.5, color: "#8890AE" }}> — only the people you add here can see this</span>
-                </span>
-              </label>
 
               {isPrivate && !formError && (
                 <div
