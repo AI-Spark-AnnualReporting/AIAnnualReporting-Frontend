@@ -184,7 +184,7 @@ export function ShareReportModal({
                 <>
                   <div style={SECTION_LABEL}>ATTACHED REPORT</div>
                   <div style={{ marginBottom: 20 }}>
-                    <AttachedReportCard report={report} />
+                    <AttachedReportCard report={report} disabled />
                   </div>
                 </>
               )}

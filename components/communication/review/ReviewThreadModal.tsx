@@ -13,6 +13,16 @@ import {
 } from "@/lib/api/communications"
 import { dirOf } from "@/lib/lang"
 import { AttachedReportCard } from "./AttachedReportCard"
+import { generationHref, hasSomethingToReview, opensModulePage } from "@/lib/reportRoutes"
+
+// This app deep-links a thread as …/communication?thread={id} — the URL a
+// notification points at, and the one a cross-app link should come back to.
+function threadPageUrl(threadId: string): string | null {
+  if (typeof window === "undefined") return null
+  const url = new URL(window.location.href)
+  url.searchParams.set("thread", threadId)
+  return url.toString()
+}
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -361,6 +371,27 @@ export function ReviewThreadModal({
 
   const report = thread?.report
   const assignment = thread?.assignment ?? null
+  // Where the report itself lives, when that is where this thread's controls
+  // should go: an unapproved report has nothing settled to read in the review
+  // screen, and ESG keeps no sections to render there at all.
+  const moduleToken = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
+  const isEsg = report?.generation?.target.kind === "esg_page"
+  // Same gate the card applies: an annual report offers nothing until it has
+  // been approved.
+  const offerable = hasSomethingToReview(report?.generation, report?.status)
+  const reportHref =
+    offerable && report?.generation && opensModulePage(report.generation)
+      // The thread's own deep link, so Centriyon can offer a way back to this
+      // conversation — see BackToOrigin over there.
+      ? generationHref(report.generation, {
+          token: moduleToken,
+          backTo: threadPageUrl(threadId),
+        })
+      : null
+  // The card beside this button computes the same href, so the two must not
+  // land in different places. The one exception is a review thread, where this
+  // button is "Open review" — a different action, under a different label.
+  const moduleHref = reportHref && (!assignment || isEsg) ? reportHref : null
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
   const openReview = onOpenReview && !readOnly ? () => onOpenReview(threadId) : undefined
 
@@ -462,13 +493,20 @@ export function ReviewThreadModal({
                 </div>
               )}
 
-              {/* The report under review — clicking opens the reviewer screen. */}
+              {/* On a REVIEW thread the card is a summary and nothing more:
+                  the footer's "Open review" is the way in, and a second click
+                  target beside it that goes somewhere else only invites the
+                  wrong one. A general thread keeps it. */}
               {report && (
                 <div style={{ marginTop: 14 }}>
                   <AttachedReportCard
                     report={report}
-                    subtitle={openReview ? "Linked · click to open in review" : "Linked · read-only snapshot"}
-                    onClick={openReview}
+                    subtitle={
+                      assignment || !openReview
+                        ? "Linked · read-only snapshot"
+                        : "Linked · click to open in review"
+                    }
+                    onClick={assignment ? undefined : openReview}
                   />
                 </div>
               )}
@@ -730,9 +768,21 @@ export function ReviewThreadModal({
           <button type="button" style={BTN_SECONDARY} onClick={onClose}>
             Close
           </button>
-          {openReview && thread && !loading && !error && (
+          {/* Nothing written yet means an empty review screen — see
+              hasSomethingToReview. The module lanes keep it: for them
+              `not_ready` is exactly the report that is out for review now. */}
+          {moduleHref && thread && !loading && !error && (
+            <a href={moduleHref} style={{ ...BTN_PRIMARY, gap: 8, textDecoration: "none" }}>
+              {isEsg ? "View ESG data" : "View report"}
+              {ICON_EXTERNAL}
+            </a>
+          )}
+          {!moduleHref && openReview && thread && !loading && !error && offerable && (
             <button type="button" style={{ ...BTN_PRIMARY, gap: 8 }} onClick={openReview}>
-              {thread.can_review ? "Open as reviewer" : "Open review"}
+              {/* Without an assignment this thread is a conversation about the
+                  report, not a review of it — the same screen, but the reader
+                  is only here to read. */}
+              {!assignment ? "View report" : thread.can_review ? "Open as reviewer" : "Open review"}
               {ICON_EXTERNAL}
             </button>
           )}

@@ -33,6 +33,7 @@ import {
 import { ReviewThreadModal } from "@/components/communication/review/ReviewThreadModal"
 import { ReviewerView } from "@/components/communication/review/ReviewerView"
 import { statusPill, isInReview } from "@/lib/report-status"
+import { hasSomethingToReview } from "@/lib/reportRoutes"
 import { MemberPicker, detailMessage } from "@/components/communication/review/shared"
 import {
   useEmailSends,
@@ -485,7 +486,7 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && (
+        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             style={{ ...BTN_PRIMARY, gap: 7, padding: "7px 13px" }}

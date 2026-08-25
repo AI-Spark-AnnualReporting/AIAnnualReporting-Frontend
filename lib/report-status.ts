@@ -41,3 +41,7 @@ export function statusPill(status?: string | null, label?: string | null): Statu
 
 export const isInReview = (status?: string | null): boolean =>
   (status ?? "").trim().toLowerCase() === "in_review"
+
+/** Signed off and out of the author's hands — approved, locked or published. */
+export const isClosed = (status?: string | null): boolean =>
+  ["approved", "locked", "published"].includes((status ?? "").trim().toLowerCase())

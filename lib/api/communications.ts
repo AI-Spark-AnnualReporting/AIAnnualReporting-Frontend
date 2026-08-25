@@ -75,6 +75,10 @@ export interface ThreadlessReport {
   // Which flag disables the row depends on the Private tickbox.
   has_general_thread: boolean
   has_my_private_thread: boolean
+  // "cycle" → this row is a reporting cycle with no annual report behind it
+  // yet, and `id` is the cycle's. Starting a thread on it creates that report
+  // server-side; nothing else here needs to know. Absent on real reports.
+  source?: "cycle"
 }
 
 export interface ThreadlessReportsResponse {
@@ -143,6 +147,45 @@ export interface ThreadReport {
   title: string
   status: string
   status_label: string
+  // Always present when `report` itself is non-null (it is null on an ad-hoc
+  // thread) — every report type resolves to one of the four states.
+  generation: ReportGeneration
+}
+
+// Where a report's CONTENT stands, which `status` does not answer: status is
+// the review workflow (who shared it, who signed it off), so a Draft report and
+// an In review one both land on an empty page when nothing was ever written.
+//
+// `ready` means APPROVED, not written — board and quarterly approve enforce no
+// completeness check. Don't label it "complete" in the UI.
+//
+// An unrecognised future `state` should be treated as not_applicable rather
+// than crashing the card.
+export interface ReportGeneration {
+  state: "ready" | "not_ready" | "in_progress" | "not_applicable"
+  // Annual only — its sections live in the reporting-cycles system, which
+  // counts them. null for every other type, so never render a bar off these
+  // without checking. `percent` is a whole number.
+  done: number | null
+  total: number | null
+  percent: number | null
+  // Ids and a kind, never a URL — the backend has no view of our routes.
+  // See generationHref() in @/lib/reportRoutes.
+  target: {
+    kind:
+      | "quarterly_report"
+      | "board_report"
+      | "earnings_report"
+      | "annual_cycle"
+      | "esg_page"
+      | null
+    company_id: string
+    // Module lanes only.
+    report_id?: string
+    // Annual only, and NOT the report id — an annual `reports` row is a shell
+    // pointing at a cycle; navigating to the report id lands on an empty page.
+    cycle_id?: string
+  }
 }
 
 // The person who STARTED the thread (confirmed with the backend) — not the
@@ -783,6 +826,20 @@ export const communicationsApi = {
     const { data } = await commClient.post(
       `/communications/threads/${encodeURIComponent(threadId)}/send-back`,
       { note },
+    )
+    return data
+  },
+
+  // An annual report's written body for the reviewer screen. Annual reports are
+  // written in the reporting-cycles system, so this reads cycle_report_sections
+  // rather than a per-report table — same envelope as the earnings sections
+  // endpoint below, keyed on the section_code the review payload emits as each
+  // section's `id`. 422 for any other report type.
+  reviewAnnualSections: async (
+    reportId: string,
+  ): Promise<ReviewReportSectionsResponse> => {
+    const { data } = await commClient.get(
+      `/communications/reports/${encodeURIComponent(reportId)}/annual-sections`,
     )
     return data
   },
