@@ -71,6 +71,14 @@ export interface ThreadlessReport {
   period: string
   status: string
   created_at: string
+  // One general thread and one private thread per person, per report.
+  // Which flag disables the row depends on the Private tickbox.
+  has_general_thread: boolean
+  has_my_private_thread: boolean
+  // "cycle" → this row is a reporting cycle with no annual report behind it
+  // yet, and `id` is the cycle's. Starting a thread on it creates that report
+  // server-side; nothing else here needs to know. Absent on real reports.
+  source?: "cycle"
 }
 
 export interface ThreadlessReportsResponse {
@@ -99,7 +107,10 @@ export interface StartThreadBody {
   report_id: string
   message: string
   // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  // On a private thread these people ARE the members — 422 if empty.
   mentioned_user_ids: string[]
+  // Only the mentioned people can see the thread. Omit for a normal thread.
+  is_private?: boolean
 }
 
 export interface CommunicationThread {
@@ -136,8 +147,50 @@ export interface ThreadReport {
   title: string
   status: string
   status_label: string
+  // Always present when `report` itself is non-null (it is null on an ad-hoc
+  // thread) — every report type resolves to one of the four states.
+  generation: ReportGeneration
 }
 
+// Where a report's CONTENT stands, which `status` does not answer: status is
+// the review workflow (who shared it, who signed it off), so a Draft report and
+// an In review one both land on an empty page when nothing was ever written.
+//
+// `ready` means APPROVED, not written — board and quarterly approve enforce no
+// completeness check. Don't label it "complete" in the UI.
+//
+// An unrecognised future `state` should be treated as not_applicable rather
+// than crashing the card.
+export interface ReportGeneration {
+  state: "ready" | "not_ready" | "in_progress" | "not_applicable"
+  // Annual only — its sections live in the reporting-cycles system, which
+  // counts them. null for every other type, so never render a bar off these
+  // without checking. `percent` is a whole number.
+  done: number | null
+  total: number | null
+  percent: number | null
+  // Ids and a kind, never a URL — the backend has no view of our routes.
+  // See generationHref() in @/lib/reportRoutes.
+  target: {
+    kind:
+      | "quarterly_report"
+      | "board_report"
+      | "earnings_report"
+      | "annual_cycle"
+      | "esg_page"
+      | null
+    company_id: string
+    // Module lanes only.
+    report_id?: string
+    // Annual only, and NOT the report id — an annual `reports` row is a shell
+    // pointing at a cycle; navigating to the report id lands on an empty page.
+    cycle_id?: string
+  }
+}
+
+// The person who STARTED the thread (confirmed with the backend) — not the
+// report's owner, even on a report thread. `can_add_members` is true only for
+// them on a private thread.
 export interface ThreadOwner {
   user_id: string
   full_name: string
@@ -155,6 +208,10 @@ export interface ThreadLastMessage {
 // `owner` and `last_message` can both be null.
 export interface ThreadSummary {
   thread_id: string
+  // Private threads you're not a member of never appear in the list at all.
+  is_private: boolean
+  // Non-null once you've been removed — the row stays, read-only.
+  removed_at: string | null
   report: ThreadReport
   owner: ThreadOwner | null
   // Added alongside the review flow; null when not out for review.
@@ -183,9 +240,9 @@ export interface MessageSender {
   is_you: boolean
 }
 
-// `kind` drives the bubble: "system" renders with the Communication Hub avatar
-// and label (ignore `sender` for the display name — it stays as the actor, for
-// the audit trail); "user" renders as a person.
+// `kind` drives the bubble: "system" lines are rendered with a muted avatar and
+// name the actor (`sender`) — who added or removed someone; "user" renders as a
+// normal person.
 export type ThreadMessageKind = "system" | "user"
 
 export interface ThreadMessage {
@@ -208,8 +265,38 @@ export interface ReviewAssignment {
   assigned_at: string
 }
 
+// A member of a private thread. `id` is the users.id UUID the member endpoints
+// take; `user_id` is the usr_… string (matches MessageSender.user_id) and is
+// what membership comparisons against the mention picker go through.
+export interface ThreadMemberSummary {
+  // The users.id UUID — what BOTH member endpoints take. Not `user_id`: the
+  // usr_… string won't resolve and comes back 403.
+  id: string
+  user_id: string
+  full_name: string
+  role: string
+  is_you: boolean
+}
+
+// Both member calls return this — drop it straight into the strip.
+export interface ThreadMembersResponse {
+  members: ThreadMemberSummary[]
+  can_add_members: boolean
+}
+
 export interface ThreadDetail {
   thread_id: string
+  is_private: boolean
+  // When you were removed from this thread. null = current member. Non-null
+  // means read-only: the backend still serves the thread, cut off at that
+  // moment, and 403s every write.
+  removed_at: string | null
+  // [] on a public thread — render the members strip off this alone, no need
+  // to check is_private first.
+  members: ThreadMemberSummary[]
+  // True only for the creator of a private thread; false for its other members
+  // and on every public thread. Gates who may pull a non-member in.
+  can_add_members: boolean
   report: ThreadReport
   owner: ThreadOwner | null
   assignment: ReviewAssignment | null
@@ -465,6 +552,10 @@ export interface ReviewViewResponse {
   // can_act && !can_approve.
   can_act: boolean
   can_approve: boolean
+  // Same flag the thread payload carries: non-null → you were removed, so the
+  // screen is read-only. `can_comment` is the derived form — use that.
+  removed_at: string | null
+  can_comment: boolean
   // Only the ticked sections (e.g. 11 of 19). Empty when the narrative hasn't
   // been generated — hide the per-section rail.
   sections: ReviewSection[]
@@ -628,9 +719,14 @@ export const communicationsApi = {
     return data
   },
 
-  // Members eligible for the @mention picker. Loaded once, filtered client-side.
-  members: async (): Promise<CommunicationMembersResponse> => {
-    const { data } = await commClient.get(`/communications/members`)
+  // Members eligible for the @mention / add-people / reviewer pickers, filtered
+  // client-side from here. `reportId` narrows it to people who can open that
+  // report — pass it whenever the thread or the share is about one, or the
+  // picker offers people whose add (or assignment) the backend will refuse.
+  members: async (reportId?: string): Promise<CommunicationMembersResponse> => {
+    const { data } = await commClient.get(
+      `/communications/members${reportId ? `?report_id=${encodeURIComponent(reportId)}` : ""}`,
+    )
     return data
   },
 
@@ -734,6 +830,20 @@ export const communicationsApi = {
     return data
   },
 
+  // An annual report's written body for the reviewer screen. Annual reports are
+  // written in the reporting-cycles system, so this reads cycle_report_sections
+  // rather than a per-report table — same envelope as the earnings sections
+  // endpoint below, keyed on the section_code the review payload emits as each
+  // section's `id`. 422 for any other report type.
+  reviewAnnualSections: async (
+    reportId: string,
+  ): Promise<ReviewReportSectionsResponse> => {
+    const { data } = await commClient.get(
+      `/communications/reports/${encodeURIComponent(reportId)}/annual-sections`,
+    )
+    return data
+  },
+
   // Produced sections of the report under review, for the reviewer screen's
   // section bodies. Company-scoped on the backend (not owner-scoped), so a
   // non-owner reviewer can read it. `section_code` pairs 1:1 with the review
@@ -802,6 +912,33 @@ export const communicationsApi = {
       header: data.header ?? null,
       brand: data.brand ?? data.cover?.brand ?? null,
     }
+  },
+
+  // Add people to a private thread. Creator only (403 otherwise); idempotent —
+  // re-adding an existing member is a 200 that changes nothing. The
+  // "X added Y" system line lands on the next message fetch, not in here.
+  addThreadMembers: async (
+    threadId: string,
+    userIds: string[],
+  ): Promise<ThreadMembersResponse> => {
+    const { data } = await commClient.post(
+      `/communications/threads/${encodeURIComponent(threadId)}/members`,
+      { user_ids: userIds },
+    )
+    return data
+  },
+
+  // Remove one person. `userId` is the users.id UUID, NOT the usr_ `user_id`
+  // on ThreadMemberSummary. Creator only · 422 removing yourself, or the last
+  // other person, or on a public thread · 404 if you're not in the thread.
+  removeThreadMember: async (
+    threadId: string,
+    userId: string,
+  ): Promise<ThreadMembersResponse> => {
+    const { data } = await commClient.delete(
+      `/communications/threads/${encodeURIComponent(threadId)}/members/${encodeURIComponent(userId)}`,
+    )
+    return data
   },
 
   // Start a thread on a report with a first message + optional mentions.

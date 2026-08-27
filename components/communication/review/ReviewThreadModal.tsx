@@ -7,11 +7,22 @@ import {
   communicationsApi,
   type CommunicationMember,
   type ThreadDetail,
+  type ThreadMemberSummary,
   type ThreadDetailResponse,
   type ThreadMessage,
 } from "@/lib/api/communications"
 import { dirOf } from "@/lib/lang"
 import { AttachedReportCard } from "./AttachedReportCard"
+import { generationHref, hasSomethingToReview, opensModulePage } from "@/lib/reportRoutes"
+
+// This app deep-links a thread as …/communication?thread={id} — the URL a
+// notification points at, and the one a cross-app link should come back to.
+function threadPageUrl(threadId: string): string | null {
+  if (typeof window === "undefined") return null
+  const url = new URL(window.location.href)
+  url.searchParams.set("thread", threadId)
+  return url.toString()
+}
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -20,11 +31,13 @@ import {
   OVERLAY,
   SECTION_LABEL,
   MentionComposer,
+  MemberPicker,
   Spinner,
   initials,
   relativeTime,
   roleLabel,
   statusOf,
+  detailMessage,
 } from "./shared"
 
 /**
@@ -35,9 +48,9 @@ import {
  * opens the thread and can't tell which report they've been asked to review.
  * Clicking it goes straight to the reviewer screen.
  *
- * `kind` drives the bubble: "system" renders as the Communication Hub itself
- * (ignore `sender` for the display name — it's the actor, kept for audit);
- * "user" renders as a person.
+ * `kind` drives the bubble: "system" lines name the actor (`sender`) with a
+ * muted avatar, so you can see who added or removed someone; "user" renders as
+ * a normal person.
  */
 
 const ICON_SHARE = (
@@ -63,6 +76,20 @@ const ICON_CHECK_CIRCLE = (
   </svg>
 )
 
+// "Sara", "Sara and Omar", "Sara, Omar and Lina" — for the add-member warning.
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+}
+
+// System bodies are verb-first predicates now — the header supplies the subject.
+// Rows written before that change still start with the actor's name and end in
+// a full stop; strip both so they don't read "Aizaz · Aizaz removed you.".
+function systemBody(body: string, actor: string): string {
+  const withoutName = body.startsWith(`${actor} `) ? body.slice(actor.length + 1) : body
+  return withoutName.replace(/\.$/, "")
+}
+
 function MessageRow({ message }: { message: ThreadMessage }) {
   const { sender, body, created_at, kind } = message
   const isSystem = kind === "system"
@@ -82,7 +109,7 @@ function MessageRow({ message }: { message: ThreadMessage }) {
             justifyContent: "center",
           }}
         >
-          <span style={{ width: 8, height: 8, borderRadius: "50%", border: "2px solid #8890AE" }} />
+          <span style={{ fontSize: 11, fontWeight: 800, color: "#8890AE" }}>{initials(sender.full_name)}</span>
         </span>
       ) : (
         <span
@@ -107,7 +134,10 @@ function MessageRow({ message }: { message: ThreadMessage }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
           {isSystem ? (
-            <span style={{ fontSize: 13, fontWeight: 800, color: "#1A1D2E" }}>Communication Hub</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#1A1D2E" }}>
+              {sender.full_name}
+              {sender.is_you && " (you)"}
+            </span>
           ) : (
             <>
               <span style={{ fontSize: 13, fontWeight: 800, color: "#1A1D2E" }}>
@@ -132,7 +162,7 @@ function MessageRow({ message }: { message: ThreadMessage }) {
             wordBreak: "break-word",
           }}
         >
-          {body}
+          {isSystem ? systemBody(body, sender.full_name) : body}
         </div>
       </div>
     </div>
@@ -168,6 +198,23 @@ export function ReviewThreadModal({
   const [mentions, setMentions] = useState<CommunicationMember[]>([])
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  // Names this reply would add to a private thread — set on the first click so
+  // the sender confirms before letting someone read the whole backlog.
+  const [confirmAdding, setConfirmAdding] = useState<string[] | null>(null)
+  // Member add/remove is its own call now — no message required.
+  const [memberBusy, setMemberBusy] = useState(false)
+  const [memberError, setMemberError] = useState<string | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState<ThreadMemberSummary | null>(null)
+
+  const reloadThread = () => {
+    communicationsApi
+      .getThread(threadId)
+      .then((detail) => {
+        setThread(detail.thread)
+        setMessages(detail.messages)
+      })
+      .catch(() => {})
+  }
 
   // On open → load thread + members in parallel, and fire read (idempotent).
   // With initialPayload the thread is already painted; we still refresh members
@@ -180,17 +227,23 @@ export function ReviewThreadModal({
       setError(null)
     }
 
-    Promise.all([
-      skipThreadFetch ? Promise.resolve(null) : communicationsApi.getThread(threadId),
-      // A members failure shouldn't block the thread from rendering.
-      communicationsApi.members().catch(() => ({ members: [] as CommunicationMember[] })),
-    ])
-      .then(([detail, membersRes]) => {
+    // Members are fetched AFTER the thread rather than beside it because the
+    // list is scoped to the thread's report - offering someone who cannot open
+    // the report is offering an add that fails.
+    ;(skipThreadFetch ? Promise.resolve(null) : communicationsApi.getThread(threadId))
+      .then(async (detail) => {
         if (cancelled) return
         if (detail) {
           setThread(detail.thread)
           setMessages(detail.messages)
         }
+        // Ad-hoc threads have no report - everyone in the company is fair game.
+        const reportId = (detail ?? initialPayload)?.thread.report?.id
+        // A members failure shouldn't block the thread from rendering.
+        const membersRes = await communicationsApi
+          .members(reportId)
+          .catch(() => ({ members: [] as CommunicationMember[] }))
+        if (cancelled) return
         setMembers(membersRes.members)
       })
       .catch((e) => {
@@ -216,18 +269,62 @@ export function ReviewThreadModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
 
-  // A reply must be addressed to at least one participant.
+  // @mention is an optional notify — everyone in the thread already sees the
+  // message, so it's never required to send.
   const hasMessage = message.trim().length > 0
-  const needsRecipient = hasMessage && mentions.length === 0
-  const canSend = hasMessage && mentions.length > 0 && !sending
+  const canSend = hasMessage && !sending
+  // Membership is keyed on usr_… `user_id`; the picker's `id` is the UUID the
+  // API takes. Comparing the wrong one flags every mention as a new member.
+  const threadMembers = thread?.members ?? []
+  const adding =
+    threadMembers.length === 0
+      ? []
+      : mentions.filter((m) => !threadMembers.some((tm) => tm.user_id === m.user_id))
+  // Only the creator of a private thread may pull in someone new; the backend
+  // 403s anyone else on the send call, which would cost them their message.
+  // One flag drives the whole state: removed → read what's there, write nothing.
+  const removedAt = thread?.removed_at ?? null
+  const readOnly = !!removedAt
+  const canAddPeople = !!thread?.can_add_members && !readOnly
+  // So when they can't add, the "@" picker only offers people already here.
+  const runMemberCall = async (call: () => Promise<unknown>) => {
+    setMemberBusy(true)
+    setMemberError(null)
+    try {
+      await call()
+      // The "X added/removed Y" system line only lands on the next fetch, so
+      // re-read rather than patching members off the response.
+      reloadThread()
+    } catch (e) {
+      setMemberError(detailMessage(e, "Something went wrong. Please try again."))
+    } finally {
+      setMemberBusy(false)
+    }
+  }
+
+  const mentionableMembers =
+    threadMembers.length > 0 && !canAddPeople
+      ? members.filter((m) => threadMembers.some((tm) => tm.user_id === m.user_id))
+      : members
+  // Company members who aren't in this thread yet and aren't already queued.
+  const addableMembers = members.filter(
+    (m) =>
+      m.user_id !== user?.user_id &&
+      !threadMembers.some((tm) => tm.user_id === m.user_id) &&
+      !mentions.some((x) => x.id === m.id),
+  )
 
   const sendReply = async () => {
     const text = message.trim()
     if (!text || sending) return
-    if (mentions.length === 0) {
-      setSendError("Add at least one participant with @ before sending.")
+    // Private thread: @mentioning a non-member puts them in, and new members
+    // see the whole history. Confirm before that happens.
+    if (adding.length > 0 && !confirmAdding) {
+      setConfirmAdding(adding.map((m) => m.full_name))
       return
     }
+    const added = adding.length > 0
+    setConfirmAdding(null)
     setSending(true)
     setSendError(null)
     try {
@@ -239,6 +336,9 @@ export function ReviewThreadModal({
       setMessage("")
       setMentions([])
       setSending(false)
+      // The member list just changed and the backend appended a system line —
+      // re-read rather than patching `members` locally and missing it.
+      if (added) reloadThread()
     } catch (e) {
       switch (statusOf(e)) {
         case 422:
@@ -250,9 +350,11 @@ export function ReviewThreadModal({
           onClose()
           return
         case 403:
-          toast.error("One of the mentioned people is no longer available")
+          // Two different 403s land here now: an inactive member, and "you
+          // didn't start this private thread". The backend's detail says which.
+          toast.error(detailMessage(e, "One of the mentioned people is no longer available"))
           communicationsApi
-            .members()
+            .members(thread?.report?.id)
             .then((r) => setMembers(r.members))
             .catch(() => {})
           setSending(false)
@@ -269,8 +371,29 @@ export function ReviewThreadModal({
 
   const report = thread?.report
   const assignment = thread?.assignment ?? null
+  // Where the report itself lives, when that is where this thread's controls
+  // should go: an unapproved report has nothing settled to read in the review
+  // screen, and ESG keeps no sections to render there at all.
+  const moduleToken = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
+  const isEsg = report?.generation?.target.kind === "esg_page"
+  // Same gate the card applies: an annual report offers nothing until it has
+  // been approved.
+  const offerable = hasSomethingToReview(report?.generation, report?.status)
+  const reportHref =
+    offerable && report?.generation && opensModulePage(report.generation)
+      // The thread's own deep link, so Centriyon can offer a way back to this
+      // conversation — see BackToOrigin over there.
+      ? generationHref(report.generation, {
+          token: moduleToken,
+          backTo: threadPageUrl(threadId),
+        })
+      : null
+  // The card beside this button computes the same href, so the two must not
+  // land in different places. The one exception is a review thread, where this
+  // button is "Open review" — a different action, under a different label.
+  const moduleHref = reportHref && (!assignment || isEsg) ? reportHref : null
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
-  const openReview = onOpenReview ? () => onOpenReview(threadId) : undefined
+  const openReview = onOpenReview && !readOnly ? () => onOpenReview(threadId) : undefined
 
   return (
     <div style={OVERLAY} onClick={onClose}>
@@ -370,15 +493,170 @@ export function ReviewThreadModal({
                 </div>
               )}
 
-              {/* The report under review — clicking opens the reviewer screen. */}
+              {/* On a REVIEW thread the card is a summary and nothing more:
+                  the footer's "Open review" is the way in, and a second click
+                  target beside it that goes somewhere else only invites the
+                  wrong one. A general thread keeps it. */}
               {report && (
                 <div style={{ marginTop: 14 }}>
                   <AttachedReportCard
                     report={report}
-                    subtitle={openReview ? "Linked · click to open in review" : "Linked · read-only snapshot"}
-                    onClick={openReview}
+                    subtitle={
+                      assignment || !openReview
+                        ? "Linked · read-only snapshot"
+                        : "Linked · click to open in review"
+                    }
+                    onClick={assignment ? undefined : openReview}
                   />
                 </div>
+              )}
+
+              {threadMembers.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginTop: 14,
+                    padding: "9px 12px",
+                    borderRadius: 10,
+                    background: "#F6F7FC",
+                    border: "1px solid #E2E4F0",
+                  }}
+                >
+                  <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {threadMembers.map((m) => {
+                      // No ✕ on your own row (422), and none on the last other
+                      // person (also 422) — don't offer a control that fails.
+                      const removable = canAddPeople && !m.is_you
+                      const isLastOther = threadMembers.length <= 2
+                      return (
+                        <span
+                          key={m.user_id}
+                          title={`${m.full_name}${m.is_you ? " (you)" : ""}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: removable ? "3px 5px 3px 3px" : 3,
+                            borderRadius: 20,
+                            background: "#fff",
+                            border: "1px solid #E2E4F0",
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: "50%",
+                              flexShrink: 0,
+                              background: m.is_you ? "linear-gradient(150deg,#5B5BF0,#4040C8)" : "#EEEEFF",
+                              color: m.is_you ? "#fff" : "#4040C8",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 9,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {initials(m.full_name)}
+                          </span>
+                          {removable && (
+                            <button
+                              type="button"
+                              disabled={memberBusy || isLastOther}
+                              aria-label={`Remove ${m.full_name}`}
+                              title={
+                                isLastOther
+                                  ? "A private conversation needs at least one other person."
+                                  : `Remove ${m.full_name}`
+                              }
+                              onClick={() => {
+                                setMemberError(null)
+                                setConfirmRemove(m)
+                              }}
+                              style={{
+                                display: "inline-flex",
+                                border: "none",
+                                background: "transparent",
+                                padding: 0,
+                                color: "#9BA3C4",
+                                cursor: memberBusy || isLastOther ? "not-allowed" : "pointer",
+                                opacity: isLastOther ? 0.4 : 1,
+                              }}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "#5A6080" }}>
+                    Only {threadMembers.length === 1 ? "you" : `these ${threadMembers.length} people`} can see this
+                    conversation
+                    {!canAddPeople && thread?.owner && !thread.owner.is_you && (
+                      <span style={{ fontWeight: 500, color: "#8890AE" }}>
+                        {" "}
+                        · {thread.owner.full_name} started it and can add people
+                      </span>
+                    )}
+                  </span>
+                  {canAddPeople && (
+                    <MemberPicker
+                      compact
+                      options={addableMembers}
+                      onPick={(m) => runMemberCall(() => communicationsApi.addThreadMembers(threadId, [m.id]))}
+                      label={
+                        memberBusy ? "Working…" : addableMembers.length === 0 ? "Everyone is in" : "+ Add people"
+                      }
+                    />
+                  )}
+                </div>
+              )}
+
+              {confirmRemove && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginTop: 8,
+                    padding: "9px 11px",
+                    borderRadius: 8,
+                    background: "#FFF7ED",
+                    border: "1px solid #FED7AA",
+                    fontSize: 12,
+                    color: "#9A3412",
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 180 }}>
+                    <strong>{confirmRemove.full_name}</strong> will lose access to this conversation. It takes effect
+                    immediately.
+                  </span>
+                  <button type="button" style={BTN_SECONDARY} disabled={memberBusy} onClick={() => setConfirmRemove(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    style={BTN_PRIMARY}
+                    disabled={memberBusy}
+                    onClick={() => {
+                      const id = confirmRemove.id
+                      setConfirmRemove(null)
+                      runMemberCall(() => communicationsApi.removeThreadMember(threadId, id))
+                    }}
+                  >
+                    {memberBusy ? "Removing…" : "Remove"}
+                  </button>
+                </div>
+              )}
+
+              {memberError && (
+                <div style={{ marginTop: 8, fontSize: 11.5, fontWeight: 600, color: "#DC2626" }}>{memberError}</div>
               )}
 
               <div style={{ ...SECTION_LABEL, marginTop: 18, marginBottom: 4 }}>THREAD</div>
@@ -391,24 +669,71 @@ export function ReviewThreadModal({
                 messages.map((m) => <MessageRow key={m.id} message={m} />)
               )}
 
+              {readOnly ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "11px 14px",
+                    borderRadius: 10,
+                    background: "#F6F7FC",
+                    border: "1px solid #E2E4F0",
+                    fontSize: 12.5,
+                    color: "#8890AE",
+                    textAlign: "center",
+                  }}
+                >
+                  You can&apos;t send messages in this conversation.
+                </div>
+              ) : (
+              <>
               {/* Reply composer */}
               <div style={{ marginTop: 12, paddingTop: 14, borderTop: "1px solid #ECEEF8" }}>
                 <MentionComposer
-                  members={members}
+                  members={mentionableMembers}
                   currentUserId={user?.user_id}
                   message={message}
                   onMessageChange={(v) => {
                     setMessage(v)
                     if (sendError) setSendError(null)
+                    if (confirmAdding) setConfirmAdding(null)
                   }}
                   mentions={mentions}
-                  onMentionsChange={setMentions}
+                  onMentionsChange={(next) => {
+                    setMentions(next)
+                    if (confirmAdding) setConfirmAdding(null)
+                  }}
                   placeholder="Write a reply…  (type @ to mention)"
                   minHeight={70}
                 />
+                {(confirmAdding || adding.length > 0) && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: "9px 11px",
+                      borderRadius: 8,
+                      background: "#FFF7ED",
+                      border: "1px solid #FED7AA",
+                      fontSize: 12,
+                      color: "#9A3412",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {confirmAdding ? (
+                      <>
+                        This will let <strong>{listNames(confirmAdding)}</strong> read the whole conversation, including
+                        everything said before they joined. Send again to confirm.
+                      </>
+                    ) : (
+                      <>
+                        <strong>{listNames(adding.map((m) => m.full_name))}</strong> will be added when you send this
+                        message, and will see everything said before they joined.
+                      </>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
                   <span style={{ fontSize: 11.5, fontWeight: 600, color: sendError ? "#DC2626" : "#9BA3C4" }}>
-                    {sendError ?? (needsRecipient ? "Add at least one participant with @ to send." : "")}
+                    {sendError ?? ""}
                   </span>
                   <button
                     type="button"
@@ -423,6 +748,8 @@ export function ReviewThreadModal({
                   </button>
                 </div>
               </div>
+              </>
+              )}
             </>
           )}
         </div>
@@ -441,9 +768,21 @@ export function ReviewThreadModal({
           <button type="button" style={BTN_SECONDARY} onClick={onClose}>
             Close
           </button>
-          {openReview && thread && !loading && !error && (
+          {/* Nothing written yet means an empty review screen — see
+              hasSomethingToReview. The module lanes keep it: for them
+              `not_ready` is exactly the report that is out for review now. */}
+          {moduleHref && thread && !loading && !error && (
+            <a href={moduleHref} style={{ ...BTN_PRIMARY, gap: 8, textDecoration: "none" }}>
+              {isEsg ? "View ESG data" : "View report"}
+              {ICON_EXTERNAL}
+            </a>
+          )}
+          {!moduleHref && openReview && thread && !loading && !error && offerable && (
             <button type="button" style={{ ...BTN_PRIMARY, gap: 8 }} onClick={openReview}>
-              {thread.can_review ? "Open as reviewer" : "Open review"}
+              {/* Without an assignment this thread is a conversation about the
+                  report, not a review of it — the same screen, but the reader
+                  is only here to read. */}
+              {!assignment ? "View report" : thread.can_review ? "Open as reviewer" : "Open review"}
               {ICON_EXTERNAL}
             </button>
           )}

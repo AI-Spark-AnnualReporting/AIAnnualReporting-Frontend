@@ -13,6 +13,7 @@ import {
   type ReviewViewResponse,
 } from "@/lib/api/communications"
 import { dirOf } from "@/lib/lang"
+import { statusPill } from "@/lib/report-status"
 import {
   BADGE_GRAY,
   BTN_PRIMARY,
@@ -48,6 +49,14 @@ import { EarningsSectionContent } from "./EarningsSectionContent"
  * so iterating it drops the extras for free.
  */
 
+// "23 Aug 2026" for the removed-from-thread banner.
+function formatRemovedOn(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
+}
+
 // Report-level comments come back under the JSON key "null".
 const REPORT_LEVEL_KEY = "null"
 
@@ -57,6 +66,8 @@ const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`
 // Quarterly reports keep their body behind the quarterly assemble endpoint;
 // every other type reads through the earnings sections endpoint.
 const QUARTERLY = "quarterly"
+const EARNINGS = "earnings"
+const ANNUAL = "annual"
 
 // Document presentation, matched to the quarterly assembled report so the
 // reviewer reads exactly what the creator approved — same page width,
@@ -206,14 +217,6 @@ export function ReviewerView({
     void load()
   }, [load])
 
-  // The reassign dropdown needs the member list.
-  useEffect(() => {
-    communicationsApi
-      .members()
-      .then((r) => setMembers(r.members))
-      .catch(() => {})
-  }, [])
-
   // The quarterly body endpoint is company-scoped in its path. Resolve the id
   // from the Centrion JWT rather than the local user, whose company_id is only
   // populated for PMs/admins — a HOD reviewer would otherwise have none.
@@ -235,6 +238,22 @@ export function ReviewerView({
   // are company-scoped on the backend, so a non-owner reviewer can read them.
   const reportId = data?.report?.id
   const reportType = data?.report?.report_type
+  // Types whose written body this screen can actually fetch — see the effect
+  // below. Annual is written in the reporting-cycles system and ESG has no
+  // sections at all, so for those the headings are all there is to show.
+  const hasBodySource =
+    reportType === QUARTERLY || reportType === EARNINGS || reportType === ANNUAL
+
+  // The reassign dropdown needs the member list - scoped to this report, since
+  // handing the review to someone who cannot open it is refused anyway.
+  useEffect(() => {
+    if (!reportId) return
+    communicationsApi
+      .members(reportId)
+      .then((r) => setMembers(r.members))
+      .catch(() => {})
+  }, [reportId])
+
   useEffect(() => {
     if (!reportId || !reportType) return
     // Wait for the company id rather than firing the earnings path at a
@@ -244,7 +263,20 @@ export function ReviewerView({
     const load =
       reportType === QUARTERLY && centrionCompanyId
         ? communicationsApi.reviewQuarterlySections(centrionCompanyId, reportId)
-        : communicationsApi.reviewReportSections(reportId)
+        : reportType === EARNINGS
+          ? communicationsApi.reviewReportSections(reportId)
+          : reportType === ANNUAL
+            // Written in the reporting-cycles system, so it comes from the
+            // Hub's own endpoint rather than a per-report module table.
+            ? communicationsApi.reviewAnnualSections(reportId)
+            // ESG keeps metrics, not sections. This used to fall through to the
+            // earnings endpoint, which answers "Earnings report <id> not found"
+            // — an error about the wrong report, on a report that is fine.
+            : null
+    if (!load) {
+      setBodies({})
+      return
+    }
     load
       .then((res) => {
         if (cancelled) return
@@ -266,9 +298,10 @@ export function ReviewerView({
   }, [reportId, reportType, centrionCompanyId])
 
   // Earnings brand accents. Quarterly gets its brand from /assemble above;
-  // earnings keeps it behind the cover-template endpoint.
+  // earnings keeps it behind the cover-template endpoint. No other type has an
+  // earnings cover to ask for.
   useEffect(() => {
-    if (!reportId || !reportType || reportType === QUARTERLY) return
+    if (reportType !== EARNINGS || !reportId) return
     let cancelled = false
     communicationsApi
       .reviewEarningsCoverSelection(reportId)
@@ -341,17 +374,14 @@ export function ReviewerView({
     }
   }
 
-  const runPanelAction = async () => {
-    if (busy || !panel) return
-    // Send-back's note is required (422 if blank) — gate it here too.
-    if (panel === "send_back" && !note.trim()) {
-      setActionError("Add a note explaining what needs to change.")
-      return
-    }
+  // `kind` is passed explicitly by the send-back button, which fires without a
+  // panel: reading `panel` there would read the state before React commits it.
+  const runPanelAction = async (kind: "approve" | "send_back" | null = panel) => {
+    if (busy || !kind) return
     setBusy(true)
     setActionError(null)
     try {
-      if (panel === "approve") {
+      if (kind === "approve") {
         const res = await communicationsApi.approveReview(threadId, note.trim() || undefined)
         toast.success("Report approved", { description: res.status_label })
       } else {
@@ -374,6 +404,14 @@ export function ReviewerView({
   const assignment = data?.assignment ?? null
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
   const canAct = data?.can_act ?? false
+  // Removed from the thread → read the record, add nothing to it. can_act
+  // already folds in the removal, so the approve/reassign buttons need nothing.
+  // No assignment means nobody was asked to review this — the screen is here to
+  // be read. The reviewer furniture (the brief, the comment controls, the
+  // assignment/comments rail) is all about a review that isn't happening.
+  const viewOnly = !data?.assignment
+  const canComment = !viewOnly && (data?.can_comment ?? true)
+  const removedAt = data?.removed_at ?? null
   const canApprove = data?.can_approve ?? false
   // The review payload's section list is earnings-only on the backend — it
   // comes back empty for a quarterly report even when the report is fully
@@ -381,11 +419,20 @@ export function ReviewerView({
   // Fall back to the sections we already fetched for the bodies. Comments key
   // off section_code either way, so posting and grouping are unaffected.
   const isQuarterly = reportType === QUARTERLY
-  const sections: ReviewSection[] = data?.sections?.length
+  // Annual joins it: what the reviewer signs off is the assembled report, so it
+  // renders as one page rather than a stack of cards. Its cover and contents
+  // are drawn at assembly, so the sections that stand for them are dropped
+  // here the way the quarterly cover is.
+  const isAnnualDoc = reportType === ANNUAL
+  const isDocument = isQuarterly || isAnnualDoc
+  const allSections: ReviewSection[] = data?.sections?.length
     ? data.sections
     : Object.values(bodies)
         .sort((a, b) => a.display_order - b.display_order)
         .map((s, i) => ({ id: s.section_code, order: i + 1, title: s.title, type: s.mode }))
+  const sections: ReviewSection[] = isAnnualDoc
+    ? allSections.filter((s) => !/cover/i.test(s.id) && !/toc/i.test(s.id))
+    : allSections
   // Once the report is approved (or otherwise finished) the review is over —
   // reassign / request-changes no longer make sense even though the backend
   // still reports can_act. Gate the reviewer actions on the review being open.
@@ -446,9 +493,13 @@ export function ReviewerView({
             {ICON_SHARE}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15.5, fontWeight: 800, color: "#1A1D2E", letterSpacing: "-.2px" }}>Review report</div>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: "#1A1D2E", letterSpacing: "-.2px" }}>
+              {viewOnly ? report?.title ?? "Report" : "Review report"}
+            </div>
             <div style={{ fontSize: 12, color: "#8890AE", marginTop: 1 }}>
-              {!assignedName ? (
+              {viewOnly ? (
+                report?.type_label ?? "Read-only"
+              ) : !assignedName ? (
                 "Unassigned"
               ) : assignment?.is_you ? (
                 <>
@@ -462,43 +513,24 @@ export function ReviewerView({
               )}
             </div>
           </div>
-          {report && (
-            <span
-              style={{
-                flexShrink: 0,
-                padding: "5px 13px",
-                borderRadius: 20,
-                background: "#FEF3C7",
-                color: "#B45309",
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              {report.status_label}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              flexShrink: 0,
-              width: 28,
-              height: 28,
-              border: "none",
-              background: "transparent",
-              color: "#9BA3C4",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-            }}
-          >
-            <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
+          {report && (() => {
+              const pill = statusPill(report.status, report.status_label)
+              return (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    padding: "5px 13px",
+                    borderRadius: 20,
+                    background: pill.bg,
+                    color: pill.color,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {pill.text}
+                </span>
+              )
+          })()}
         </div>
 
         {loading ? (
@@ -514,9 +546,20 @@ export function ReviewerView({
             </button>
           </div>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px" }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: "grid",
+              gridTemplateColumns: viewOnly ? "minmax(0, 1fr)" : "minmax(0, 1fr) 340px",
+            }}
+          >
             {/* Report + sections */}
             <div style={{ overflowY: "auto", padding: "18px 24px 24px", background: "#F4F5FA", minWidth: 0 }}>
+              {/* Reviewing instructions, so only where a review is happening.
+                  The exception is the removal notice: someone reading a thread
+                  they were taken out of needs to know why it is read-only. */}
+              {(!viewOnly || removedAt) && (
               <div
                 style={{
                   padding: "13px 16px",
@@ -528,22 +571,34 @@ export function ReviewerView({
                   marginBottom: 16,
                 }}
               >
-                Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
-                requested change. When you&apos;re done, approve it or send it back to the creator.
+                {canComment ? (
+                  <>
+                    Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
+                    requested change. When you&apos;re done, approve it or send it back to the creator.
+                  </>
+                ) : (
+                  <>
+                    You were removed from this conversation
+                    {removedAt ? ` on ${formatRemovedOn(removedAt)}` : ""}. You can read what was said up to then.
+                  </>
+                )}
               </div>
+              )}
 
               {sections.length === 0 && (
                 <div
                   style={{ ...CARD, padding: "28px 20px", textAlign: "center", fontSize: 13, color: "#8890AE", marginBottom: 12 }}
                 >
-                  This report has no generated sections yet — leave a comment on the report as a whole below.
+                  {canComment
+                    ? "This report has no generated sections yet — leave a comment on the report as a whole below."
+                    : "This report has no generated sections yet."}
                 </div>
               )}
 
               {/* Quarterly cover — page 1. Values come from the assemble
                   header; the section itself is dropped upstream because the
                   report never renders its content either. */}
-              {isQuarterly && sections.length > 0 && (
+              {isDocument && sections.length > 0 && (
                 <div
                   style={{
                     marginBottom: 20,
@@ -556,10 +611,12 @@ export function ReviewerView({
                       one fallback). Don't substitute the review payload's period
                       or title — /assemble omits `header`, so that would put
                       values on this cover that the real cover doesn't show. */}
+                  {/* Annual has no /assemble header to read — the report's own
+                      meta is what its cycle prints on the cover. */}
                   <CoverRenderer
                     companyName={header?.company_name ?? centrionCompanyName}
-                    period={header?.period_label ?? null}
-                    title={header?.title ?? null}
+                    period={header?.period_label ?? (isAnnualDoc ? report?.period ?? null : null)}
+                    title={header?.title ?? (isAnnualDoc ? report?.title ?? null : null)}
                     preparedOn={header?.prepared_on ?? null}
                     templateKey={coverTemplateKey}
                     maxWidth={DOC_WIDTH}
@@ -574,7 +631,7 @@ export function ReviewerView({
                 style={{
                   ["--brand-primary" as string]: brand?.primary ?? "#4040C8",
                   ["--brand-secondary" as string]: brand?.secondary ?? "#4040C8",
-                  ...(isQuarterly && sections.length > 0
+                  ...(isDocument && sections.length > 0
                     ? { ...CARD, padding: "32px 40px", maxWidth: DOC_WIDTH, margin: "0 auto" }
                     : {}),
                 }}
@@ -591,8 +648,8 @@ export function ReviewerView({
                       <span
                         style={{
                           flexShrink: 0,
-                          fontWeight: isQuarterly ? 700 : 800,
-                          ...(isQuarterly
+                          fontWeight: isDocument ? 700 : 800,
+                          ...(isDocument
                             ? { fontFamily: MONO, fontSize: 12, color: BRAND }
                             : // Earnings preview: faint "01", tabular figures.
                               { fontSize: 11, color: "#9BA3C4", fontVariantNumeric: "tabular-nums" }),
@@ -606,7 +663,7 @@ export function ReviewerView({
                           minWidth: 0,
                           fontWeight: 800,
                           color: BRAND,
-                          ...(isQuarterly ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
+                          ...(isDocument ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
                         }}
                       >
                         {s.title}
@@ -633,7 +690,13 @@ export function ReviewerView({
                       <button
                         type="button"
                         onClick={() => (open ? setComposerFor(undefined) : openComposer(s.id))}
-                        style={{ ...BTN_SECONDARY, gap: 7, fontSize: 12.5, padding: "7px 13px" }}
+                        style={{
+                          ...BTN_SECONDARY,
+                          gap: 7,
+                          fontSize: 12.5,
+                          padding: "7px 13px",
+                          display: canComment ? undefined : "none",
+                        }}
                       >
                         <span style={{ color: "#7C3AED", display: "inline-flex" }}>{ICON_COMMENT}</span>
                         {open ? "Cancel" : "Add comment"}
@@ -642,19 +705,21 @@ export function ReviewerView({
 
                     {/* Quarterly sits directly on the document page; every
                         other type keeps its own card. */}
-                    <div style={isQuarterly ? undefined : { ...CARD, padding: "18px 22px" }}>
+                    <div style={isDocument ? undefined : { ...CARD, padding: "18px 22px" }}>
                       {body ? (
                         // Quarterly reads through the ported quarterly renderer
                         // (columns derived from the data, brand-accented figures);
                         // every other type keeps this file's own SectionBody.
-                        isQuarterly ? (
+                        isDocument ? (
                           <SectionContent section={body} />
                         ) : (
                           <EarningsSectionContent section={body} coverTemplateKey={coverTemplateKey} />
                         )
                       ) : (
                         <div style={{ fontSize: 12.5, color: "#9BA3C4", fontStyle: "italic" }}>
-                          Section content isn&apos;t available for this report.
+                          {hasBodySource
+                            ? "This section hasn't been generated yet."
+                            : "This report keeps no section text — open the report to see its data."}
                         </div>
                       )}
 
@@ -690,7 +755,8 @@ export function ReviewerView({
               </div>
 
               {/* Report-level comments (section_id: null) */}
-              <div style={{ ...CARD, padding: "16px 20px", maxWidth: isQuarterly ? DOC_WIDTH : undefined, margin: isQuarterly ? "16px auto 0" : undefined }}>
+              {!viewOnly && (
+              <div style={{ ...CARD, padding: "16px 20px", maxWidth: isDocument ? DOC_WIDTH : undefined, margin: isDocument ? "16px auto 0" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: "#1A1D2E" }}>
                     On the report as a whole
@@ -714,13 +780,15 @@ export function ReviewerView({
                       {reportLevel.length}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    style={BTN_SECONDARY}
-                    onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
-                  >
-                    {composerFor === null ? "Cancel" : "Add comment"}
-                  </button>
+                  {canComment && (
+                    <button
+                      type="button"
+                      style={BTN_SECONDARY}
+                      onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
+                    >
+                      {composerFor === null ? "Cancel" : "Add comment"}
+                    </button>
+                  )}
                 </div>
 
                 {reportLevel.map((c) => (
@@ -749,9 +817,11 @@ export function ReviewerView({
                   </div>
                 )}
               </div>
+              )}
             </div>
 
-            {/* Right rail */}
+            {/* Right rail — the review's own controls, so it goes with it. */}
+            {!viewOnly && (
             <div
               style={{
                 borderLeft: "1px solid #ECEEF8",
@@ -954,9 +1024,9 @@ export function ReviewerView({
                           style={{
                             ...BTN_PRIMARY,
                             flex: 1,
-                            opacity: busy || (panel === "send_back" && !note.trim()) ? 0.6 : 1,
+                            opacity: busy ? 0.6 : 1,
                           }}
-                          disabled={busy || (panel === "send_back" && !note.trim())}
+                          disabled={busy}
                           onClick={() => void runPanelAction()}
                         >
                           {busy ? "Working…" : panel === "approve" ? "Approve" : "Send back"}
@@ -1004,22 +1074,30 @@ export function ReviewerView({
                       <button
                         type="button"
                         style={{ ...BTN_SECONDARY, width: "100%", gap: 8, padding: "12px 16px" }}
+                        // Straight to it: what needs changing is in the section
+                        // comments this reviewer has been leaving, and a second
+                        // required box only got "see comments" typed into it.
                         onClick={() => {
-                          setPanel("send_back")
                           setNote("")
                           setActionError(null)
+                          void runPanelAction("send_back")
                         }}
                       >
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                           <path d="M9.5 1.9l2.6 2.6-7 7-3.1.5.5-3.1 7-7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                         </svg>
-                        Request changes &amp; reassign
+                        {/* It goes to the report's creator — nobody is
+                            reassigned, the assignment is simply cleared. */}
+                        {data?.owner?.full_name
+                          ? `Send back to ${data.owner.full_name}`
+                          : "Send back to the creator"}
                       </button>
                     </>
                   )}
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
       </div>

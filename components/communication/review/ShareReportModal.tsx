@@ -59,7 +59,8 @@ export function ShareReportModal({
   useEffect(() => {
     let cancelled = false
     communicationsApi
-      .members()
+      // Scoped to this report - only people who can open it can review it.
+      .members(reportId)
       .then((res) => {
         if (!cancelled) setMembers(res.members)
       })
@@ -183,7 +184,7 @@ export function ShareReportModal({
                 <>
                   <div style={SECTION_LABEL}>ATTACHED REPORT</div>
                   <div style={{ marginBottom: 20 }}>
-                    <AttachedReportCard report={report} />
+                    <AttachedReportCard report={report} disabled />
                   </div>
                 </>
               )}
