@@ -133,7 +133,9 @@ export interface CommunicationMessage {
 
 export interface StartThreadResponse {
   thread: CommunicationThread
-  message: CommunicationMessage
+  // null when the thread was started with no first message — the thread exists,
+  // it just has nothing in it yet.
+  message: CommunicationMessage | null
 }
 
 // ── Communication list (rows) ─────────────────────────────────────────────
