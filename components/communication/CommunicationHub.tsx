@@ -379,16 +379,16 @@ function ThreadRow({
         borderBottom: last ? "none" : "1px solid #F0F1F8",
       }}
     >
-      <FileTile kind={reportKind(report.report_type)} />
+      <FileTile kind={report ? reportKind(report.report_type) : "report"} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1D2E", letterSpacing: "-.1px" }}>
-            {report.title}
+            {report?.title ?? "Conversation"}
           </span>
           {/* Only "In review" earns a pill in the list - every other status is
               noise next to the thread's own activity line. */}
-          {inReview && (() => {
+          {inReview && report && (() => {
             const pill = statusPill(report.status, report.status_label)
             return (
               <span
