@@ -133,7 +133,9 @@ export interface CommunicationMessage {
 
 export interface StartThreadResponse {
   thread: CommunicationThread
-  message: CommunicationMessage
+  // null when the thread was started with no first message — the thread exists,
+  // it just has nothing in it yet.
+  message: CommunicationMessage | null
 }
 
 // ── Communication list (rows) ─────────────────────────────────────────────
@@ -212,7 +214,8 @@ export interface ThreadSummary {
   is_private: boolean
   // Non-null once you've been removed — the row stays, read-only.
   removed_at: string | null
-  report: ThreadReport
+  // null on an ad-hoc thread — one with no report behind it.
+  report: ThreadReport | null
   owner: ThreadOwner | null
   // Added alongside the review flow; null when not out for review.
   assignment: ReviewAssignment | null
@@ -297,7 +300,8 @@ export interface ThreadDetail {
   // True only for the creator of a private thread; false for its other members
   // and on every public thread. Gates who may pull a non-member in.
   can_add_members: boolean
-  report: ThreadReport
+  // null on an ad-hoc thread — one with no report behind it.
+  report: ThreadReport | null
   owner: ThreadOwner | null
   assignment: ReviewAssignment | null
   // True only for the assigned reviewer — gates "Open as reviewer".

@@ -290,7 +290,7 @@ export function NotificationBell({
           return {
             id: `thread:${t.thread_id}`,
             kind: "thread_message" as const,
-            title: t.report.title,
+            title: t.report?.title ?? "Conversation",
             body: `${sender}: ${lm.preview}`,
             meta: plural,
             timestamp: t.updated_at,

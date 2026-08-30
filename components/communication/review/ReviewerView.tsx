@@ -32,6 +32,7 @@ import {
 import { CoverRenderer } from "./CoverRenderer"
 import { SectionContent } from "./SectionContent"
 import { EarningsSectionContent } from "./EarningsSectionContent"
+import { Skeleton } from "@/components/ui/skeletons"
 
 /**
  * Reviewer screen — the "Open as reviewer" destination.
@@ -96,6 +97,20 @@ const ICON_COMMENT = (
 // `onJump` makes the whole row a target that scrolls the document to the
 // section this comment is on. Omitted for report-level comments (no section to
 // scroll to) and for the rows already rendered inside their own section.
+/* Placeholder lines while a section's body is still in flight.
+
+   Ragged widths on purpose: three equal bars read as a table, not as text
+   about to arrive. */
+function SectionBodySkeleton() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }} aria-busy="true" aria-label="Loading section content">
+      <Skeleton style={{ height: 11, width: "92%" }} />
+      <Skeleton style={{ height: 11, width: "100%" }} />
+      <Skeleton style={{ height: 11, width: "78%" }} />
+    </div>
+  )
+}
+
 function CommentRow({
   comment,
   showSection,
@@ -188,6 +203,10 @@ export function ReviewerView({
 
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, ReviewReportSection>>({})
+  // The bodies arrive in their own request, after the headings. Until it lands
+  // every section rendered "hasn't been generated yet", which is a lie about a
+  // report that is merely still loading.
+  const [bodiesLoading, setBodiesLoading] = useState(false)
   // Quarterly only — cover values, chosen cover template, and brand accents for
   // the document page.
   const [header, setHeader] = useState<ReviewReportHeader | null>(null)
@@ -275,8 +294,10 @@ export function ReviewerView({
             : null
     if (!load) {
       setBodies({})
+      setBodiesLoading(false)
       return
     }
+    setBodiesLoading(true)
     load
       .then((res) => {
         if (cancelled) return
@@ -292,6 +313,9 @@ export function ReviewerView({
         if (res.cover_template_key) setCoverTemplateKey(res.cover_template_key)
       })
       .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setBodiesLoading(false)
+      })
     return () => {
       cancelled = true
     }
@@ -715,6 +739,8 @@ export function ReviewerView({
                         ) : (
                           <EarningsSectionContent section={body} coverTemplateKey={coverTemplateKey} />
                         )
+                      ) : bodiesLoading ? (
+                        <SectionBodySkeleton />
                       ) : (
                         <div style={{ fontSize: 12.5, color: "#9BA3C4", fontStyle: "italic" }}>
                           {hasBodySource

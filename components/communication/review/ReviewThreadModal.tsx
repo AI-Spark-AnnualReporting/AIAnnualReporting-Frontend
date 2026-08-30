@@ -227,9 +227,8 @@ export function ReviewThreadModal({
       setError(null)
     }
 
-    // Members are fetched AFTER the thread rather than beside it because the
-    // list is scoped to the thread's report - offering someone who cannot open
-    // the report is offering an add that fails.
+    // Every active person in the company is addable, whoever can open the
+    // report: the report itself is what checks that.
     ;(skipThreadFetch ? Promise.resolve(null) : communicationsApi.getThread(threadId))
       .then(async (detail) => {
         if (cancelled) return
@@ -237,11 +236,11 @@ export function ReviewThreadModal({
           setThread(detail.thread)
           setMessages(detail.messages)
         }
-        // Ad-hoc threads have no report - everyone in the company is fair game.
-        const reportId = (detail ?? initialPayload)?.thread.report?.id
+        // Everyone active in the company: being in the conversation and being
+        // able to read the report are separate things.
         // A members failure shouldn't block the thread from rendering.
         const membersRes = await communicationsApi
-          .members(reportId)
+          .members()
           .catch(() => ({ members: [] as CommunicationMember[] }))
         if (cancelled) return
         setMembers(membersRes.members)
@@ -354,7 +353,7 @@ export function ReviewThreadModal({
           // didn't start this private thread". The backend's detail says which.
           toast.error(detailMessage(e, "One of the mentioned people is no longer available"))
           communicationsApi
-            .members(thread?.report?.id)
+            .members()
             .then((r) => setMembers(r.members))
             .catch(() => {})
           setSending(false)
