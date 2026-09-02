@@ -66,6 +66,22 @@ export interface GetOutlineResponse {
   editable: boolean
 }
 
+// GET .../additional-insights → AI-scanned leftover content from uploaded
+// documents that wasn't used to answer any question but is still relevant.
+// `items` is legitimately [] with has_content: false — a normal empty state,
+// not an error.
+export interface AdditionalInsightItem {
+  title: string
+  summary: string
+  relates_to: string | null
+}
+
+export interface AdditionalInsightsResponse {
+  success: boolean
+  items: AdditionalInsightItem[]
+  has_content: boolean
+}
+
 // PUT .../draft body — the full draft text. Empty string is meaningful (the
 // user cleared the editor), so it must be sent, not skipped.
 export interface SaveDraftPayload {
@@ -164,6 +180,17 @@ export const departmentApi = {
     )
     // Backend returns the full outline; tolerate a { outline } wrapper too.
     return data?.outline ?? data
+  },
+
+  // Fetch AI-surfaced leftover content from the session's uploaded documents —
+  // relevant material that wasn't used to answer any question. LLM-backed like
+  // generateOutline, so give it the same 2-min budget.
+  getAdditionalInsights: async (sessionId: string): Promise<AdditionalInsightsResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/additional-insights`,
+      { timeout: 120000 } // 2 min — LLM scans documents for leftover content
+    )
+    return data
   },
 
   uploadDocument: async (sessionId: string, file: File) => {

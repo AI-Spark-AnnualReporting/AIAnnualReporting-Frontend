@@ -639,6 +639,16 @@ export default function SessionWorkspacePage({
             </Button>
           )}
 
+          <Link href={`/department/sessions/${id}/insights`}>
+            <Button
+              variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              title="View AI-surfaced content from your documents that wasn't used in any answer"
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              Additional Insights
+            </Button>
+          </Link>
+
           <Button
             variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             onClick={() => setViewMode("overview")}

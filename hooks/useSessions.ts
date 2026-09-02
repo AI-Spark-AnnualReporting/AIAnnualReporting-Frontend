@@ -119,6 +119,22 @@ export function usePatchOutlineTitles() {
   })
 }
 
+// ── Additional Insights (read-only) ─────────────────────────────────────────
+
+/**
+ * Fetch AI-surfaced leftover content from the session's uploaded documents.
+ * Key: ["session", id, "additional-insights"]. Unlike useOutline, there's no
+ * in-progress local edit to protect, so background refetches are left on.
+ */
+export function useAdditionalInsights(sessionId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "additional-insights"],
+    queryFn: () => departmentApi.getAdditionalInsights(sessionId),
+    enabled: !!sessionId,
+    retry: false,
+  })
+}
+
 // ── Draft working copy ──────────────────────────────────────────────────────
 
 // Shared mutation key so the draft page can gate navigation/finalize on
