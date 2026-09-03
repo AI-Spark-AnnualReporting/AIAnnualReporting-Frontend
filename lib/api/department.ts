@@ -71,9 +71,11 @@ export interface GetOutlineResponse {
 // `items` is legitimately [] with has_content: false — a normal empty state,
 // not an error.
 export interface AdditionalInsightItem {
+  id: string // Stable, content-derived id — used to target the toggle endpoint.
   title: string
   summary: string
   relates_to: string | null
+  included: boolean
 }
 
 export interface AdditionalInsightsResponse {
@@ -189,6 +191,21 @@ export const departmentApi = {
     const { data } = await apiClient.get(
       `/department/sessions/${sessionId}/additional-insights`,
       { timeout: 120000 } // 2 min — LLM scans documents for leftover content
+    )
+    return data
+  },
+
+  // Flip one insight card's included flag. Fast (no LLM/embedding work) — just
+  // toggles a stored field. Takes effect on the next outline/draft generation,
+  // not retroactively. Returns the full updated list.
+  setInsightInclusion: async (
+    sessionId: string,
+    insightId: string,
+    included: boolean
+  ): Promise<AdditionalInsightsResponse> => {
+    const { data } = await apiClient.patch(
+      `/department/sessions/${sessionId}/additional-insights/${insightId}`,
+      { included }
     )
     return data
   },

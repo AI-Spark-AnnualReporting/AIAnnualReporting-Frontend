@@ -141,6 +141,25 @@ export function useAdditionalInsights(sessionId: string) {
   })
 }
 
+/**
+ * Toggle one insight card's `included` flag. The PATCH response is the full
+ * updated list, so we write it straight into the query cache instead of
+ * refetching (toggling is cheap; a refetch would re-run the LLM pass).
+ */
+export function useSetInsightInclusion(sessionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ insightId, included }: { insightId: string; included: boolean }) =>
+      departmentApi.setInsightInclusion(sessionId, insightId, included),
+    onSuccess: (data) => {
+      qc.setQueryData(["session", sessionId, "additional-insights"], data)
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(err?.message || "Couldn't update this card")
+    },
+  })
+}
+
 // ── Draft working copy ──────────────────────────────────────────────────────
 
 // Shared mutation key so the draft page can gate navigation/finalize on
