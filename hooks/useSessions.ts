@@ -123,8 +123,11 @@ export function usePatchOutlineTitles() {
 
 /**
  * Fetch AI-surfaced leftover content from the session's uploaded documents.
- * Key: ["session", id, "additional-insights"]. Unlike useOutline, there's no
- * in-progress local edit to protect, so background refetches are left on.
+ * Key: ["session", id, "additional-insights"]. Also used from the main
+ * workspace page (to badge the "Additional Insights" button), so this is
+ * LLM-backed and expensive — staleTime: Infinity + no background refetches
+ * means it's computed once per browser session (tab) and reused across
+ * remounts/navigation, only re-running on an actual page reload.
  */
 export function useAdditionalInsights(sessionId: string) {
   return useQuery({
@@ -132,6 +135,9 @@ export function useAdditionalInsights(sessionId: string) {
     queryFn: () => departmentApi.getAdditionalInsights(sessionId),
     enabled: !!sessionId,
     retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 }
 

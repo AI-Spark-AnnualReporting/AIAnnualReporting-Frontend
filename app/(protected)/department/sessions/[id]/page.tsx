@@ -1,7 +1,7 @@
 "use client"
 
 import { use, useState, useEffect, useCallback, useRef } from "react"
-import { useSession, useSubmitAnswers, useGenerateDraft } from "@/hooks/useSessions"
+import { useSession, useSubmitAnswers, useGenerateDraft, useAdditionalInsights } from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
 import {
   languageMismatchWarning,
@@ -101,6 +101,11 @@ export default function SessionWorkspacePage({
   const { data, isLoading, refetch } = useSession(id)
   const submitAnswers = useSubmitAnswers()
   const generateDraft = useGenerateDraft()
+  // Checked eagerly so the "Additional Insights" button can badge itself —
+  // cached for the browser session (see useAdditionalInsights) so this only
+  // costs one LLM-backed call per reload, not per render/navigation.
+  const { data: insightsData } = useAdditionalInsights(id)
+  const hasAdditionalInsights = !!insightsData?.has_content && insightsData.items.length > 0
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -639,7 +644,7 @@ export default function SessionWorkspacePage({
             </Button>
           )}
 
-          <Link href={`/department/sessions/${id}/insights`}>
+          <Link href={`/department/sessions/${id}/insights`} className="relative inline-block">
             <Button
               variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               title="View AI-surfaced content from your documents that wasn't used in any answer"
@@ -647,6 +652,9 @@ export default function SessionWorkspacePage({
               <Sparkles className="mr-2 h-4 w-4" />
               Additional Insights
             </Button>
+            {hasAdditionalInsights && (
+              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-indigo-600 ring-2 ring-white" />
+            )}
           </Link>
 
           <Button
