@@ -2,8 +2,11 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useDepartmentDashboard } from "@/hooks/useSessions"
-import { departmentApi } from "@/lib/api/department"
+import {
+  useDepartmentDashboard,
+  useUploadSessionDocument,
+  useExtractAnswers,
+} from "@/hooks/useSessions"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -76,6 +79,8 @@ function StatusPill({ status, deptCode }: { status: SessionStatus; deptCode?: st
 
 export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
+  const uploadDocument = useUploadSessionDocument()
+  const extractAnswers = useExtractAnswers()
   const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
   const sort = useSort(SORT_FIELDS)
@@ -135,7 +140,7 @@ export default function DepartmentDashboard() {
     // selected so the user can adjust them and retry.
     try {
       for (const file of files) {
-        await departmentApi.uploadDocument(sessionId, file)
+        await uploadDocument.mutateAsync({ sessionId, file })
       }
     } catch (err: unknown) {
       setStarting(false)
@@ -153,7 +158,7 @@ export default function DepartmentDashboard() {
     // Documents are uploaded. If extraction fails the user can still answer
     // manually, so continue into the workspace as before.
     try {
-      const result = await departmentApi.extractAnswers(sessionId)
+      const result = await extractAnswers.mutateAsync(sessionId)
       setExtractionResult({
         total_questions: result.total_questions,
         found_count: result.found_count,
