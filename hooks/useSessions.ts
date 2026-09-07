@@ -160,6 +160,22 @@ export function useSetInsightInclusion(sessionId: string) {
   })
 }
 
+/**
+ * The verbatim source chunks behind one insight card.
+ * Only runs once `insightId` is non-empty — the page passes "" until a card is
+ * expanded, the same enable-by-truthy-id idiom used elsewhere in this file.
+ * Cheap (plain DB read), so unlike useAdditionalInsights it can refetch freely.
+ */
+export function useInsightSources(sessionId: string, insightId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "insight-sources", insightId],
+    queryFn: () => departmentApi.getInsightSources(sessionId, insightId),
+    enabled: !!sessionId && !!insightId,
+    retry: false,
+    staleTime: Infinity,
+  })
+}
+
 // ── Draft working copy ──────────────────────────────────────────────────────
 
 // Shared mutation key so the draft page can gate navigation/finalize on

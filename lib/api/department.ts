@@ -76,6 +76,25 @@ export interface AdditionalInsightItem {
   summary: string
   relates_to: string | null
   included: boolean
+  // Chunks this card was summarized from. Empty when the model named no valid
+  // source — the card still shows, but without a "verbatim source" control,
+  // since we'd otherwise risk displaying the wrong passage.
+  source_chunk_ids: string[]
+}
+
+// GET .../additional-insights/{id}/sources → the exact document text a card was
+// summarized from. Fetched only when a card is expanded, not with the list:
+// chunk text is large and only wanted on demand.
+export interface InsightSourceChunk {
+  chunk_id: string
+  document_filename: string
+  chunk_index: number
+  content: string
+}
+
+export interface InsightSourcesResponse {
+  success: boolean
+  sources: InsightSourceChunk[]
 }
 
 export interface AdditionalInsightsResponse {
@@ -206,6 +225,18 @@ export const departmentApi = {
     const { data } = await apiClient.patch(
       `/department/sessions/${sessionId}/additional-insights/${insightId}`,
       { included }
+    )
+    return data
+  },
+
+  // The verbatim chunks behind one insight card. Plain DB read — no LLM, so
+  // no extended timeout unlike getAdditionalInsights.
+  getInsightSources: async (
+    sessionId: string,
+    insightId: string
+  ): Promise<InsightSourcesResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/additional-insights/${insightId}/sources`
     )
     return data
   },
