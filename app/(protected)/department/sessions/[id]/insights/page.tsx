@@ -126,7 +126,7 @@ export default function AdditionalInsightsPage({ params }: { params: Promise<{ i
   const hasContent = data?.has_content ?? items.length > 0
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
