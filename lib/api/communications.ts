@@ -248,12 +248,20 @@ export interface MessageSender {
 // normal person.
 export type ThreadMessageKind = "system" | "user"
 
+// One @mention on a message. The name is already inside `body` as
+// "@Full Name" — this says which names in that text are mentions.
+export interface MessageMention {
+  user_id: string
+  full_name: string
+}
+
 export interface ThreadMessage {
   id: string
   kind: ThreadMessageKind
   sender: MessageSender
   body: string
   mentioned_user_ids: string[]
+  mentions: MessageMention[]
   created_at: string
 }
 
