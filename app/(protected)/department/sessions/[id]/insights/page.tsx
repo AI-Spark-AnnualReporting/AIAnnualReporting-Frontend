@@ -72,6 +72,11 @@ function VerbatimSources({
 
   return (
     <div className="space-y-3 border-t border-slate-100 px-5 py-4">
+      <p className="text-xs text-slate-500">
+        This is the exact text from your document. If this card is included, your
+        report is written from the passage below — word for word, not from the
+        summary above.
+      </p>
       {sources.map((src) => (
         <div key={src.chunk_id}>
           <p className="mb-1.5 text-xs font-medium text-slate-500">
@@ -121,7 +126,7 @@ export default function AdditionalInsightsPage({ params }: { params: Promise<{ i
   const hasContent = data?.has_content ?? items.length > 0
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -146,9 +151,20 @@ export default function AdditionalInsightsPage({ params }: { params: Promise<{ i
       </div>
 
       {hasContent && items.length > 0 && (
-        <p className="rounded-lg bg-slate-50 px-4 py-2.5 text-xs text-slate-500">
-          Included cards are folded into your outline and draft the next time you generate them.
-        </p>
+        <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+          <p className="font-medium text-slate-700">
+            Included cards are written into your outline and draft the next time you
+            generate them — using the original wording from your document, not the
+            summary shown here.
+          </p>
+          <p className="mt-1 text-slate-500">
+            The summary is a short preview, written to make these quick to read. Your
+            report is built from the full source passage behind it, so no figures or
+            detail are lost along the way. Open{" "}
+            <span className="font-medium text-slate-600">Show verbatim source</span> on
+            any card to read exactly what will be used.
+          </p>
+        </div>
       )}
 
       {isError ? (
