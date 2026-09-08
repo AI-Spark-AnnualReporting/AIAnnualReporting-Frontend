@@ -49,14 +49,23 @@ function RouteGuardInner({ children, allowedRoles }: RouteGuardProps) {
       return
     }
 
-    if (isAuthenticated && allowedRoles && user && !allowedRoles.includes(user.role)) {
+    if (
+      isAuthenticated &&
+      allowedRoles &&
+      user &&
+      user.role !== "spark_internal" &&
+      !allowedRoles.includes(user.role)
+    ) {
       const roleRoutes: Record<UserRole, string> = {
         admin: "/admin",
         project_manager: "/pm",
         hod: "/hod",
         department_user: "/department",
+        spark_internal: "/pm",
       }
-      router.push(roleRoutes[user.role])
+      // Fallback matters: an unmapped role made this router.push(undefined),
+      // which throws rather than redirecting.
+      router.push(roleRoutes[user.role] ?? "/pm")
     }
   }, [isLoading, isAuthenticated, hasToken, tokenInUrl, user, router, pathname, allowedRoles])
 
@@ -68,7 +77,15 @@ function RouteGuardInner({ children, allowedRoles }: RouteGuardProps) {
 
   if (!isAuthenticated) return <PageLoader fullScreen />
 
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+  // Spark staff hold every permission and are here to look at someone else's
+  // workspace, so a per-page role list is not about them. Without this the three
+  // allowedRoles-guarded PM pages spin on a loader for ever.
+  if (
+    allowedRoles &&
+    user &&
+    user.role !== "spark_internal" &&
+    !allowedRoles.includes(user.role)
+  ) {
     return <PageLoader fullScreen />
   }
 

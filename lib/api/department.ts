@@ -66,6 +66,43 @@ export interface GetOutlineResponse {
   editable: boolean
 }
 
+// GET .../additional-insights → AI-scanned leftover content from uploaded
+// documents that wasn't used to answer any question but is still relevant.
+// `items` is legitimately [] with has_content: false — a normal empty state,
+// not an error.
+export interface AdditionalInsightItem {
+  id: string // Stable, content-derived id — used to target the toggle endpoint.
+  title: string
+  summary: string
+  relates_to: string | null
+  included: boolean
+  // Chunks this card was summarized from. Empty when the model named no valid
+  // source — the card still shows, but without a "verbatim source" control,
+  // since we'd otherwise risk displaying the wrong passage.
+  source_chunk_ids: string[]
+}
+
+// GET .../additional-insights/{id}/sources → the exact document text a card was
+// summarized from. Fetched only when a card is expanded, not with the list:
+// chunk text is large and only wanted on demand.
+export interface InsightSourceChunk {
+  chunk_id: string
+  document_filename: string
+  chunk_index: number
+  content: string
+}
+
+export interface InsightSourcesResponse {
+  success: boolean
+  sources: InsightSourceChunk[]
+}
+
+export interface AdditionalInsightsResponse {
+  success: boolean
+  items: AdditionalInsightItem[]
+  has_content: boolean
+}
+
 // PUT .../draft body — the full draft text. Empty string is meaningful (the
 // user cleared the editor), so it must be sent, not skipped.
 export interface SaveDraftPayload {
@@ -164,6 +201,44 @@ export const departmentApi = {
     )
     // Backend returns the full outline; tolerate a { outline } wrapper too.
     return data?.outline ?? data
+  },
+
+  // Fetch AI-surfaced leftover content from the session's uploaded documents —
+  // relevant material that wasn't used to answer any question. LLM-backed like
+  // generateOutline, so give it the same 2-min budget.
+  getAdditionalInsights: async (sessionId: string): Promise<AdditionalInsightsResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/additional-insights`,
+      { timeout: 120000 } // 2 min — LLM scans documents for leftover content
+    )
+    return data
+  },
+
+  // Flip one insight card's included flag. Fast (no LLM/embedding work) — just
+  // toggles a stored field. Takes effect on the next outline/draft generation,
+  // not retroactively. Returns the full updated list.
+  setInsightInclusion: async (
+    sessionId: string,
+    insightId: string,
+    included: boolean
+  ): Promise<AdditionalInsightsResponse> => {
+    const { data } = await apiClient.patch(
+      `/department/sessions/${sessionId}/additional-insights/${insightId}`,
+      { included }
+    )
+    return data
+  },
+
+  // The verbatim chunks behind one insight card. Plain DB read — no LLM, so
+  // no extended timeout unlike getAdditionalInsights.
+  getInsightSources: async (
+    sessionId: string,
+    insightId: string
+  ): Promise<InsightSourcesResponse> => {
+    const { data } = await apiClient.get(
+      `/department/sessions/${sessionId}/additional-insights/${insightId}/sources`
+    )
+    return data
   },
 
   uploadDocument: async (sessionId: string, file: File) => {

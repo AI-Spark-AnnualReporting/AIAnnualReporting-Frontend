@@ -11,14 +11,19 @@
  *   This gives us real session data that we inject back into the PM dashboard.
  *
  * CACHING STRATEGY (all module-level, survives between requests in Next.js dev/prod):
- *   - tokenCache      : JWT per user email, 45 s TTL
- *   - deptUsersCache  : list of dept users from /admin/users, 60 s TTL
- *   - dashboardCache  : full /department/dashboard payload per user, 10 s TTL
+ *   - tokenCache      : JWT per user email, cached until the token's own `exp` claim
+ *                       (minus a safety buffer) instead of a short arbitrary window —
+ *                       this is what previously forced a fresh login-for-every-dept-user
+ *                       fan-out every 45 s even though the tokens were still valid.
+ *   - deptUsersCache  : list of dept users from /admin/users, 5 min TTL
+ *   - dashboardCache  : full /department/dashboard payload per user, 60 s TTL
  *
- *   The 10 s dashboard cache is the critical optimisation:
- *   fetchSessionsForCycle is called once per cycle in the list route (10 cycles),
- *   but every dept user's dashboard is fetched only ONCE per 10 s window and
- *   shared across all cycle lookups, reducing 60 network calls to 6.
+ *   The dashboard cache is the critical optimisation: fetchSessionsForCycle is
+ *   called once per cycle in the list route (10 cycles), but every dept user's
+ *   dashboard is fetched only ONCE per cache window and shared across all cycle
+ *   lookups, reducing 60 network calls to 6. Progress data doesn't need
+ *   sub-minute freshness, so the window was widened from 10 s to cut how often
+ *   PMs hit the ~8 s cold path.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL!
@@ -55,6 +60,21 @@ function setAdminCyclesCache(v: CachedCycles | null) { g.__pmAdminCycles = v }
 // Sentinel value cached for users whose login fails, so we don't retry on every request
 const LOGIN_FAILED = "__FAILED__"
 
+// Safety buffer subtracted from the JWT's own `exp` so we never hand out a
+// token that expires mid-request; falls back to this if `exp` can't be read.
+const TOKEN_EXPIRY_BUFFER_MS = 30_000
+const FALLBACK_TOKEN_TTL_MS = 5 * 60_000
+
+/** Read a JWT's `exp` claim (seconds since epoch) without verifying the signature. */
+function decodeTokenExpiry(jwt: string): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString())
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
 async function loginAs(email: string, password: string): Promise<string | null> {
   const now = Date.now()
   const cached = tokenCache.get(email)
@@ -80,7 +100,15 @@ async function loginAs(email: string, password: string): Promise<string | null> 
       tokenCache.set(email, { token: LOGIN_FAILED, expiresAt: now + 30_000 })
       return null
     }
-    tokenCache.set(email, { token, expiresAt: now + 45_000 }) // 45 s
+    // Cache for the token's real lifetime instead of an arbitrary short window —
+    // re-logging in as every dept user well before their tokens actually expired
+    // was the main driver of the ~8 s cold path on PM dashboard screens.
+    const tokenExpiry = decodeTokenExpiry(token)
+    const expiresAt =
+      tokenExpiry !== null
+        ? Math.max(now + 5_000, tokenExpiry - TOKEN_EXPIRY_BUFFER_MS)
+        : now + FALLBACK_TOKEN_TTL_MS
+    tokenCache.set(email, { token, expiresAt })
     return token
   } catch {
     tokenCache.set(email, { token: LOGIN_FAILED, expiresAt: now + 30_000 })
@@ -105,7 +133,7 @@ async function getDeptUsers(serviceToken: string): Promise<DeptUser[]> {
     // The API may return a plain array OR { success, users: [...] } — handle both
     const allUsers: DeptUser[] = Array.isArray(raw) ? raw : (raw.users ?? [])
     const users = allUsers.filter((u) => u.role === "department_user")
-    setDeptUsersCache({ users, expiresAt: now + 60_000 }) // 60 s
+    setDeptUsersCache({ users, expiresAt: now + 5 * 60_000 }) // 5 min — dept roster rarely changes
     return users
   } catch {
     return []
@@ -134,7 +162,7 @@ export async function getAdminCycles(
     const cycles: Record<string, unknown>[] = Array.isArray(raw)
       ? raw
       : (raw.cycles ?? raw.data ?? [])
-    setAdminCyclesCache({ cycles, expiresAt: now + 15_000 }) // 15 s
+    setAdminCyclesCache({ cycles, expiresAt: now + 60_000 }) // 60 s
     return cycles
   } catch {
     return []
@@ -161,7 +189,7 @@ async function getDeptDashboard(email: string, token: string): Promise<DeptSessi
     const assignments: DeptSession[] = Array.isArray(data.assignments)
       ? data.assignments
       : []
-    dashboardCache.set(email, { assignments, expiresAt: now + 10_000 }) // 10 s
+    dashboardCache.set(email, { assignments, expiresAt: now + 60_000 }) // 60 s — progress data doesn't need sub-minute freshness
     return assignments
   } catch {
     return []

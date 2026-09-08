@@ -38,7 +38,7 @@ import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
   AlertTriangle, BookOpen, CheckCircle2, Clock, RefreshCw, Sparkles,
   FileUp, Zap, AlertOctagon, BellRing, Trophy, ShieldAlert,
-  ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X,
+  ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X, Target,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, deptLeadLabel } from "@/lib/utils"
@@ -795,6 +795,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   <Button variant="outline">
                     <ListChecks className="mr-2 h-4 w-4" />
                     View Questions
+                  </Button>
+                </Link>
+              )}
+              {/* Gated on the brief existing, not on questions: the brief is
+                  written a step earlier, and it is the only thing the page
+                  needs. Everything else it shows degrades to an empty state. */}
+              {hasKickoff && (
+                <Link href={`/pm/cycles/${id}/brief`}>
+                  <Button variant="outline">
+                    <Target className="mr-2 h-4 w-4" />
+                    View Strategic Brief
                   </Button>
                 </Link>
               )}

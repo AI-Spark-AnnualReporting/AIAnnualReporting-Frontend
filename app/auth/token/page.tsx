@@ -19,7 +19,14 @@ function TokenHandler() {
       router.replace("/login")
       return
     }
-    loginWithToken(token).catch(() => router.replace("/login"))
+    // Centriyon can name the workspace to open (`next`) and, for Spark staff,
+    // the company to act on (`company`). Cross-origin, the URL is the only
+    // channel — localStorage on this origin is not reachable from there.
+    loginWithToken(token, {
+      next: searchParams.get("next"),
+      company: searchParams.get("company"),
+      back: searchParams.get("back"),
+    }).catch(() => router.replace("/login"))
   }, [searchParams, router, loginWithToken])
 
   return <SigningIn />

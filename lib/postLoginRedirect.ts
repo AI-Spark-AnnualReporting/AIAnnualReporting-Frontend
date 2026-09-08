@@ -27,17 +27,30 @@ export function clearPostLoginRedirect() {
  * an internal app route — `//evil.com` is a protocol-relative URL, so a bare
  * leading-slash check is not enough to keep this from becoming an open redirect.
  */
+/**
+ * Whether a path is safe to redirect to after a handoff.
+ *
+ * Shared with the `?next=` param on /auth/token, which arrives from another
+ * origin holding a live token — so the same open-redirect rules have to apply
+ * there, and applying them from one place is the point.
+ */
+export function isSafeRedirectPath(path: unknown): path is string {
+  if (typeof path !== "string") return false
+  if (!path.startsWith("/") || path.startsWith("//")) return false
+  // Bouncing back into the login handoff would just loop.
+  if (path.startsWith("/auth") || path.startsWith("/login")) return false
+  return true
+}
+
 export function consumePostLoginRedirect(): string | null {
   const raw = localStorage.getItem(KEY)
   clearPostLoginRedirect()
   if (!raw) return null
   try {
     const { path, ts } = JSON.parse(raw) as { path?: unknown; ts?: unknown }
-    if (typeof path !== "string" || typeof ts !== "number") return null
+    if (typeof ts !== "number") return null
     if (Date.now() - ts > MAX_AGE_MS) return null
-    if (!path.startsWith("/") || path.startsWith("//")) return null
-    // Bouncing back into the login handoff would just loop.
-    if (path.startsWith("/auth") || path.startsWith("/login")) return null
+    if (!isSafeRedirectPath(path)) return null
     return path
   } catch {
     return null

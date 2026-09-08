@@ -5,6 +5,7 @@ import axios, {
 } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
+import { getActingCompany } from "@/lib/actingCompany"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -18,13 +19,22 @@ export const apiClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
-// Request interceptor: attach the Centriyon-issued JWT.
+// Request interceptor: attach the Centriyon-issued JWT, and — for Spark staff —
+// the company they are acting on. Read fresh per request rather than captured,
+// so another tab switching company can't leave this one stale.
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("access_token")
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`
+      }
+      // Absent for everyone but Spark, so no other user's requests change. The
+      // backend ignores it for every role except spark_internal regardless —
+      // that check is what stops it being a tenant-isolation hole.
+      const company = getActingCompany()
+      if (company && config.headers) {
+        config.headers["X-Company-Id"] = company
       }
     }
     return config

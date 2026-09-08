@@ -10,6 +10,7 @@ import {
   type ThreadMemberSummary,
   type ThreadDetailResponse,
   type ThreadMessage,
+  type MessageMention,
 } from "@/lib/api/communications"
 import { dirOf } from "@/lib/lang"
 import { AttachedReportCard } from "./AttachedReportCard"
@@ -90,6 +91,32 @@ function systemBody(body: string, actor: string): string {
   return withoutName.replace(/\.$/, "")
 }
 
+// The backend writes "@Full Name" into the body and lists who was mentioned.
+// Colour those names; the rest of the text renders untouched. Matching on the
+// name keeps the stored message readable everywhere else (email, notifications)
+// instead of hiding a token syntax only this component can decode.
+export function highlightMentions(body: string, mentions: MessageMention[]) {
+  // Longest name first so "@Ann Lee" wins over "@Ann".
+  const names = mentions
+    .map((m) => m.full_name)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  if (names.length === 0) return body
+
+  // Capturing group => split keeps the matches, so odd indexes are the mentions.
+  const parts = body.split(new RegExp(`(@(?:${names.join("|")}))`, "g"))
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <span key={i} style={{ color: "#4040C8", fontWeight: 700 }}>
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  )
+}
+
 function MessageRow({ message }: { message: ThreadMessage }) {
   const { sender, body, created_at, kind } = message
   const isSystem = kind === "system"
@@ -162,7 +189,7 @@ function MessageRow({ message }: { message: ThreadMessage }) {
             wordBreak: "break-word",
           }}
         >
-          {isSystem ? systemBody(body, sender.full_name) : body}
+          {isSystem ? systemBody(body, sender.full_name) : highlightMentions(body, message.mentions ?? [])}
         </div>
       </div>
     </div>
