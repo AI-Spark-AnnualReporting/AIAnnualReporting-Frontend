@@ -11,13 +11,21 @@ import { useRouter } from "next/navigation"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
 import { centriyonLoginUrl } from "@/lib/centriyon"
-import { clearPostLoginRedirect, consumePostLoginRedirect } from "@/lib/postLoginRedirect"
+import {
+  clearPostLoginRedirect,
+  consumePostLoginRedirect,
+  isSafeRedirectPath,
+} from "@/lib/postLoginRedirect"
+import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
 
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  loginWithToken: (token: string) => Promise<void>
+  loginWithToken: (
+    token: string,
+    opts?: { next?: string | null; company?: string | null }
+  ) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
@@ -29,6 +37,9 @@ const ROLE_ROUTES: Record<UserRole, string> = {
   project_manager: "/pm",
   hod: "/hod",
   department_user: "/department",
+  // Spark staff are sent to a specific workspace by the `next` param on the
+  // handoff. This is only the fallback for arriving without one.
+  spark_internal: "/pm",
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -60,15 +71,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // `?token=` on the root URL. We persist it, hydrate the user, and route to
   // their role home. There's no SAR-issued refresh token any more.
   const loginWithToken = useCallback(
-    async (token: string) => {
+    async (
+      token: string,
+      opts?: { next?: string | null; company?: string | null }
+    ) => {
       localStorage.setItem("access_token", token)
       localStorage.removeItem("refresh_token")
+      // Spark accounts carry no company of their own; the backend resolves the
+      // one they are acting on from X-Company-Id, which the api client attaches
+      // from here. Set it BEFORE /auth/me — that call is company-scoped too.
+      if (opts?.company) {
+        setActingCompany(opts.company)
+      } else {
+        clearActingCompany()
+      }
       const userData = await authApi.me()
       setUser(userData)
-      // A session that expired mid-work left the page behind — resume it.
-      // RouteGuard re-routes if the role can't actually see that page.
+      // An explicit destination wins: it is the whole point of the handoff.
+      // Otherwise resume a session that expired mid-work, then fall back to the
+      // role home. RouteGuard re-routes if the role can't see the page.
       const back = consumePostLoginRedirect()
-      router.push(back ?? ROLE_ROUTES[userData.role] ?? "/login")
+      const target = isSafeRedirectPath(opts?.next)
+        ? opts.next
+        : back ?? ROLE_ROUTES[userData.role] ?? "/login"
+      // replace, not push: otherwise /auth/token?token=<JWT> stays one Back
+      // press away, and for a super-admin's token that is worth avoiding.
+      router.replace(target)
     },
     [router]
   )
@@ -83,6 +111,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem("refresh_token")
       // Signing out is deliberate — don't resume the last page on next login.
       clearPostLoginRedirect()
+      // Otherwise the next person on this browser inherits a Spark session's
+      // company and silently sends it on every request.
+      clearActingCompany()
       setUser(null)
       window.location.href = centriyonLoginUrl()
     }

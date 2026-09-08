@@ -33,7 +33,9 @@ export const USER_STATUSES = {
 export const USER_ROLES = {
   admin: { label: "Admin" },
   project_manager: { label: "Project Manager" },
+  hod: { label: "Department Lead" },
   department_user: { label: "Department User" },
+  spark_internal: { label: "Spark Internal" },
 } as const
 
 export const TONE_OPTIONS = [

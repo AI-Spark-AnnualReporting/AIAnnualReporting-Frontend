@@ -1,5 +1,7 @@
 "use client"
 
+import { usePathname } from "next/navigation"
+
 import { useAuth } from "@/contexts/AuthContext"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopNav } from "@/components/layout/TopNav"
@@ -16,8 +18,24 @@ import { HODSidebar } from "@/components/layout/HODSidebar"
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
+  const pathname = usePathname()
 
-  if (user?.role === "project_manager") {
+  // Spark staff are the exception to "shell follows role": one role, but they
+  // open whichever workspace they were sent to, so for them the shell follows
+  // the PATH. Without this they fall through to the legacy shell below and get
+  // the department nav on a PM page.
+  const effectiveRole =
+    user?.role === "spark_internal"
+      ? pathname?.startsWith("/pm")
+        ? "project_manager"
+        : pathname?.startsWith("/hod")
+          ? "hod"
+          : pathname?.startsWith("/department")
+            ? "department_user"
+            : user.role
+      : user?.role
+
+  if (effectiveRole === "project_manager") {
     return (
       <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <PMSidebar />
@@ -31,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (user?.role === "department_user") {
+  if (effectiveRole === "department_user") {
     return (
       <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <DeptSidebar />
@@ -45,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (user?.role === "hod") {
+  if (effectiveRole === "hod") {
     return (
       <div className="flex h-screen overflow-hidden bg-[#f2f3fa]">
         <HODSidebar />
