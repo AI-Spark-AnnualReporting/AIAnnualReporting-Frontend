@@ -1,7 +1,14 @@
 "use client"
 
 import { use, useState, useEffect, useCallback, useRef } from "react"
-import { useSession, useSubmitAnswers, useGenerateDraft, useAdditionalInsights } from "@/hooks/useSessions"
+import {
+  useSession,
+  useSubmitAnswers,
+  useGenerateDraft,
+  useAdditionalInsights,
+  useUploadSessionDocument,
+  useExtractAnswers,
+} from "@/hooks/useSessions"
 import { departmentApi } from "@/lib/api/department"
 import {
   languageMismatchWarning,
@@ -102,10 +109,14 @@ export default function SessionWorkspacePage({
   const submitAnswers = useSubmitAnswers()
   const generateDraft = useGenerateDraft()
   // Checked eagerly so the "Additional Insights" button can badge itself —
-  // cached for the browser session (see useAdditionalInsights) so this only
-  // costs one LLM-backed call per reload, not per render/navigation.
-  const { data: insightsData } = useAdditionalInsights(id)
+  // cached (see useAdditionalInsights) so this costs one LLM-backed call rather
+  // than one per render/navigation. It re-runs when uploading a document or
+  // extracting answers invalidates the key, which is what keeps the badge
+  // honest without a page reload; isFetching drives the in-progress state below.
+  const { data: insightsData, isFetching: insightsFetching } = useAdditionalInsights(id)
   const hasAdditionalInsights = !!insightsData?.has_content && insightsData.items.length > 0
+  const uploadDocument = useUploadSessionDocument()
+  const extractAnswers = useExtractAnswers()
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -394,7 +405,7 @@ export default function SessionWorkspacePage({
     // adjust and retry.
     try {
       for (const file of files) {
-        await departmentApi.uploadDocument(id, file)
+        await uploadDocument.mutateAsync({ sessionId: id, file })
       }
     } catch (err: unknown) {
       setUploading(false)
@@ -414,7 +425,7 @@ export default function SessionWorkspacePage({
     // Documents are uploaded. Refetch on success or failure so any drafted
     // answers (and progress) are reflected in the workspace.
     try {
-      const result = await departmentApi.extractAnswers(id)
+      const result = await extractAnswers.mutateAsync(id)
       setExtractionResult({
         total_questions: result.total_questions,
         found_count: result.found_count,
@@ -647,12 +658,23 @@ export default function SessionWorkspacePage({
           <Link href={`/department/sessions/${id}/insights`} className="relative inline-block">
             <Button
               variant="outline" className="h-9 shrink-0 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              title="View AI-surfaced content from your documents that wasn't used in any answer"
+              title={
+                insightsFetching
+                  ? "Checking your documents for content that wasn't used in any answer…"
+                  : "View AI-surfaced content from your documents that wasn't used in any answer"
+              }
             >
-              <Sparkles className="mr-2 h-4 w-4" />
+              {/* Re-scanning after an upload/extraction is an LLM pass and can run
+                  for a while. Without this the button looks idle and the user has
+                  no way to tell that results are still on their way. */}
+              {insightsFetching
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Sparkles className="mr-2 h-4 w-4" />}
               Additional Insights
             </Button>
-            {hasAdditionalInsights && (
+            {/* Hold the badge back while a re-scan is in flight — the previous
+                result is not yet known to still be true. */}
+            {hasAdditionalInsights && !insightsFetching && (
               <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-indigo-600 ring-2 ring-white" />
             )}
           </Link>

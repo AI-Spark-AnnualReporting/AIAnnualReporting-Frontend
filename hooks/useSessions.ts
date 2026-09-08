@@ -64,6 +64,69 @@ export function useGenerateDraft() {
   })
 }
 
+// ── Supporting documents + AI answer extraction ─────────────────────────────
+
+/**
+ * Upload one supporting document to a session.
+ *
+ * Exists as a mutation (rather than a bare departmentApi call) so the cache
+ * invalidation below lives in exactly one place: a new document changes the
+ * session, the dashboard's progress figures, and — critically — the
+ * additional-insights result, which is derived from this session's uploaded
+ * document chunks.
+ *
+ * No toast here: both call sites drive a full-screen ExtractionLoader and own
+ * their own error messaging, so a toast from the hook would double up.
+ */
+export function useUploadSessionDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) =>
+      departmentApi.uploadDocument(sessionId, file),
+    onSettled: (_data, _err, vars) => invalidateAfterDocumentWork(qc, vars.sessionId),
+  })
+}
+
+/**
+ * Run AI answer-extraction over the session's uploaded documents.
+ *
+ * Invalidation is on `onSettled`, not `onSuccess`, and that is deliberate: by
+ * the time extraction runs the documents are already on the server, so even a
+ * failed extraction leaves new document content behind — and therefore a stale
+ * additional-insights cache. Invalidating only on success would leave the
+ * failure path showing "Nothing extra found" until a hard reload.
+ *
+ * No toast here, for the same reason as useUploadSessionDocument.
+ */
+export function useExtractAnswers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => departmentApi.extractAnswers(sessionId),
+    onSettled: (_data, _err, sessionId) => invalidateAfterDocumentWork(qc, sessionId),
+  })
+}
+
+/**
+ * Everything that goes stale once documents are uploaded or answers extracted.
+ *
+ * The additional-insights key is the one that used to be missed: it is
+ * configured with staleTime: Infinity (see useAdditionalInsights), so without
+ * an explicit invalidation it survives until the tab is reloaded — which is
+ * exactly why insights only appeared after a hard refresh. invalidateQueries
+ * overrides staleTime: active queries refetch now, inactive ones on next mount.
+ */
+function invalidateAfterDocumentWork(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string
+) {
+  qc.invalidateQueries({ queryKey: ["session", sessionId] })
+  qc.invalidateQueries({ queryKey: ["session", sessionId, "additional-insights"] })
+  // Extraction writes answers, which moves progress_percentage/status — both
+  // surfaced on the department dashboard and in the PM's cycle views.
+  qc.invalidateQueries({ queryKey: ["dept", "dashboard"] })
+  qc.invalidateQueries({ queryKey: ["pm"] })
+}
+
 // ── Outline (before draft) ──────────────────────────────────────────────────
 
 /**
@@ -126,8 +189,14 @@ export function usePatchOutlineTitles() {
  * Key: ["session", id, "additional-insights"]. Also used from the main
  * workspace page (to badge the "Additional Insights" button), so this is
  * LLM-backed and expensive — staleTime: Infinity + no background refetches
- * means it's computed once per browser session (tab) and reused across
- * remounts/navigation, only re-running on an actual page reload.
+ * keep it from re-running on every remount or navigation.
+ *
+ * It is refreshed by explicit invalidation instead: uploading a document or
+ * running answer-extraction busts this key (see invalidateAfterDocumentWork).
+ * That invalidation is load-bearing — without it this result survives until the
+ * tab is reloaded, which is why insights used to appear only after a hard
+ * refresh. Anything else that changes a session's documents or answers must
+ * invalidate this key too.
  */
 export function useAdditionalInsights(sessionId: string) {
   return useQuery({
@@ -157,6 +226,22 @@ export function useSetInsightInclusion(sessionId: string) {
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Couldn't update this card")
     },
+  })
+}
+
+/**
+ * The verbatim source chunks behind one insight card.
+ * Only runs once `insightId` is non-empty — the page passes "" until a card is
+ * expanded, the same enable-by-truthy-id idiom used elsewhere in this file.
+ * Cheap (plain DB read), so unlike useAdditionalInsights it can refetch freely.
+ */
+export function useInsightSources(sessionId: string, insightId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "insight-sources", insightId],
+    queryFn: () => departmentApi.getInsightSources(sessionId, insightId),
+    enabled: !!sessionId && !!insightId,
+    retry: false,
+    staleTime: Infinity,
   })
 }
 
