@@ -1,4 +1,13 @@
-export type UserRole = "admin" | "project_manager" | "hod" | "department_user"
+// `spark_internal` is Spark's own staff, arriving from Centriyon. They are not
+// a department, a PM or an HOD — they open any of those workspaces as
+// themselves, with their own full permissions. Which workspace they are in is
+// therefore a function of the URL, not of the role (see AppShell).
+export type UserRole =
+  | "admin"
+  | "project_manager"
+  | "hod"
+  | "department_user"
+  | "spark_internal"
 export type UserStatus = "active" | "inactive" | "pending" | "suspended"
 export type CycleStatus = "draft" | "active" | "completed" | "archived" | "closed"
 export type SessionStatus =

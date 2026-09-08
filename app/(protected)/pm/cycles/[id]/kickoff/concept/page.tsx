@@ -12,6 +12,7 @@ import { KickoffStepper } from "@/components/pm/kickoff-stepper"
 import { KickoffBuildLoader } from "@/components/pm/kickoff-build-loader"
 import { ApproveDeadlineDialog } from "@/components/pm/approve-deadline-dialog"
 import { ConceptMessageCard } from "@/components/report/ConceptMessageCard"
+import { primaryIndexOf } from "@/lib/conceptMessages"
 import { cn, formatDate } from "@/lib/utils"
 import { toast } from "sonner"
 import {
@@ -47,17 +48,6 @@ import {
 
    Primary is positional, not a stored flag — see makePrimary below.
 ──────────────────────────────────────────────────────────────────────────── */
-
-/**
- * Which message is primary. Prefers the explicit `role` tag and falls back to
- * position, so this works both before and after the backend starts returning
- * the field — no second frontend change needed when it lands.
- */
-const primaryIndexOf = (list: ConceptMessage[]) => {
-  const tagged = list.findIndex((m) => m.role === "primary")
-  if (tagged >= 0) return tagged
-  return list.length > 0 ? 0 : -1
-}
 
 /** Tag the chosen message primary and every other one secondary, in place. */
 const tagRoles = (list: ConceptMessage[], idx: number): ConceptMessage[] =>
