@@ -362,6 +362,23 @@ export function usePreviousBrief(cycleId: string, enabled = true) {
   })
 }
 
+// The cycle's concept messages, for the read-only Strategic Brief page. They
+// are NOT on the /pm/dashboard payload the rest of that page runs on, so this
+// is its one extra call.
+//
+// An empty list is not an error: generation failures come back as 200 with an
+// empty array, so the page distinguishes "none written" from a thrown request
+// and must not treat the two the same.
+export function useConceptMessages(cycleId: string) {
+  return useQuery({
+    queryKey: ["pm", "concept-messages", cycleId],
+    queryFn: () => pmApi.getConceptMessages(cycleId),
+    enabled: !!cycleId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useSubmitKickoff() {
   const qc = useQueryClient()
   return useMutation<KickoffBriefResponse, { message?: string; response?: { data?: { detail?: string } } }, KickoffBriefPayload>({
