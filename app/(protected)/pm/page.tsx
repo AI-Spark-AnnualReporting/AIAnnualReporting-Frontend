@@ -31,7 +31,7 @@ export default function PMDashboard() {
 
   const cycles = data?.active_cycles || []
   const sortedCycles = sort.sort(cycles)
-  const recentSubmissions = data?.recent_submissions || []
+  const recentSubmissionsCount = data?.recent_submissions_count ?? 0
   const pendingReviews = data?.pending_reviews ?? 0
 
   return (
@@ -62,7 +62,7 @@ export default function PMDashboard() {
         />
         <PMStatCard
           title="Recent Submissions"
-          value={recentSubmissions.length}
+          value={recentSubmissionsCount}
           description="Latest department submissions"
           icon={FileText}
           accent="green"

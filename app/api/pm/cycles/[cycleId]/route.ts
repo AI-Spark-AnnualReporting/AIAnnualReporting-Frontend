@@ -12,7 +12,9 @@
  *
  * After the list route (/api/pm/cycles) has run, both the admin cycles list and
  * every dept user's dashboard are cached on globalThis.  This route therefore
- * completes in ~200 ms on warm cache instead of ~8 s on cold.
+ * completes in ~200 ms on warm cache instead of ~8 s on cold. Cache windows are
+ * now measured in minutes (see _sessionAggregator.ts), so the cold path is hit
+ * far less often than before.
  */
 
 import { NextRequest, NextResponse } from "next/server"
