@@ -473,13 +473,8 @@ export interface PMDashboard {
     updated_at?: string
   }[]
   pending_reviews: number
-  recent_submissions: {
-    session_id: string
-    department_name: string
-    cycle_name?: string
-    submitted_at: string
-    status?: SessionStatus
-  }[]
+  /** Historic behaviour: the source list was capped at 10 before being counted — preserved as-is. */
+  recent_submissions_count: number
 }
 
 export interface AdminStats {

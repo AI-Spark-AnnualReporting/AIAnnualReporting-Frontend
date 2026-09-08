@@ -320,6 +320,16 @@ export interface PMCycleListItem {
   submission_deadline?: string
   // Last-modified timestamp from CycleResponse/TimestampMixin — drives the "Last Modified" sort.
   updated_at?: string
+  // Fields GET /pm/cycles already returns per cycle — optional + null-guarded
+  // everywhere they're read so a partial backend rollout degrades to 0/undercounts
+  // instead of crashing. See usePMDashboard, which derives the dashboard from
+  // these instead of fetching every cycle's session list separately.
+  total_departments?: number
+  submitted_count?: number
+  /** Average department progress_percentage across the cycle. */
+  progress?: number
+  /** Counts of the cycle's department sessions, keyed by SessionStatus. Missing keys = 0. */
+  status_counts?: Partial<Record<SessionStatus, number>>
 }
 
 export interface PMCycleSession {
@@ -580,14 +590,6 @@ export const pmApi = {
     return { success: data?.success ?? true, cycles, total: data?.total ?? cycles.length }
   },
 
-  // GET /pm/cycles/{id}/sessions — every department session in a cycle
-  getCycleSessions: async (
-    cycleId: string
-  ): Promise<{ success: boolean; sessions: PMCycleSession[]; total: number }> => {
-    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sessions`)
-    return data
-  },
-
   /**
    * Fetch a session's full Q&A detail as PM. GET /pm/sessions/{id} is the
    * PM-access endpoint — it works for sessions owned by department users
@@ -662,7 +664,7 @@ export const pmApi = {
     return data
   },
 
-  // Resolved report sections for a cycle (PM-access). Named to parallel getCycleSessions.
+  // Resolved report sections for a cycle (PM-access).
   getCycleSections: async (cycleId: string): Promise<CycleReportSection[]> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sections`)
     return data.sections
