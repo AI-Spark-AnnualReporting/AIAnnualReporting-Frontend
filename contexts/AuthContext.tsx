@@ -17,6 +17,7 @@ import {
   isSafeRedirectPath,
 } from "@/lib/postLoginRedirect"
 import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
+import { clearBackUrl, setBackUrl } from "@/lib/backUrl"
 
 interface AuthContextValue {
   user: User | null
@@ -24,7 +25,11 @@ interface AuthContextValue {
   isAuthenticated: boolean
   loginWithToken: (
     token: string,
-    opts?: { next?: string | null; company?: string | null }
+    opts?: {
+      next?: string | null
+      company?: string | null
+      back?: string | null
+    }
   ) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
@@ -73,7 +78,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithToken = useCallback(
     async (
       token: string,
-      opts?: { next?: string | null; company?: string | null }
+      opts?: {
+        next?: string | null
+        company?: string | null
+        back?: string | null
+      }
     ) => {
       localStorage.setItem("access_token", token)
       localStorage.removeItem("refresh_token")
@@ -85,6 +94,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         clearActingCompany()
       }
+      // Stash before the router.replace below destroys the query string. Only a
+      // Centriyon-origin URL is kept — see lib/backUrl.
+      setBackUrl(opts?.back)
       const userData = await authApi.me()
       setUser(userData)
       // An explicit destination wins: it is the whole point of the handoff.
@@ -114,6 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Otherwise the next person on this browser inherits a Spark session's
       // company and silently sends it on every request.
       clearActingCompany()
+      clearBackUrl()
       setUser(null)
       window.location.href = centriyonLoginUrl()
     }

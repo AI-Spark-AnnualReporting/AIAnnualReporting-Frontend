@@ -25,6 +25,7 @@ function TokenHandler() {
     loginWithToken(token, {
       next: searchParams.get("next"),
       company: searchParams.get("company"),
+      back: searchParams.get("back"),
     }).catch(() => router.replace("/login"))
   }, [searchParams, router, loginWithToken])
 
