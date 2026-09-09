@@ -32,6 +32,7 @@ import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
 import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
+import { ConceptMessagesSummary } from "@/components/report/ConceptMessagesSummary"
 import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
 import {
   useBuildPlan,
@@ -464,6 +465,13 @@ function ThemesStep({
       {/* Areas of Focus — from the brief, view-only (the role choice is made there). */}
       <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
         <AreasOfFocusSummary areas={areasOfFocus} locked={locked} isRtl={isRtl} />
+      </div>
+
+      {/* Concept Messages — the narrative written from those areas, view-only
+          (they're edited on the kickoff wizard's Concept Messages step). Sits
+          here because it's what the section writer is actually handed. */}
+      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <ConceptMessagesSummary cycleId={cycleId} locked={locked} isRtl={isRtl} />
       </div>
 
       {/* Suggested Themes — cycle.suggested_themes: editable + AI-refine + selectable. */}
