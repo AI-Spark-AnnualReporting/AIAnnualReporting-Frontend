@@ -16,7 +16,9 @@ import { centriyonLoginUrl } from "@/lib/centriyon"
 const CENTRION_BASE_URL =
   process.env.NEXT_PUBLIC_CENTRION_API_URL || "http://localhost:8000/api/v1"
 
-const commClient: AxiosInstance = axios.create({
+// Exported so other Centriyon-backed modules (lib/api/annual-design) reuse this
+// one instance rather than standing up a second client with the same auth.
+export const commClient: AxiosInstance = axios.create({
   baseURL: CENTRION_BASE_URL,
   headers: { "Content-Type": "application/json" },
   timeout: 30000,

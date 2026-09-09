@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
   Sparkles,
+  Palette,
 } from "lucide-react"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { PageLoader } from "@/components/ui/spinner"
+import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import {
   useAssembleReport,
@@ -63,6 +65,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const render = useRenderReport(cycleId)
 
   const [reassembleOpen, setReassembleOpen] = useState(false)
+  const [designOpen, setDesignOpen] = useState(false)
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -121,6 +124,15 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               )}
               Re-assemble
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDesignOpen(true)}
+              className="h-8"
+            >
+              <Palette className="h-3.5 w-3.5 mr-1.5" />
+              Design
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" disabled={render.isPending} className="h-8">
@@ -168,7 +180,10 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto print:overflow-visible">
+      {/* The canvas the document sits on. Grey so the white page reads as a
+          sheet of paper rather than as the page background — print resets it,
+          since paper is already paper. */}
+      <div className="flex-1 overflow-y-auto bg-[#F4F5FA] print:overflow-visible print:bg-white">
         {reportMissing ? (
           <EmptyReport cycleId={cycleId} />
         ) : (
@@ -187,6 +202,19 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         onConfirm={async () => {
           await assemble.mutateAsync({ refresh: true })
           setReassembleOpen(false)
+        }}
+      />
+
+      <DesignDialog
+        cycleId={cycleId}
+        open={designOpen}
+        onOpenChange={setDesignOpen}
+        cover={{
+          title: pmData?.cycle?.cycle_name,
+          headline: report?.headline ?? undefined,
+          periodLabel: pmData?.cycle?.fiscal_year
+            ? `FY ${pmData.cycle.fiscal_year}`
+            : undefined,
         }}
       />
     </div>

@@ -47,7 +47,20 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
   const execNumber = report.outline?.[0]?.number ?? null
 
   return (
-    <article className="mx-auto max-w-3xl px-6 py-10 space-y-12 print:max-w-none print:px-0 print:py-0 print:space-y-0">
+    // A sheet of paper on the canvas behind it, rather than bare text on the
+    // page background: this is a finished document, and it should look like one
+    // before it is downloaded. The proportions and the soft shadow match the
+    // report previews elsewhere in the platform, so the same document looks the
+    // same wherever it is shown.
+    //
+    // One continuous sheet, not paginated — where a page actually breaks is
+    // decided by the renderer at export time, and drawing invented breaks here
+    // would promise a layout the file will not have.
+    <article className="mx-auto my-8 max-w-3xl space-y-12 rounded-lg border
+                        border-[#E5E7EF] bg-white px-12 py-14
+                        shadow-[0_10px_30px_rgba(20,22,40,.08)]
+                        print:my-0 print:max-w-none print:rounded-none print:border-0
+                        print:px-0 print:py-0 print:shadow-none print:space-y-0">
       <CoverBlock report={report} cycle={cycle} />
       <ExecutiveSummary
         content={report.executive_summary}
