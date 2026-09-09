@@ -97,3 +97,26 @@ export const annualDesignApi = {
     return data?.color_palettes ?? []
   },
 }
+
+/**
+ * Download the report, typeset by the shared export engine.
+ *
+ * Points at Centriyon rather than this app's own /render: that is where the
+ * engine lives, and it is the only way the design chosen in the modal reaches
+ * the file. Returns the blob and the filename the server chose.
+ */
+export async function downloadAnnualReport(
+  cycleId: string, format: "pdf" | "docx",
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await commClient.post(
+    `/annual/cycles/${encodeURIComponent(cycleId)}/export`,
+    { format },
+    { responseType: "blob", timeout: 120000 },
+  )
+  const disposition = String(res.headers?.["content-disposition"] ?? "")
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)
+  return {
+    blob: res.data as Blob,
+    filename: match ? decodeURIComponent(match[1]) : `Annual_Report.${format}`,
+  }
+}

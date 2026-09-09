@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+
+import { downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import type {
@@ -319,8 +321,12 @@ export function useAssembleReport(cycleId: string) {
 // meaningful.
 export function useRenderReport(cycleId: string) {
   return useMutation({
+    // Typeset by the shared export engine on the Centriyon side, not by this
+    // app's own renderer — that is where the engine lives, and it is the only
+    // way the cover, colours and type chosen in the design controls reach the
+    // file. The document that comes back is the one the preview showed.
     mutationFn: ({ format }: { format: "docx" | "pdf" }) =>
-      pmApi.renderReport(cycleId, format),
+      downloadAnnualReport(cycleId, format),
     onSuccess: ({ blob, filename }) => {
       const url = URL.createObjectURL(blob)
       const a = window.document.createElement("a")
