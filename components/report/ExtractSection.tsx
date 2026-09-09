@@ -37,8 +37,9 @@ import type { ContentLanguage, CycleReportSection } from "@/types"
 // Document-driven extraction: uploading the source runs AI extraction on the
 // backend and returns the text in `section.content`. The PM reviews/edits it,
 // then locks. Locking needs a document attached; the content itself is optional.
+// PDF is excluded on purpose — extract sections feed the text layer to the AI
+// agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS.
 const ACCEPT = {
-  "application/pdf": [".pdf"],
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
     ".docx",
   ],
@@ -87,7 +88,7 @@ export function ExtractSection({
 
   const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
-      toast.error("Unsupported file type. Use PDF or DOCX.")
+      toast.error("Unsupported file type. Use DOCX.")
       return
     }
     const file = accepted[0]
@@ -397,7 +398,7 @@ function EmptyDropzone({
               ? "Drop the file to upload"
               : "Drag a file here, or click to browse"}
         </p>
-        <p className="text-xs text-muted-foreground">PDF or DOCX</p>
+        <p className="text-xs text-muted-foreground">DOCX</p>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
         Upload the source document. We&apos;ll automatically extract the relevant
