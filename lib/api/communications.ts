@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
+import { agentRunPath } from "@/lib/reportReadiness"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -667,6 +668,23 @@ interface AssembledReportResponse {
   } | null
 }
 
+/** What a "get this report ready for the AI assistant again" call returns. The
+ *  work runs in the background, so this is only a handle on it. */
+export interface ReindexResponse {
+  report_id: string
+  run_id: string | null
+  /** An agent_runs URL, already prefixed with /api/v1 — see getAgentRun. */
+  poll_url: string | null
+  /** "Q3 2025 earnings report" — names the report in the success toast. */
+  report_label?: string | null
+}
+
+export interface AgentRunStatus {
+  id: string
+  status: string
+  error_message?: string | null
+}
+
 export const communicationsApi = {
   // Company profile for the signed-in user (company derived from the JWT).
   // Used to fill the External-email preview (name, city, currency, sender).
@@ -1020,4 +1038,40 @@ export const communicationsApi = {
     const { data } = await commClient.get(`/communications/history/drafts`)
     return data
   },
+  // ── Report readiness for the AI assistant ────────────────────────────────
+  //
+  // When a quarterly or earnings report is approved, Centriton indexes it so the
+  // AI assistant can answer questions about it. If that fails, the approver gets
+  // a notification row in the SHARED notifications table — which this app's bell
+  // reads too. These three let that bell fix the problem in place instead of
+  // sending the user to an app they may not use.
+  //
+  // Nothing new is needed to call them: commClient already points at Centriton's
+  // backend with the same JWT, and already calls both of these route families.
+
+  reindexEarningsReport: async (reportId: string): Promise<ReindexResponse> => {
+    const { data } = await commClient.post(
+      `/earnings/reports/${encodeURIComponent(reportId)}/reindex`, {},
+    )
+    return data
+  },
+
+  reindexQuarterlyReport: async (
+    companyId: string, reportId: string,
+  ): Promise<ReindexResponse> => {
+    const { data } = await commClient.post(
+      `/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/reindex`,
+      {},
+    )
+    return data
+  },
+
+  // poll_url comes back as "/api/v1/agent_runs/{id}", and commClient's baseURL
+  // ALREADY ends in /api/v1 — passing it raw would request /api/v1/api/v1/...
+  // Centriton's own client strips the same prefix for the same reason.
+  getAgentRun: async (pollUrl: string): Promise<AgentRunStatus> => {
+    const { data } = await commClient.get(agentRunPath(pollUrl))
+    return data
+  },
+
 }

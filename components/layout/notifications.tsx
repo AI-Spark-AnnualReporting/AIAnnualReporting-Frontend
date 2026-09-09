@@ -8,8 +8,15 @@ import {
   useMarkNotificationRead,
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { useAuth } from "@/contexts/AuthContext"
 import { communicationsApi, type ThreadSummary } from "@/lib/api/communications"
+import { centriyonUrl } from "@/lib/centriyon"
+import {
+  isReadinessNotification,
+  reportKind,
+} from "@/lib/reportReadiness"
 import { Notification } from "@/types"
 import { formatDistanceToNow } from "date-fns"
 
@@ -25,6 +32,10 @@ import { formatDistanceToNow } from "date-fns"
      • escalation / regular — the live backend feed (passed in as props)
      • thread_message      — the Communication Hub feed (fetched here), whose
                              rows deep-link to the thread on the role's hub.
+     • report_not_ready    — a report Centriton could not prepare for the AI
+                             assistant. Written by Centriton into the SHARED
+                             notifications table; carries an in-row "Try again"
+                             that calls Centriton's backend directly.
 ═══════════════════════════════════════════════════════════════════════ */
 
 // ── Message parsing (still used by the escalation banner) ──────────────────
@@ -62,7 +73,7 @@ function relativeTime(iso: string): string {
 }
 
 // ── Notification model ─────────────────────────────────────────────────────
-type NotificationKind = "escalation" | "thread_message" | "regular"
+type NotificationKind = "escalation" | "thread_message" | "regular" | "report_not_ready"
 
 interface KindMeta {
   accent: string // icon tint + unread dot
@@ -95,6 +106,18 @@ const KIND_META: Record<NotificationKind, KindMeta> = {
       </svg>
     ),
   },
+  report_not_ready: {
+    // #B45309 is the warning ink used across both apps.
+    accent: "#B45309",
+    bg: "#FFF7ED",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 2.6 14.4 13H1.6L8 2.6z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M8 6.6v2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11.2" r=".75" fill="currentColor" />
+      </svg>
+    ),
+  },
   regular: {
     accent: "#4040C8",
     bg: "#EEEEFF",
@@ -121,7 +144,16 @@ interface UnifiedNotif {
   timestamp: string
   unread: boolean
   onClick: () => void
+  /** In-row button. Its click never opens the notification. */
+  action?: { label: string; busyLabel: string; run: () => Promise<void> }
 }
+
+// Retry polling. Past the cap we stop watching rather than spin forever on a run
+// whose process died — a server restart drops an in-flight background task with
+// no record. Giving up is NOT a failure, so it must not claim one.
+const POLL_MS = 3000
+const POLL_CAP_MS = 120000
+
 
 // Role → base Communication Hub path. Null for roles without a hub.
 function commsBasePath(role?: string): string | null {
@@ -149,6 +181,8 @@ const SCOPED_CSS = `
 .notif-row { transition: background .13s; }
 .notif-row:hover { background: #F7F7FD; }
 .notif-clear:hover { color: #4040C8 !important; }
+.notif-action:hover:not(:disabled) { background: #FFF1DF !important; }
+.notif-action:disabled { opacity: .6; cursor: default; }
 `
 
 const REFRESH_MS = 45000
@@ -173,9 +207,12 @@ export function NotificationBell({
 }) {
   const router = useRouter()
   const { user } = useAuth()
+  const qc = useQueryClient()
   const base = commsBasePath(user?.role)
 
   const [open, setOpen] = useState(false)
+  // Per-row, so two retries can be in flight without disabling each other.
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
   const wrapRef = useRef<HTMLDivElement>(null)
 
   // Communication Hub threads (thread_message notifications). `readThreads`
@@ -235,6 +272,41 @@ export function NotificationBell({
     }
   }, [open])
 
+  // Watch a queued retry to its end. Returns how it ended, or null if we stopped
+  // watching — which is not the same as failing, so the caller must not say so.
+  const watchRun = useCallback(async (pollUrl: string | null): Promise<string | null> => {
+    if (!pollUrl) return null
+    const started = Date.now()
+    while (Date.now() - started < POLL_CAP_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS))
+      try {
+        const run = await communicationsApi.getAgentRun(pollUrl)
+        if (run.status === "completed" || run.status === "failed") return run.status
+      } catch {
+        // A transient poll failure is not a retry failure — keep watching.
+      }
+    }
+    return null
+  }, [])
+
+  const runAction = async (n: UnifiedNotif) => {
+    if (!n.action || busy[n.id]) return
+    setBusy((prev) => ({ ...prev, [n.id]: true }))
+    try {
+      await n.action.run()
+    } catch (err) {
+      // Retrying is safe to repeat by design, so the row is left exactly as it
+      // is and the button can be pressed again.
+      toast.error((err as { message?: string })?.message || "Couldn't try again just now.")
+    } finally {
+      setBusy((prev) => {
+        const next = { ...prev }
+        delete next[n.id]
+        return next
+      })
+    }
+  }
+
   // Build the unified list from both sources. Communication notifications
   // (action_url → /communications/threads/…) are dropped here: the Comm Hub
   // thread feed below already surfaces them as richer, deep-linking cards, so
@@ -258,6 +330,55 @@ export function NotificationBell({
           setOpen(false)
           if (n.related_id) router.push(`/sessions/${n.related_id}`)
         },
+      }
+    }
+    // A report Centriton could not get ready for the AI assistant. The row is
+    // written by Centriton into this shared table and is actionable from here:
+    // the button calls Centriton's backend, so the user never has to leave.
+    if (isReadinessNotification(n)) {
+      const kind = reportKind(n.action_url)
+      const reportId = n.related_id ?? ""
+      return {
+        id: n.id,
+        kind: "report_not_ready" as const,
+        title: n.title || n.message,
+        body: n.title && n.message && n.title !== n.message ? n.message : undefined,
+        meta: "Needs attention",
+        timestamp: n.created_at,
+        unread: !n.is_read,
+        onClick: () => {
+          if (!n.is_read) markRead.mutate(n.id)
+          setOpen(false)
+          // NOT router.push: action_url is a Centriton route and a 404 here.
+          // centriyonUrl carries the session across so they land signed in.
+          const token = typeof window !== "undefined"
+            ? localStorage.getItem("access_token")
+            : null
+          const href = token && n.action_url ? centriyonUrl(token, n.action_url) : null
+          if (href) window.location.href = href
+        },
+        // No report to act on (an unparseable link) → no button. The row still
+        // reads fine, it just cannot fix itself.
+        action: kind && reportId ? {
+          label: "Try again",
+          busyLabel: "Getting it ready…",
+          run: async () => {
+            const res = kind === "earnings"
+              ? await communicationsApi.reindexEarningsReport(reportId)
+              : await communicationsApi.reindexQuarterlyReport(user?.company_id ?? "", reportId)
+            const outcome = await watchRun(res.poll_url)
+            // On success Centriton marks the row read, so refetching makes it
+            // disappear. Prefix matching means this one key covers the list and
+            // the unread count.
+            qc.invalidateQueries({ queryKey: ["notifications"] })
+            if (outcome === "completed") {
+              toast.success("✓ The assistant can read this report now", {
+                description: `${res.report_label || "Your report"} is ready — `
+                  + "you can ask the assistant about it.",
+              })
+            }
+          },
+        } : undefined,
       }
     }
     return {
@@ -497,13 +618,23 @@ export function NotificationBell({
             ) : (
               items.map((n) => {
                 const meta = KIND_META[n.kind]
+                const isBusy = !!busy[n.id]
                 return (
-                  <button
+                  // A div, not a button: a row may carry its own action button,
+                  // and a button inside a button is invalid HTML that browsers
+                  // silently restructure. Keyboard behaviour is kept by hand.
+                  <div
                     key={n.id}
-                    type="button"
                     role="menuitem"
+                    tabIndex={0}
                     className="notif-row"
                     onClick={n.onClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        n.onClick()
+                      }
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "flex-start",
@@ -511,7 +642,6 @@ export function NotificationBell({
                       width: "100%",
                       textAlign: "left",
                       padding: "13px 16px",
-                      border: "none",
                       borderBottom: "1px solid #F4F5FB",
                       background: n.unread ? "#FBFAFF" : "#fff",
                       cursor: "pointer",
@@ -567,9 +697,16 @@ export function NotificationBell({
                             fontSize: 12,
                             color: "#5A6080",
                             marginTop: 2,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
+                            // A warning is a sentence or two of plain English and
+                            // is useless truncated to one line, unlike a message
+                            // preview which is only ever a teaser.
+                            ...(n.kind === "report_not_ready"
+                              ? { lineHeight: 1.45 }
+                              : {
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap" as const,
+                                }),
                           }}
                         >
                           {n.body}
@@ -580,8 +717,35 @@ export function NotificationBell({
                         {n.meta && <span style={{ width: 3, height: 3, borderRadius: "50%", background: "#CBD0E4" }} />}
                         <span style={{ fontSize: 11, color: "#9BA3C4" }}>{relativeTime(n.timestamp)}</span>
                       </div>
+                      {n.action && (
+                        <button
+                          type="button"
+                          className="notif-action"
+                          disabled={isBusy}
+                          // Stop the row's own click — pressing Try again should
+                          // fix the problem in place, not navigate away from it.
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void runAction(n)
+                          }}
+                          style={{
+                            marginTop: 9,
+                            padding: "6px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${meta.accent}33`,
+                            background: meta.bg,
+                            color: meta.accent,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {isBusy ? n.action.busyLabel : n.action.label}
+                        </button>
+                      )}
                     </div>
-                  </button>
+                  </div>
                 )
               })
             )}

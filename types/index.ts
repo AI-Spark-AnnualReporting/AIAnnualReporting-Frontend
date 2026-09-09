@@ -442,6 +442,10 @@ export interface Notification {
   title?: string
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
+  /** What `related_id` points at — "session", "cycle", "report". Returned by the
+   *  backend (NotificationResponse.related_type) and needed to tell a
+   *  report-readiness row apart from any other "alert". */
+  related_type?: string | null
   related_id?: string
   action_url?: string
   created_at: string
