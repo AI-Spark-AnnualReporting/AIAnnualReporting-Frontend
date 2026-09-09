@@ -254,7 +254,10 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
     )
   }
 
-  if (!serverDraft && !generateDraft.isPending) {
+  // Gate on "was a draft ever built", not on the text itself — clearing the
+  // editor saves an empty draft, and keying off `serverDraft` flipped the page
+  // to this empty state mid-edit, throwing the user out of the textarea.
+  if (!serverDraft && !session.draft_generated_at && !generateDraft.isPending) {
     return (
       <div className="mx-auto max-w-lg space-y-6 py-16 text-center">
         <EmptyState
