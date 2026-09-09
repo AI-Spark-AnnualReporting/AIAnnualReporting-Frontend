@@ -1021,3 +1021,27 @@ export const communicationsApi = {
     return data
   },
 }
+
+// ── Board report vector index ─────────────────────────────────────────────
+//
+// Not a Communication Hub endpoint, but it lives on the same Centrion backend
+// and needs the same client — the Centriyon-issued JWT, the same base URL, the
+// same 401 bounce. A second axios instance would only be a second copy of all
+// of that.
+//
+// Approving a board report kicks off the embedding that lets the AI assistant
+// read it. When that fails, Centriton writes the notification this bell renders
+// (notification_type 'alert', related_type 'report'), and this is the way back:
+// it re-runs the job.
+//
+// Returns 202 with a run id — the work is NOT done when this resolves. The
+// notification clears only once the index lands and Centriton marks it read,
+// which the 60s notification poll picks up on its own.
+export const boardIndexApi = {
+  retry: async (reportId: string): Promise<{ run_id: string | null; status: string }> => {
+    const { data } = await commClient.post(
+      `/board/reports/${encodeURIComponent(reportId)}/index/retry`,
+    )
+    return data
+  },
+}

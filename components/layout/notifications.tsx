@@ -9,7 +9,8 @@ import {
   useMarkAllNotificationsRead,
 } from "@/hooks/useNotifications"
 import { useAuth } from "@/contexts/AuthContext"
-import { communicationsApi, type ThreadSummary } from "@/lib/api/communications"
+import { boardIndexApi, communicationsApi, type ThreadSummary } from "@/lib/api/communications"
+import { toast } from "sonner"
 import { Notification } from "@/types"
 import { formatDistanceToNow } from "date-fns"
 
@@ -62,7 +63,7 @@ function relativeTime(iso: string): string {
 }
 
 // ── Notification model ─────────────────────────────────────────────────────
-type NotificationKind = "escalation" | "thread_message" | "regular"
+type NotificationKind = "escalation" | "thread_message" | "board_index" | "regular"
 
 interface KindMeta {
   accent: string // icon tint + unread dot
@@ -95,6 +96,19 @@ const KIND_META: Record<NotificationKind, KindMeta> = {
       </svg>
     ),
   },
+  // Something is wrong and the reader can fix it — deliberately not the neutral
+  // bell of a "regular" notice.
+  board_index: {
+    accent: "#D9480F",
+    bg: "#FFF0E6",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 2.6 14.4 13.4H1.6L8 2.6z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M8 6.6v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <circle cx="8" cy="11.6" r=".8" fill="currentColor" />
+      </svg>
+    ),
+  },
   regular: {
     accent: "#4040C8",
     bg: "#EEEEFF",
@@ -121,6 +135,8 @@ interface UnifiedNotif {
   timestamp: string
   unread: boolean
   onClick: () => void
+  /** Board report whose indexing failed — the id the Try again button retries. */
+  retryReportId?: string
 }
 
 // Role → base Communication Hub path. Null for roles without a hub.
@@ -177,6 +193,53 @@ export function NotificationBell({
 
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+
+  // Board reports whose index is being re-run. Optimistic on the LABEL only —
+  // the row stays until the backend stops sending the warning, so a retry that
+  // fails again never briefly looks like it worked.
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set())
+
+  const retryBoardIndex = useCallback((reportId: string) => {
+    setRetryingIds((prev) => new Set(prev).add(reportId))
+    boardIndexApi.retry(reportId).catch((err: { message?: string; status?: number }) => {
+      // In a promise callback, not an effect body — no cascading render.
+      setRetryingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(reportId)
+        return next
+      })
+      toast.error(
+        err?.status === 403
+          ? "You don't have permission to retry this."
+          : err?.message || "Couldn't start it again",
+      )
+    })
+    // No polling and no invalidate: the call returns 202, the work takes about a
+    // minute, and useNotificationsLive already refetches every 60s. Invalidating
+    // now would just refetch the same unread row.
+  }, [])
+
+  // Centriton marks the warning read the moment the index lands, so that
+  // transition is the only place success is knowable here. Fired only for a
+  // report the user pressed Try again on: when the approve-time index just
+  // works, which is nearly always, the user never knew there was a problem and
+  // congratulating them on a fix they did not ask for is noise.
+  const announcedIds = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (retryingIds.size === 0 || notifications.length === 0) return
+    for (const id of retryingIds) {
+      if (announcedIds.current.has(id)) continue
+      const row = notifications.find((n) => n.related_type === "report" && n.related_id === id)
+      if (row && !row.is_read) continue
+      // Announcing is talking to an external system, which is what an effect is
+      // for. Nothing is pruned from retryingIds: the button disappears with the
+      // unread row on its own, so there is no stale label to clean up — and a
+      // setState here would cascade a render every poll.
+      announcedIds.current.add(id)
+      toast.success("The assistant can read this report now")
+    }
+  }, [notifications, retryingIds])
 
   // Communication Hub threads (thread_message notifications). `readThreads`
   // tracks optimistic reads so the badge/list update instantly on click.
@@ -260,16 +323,31 @@ export function NotificationBell({
         },
       }
     }
+    // Centriton's warning that a board report was approved but never finished
+    // being indexed, so the AI assistant can't read it. Unlike every other row
+    // here, this one is fixable from the bell — see the Try again button.
+    // Only while UNREAD. This feed returns read rows too, and Centriton marks
+    // the warning read the moment the index lands — so a read one is history,
+    // and still offering Try again on it would invite a pointless re-run.
+    const boardIndexReportId =
+      n.notification_type === "alert" && n.related_type === "report" && !n.is_read
+        ? n.related_id
+        : undefined
+
     return {
       id: n.id,
-      kind: "regular" as const,
+      kind: (boardIndexReportId ? "board_index" : "regular") as NotificationKind,
       title: n.title || n.message,
       body: n.title && n.message && n.title !== n.message ? n.message : undefined,
-      meta: "Notification",
+      meta: boardIndexReportId ? "Needs attention" : "Notification",
       timestamp: n.created_at,
       unread: !n.is_read,
+      retryReportId: boardIndexReportId,
       onClick: () => {
-        if (!n.is_read) markRead.mutate(n.id)
+        // Everything else is news, and reading it is the point. This one is a
+        // job still outstanding: Centriton marks it read when the index lands,
+        // and doing it here would hide the problem while it is still real.
+        if (!n.is_read && !boardIndexReportId) markRead.mutate(n.id)
         setOpen(false)
         // Deep-link when the backend attached a destination — e.g. a "draft
         // submitted" notification points the HOD at /hod/sessions/{id}/review.
@@ -497,13 +575,23 @@ export function NotificationBell({
             ) : (
               items.map((n) => {
                 const meta = KIND_META[n.kind]
+                const retrying = n.retryReportId ? retryingIds.has(n.retryReportId) : false
                 return (
-                  <button
+                  // A div, not a button: a row can carry its own action button
+                  // (Try again), and a button may not be nested in a button.
+                  // tabIndex + onKeyDown keep it operable from the keyboard.
+                  <div
                     key={n.id}
-                    type="button"
                     role="menuitem"
+                    tabIndex={0}
                     className="notif-row"
                     onClick={n.onClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        n.onClick()
+                      }
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "flex-start",
@@ -579,9 +667,35 @@ export function NotificationBell({
                         {n.meta && <span style={{ fontSize: 11, fontWeight: 700, color: meta.accent }}>{n.meta}</span>}
                         {n.meta && <span style={{ width: 3, height: 3, borderRadius: "50%", background: "#CBD0E4" }} />}
                         <span style={{ fontSize: 11, color: "#9BA3C4" }}>{relativeTime(n.timestamp)}</span>
+                        {n.retryReportId && (
+                          <button
+                            type="button"
+                            disabled={retrying}
+                            // Acting on the row must not also open it.
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              retryBoardIndex(n.retryReportId!)
+                            }}
+                            style={{
+                              marginLeft: "auto",
+                              padding: "3px 10px",
+                              borderRadius: 7,
+                              border: `1px solid ${meta.accent}`,
+                              background: "#fff",
+                              color: meta.accent,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              fontFamily: "inherit",
+                              cursor: retrying ? "default" : "pointer",
+                              opacity: retrying ? 0.55 : 1,
+                            }}
+                          >
+                            {retrying ? "Getting it ready…" : "Try again"}
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 )
               })
             )}

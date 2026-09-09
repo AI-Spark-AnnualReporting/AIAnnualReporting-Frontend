@@ -442,6 +442,10 @@ export interface Notification {
   title?: string
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
+  // What the notification is about. The backend returns it (schemas/
+  // notification.py) but it was never declared here. Centriton's board-index
+  // warning is identified by ("report", <report id>).
+  related_type?: string
   related_id?: string
   action_url?: string
   created_at: string
