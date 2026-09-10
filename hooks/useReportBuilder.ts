@@ -396,7 +396,7 @@ export function useRenderReport(cycleId: string) {
       window.document.body.removeChild(a)
       // Revoke on the next tick so the browser has time to start the download.
       setTimeout(() => URL.revokeObjectURL(url), 0)
-      toast.success("Document downloaded")
+      toast.success("Document exported")
     },
     onError: (err: Error) =>
       toast.error(err?.message || "Couldn't generate the document"),

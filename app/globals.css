@@ -21,6 +21,24 @@
   --color-border: hsl(214.3 31.8% 91.4%);
   --color-input: hsl(214.3 31.8% 91.4%);
   --color-ring: hsl(221.2 83.2% 53.3%);
+
+  /* Centrion's own product purple — the sibling app's --primary/--ring/--accent
+   * (Centrion_Frontend/src/index.css). #4040C8.
+   *
+   * A separate token rather than a change to --color-primary: flipping that
+   * would repaint ~83 usages across 21 screens (sidebar nav, every default
+   * button, spinners, checkboxes, the auth pages) while leaving ~500 hardcoded
+   * indigo and blue utility classes untouched — a two-tone app, not a rebrand.
+   * Things opt in by asking for `brand`.
+   *
+   * Not #3C0866: that is the first report brand PRESET — the document's purple,
+   * already wired as the cover preview's fallback — and it reads near-black as
+   * a button. */
+  --color-brand: hsl(240 52% 52%);
+  --color-brand-foreground: hsl(210 40% 98%);
+  --color-brand-muted: hsl(240 52% 96%);
+  --color-brand-strong: hsl(240 55% 34%);
+
   --radius: 0.5rem;
 }
 

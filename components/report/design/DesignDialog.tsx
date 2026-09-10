@@ -165,7 +165,7 @@ export function DesignDialog({
         typography,
       })
       toast.success("Design saved", {
-        description: "Your next download will use it.",
+        description: "Your next export will use it.",
       })
       onSaved?.()
       onOpenChange(false)
@@ -181,12 +181,12 @@ export function DesignDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="space-y-2 border-b bg-indigo-50 px-6 py-5 text-left">
+        <DialogHeader className="space-y-2 border-b bg-brand-muted px-6 py-5 text-left">
           <span className="flex h-11 w-11 items-center justify-center rounded-xl
-                           bg-indigo-600 text-white shadow-sm">
+                           bg-brand text-brand-foreground shadow-sm">
             <Palette className="h-5 w-5" />
           </span>
-          <DialogTitle className="text-indigo-900">Report design</DialogTitle>
+          <DialogTitle className="text-brand-strong">Report design</DialogTitle>
           <DialogDescription>
             The cover, colours and type your report is published with.
           </DialogDescription>
@@ -220,12 +220,12 @@ export function DesignDialog({
                             className={cn(
                               "group relative rounded-lg border p-2 text-left transition-colors",
                               layoutKey === t.key
-                                ? "border-primary ring-1 ring-primary bg-primary/5"
+                                ? "border-brand ring-1 ring-brand bg-brand/5"
                                 : "border-border hover:bg-accent",
                             )}>
                       {layoutKey === t.key && (
                         <Check className="absolute right-3 top-3 z-10 h-3.5 w-3.5
-                                          rounded-full bg-background text-primary" />
+                                          rounded-full bg-background text-brand" />
                       )}
                       <PreviewFrame>
                         <CoverPreview
@@ -265,7 +265,7 @@ export function DesignDialog({
                             className={cn(
                               "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
                               brand.palette_key === p.key
-                                ? "border-primary bg-primary/5"
+                                ? "border-brand bg-brand/5"
                                 : "border-border hover:bg-accent",
                             )}>
                       <span className="flex h-4 w-4 overflow-hidden rounded-full">
@@ -280,7 +280,7 @@ export function DesignDialog({
                           className={cn(
                             "rounded-full border px-3 py-1.5 text-xs",
                             brand.palette_key === "custom"
-                              ? "border-primary bg-primary/5"
+                              ? "border-brand bg-brand/5"
                               : "border-border hover:bg-accent",
                           )}>
                     Custom
@@ -337,7 +337,7 @@ export function DesignDialog({
                             className={cn(
                               "rounded px-2.5 py-1 text-xs capitalize transition-colors",
                               view === v
-                                ? "bg-primary text-primary-foreground"
+                                ? "bg-brand text-brand-foreground"
                                 : "text-muted-foreground hover:bg-accent",
                             )}>
                       {v}
@@ -401,7 +401,7 @@ export function DesignDialog({
                 would have fallen back to their initialisers, so applying would
                 silently replace whatever design the report actually had with
                 the defaults. */}
-            <Button size="sm" onClick={apply}
+            <Button size="sm" variant="brand" onClick={apply}
                     disabled={saving || loading || locked || templates.length === 0}>
               {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}

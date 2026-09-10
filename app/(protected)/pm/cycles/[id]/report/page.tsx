@@ -5,7 +5,7 @@ import Link from "next/link"
 import {
   ArrowLeft,
   ChevronDown,
-  Download,
+  FileDown,
   FileCheck,
   FileText,
   Loader2,
@@ -177,7 +177,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
-                  variant={approval?.can_approve ? "outline" : "default"}
+                  variant={approval?.can_approve ? "outline" : "brand"}
                   disabled={render.isPending}
                   className="h-8"
                 >
@@ -192,8 +192,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     </>
                   ) : (
                     <>
-                      <Download className="h-3.5 w-3.5 mr-1.5" />
-                      Download
+                      <FileDown className="h-3.5 w-3.5 mr-1.5" />
+                      Export
                       <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-70" />
                     </>
                   )}
@@ -330,7 +330,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         open={approveOpen}
         onOpenChange={setApproveOpen}
         title="Approve and lock this report?"
-        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. The report stays available to download."
+        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. The report stays available to export."
         confirmLabel="Approve & Lock"
         variant="destructive"
         isLoading={approve.isPending}

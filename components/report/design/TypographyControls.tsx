@@ -87,7 +87,7 @@ export function TypographyControls({ value, onChange, recommended, layoutName }:
         </div>
         {customised && (
           <button type="button"
-                  className="text-xs font-medium text-primary hover:underline"
+                  className="text-xs font-medium text-brand hover:underline"
                   onClick={() => onChange(recommended)}>
             Reset to {layoutName}&rsquo;s type
           </button>
@@ -124,7 +124,7 @@ export function TypographyControls({ value, onChange, recommended, layoutName }:
                         className={cn(
                           "px-2 py-1 text-xs transition-colors",
                           value[key].weight === w
-                            ? "bg-primary text-primary-foreground"
+                            ? "bg-brand text-brand-foreground"
                             : "bg-background hover:bg-accent",
                         )}>
                   {w === 400 ? "Regular" : "Bold"}
