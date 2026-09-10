@@ -31,6 +31,12 @@ interface FeederPickerProps {
     onChange: (next: boolean) => void
     label?: string
   }
+  // Whether department feeders mean anything for this section. False on extract:
+  // it reads its uploaded document and nothing else — only the analyze path ever
+  // consumes department digests. Stated explicitly rather than inferred from the
+  // document toggle, which is absent on sections AI may never draft and so read
+  // as "departments apply" for exactly the sections where they don't.
+  departmentsApply?: boolean
 }
 
 // Popover (via DropdownMenu) for selecting which departments feed a section, plus
@@ -44,6 +50,7 @@ export function FeederPicker({
   selected,
   children,
   documentOption,
+  departmentsApply = true,
 }: FeederPickerProps) {
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState<Set<string>>(new Set(selected))
@@ -72,8 +79,8 @@ export function FeederPicker({
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
     // Commit department changes on close. (Mode is handled live by the document
-    // toggle, not here.) Skip while in extract mode — it has no departments.
-    if (!nextOpen && !docChecked) {
+    // toggle, not here.) Skip where departments don't apply — nothing reads them.
+    if (!nextOpen && departmentsApply) {
       const current = [...local].sort()
       const previous = [...selected].sort()
       const changed =
@@ -89,6 +96,8 @@ export function FeederPicker({
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[240px]">
+        {departmentsApply && (
+          <>
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
           Departments feeding this section
         </DropdownMenuLabel>
@@ -102,15 +111,16 @@ export function FeederPicker({
             <DropdownMenuCheckboxItem
               key={d.department_code}
               checked={local.has(d.department_code)}
-              // Extract mode is document-based — departments don't apply.
               // Analyze mode uses department feeders, so don't disable them.
-              disabled={docChecked}
+              disabled={!departmentsApply}
               onCheckedChange={(checked) => toggle(d.department_code, !!checked)}
               onSelect={(e) => e.preventDefault()} // keep the menu open on click
             >
               {d.department_name}
             </DropdownMenuCheckboxItem>
           ))
+        )}
+          </>
         )}
 
         {documentOption && (

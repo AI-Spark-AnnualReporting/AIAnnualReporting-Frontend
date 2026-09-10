@@ -373,17 +373,41 @@ function SourcesFeederArea({
     )
   }
 
+  // Nothing left to choose: extract has no departments, and a section AI may
+  // never draft has no source-mode toggle either. Show the chips alone rather
+  // than a trigger that opens an empty menu.
+  if (isExtract && !section.ai_allowed) {
+    return (
+      <div className="text-xs">
+        <span className="flex flex-wrap items-center gap-1">{docChip}</span>
+      </div>
+    )
+  }
+
   return (
     <FeederPicker
       cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
+      // Extract reads the uploaded document and nothing else, so its checkboxes
+      // are inert. The backend refuses feeders on extract now too.
+      departmentsApply={!isExtract}
       selected={feederCodes}
       // Analyze sections: departments only — no source-mode switcher.
       // Generate sections: show "Upload document later" to switch to extract.
       // Extract sections: "Upload document later" is checked (toggle back to generate).
+      // The toggle is binary: ticked means extract, unticked means generate. A
+      // section AI may never draft has no valid unticked state, so offering it
+      // let a PM set mode='generate' on one the backend will always refuse to
+      // generate — the plan card then read the mode and said "AI-written" while
+      // the builder read ai_allowed and showed an upload box. It was one-way
+      // too: once flipped the section rendered as manual and the toggle
+      // vanished, so it could not be flipped back.
+      //
+      // Department feeders and the analyze toggle stay available — analyze is
+      // the standing configuration for several ai_allowed=false sections.
       documentOption={
-        isAnalyze
+        isAnalyze || !section.ai_allowed
           ? undefined
           : {
               checked: isExtract,
