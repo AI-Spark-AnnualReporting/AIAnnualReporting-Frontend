@@ -45,6 +45,20 @@ const BOLD_BOTTOM = 56
 const BOLD_HEADER_H = 34
 const BOLD_FOOTER_H = 24
 
+// report_export._BOLD_NAV_WINDOW / _BOLD_NAV_CURRENT_SLOT: five cells, and the
+// section being read sits in the third (0-based slot 2) so there is context on
+// both sides of it.
+const BOLD_NAV_CURRENT_SLOT = 2
+// Stand-ins for the neighbouring sections. The real strip carries whichever
+// five sections surround the current one, numbered as the document numbers them.
+const NAV_WINDOW = [
+  "2. Chairman's Statement",
+  "3. CEO's Review",
+  "",                        // replaced by the current section
+  "5. Risk Management",
+  "6. Corporate Governance Report",
+]
+
 export interface PagePreviewProps {
   templateKey: string | null
   brand: BrandColors
@@ -117,6 +131,14 @@ export function PagePreview({
   const bold = variant === "bold"
   const minimal = variant === "minimal"
 
+  // report_export._bold_pill_colours: brand secondary when it is genuinely
+  // distinct from primary, else an inverted white cell with brand-coloured
+  // text. Never primary, which would make the pill invisible against the bar.
+  const secondary = brand.secondary
+  const distinct = !!secondary && secondary.toUpperCase() !== primary.toUpperCase()
+  const pillBg = distinct ? (secondary as string) : "#FFFFFF"
+  const pillText = distinct ? onColor(secondary as string) : primary
+
   const logo = logoUrl ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={logoUrl} alt=""
@@ -124,28 +146,57 @@ export function PagePreview({
   ) : null
 
   const header = bold ? (
-    // Full-bleed brand bar carrying the section nav strip, current item in a pill.
-    <div style={{ position: "absolute", inset: `0 0 auto 0`, height: BOLD_HEADER_H,
-                  background: primary, display: "flex", alignItems: "center",
-                  gap: 6, padding: "0 12px", overflow: "hidden" }}>
-      {logoUrl && (
-        <span style={{ background: "#fff", borderRadius: 2, padding: "3px 5px",
-                       display: "flex", alignItems: "center" }}>{logo}</span>
-      )}
-      {["Chairman", sectionTitle, "Governance", "Financials"].map((label, i) => (
-        <span key={label}
-              style={{
-                fontSize: 8, whiteSpace: "nowrap", borderRadius: 999,
-                padding: "3px 7px",
-                background: i === 1 ? (brand.secondary || "#fff") : "transparent",
-                color: i === 1
-                  ? onColor(brand.secondary || "#FFFFFF")
-                  : onBrand,
-                opacity: i === 1 ? 1 : 0.75,
-              }}>
-          {label}
-        </span>
-      ))}
+    // Transcribed from templates/reports/default/bold_nav.html and the
+    // _BOLD_* constants beside it, because the previous mock was inventing its
+    // own: four short unnumbered labels ("Chairman", "Governance") in rounded
+    // pills, against a real strip of FIVE equal cells carrying the numbered
+    // section titles the document actually prints, with a square full-height
+    // pill on the current one.
+    <div style={{
+      position: "absolute", inset: "0 0 auto 0", height: BOLD_HEADER_H,
+      background: primary, color: onBrand,
+      display: "flex", alignItems: "stretch", overflow: "hidden",
+    }}>
+      {/* 56pt, transparent — the logo sits on the brand colour and carries its
+          own transparency. There is no white plaque. */}
+      <div style={{ flex: "0 0 56px", display: "flex", alignItems: "center",
+                    justifyContent: "center", padding: 4, boxSizing: "border-box" }}>
+        {logoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt=""
+               style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+        )}
+      </div>
+      {NAV_WINDOW.map((entry, i) => {
+        const current = i === BOLD_NAV_CURRENT_SLOT
+        const title = i === BOLD_NAV_CURRENT_SLOT
+          ? `${sectionNumber}. ${sectionTitle}`
+          : entry
+        return (
+          <div key={entry}
+               style={{
+                 flex: "1 1 0", minWidth: 0, display: "flex", alignItems: "center",
+                 justifyContent: "center", padding: "3px 6px", boxSizing: "border-box",
+                 // 8px once a title runs long, matching _BOLD_SMALL_TITLE_CHARS.
+                 fontSize: title.length > 44 ? 8 : 9,
+                 lineHeight: 1.15, textAlign: "center",
+                 background: current ? pillBg : "transparent",
+                 color: current ? pillText : onBrand,
+                 fontWeight: current ? 700 : 400,
+                 // Dividers, suppressed either side of the pill so it reads as
+                 // one clean shape.
+                 borderInlineStart:
+                   current || i === 0 || i === BOLD_NAV_CURRENT_SLOT + 1
+                     ? "0"
+                     : "1px solid rgba(255,255,255,.25)",
+               }}>
+            <span style={{
+              display: "-webkit-box", WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical", overflow: "hidden",
+            }}>{title}</span>
+          </div>
+        )
+      })}
     </div>
   ) : minimal ? (
     // The logo alone, higher up and with no rule — matching a cover designed
