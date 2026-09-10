@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react"
 import { CoverRenderer } from "./CoverRenderer"
+import { Prose } from "./shared"
 
 /**
  * Earnings section content, ported from the Centrion frontend's earnings
@@ -111,24 +112,6 @@ export function EarningsSectionContent({
 
 function Blank() {
   return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>
-}
-
-// ─── prose ────────────────────────────────────────────────────────────────────
-function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-  const blocks = paragraphs.length ? paragraphs : [text]
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{ margin: i === 0 ? 0 : "14px 0 0", fontSize: 14, lineHeight: 1.75, color: "#2A2E47", whiteSpace: "pre-wrap", textAlign: "justify" }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  )
 }
 
 // ─── tables ───────────────────────────────────────────────────────────────────

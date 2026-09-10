@@ -3,7 +3,7 @@ import {
   Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
-  AssemblyReadiness, FinalReport, SectionMode,
+  AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
   ContentLanguage,
 } from "@/types"
 
@@ -839,6 +839,22 @@ export const pmApi = {
   lockPlan: async (cycleId: string): Promise<PlanResponse> => {
     const { data } = await apiClient.post(`/pm/cycles/${cycleId}/plan/lock`)
     return data.plan ?? data
+  },
+
+  // Sign-off state of the cycle's annual report. Reads the shared `reports` row,
+  // so a Communication Hub reviewer's approval lands here too. `report_id` is
+  // what <ReportHubPanel> needs, and is null until the report is assembled.
+  getApproval: async (cycleId: string): Promise<ReportApproval> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/approval`)
+    return data
+  },
+
+  // Approve and lock the assembled report. One-way: afterwards every section,
+  // plan, and assemble write returns 409. 409 here too if the report has not
+  // been assembled, or was already signed off (including from the Hub).
+  approveReport: async (cycleId: string): Promise<ReportApproval> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/approve`)
+    return data
   },
 
   setFeeders: async (

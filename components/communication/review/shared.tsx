@@ -4,6 +4,7 @@ import { CSSProperties, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { formatDistanceToNow } from "date-fns"
 import type { CommunicationMember } from "@/lib/api/communications"
+import { ProsePreview } from "@/components/ui/prose-preview"
 
 /**
  * Shared primitives for the report review & approval flow.
@@ -571,5 +572,28 @@ export function MemberPicker({
           document.body,
         )}
     </>
+  )
+}
+
+
+/**
+ * Section prose in the reviewer screen.
+ *
+ * Renders MARKDOWN, not plain text. The ported Centriyon version split on blank
+ * lines into <p> with pre-wrap, which is right for quarterly and earnings text
+ * but printed annual sections as literal "# Vision" and "* Safety" — a cycle's
+ * section content is markdown, and the report page has always rendered it as
+ * such via ProsePreview. This uses that same renderer so the reviewer sees what
+ * the creator sees: heading demotion, GFM tables, sanitised HTML.
+ *
+ * Lives here rather than in SectionContent and EarningsSectionContent, which
+ * each carried their own byte-identical copy.
+ */
+export function Prose({ text }: { text: string }) {
+  return (
+    <ProsePreview
+      content={text}
+      className="text-[14px] leading-[1.75] text-[#2A2E47]"
+    />
   )
 }
