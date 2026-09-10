@@ -124,7 +124,16 @@ export function DesignDialog({
           ?? tpls.find((t) => t.is_default)?.key
           ?? DEFAULT_LAYOUT_KEY
         setLayoutKey(key)
-        setBrand(current.brand ?? current.company_default?.brand ?? {})
+        // `??` only falls back on null/undefined, and the backend sends `{}`
+        // for a report that has not chosen colours — which is truthy, so the
+        // company default was never reached and the controls seeded empty. The
+        // preview then drew its own fallback purple while the exported file
+        // used the company's real colours, so the modal and the document
+        // disagreed and NEITHER was what the user had picked.
+        const hasOwnBrand = Object.keys(current.brand ?? {}).length > 0
+        setBrand(hasOwnBrand
+          ? current.brand
+          : (current.company_default?.brand ?? {}))
         setTypography(current.typography
           ?? current.company_default?.typography
           ?? LAYOUT_TYPOGRAPHY[key]

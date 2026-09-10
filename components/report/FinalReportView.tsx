@@ -44,9 +44,18 @@ interface FinalReportViewProps {
    * showing nothing.
    */
   assembled?: AssembledReport
+  /**
+   * True while the assembled document is still on its way. The cover is drawn
+   * from it, so painting the fallback in the meantime shows the reader a
+   * different front page for a second and then swaps it — which is exactly the
+   * "it went white, then ten seconds later it turned yellow" this page did.
+   */
+  assembledPending?: boolean
 }
 
-export function FinalReportView({ report, cycle, assembled }: FinalReportViewProps) {
+export function FinalReportView({
+  report, cycle, assembled, assembledPending = false,
+}: FinalReportViewProps) {
   // Skip the auto cover/TOC sections from the body list — we render bespoke
   // treatments for those.
   const bodySections = report.sections
@@ -118,7 +127,8 @@ export function FinalReportView({ report, cycle, assembled }: FinalReportViewPro
         }
       `}</style>
 
-      <CoverBlock report={report} cycle={cycle} assembled={assembled} />
+      <CoverBlock report={report} cycle={cycle} assembled={assembled}
+                  pending={assembledPending} />
       <ExecutiveSummary
         content={report.executive_summary}
         number={execNumber}
@@ -150,11 +160,26 @@ function CoverBlock({
   report,
   cycle,
   assembled,
+  pending,
 }: {
   report: FinalReport
   cycle: CycleMeta | undefined
   assembled?: AssembledReport
+  pending?: boolean
 }) {
+  // Hold the space rather than filling it with a cover we already know is not
+  // the right one. A blank sheet that becomes the real cover reads as loading;
+  // a generic cover that becomes a branded one reads as the design failing.
+  if (pending && !assembled?.cover) {
+    const scale = SHEET_W / PAGE_W
+    return (
+      <section aria-busy="true"
+               style={{ height: PAGE_H * scale, width: SHEET_W,
+                        marginInline: -SHEET_PAD, overflow: "hidden" }}
+               className="animate-pulse bg-muted/40" />
+    )
+  }
+
   // The real cover, drawn by the same component the design dialog previews and
   // from the same payload the file is printed from. Apply a navy Bold cover and
   // this page changes — it used to draw its own generic front page, so the PM

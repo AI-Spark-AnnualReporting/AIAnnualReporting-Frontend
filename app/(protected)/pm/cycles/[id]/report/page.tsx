@@ -65,7 +65,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const reportQuery = useFinalReport(cycleId)
   // The document as the engine will print it. Only once there is something to
   // assemble — asking before that is a guaranteed 422.
-  const { data: assembled } = useAssembledReport(cycleId, reportQuery.isSuccess)
+  const assembledQuery = useAssembledReport(cycleId, reportQuery.isSuccess)
+  const assembled = assembledQuery.data
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as DashboardData | undefined
   const assemble = useAssembleReport(cycleId)
@@ -195,7 +196,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           <EmptyReport cycleId={cycleId} />
         ) : (
           <FinalReportView report={report} cycle={pmData?.cycle}
-                           assembled={assembled} />
+                           assembled={assembled}
+                           assembledPending={assembledQuery.isPending} />
         )}
       </div>
 
