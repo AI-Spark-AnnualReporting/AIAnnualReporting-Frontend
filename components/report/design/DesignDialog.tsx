@@ -16,6 +16,8 @@ import {
   type CoverTemplate, type Typography,
 } from "@/types/report-design"
 import { CoverPreview } from "./CoverPreview"
+import { PagePreview } from "./PagePreview"
+import { PreviewFrame } from "./PreviewFrame"
 import { TypographyControls } from "./TypographyControls"
 
 /**
@@ -67,6 +69,10 @@ export interface DesignDialogProps {
 export function DesignDialog({
   cycleId, open, onOpenChange, cover, onSaved,
 }: DesignDialogProps) {
+  // Which page the preview shows. Starts on the cover because that is what the
+  // layout picker directly above it changes; the page view is where the type
+  // controls become legible.
+  const [view, setView] = useState<"cover" | "page">("cover")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -162,7 +168,7 @@ export function DesignDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0">
+      <DialogContent className="max-w-6xl gap-0 overflow-hidden p-0">
         <DialogHeader className="space-y-2 border-b bg-indigo-50 px-6 py-5 text-left">
           <span className="flex h-11 w-11 items-center justify-center rounded-xl
                            bg-indigo-600 text-white shadow-sm">
@@ -180,7 +186,7 @@ export function DesignDialog({
           </div>
         ) : (
           <div className="grid max-h-[70vh] gap-6 overflow-y-auto p-6
-                          lg:grid-cols-[minmax(0,1fr)_minmax(260px,38%)]">
+                          lg:grid-cols-[minmax(0,1fr)_minmax(340px,44%)]">
             <div className="space-y-6">
               {/* Layout */}
               <section className="space-y-3">
@@ -279,23 +285,66 @@ export function DesignDialog({
 
             {/* Live preview */}
             <div className="lg:sticky lg:top-0 lg:self-start">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide
-                            text-muted-foreground">Preview</p>
-              <CoverPreview
-                templateKey={layoutKey}
-                brand={brand}
-                typography={typography}
-                companyName={cover?.companyName}
-                title={cover?.title}
-                headline={cover?.headline}
-                periodLabel={cover?.periodLabel}
-                logoUrl={cover?.logoUrl}
-                coverImage={cover?.coverImage}
-              />
-              {cover?.coverImage && (
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide
+                              text-muted-foreground">Preview</p>
+                {/* Two views because the cover alone cannot show the type
+                    settings: it never prints a subheading, a paragraph, a list
+                    or a table, so four of the nine controls changed nothing
+                    visible and read as broken. */}
+                <div className="flex rounded-md border p-0.5" role="tablist"
+                     aria-label="Preview page">
+                  {(["cover", "page"] as const).map((v) => (
+                    <button key={v} type="button" role="tab"
+                            aria-selected={view === v}
+                            onClick={() => setView(v)}
+                            className={cn(
+                              "rounded px-2.5 py-1 text-xs capitalize transition-colors",
+                              view === v
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-accent",
+                            )}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <PreviewFrame>
+                {view === "cover" ? (
+                  <CoverPreview
+                    templateKey={layoutKey}
+                    brand={brand}
+                    typography={typography}
+                    companyName={cover?.companyName}
+                    title={cover?.title}
+                    headline={cover?.headline}
+                    periodLabel={cover?.periodLabel}
+                    logoUrl={cover?.logoUrl}
+                    coverImage={cover?.coverImage}
+                  />
+                ) : (
+                  <PagePreview
+                    templateKey={layoutKey}
+                    brand={brand}
+                    typography={typography}
+                    companyName={cover?.companyName}
+                    periodLabel={cover?.periodLabel}
+                    logoUrl={cover?.logoUrl}
+                  />
+                )}
+              </PreviewFrame>
+
+              {view === "cover" && cover?.coverImage && (
                 <p className="mt-2 text-xs text-muted-foreground">
                   An uploaded cover image is being used, so the layout above
                   applies to the rest of the report rather than the front page.
+                </p>
+              )}
+              {view === "page" && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Sample text, real settings — this is how your headings, body
+                  copy and tables will be set.
                 </p>
               )}
             </div>

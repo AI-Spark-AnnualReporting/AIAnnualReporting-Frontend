@@ -2,15 +2,28 @@
 
 import { useMemo } from "react"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { CoverPreview } from "@/components/report/design/CoverPreview"
+import { PAGE_H, PAGE_W } from "@/components/report/design/PreviewFrame"
 import { ReportSectionRenderer } from "@/components/report/ReportSectionRenderer"
 import { COMPANY_PROFILES, SECTORS } from "@/lib/constants"
 import { computeSectionNumbering, toArabicDigits } from "@/lib/report-format"
+import type { AssembledReport } from "@/lib/api/annual-design"
+import { DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY } from "@/types/report-design"
+import type { BrandColors, Typography } from "@/types/report-design"
 import type {
   CompanyProfile,
   ContentLanguage,
   FinalReport,
   Sector,
 } from "@/types"
+
+// A4 at 96dpi is 794 x 1123 CSS px. The sheet used to be max-w-3xl — 768px
+// wide with 48px padding, so a 672px text column standing in for a 794px page.
+// Every measurement a reader takes off it (line length, how much fits above the
+// fold, how a wide table sits) was therefore wrong by 15%.
+const SHEET_W = PAGE_W * (96 / 72)          // 793.3
+// The renderer's 50pt page margin, in the same units.
+const SHEET_PAD = 50 * (96 / 72)            // 66.7
 
 interface CycleMeta {
   cycle_name?: string
@@ -23,9 +36,17 @@ interface CycleMeta {
 interface FinalReportViewProps {
   report: FinalReport
   cycle: CycleMeta | undefined
+  /**
+   * The document as the export engine will print it. When present the cover,
+   * the brand colour and the type all come from it, so what is on screen is
+   * what will be in the file. Absent (the engine unreachable, or the report not
+   * yet assembled) the page falls back to its own plain treatment rather than
+   * showing nothing.
+   */
+  assembled?: AssembledReport
 }
 
-export function FinalReportView({ report, cycle }: FinalReportViewProps) {
+export function FinalReportView({ report, cycle, assembled }: FinalReportViewProps) {
   // Skip the auto cover/TOC sections from the body list — we render bespoke
   // treatments for those.
   const bodySections = report.sections
@@ -46,6 +67,22 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
   // `sections`, so pull its number from the head of the outline.
   const execNumber = report.outline?.[0]?.number ?? null
 
+  const brand = (assembled?.cover?.brand ?? assembled?.brand ?? {}) as BrandColors
+  const layoutKey = assembled?.cover?.template_key ?? DEFAULT_LAYOUT_KEY
+  const typography = (assembled?.typography as Typography | null)
+    ?? LAYOUT_TYPOGRAPHY[layoutKey]
+    ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY]
+
+  // Handed to the sheet as custom properties rather than applied per element:
+  // the body prose is rendered from markdown by ProsePreview, which has no
+  // per-report styling hook, and inheritance reaches every heading and
+  // paragraph inside it without either component knowing about the other.
+  const sheetVars = {
+    "--report-brand": brand.primary || "#3C0866",
+    "--report-font-heading": typography.heading.family,
+    "--report-font-body": typography.body.family,
+  } as React.CSSProperties
+
   return (
     // A sheet of paper on the canvas behind it, rather than bare text on the
     // page background: this is a finished document, and it should look like one
@@ -56,12 +93,32 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
     // One continuous sheet, not paginated — where a page actually breaks is
     // decided by the renderer at export time, and drawing invented breaks here
     // would promise a layout the file will not have.
-    <article className="mx-auto my-8 max-w-3xl space-y-12 rounded-lg border
-                        border-[#E5E7EF] bg-white px-12 py-14
-                        shadow-[0_10px_30px_rgba(20,22,40,.08)]
-                        print:my-0 print:max-w-none print:rounded-none print:border-0
-                        print:px-0 print:py-0 print:shadow-none print:space-y-0">
-      <CoverBlock report={report} cycle={cycle} />
+    <article
+      style={{ ...sheetVars, width: SHEET_W, paddingInline: SHEET_PAD }}
+      className="report-sheet mx-auto my-8 max-w-full space-y-12 overflow-hidden
+                 rounded-lg border border-[#E5E7EF] bg-white pb-14
+                 shadow-[0_10px_30px_rgba(20,22,40,.08)]
+                 print:my-0 print:w-auto print:rounded-none print:border-0
+                 print:px-0 print:py-0 print:shadow-none print:space-y-0">
+      {/* Section titles and their numbers carry the report's own brand colour,
+          and its heading font, so the design is visible in the body and not
+          only on the front page. Scoped to this sheet — the surrounding app
+          keeps its own type. */}
+      <style>{`
+        .report-sheet h1, .report-sheet h2, .report-sheet h3, .report-sheet h4 {
+          font-family: var(--report-font-heading), ui-sans-serif, system-ui, sans-serif;
+        }
+        .report-sheet h2 { color: var(--report-brand); }
+        .report-sheet .prose p, .report-sheet .prose li, .report-sheet .prose td {
+          font-family: var(--report-font-body), ui-sans-serif, system-ui, sans-serif;
+        }
+        .report-sheet .prose th {
+          color: var(--report-brand);
+          border-bottom: 3px solid var(--report-brand);
+        }
+      `}</style>
+
+      <CoverBlock report={report} cycle={cycle} assembled={assembled} />
       <ExecutiveSummary
         content={report.executive_summary}
         number={execNumber}
@@ -92,10 +149,51 @@ export function FinalReportView({ report, cycle }: FinalReportViewProps) {
 function CoverBlock({
   report,
   cycle,
+  assembled,
 }: {
   report: FinalReport
   cycle: CycleMeta | undefined
+  assembled?: AssembledReport
 }) {
+  // The real cover, drawn by the same component the design dialog previews and
+  // from the same payload the file is printed from. Apply a navy Bold cover and
+  // this page changes — it used to draw its own generic front page, so the PM
+  // who chose the design saw the plain one while an external reviewer looking at
+  // the same report saw the designed one.
+  const cover = assembled?.cover
+  if (cover) {
+    const values = cover.values ?? {}
+    const layoutKey = cover.template_key ?? DEFAULT_LAYOUT_KEY
+    const typography = (assembled?.typography as Typography | null)
+      ?? LAYOUT_TYPOGRAPHY[layoutKey]
+      ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY]
+    // Full sheet width, breaking out of the page margin the body copy sits in:
+    // a cover is printed to the paper edge, and an inset one reads as a picture
+    // of a cover rather than the cover. The sheet is A4-wide, so this is 1:1 —
+    // a type size on screen is the type size in the file.
+    const scale = SHEET_W / PAGE_W
+    return (
+      <section className="print:break-after-page"
+               style={{ height: PAGE_H * scale, width: SHEET_W,
+                        marginInline: -SHEET_PAD, overflow: "hidden" }}>
+        <div style={{ width: PAGE_W, height: PAGE_H,
+                      transform: `scale(${scale})`, transformOrigin: "top left" }}>
+          <CoverPreview
+            templateKey={layoutKey}
+            brand={(cover.brand ?? assembled?.brand ?? {}) as BrandColors}
+            typography={typography}
+            companyName={values.company_name}
+            title={values.title}
+            headline={values.headline}
+            periodLabel={values.period_label}
+            logoUrl={values.logo_url}
+            coverImage={values.cover_image}
+          />
+        </div>
+      </section>
+    )
+  }
+
   const profileLabel = cycle?.company_profile
     ? COMPANY_PROFILES[cycle.company_profile]
     : null

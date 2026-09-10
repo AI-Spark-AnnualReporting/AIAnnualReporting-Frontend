@@ -1,16 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
 import type { BrandColors, Typography } from "@/types/report-design"
 import { coverVariant } from "@/types/report-design"
+import { PAGE_H, PAGE_W } from "./PreviewFrame"
 
 /**
  * The cover as the PDF will print it.
  *
- * Drawn as a real A4 canvas at the renderer's own logical size (595×842 CSS px,
- * the same numbers its templates use) and scaled down to whatever space it has.
- * Working at the true size is what lets the type sizes mean the same thing here
- * as they do in the file — a "16px heading" is 16px on both.
+ * Drawn at the renderer's own logical size; PreviewFrame does the scaling. See
+ * PagePreview for the body page — between them they cover every type control,
+ * which the cover alone does not: it sets its own title size per layout and
+ * never shows a subheading, a paragraph, a list or a table.
  *
  * It is a picture of the renderer's output, not the renderer. The two are
  * independent implementations and can drift; what keeps them honest is that the
@@ -22,8 +22,6 @@ import { coverVariant } from "@/types/report-design"
  * it will happily show Merriweather while the PDF falls back to sans-serif.
  */
 
-const PAGE_W = 595
-const PAGE_H = 842
 const MARGIN = 50
 
 export interface CoverPreviewProps {
@@ -57,28 +55,14 @@ export function CoverPreview({
   templateKey, brand, typography, companyName, title, headline,
   periodLabel, logoUrl, coverImage,
 }: CoverPreviewProps) {
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
   const variant = coverVariant(templateKey)
   const primary = brand.primary || "#3C0866"
-  const scale = width ? width / PAGE_W : 0
   const subtitle = [periodLabel, "Prepared today"].filter(Boolean).join(" · ")
 
   const page: React.CSSProperties = {
     width: PAGE_W,
     height: PAGE_H,
     background: "#fff",
-    transform: `scale(${scale})`,
-    transformOrigin: "top left",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
@@ -164,13 +148,5 @@ export function CoverPreview({
     )
   }
 
-  return (
-    <div ref={wrapRef} className="w-full">
-      {/* Reserves the scaled height so the panel does not jump as it settles. */}
-      <div style={{ height: scale ? PAGE_H * scale : 0 }}
-           className="overflow-hidden rounded-lg border bg-white shadow-sm">
-        <div style={page}>{body}</div>
-      </div>
-    </div>
-  )
+  return <div style={page}>{body}</div>
 }

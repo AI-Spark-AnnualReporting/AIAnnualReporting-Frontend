@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { downloadAnnualReport } from "@/lib/api/annual-design"
+import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import type {
@@ -300,6 +300,28 @@ export function useFinalReport(cycleId: string) {
   })
 }
 
+/**
+ * The document as the export engine will print it — the same payload the
+ * download is built from.
+ *
+ * Read by the report page so the cover on screen is the cover in the file. It
+ * used to draw its own generic front page, so a PM could pick a navy Bold cover,
+ * close the dialog, and see nothing change — while an external reviewer looking
+ * at the same report saw the designed one.
+ *
+ * 422 means "not assembled yet", which the page already handles through the
+ * final-report query; no retry, so that state settles immediately.
+ */
+export function useAssembledReport(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId),
+    queryFn: () => annualDesignApi.assembled(cycleId),
+    enabled: !!cycleId && enabled,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
 export function useAssembleReport(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -308,6 +330,7 @@ export function useAssembleReport(cycleId: string) {
     onSuccess: (report) => {
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
       toast.success("Report assembled")
     },
     onError: (err: MutationError) =>

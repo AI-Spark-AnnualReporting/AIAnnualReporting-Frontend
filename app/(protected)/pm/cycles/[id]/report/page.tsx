@@ -13,6 +13,7 @@ import {
   Sparkles,
   Palette,
 } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -27,10 +28,12 @@ import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import {
   useAssembleReport,
+  useAssembledReport,
   useFinalReport,
   useRenderReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -58,7 +61,11 @@ interface DashboardData {
 }
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
+  const qc = useQueryClient()
   const reportQuery = useFinalReport(cycleId)
+  // The document as the engine will print it. Only once there is something to
+  // assemble — asking before that is a guaranteed 422.
+  const { data: assembled } = useAssembledReport(cycleId, reportQuery.isSuccess)
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as DashboardData | undefined
   const assemble = useAssembleReport(cycleId)
@@ -187,7 +194,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         {reportMissing ? (
           <EmptyReport cycleId={cycleId} />
         ) : (
-          <FinalReportView report={report} cycle={pmData?.cycle} />
+          <FinalReportView report={report} cycle={pmData?.cycle}
+                           assembled={assembled} />
         )}
       </div>
 
@@ -209,13 +217,25 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         cycleId={cycleId}
         open={designOpen}
         onOpenChange={setDesignOpen}
+        // From the assembled document, so the modal previews the real cover —
+        // the company's own mark, its title, and any uploaded cover image. It
+        // used to be given three fields, which is why the preview showed a
+        // logo-less page that looked nothing like the file.
         cover={{
-          title: pmData?.cycle?.cycle_name,
-          headline: report?.headline ?? undefined,
-          periodLabel: pmData?.cycle?.fiscal_year
-            ? `FY ${pmData.cycle.fiscal_year}`
-            : undefined,
+          companyName: assembled?.cover?.values?.company_name,
+          title: assembled?.cover?.values?.title ?? pmData?.cycle?.cycle_name,
+          headline: assembled?.cover?.values?.headline ?? report?.headline ?? undefined,
+          periodLabel:
+            assembled?.cover?.values?.period_label ??
+            (pmData?.cycle?.fiscal_year ? `FY ${pmData.cycle.fiscal_year}` : undefined),
+          logoUrl: assembled?.cover?.values?.logo_url ?? undefined,
+          coverImage: assembled?.cover?.values?.cover_image ?? undefined,
         }}
+        onSaved={() =>
+          qc.invalidateQueries({
+            queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId),
+          })
+        }
       />
     </div>
   )
