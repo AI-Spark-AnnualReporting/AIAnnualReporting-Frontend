@@ -455,7 +455,17 @@ export function ReviewerView({
   // gating the whole rail on that hid the feedback from the one person who
   // has to act on it. Keep the column whenever there is something to read.
   const showRail = !viewOnly || allComments.length > 0
-  const canComment = !viewOnly && (data?.can_comment ?? true)
+  // Once the report is approved (or otherwise finished) the review is over —
+  // reassign / request-changes no longer make sense even though the backend
+  // still reports can_act. Gate the reviewer actions on the review being open.
+  const FINISHED_STATUSES = ["approved", "locked", "published", "complete", "completed"]
+  const reviewClosed = !!report && FINISHED_STATUSES.includes(report.status)
+  // No new comments once the report is signed off. Every write path 409s from
+  // then on, so a comment asking for a change could never be acted on, and the
+  // rail says in the same breath that no review actions remain. Existing
+  // comments stay visible — they are the record of how it got approved — and
+  // the thread stays open for anything still worth saying.
+  const canComment = !viewOnly && !reviewClosed && (data?.can_comment ?? true)
   const removedAt = data?.removed_at ?? null
   const canApprove = data?.can_approve ?? false
   // The review payload's section list is earnings-only on the backend — it
@@ -478,11 +488,6 @@ export function ReviewerView({
   const sections: ReviewSection[] = isAnnualDoc
     ? allSections.filter((s) => !/cover/i.test(s.id) && !/toc/i.test(s.id))
     : allSections
-  // Once the report is approved (or otherwise finished) the review is over —
-  // reassign / request-changes no longer make sense even though the backend
-  // still reports can_act. Gate the reviewer actions on the review being open.
-  const FINISHED_STATUSES = ["approved", "locked", "published", "complete", "completed"]
-  const reviewClosed = !!report && FINISHED_STATUSES.includes(report.status)
 
   return (
     <div style={{ ...OVERLAY, alignItems: "stretch", justifyContent: "stretch", padding: 10 }} onClick={onClose}>
