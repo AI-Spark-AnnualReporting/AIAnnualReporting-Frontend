@@ -100,10 +100,9 @@ export function DesignDialog({
 
     Promise.all([
       annualDesignApi.get(cycleId),
-      annualDesignApi.templates(),
-      annualDesignApi.palettes(),
+      annualDesignApi.catalogue(),
     ])
-      .then(([current, tpls, pals]) => {
+      .then(([current, { cover_templates: tpls, color_palettes: pals }]) => {
         if (cancelled) return
         setDesign(current)
         setTemplates(tpls)

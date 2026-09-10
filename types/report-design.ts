@@ -1,10 +1,10 @@
 /**
  * How a report looks: the cover layout, the brand colours, the type.
  *
- * The same three settings every report kind in the platform stores, so the
- * shapes here mirror the Centriyon backend's exactly — they are sent to and read
- * from its /annual/cycles/{id}/cover-template endpoints, and anything that
- * drifts here is silently rejected there.
+ * The same three settings every report kind in the platform stores. The shapes
+ * mirror what the export engine accepts exactly — it rejects anything outside
+ * its own allowlists with a 422, and this app's backend validates against a copy
+ * of those lists so a bad value fails at save rather than at download.
  */
 
 export type TypographyFamily =
@@ -63,12 +63,20 @@ export interface CompanyDesignDefault {
 
 export interface AnnualDesign {
   cycle_id: string
-  report_id: string
   cover_template_key: string | null
   brand: BrandColors
   typography: Typography | null
   company_default: CompanyDesignDefault | null
-  /** True once the report is approved — the look is frozen with the document. */
+  /**
+   * True once the report's blueprint is locked — the structure is settled, so
+   * the look is settled with it.
+   *
+   * This used to read a shared row's `status`, which one app sets to 'approved'
+   * on every assemble to mean "mirrored" while the other reads it as "a human
+   * signed this off". The result was a report that could never be designed at
+   * all: refused before assembly because the row did not exist, refused after
+   * because it already said approved.
+   */
   locked: boolean
 }
 

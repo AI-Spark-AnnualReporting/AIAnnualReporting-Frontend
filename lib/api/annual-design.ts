@@ -1,16 +1,23 @@
 /**
  * The annual report's design settings, and the assembled document behind them.
  *
- * These endpoints live on the CENTRIYON backend, not this app's — that is where
- * the shared export engine and the cover-template catalogue are, and where every
- * other report kind already stores the same three settings. Reuses commClient
- * from lib/api/communications, which is already pointed there with the same JWT.
+ * All of it served by THIS app's backend. It used to be split: the settings and
+ * the download lived on the Centriyon backend and the rest of the page here,
+ * which cost more than the tidiness was worth.
  *
- * Keyed on cycle_id: the `reports` row behind an annual report is a mirror keyed
- * (company_id, 'annual', 'FY-{year}'), which this app has no way to name.
+ *  - the design was stored on a shared `reports` row keyed
+ *    (company, fiscal year) that live data has standing behind as many as 25
+ *    cycles, so designing one report restyled all of them;
+ *  - it was behind a bare authenticated check, so any member of the company
+ *    could read and rewrite it;
+ *  - and it pointed at a second base URL, which this app's container build
+ *    bakes in at compile time — so in production Design and Download silently
+ *    aimed at the wrong host while every other part of the page worked.
+ *
+ * One backend, one URL, one owner.
  */
 
-import { commClient } from "@/lib/api/communications"
+import { apiClient } from "@/lib/api/client"
 import type {
   AnnualDesign,
   ColorPalette,
@@ -18,7 +25,7 @@ import type {
   DesignSelection,
 } from "@/types/report-design"
 
-/** The assembled document, exactly as the exporter will render it. */
+/** The document, exactly as the export engine will print it. */
 export interface AssembledReport {
   cover: {
     template_key?: string | null
@@ -31,11 +38,13 @@ export interface AssembledReport {
       headline?: string
       period_label?: string
       prepared_on?: string
+      footnote?: string
       cover_image?: string | null
     }
   } | null
   brand: Record<string, string>
   typography: Record<string, unknown> | null
+  content_language?: string
   sections: {
     section_code: string
     title: string
@@ -43,14 +52,23 @@ export interface AssembledReport {
     number?: number | null
     mode?: string | null
     content?: unknown
+    /** Every heading this section will print, with the number it will be given. */
+    headings?: { level: number; number: string; text: string }[]
   }[]
+  /**
+   * False when the export engine could not be reached to apply its own
+   * clean-up, so the preview may show a heading the file would drop. Surfaced
+   * rather than hidden: it is the difference between a preview slightly ahead
+   * of the file and one that is simply wrong.
+   */
+  normalised?: boolean
 }
 
 export const annualDesignApi = {
   /** The cycle's current cover/brand/type choice, for pre-selecting the controls. */
   get: async (cycleId: string): Promise<AnnualDesign> => {
-    const { data } = await commClient.get(
-      `/annual/cycles/${encodeURIComponent(cycleId)}/cover-template`,
+    const { data } = await apiClient.get(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
     )
     return data
   },
@@ -61,9 +79,9 @@ export const annualDesignApi = {
    * null` clears the override so the report falls back to its layout's
    * recommended type — that is what "reset to recommended" sends.
    */
-  save: async (cycleId: string, selection: DesignSelection): Promise<unknown> => {
-    const { data } = await commClient.patch(
-      `/annual/cycles/${encodeURIComponent(cycleId)}/cover-template`,
+  save: async (cycleId: string, selection: DesignSelection): Promise<AnnualDesign> => {
+    const { data } = await apiClient.patch(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
       selection,
     )
     return data
@@ -75,43 +93,43 @@ export const annualDesignApi = {
    * showing the same cover, the same order and the same heading numbers.
    */
   assembled: async (cycleId: string): Promise<AssembledReport> => {
-    const { data } = await commClient.get(
-      `/annual/cycles/${encodeURIComponent(cycleId)}/assemble`,
+    const { data } = await apiClient.get(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/assembled`,
     )
     return data
   },
 
   /**
-   * The cover catalogue and the colour presets — global reference data shared
-   * with every report kind, served under the quarterly path because that is
-   * where they have always lived. Not annual-specific, and deliberately not
-   * duplicated behind an /annual alias.
+   * The cover layouts and colour presets — global reference data shared with
+   * every report kind. One request, because the modal cannot draw itself
+   * without both.
    */
-  templates: async (): Promise<CoverTemplate[]> => {
-    const { data } = await commClient.get(`/reports/quarterly/cover-templates`)
-    return data?.cover_templates ?? []
-  },
-
-  palettes: async (): Promise<ColorPalette[]> => {
-    const { data } = await commClient.get(`/reports/quarterly/color-palettes`)
-    return data?.color_palettes ?? []
+  catalogue: async (): Promise<{
+    cover_templates: CoverTemplate[]
+    color_palettes: ColorPalette[]
+  }> => {
+    const { data } = await apiClient.get(`/pm/report-design/catalogue`)
+    return {
+      cover_templates: data?.cover_templates ?? [],
+      color_palettes: data?.color_palettes ?? [],
+    }
   },
 }
 
 /**
  * Download the report, typeset by the shared export engine.
  *
- * Points at Centriyon rather than this app's own /render: that is where the
- * engine lives, and it is the only way the design chosen in the modal reaches
- * the file. Returns the blob and the filename the server chose.
+ * Long timeout on purpose: typesetting launches a fresh browser per section, so
+ * a 17-section report is around twenty cold starts. The client default of 30s
+ * failed every real report while looking like a network fault.
  */
 export async function downloadAnnualReport(
   cycleId: string, format: "pdf" | "docx",
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await commClient.post(
-    `/annual/cycles/${encodeURIComponent(cycleId)}/export`,
-    { format },
-    { responseType: "blob", timeout: 120000 },
+  const res = await apiClient.post(
+    `/pm/cycles/${encodeURIComponent(cycleId)}/render`,
+    null,
+    { params: { format }, responseType: "blob", timeout: 180000 },
   )
   const disposition = String(res.headers?.["content-disposition"] ?? "")
   const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)
