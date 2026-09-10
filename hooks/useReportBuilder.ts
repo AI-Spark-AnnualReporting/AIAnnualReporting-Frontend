@@ -7,6 +7,7 @@ import type {
   CycleReportSection,
   FinalReport,
   PlanResponse,
+  ReportApproval,
   ReportTheme,
   SectionMode,
 } from "@/types"
@@ -310,6 +311,41 @@ export function useAssembleReport(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to assemble report")),
+  })
+}
+
+// ───── Approve & lock ────────────────────────────────────────────────
+
+// Sign-off state of the cycle's report. Also the source of `report_id`, which
+// the Communication Hub rail needs. Refetched on window focus so a reviewer
+// approving in the Hub shows up here without a manual reload.
+export function useReportApproval(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
+    queryFn: () => pmApi.getApproval(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+}
+
+// One-way. Everything the report page and the builder gate on has to re-read.
+export function useApproveReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.approveReport(cycleId),
+    onSuccess: (approval) => {
+      qc.setQueryData<ReportApproval>(
+        QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
+        approval,
+      )
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+      toast.success("Report approved and locked")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to approve the report")),
   })
 }
 

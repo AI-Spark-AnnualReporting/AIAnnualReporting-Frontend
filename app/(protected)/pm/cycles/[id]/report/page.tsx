@@ -9,6 +9,7 @@ import {
   FileCheck,
   FileText,
   Loader2,
+  Lock,
   RefreshCw,
   Sparkles,
 } from "lucide-react"
@@ -23,10 +24,14 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { PageLoader } from "@/components/ui/spinner"
 import { FinalReportView } from "@/components/report/FinalReportView"
+import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
+import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import {
+  useApproveReport,
   useAssembleReport,
   useFinalReport,
   useRenderReport,
+  useReportApproval,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { formatDateTime } from "@/lib/utils"
@@ -62,7 +67,14 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const assemble = useAssembleReport(cycleId)
   const render = useRenderReport(cycleId)
 
+  // Sign-off state. `refetch` is stable, so it's safe to hand to the hub panel
+  // as its onChanged — an inline arrow there would re-run its loader forever.
+  const approvalQuery = useReportApproval(cycleId)
+  const approval = approvalQuery.data
+  const approve = useApproveReport(cycleId)
+
   const [reassembleOpen, setReassembleOpen] = useState(false)
+  const [approveOpen, setApproveOpen] = useState(false)
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -82,8 +94,17 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // 404 / missing report → empty state with an Assemble CTA.
   const reportMissing = !!reportQuery.error || !report
 
+  const locked = !!approval?.locked
+
+  // Full-bleed and exactly one viewport tall, so the document and the rail each
+  // own their scrollbar and the shell around them never gets one of its own.
+  //
+  // The numbers are AppShell's, not guesses: <main> pads its child px-8 py-8, so
+  // -m-8 cancels it entirely, and PMTopNav is a fixed 72px — that is all the
+  // height above us. Anything less exact leaves the page a few pixels too tall
+  // and <main> grows a second, pointless scrollbar beside the report's own.
   return (
-    <div className="-mx-6 -mt-6 -mb-6 flex flex-col min-h-[calc(100vh-4rem)] bg-background print:block print:m-0 print:min-h-0">
+    <div className="-m-8 flex h-[calc(100vh-72px)] flex-col overflow-hidden bg-background print:m-0 print:block print:h-auto print:overflow-visible">
       <div className="flex items-center gap-3 px-5 py-3 border-b bg-card shrink-0 print:hidden">
         <Link href={`/pm/cycles/${cycleId}/build`}>
           <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -101,29 +122,43 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               {typeof report.word_count === "number"
                 ? ` · ${report.word_count.toLocaleString()} words`
                 : ""}
+              {locked && approval?.approved_by
+                ? ` · Approved by ${approval.approved_by}${
+                    approval.version ? ` · ${approval.version}` : ""
+                  }`
+                : ""}
             </p>
           )}
         </div>
 
         {!reportMissing && (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setReassembleOpen(true)}
-              disabled={assemble.isPending || render.isPending}
-              className="h-8"
-            >
-              {assemble.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-              )}
-              Re-assemble
-            </Button>
+            {/* Re-assembling a signed-off report is refused by the API (409),
+                so the button goes away rather than failing on click. */}
+            {!locked && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setReassembleOpen(true)}
+                disabled={assemble.isPending || render.isPending}
+                className="h-8"
+              >
+                {assemble.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Re-assemble
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" disabled={render.isPending} className="h-8">
+                <Button
+                  size="sm"
+                  variant={approval?.can_approve ? "outline" : "default"}
+                  disabled={render.isPending}
+                  className="h-8"
+                >
                   {render.isPending ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
@@ -164,15 +199,64 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Not gated on completeness — the confirm dialog is where the
+                one-way consequence gets spelled out. Same as the board report. */}
+            {approval?.can_approve && (
+              <Button
+                size="sm"
+                onClick={() => setApproveOpen(true)}
+                disabled={approve.isPending}
+                className="h-8"
+              >
+                {approve.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Approve &amp; Lock
+              </Button>
+            )}
           </>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto print:overflow-visible">
-        {reportMissing ? (
-          <EmptyReport cycleId={cycleId} />
-        ) : (
-          <FinalReportView report={report} cycle={pmData?.cycle} />
+      <div className="flex flex-1 min-h-0 print:block">
+        <div className="flex-1 overflow-y-auto print:overflow-visible">
+          {reportMissing ? (
+            <EmptyReport cycleId={cycleId} />
+          ) : (
+            <FinalReportView report={report} cycle={pmData?.cycle} />
+          )}
+        </div>
+
+        {/* The Communication Hub rail, same composition as the board report's:
+            a plain status card, then "Share for review" (assigns a reviewer and
+            starts the thread), Discuss, and the reviewer's approve / send-back
+            screen. Status lives in the card above, so the panel's own radios
+            stay hidden. Only exists once the report has been assembled, since
+            that is what creates the shared reports row. */}
+        {approval?.report_id && (
+          <aside
+            className="shrink-0 overflow-y-auto border-l px-4 py-5 print:hidden"
+            style={{
+              // 290px rail + padding, and the same ground the cards are drawn
+              // for — white-on-white would flatten them into the document.
+              width: 290 + 32,
+              background: "#F2F3FA",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <ReportStatusCard status={approval.status} approvedAt={approval.approved_at} />
+            <ReportHubPanel
+              reportId={approval.report_id}
+              showStatus={false}
+              readOnly={locked}
+              onChanged={approvalQuery.refetch}
+            />
+          </aside>
         )}
       </div>
 
@@ -187,6 +271,20 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         onConfirm={async () => {
           await assemble.mutateAsync({ refresh: true })
           setReassembleOpen(false)
+        }}
+      />
+
+      <ConfirmDialog
+        open={approveOpen}
+        onOpenChange={setApproveOpen}
+        title="Approve and lock this report?"
+        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. The report stays available to download."
+        confirmLabel="Approve & Lock"
+        variant="destructive"
+        isLoading={approve.isPending}
+        onConfirm={async () => {
+          await approve.mutateAsync()
+          setApproveOpen(false)
         }}
       />
     </div>

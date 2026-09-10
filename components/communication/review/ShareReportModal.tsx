@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { useAuth } from "@/contexts/AuthContext"
 import {
   communicationsApi,
   type CommunicationMember,
@@ -34,18 +35,29 @@ import {
 export function ShareReportModal({
   reportId,
   report,
+  ownerUserId,
   onClose,
   onShared,
 }: {
   reportId: string
   // The report being shared — drives the "Attached report" block.
   report?: ThreadReport
+  // The author's usr_ id. They cannot review their own report (the backend
+  // answers 422), so they are dropped from the picker along with you.
+  ownerUserId?: string | null
   onClose: () => void
   onShared?: (payload: ShareReportResponse) => void
 }) {
+  const { user } = useAuth()
+
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [members, setMembers] = useState<CommunicationMember[]>([])
+  // The backend rejects assigning a review to yourself (422) — drop yourself
+  // from the picker up front instead of letting the user hit that error.
+  const assignableMembers = members.filter(
+    (m) => m.user_id !== user?.user_id && m.user_id !== ownerUserId,
+  )
 
   const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [comment, setComment] = useState("")
@@ -201,7 +213,7 @@ export function ShareReportModal({
                 style={{ ...INPUT, marginBottom: 20 }}
               >
                 <option value="">Choose a person…</option>
-                {members.map((m) => (
+                {assignableMembers.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.full_name} · {m.display_role}
                   </option>

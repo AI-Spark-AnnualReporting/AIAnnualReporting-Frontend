@@ -53,10 +53,10 @@ export function AttachedReportCard({
 }) {
   const { user } = useAuth()
   const pill = statusPill(report.status, report.status_label)
-  // An annual report that isn't approved yet leads nowhere: its cycle is still
-  // being written, and there is no review to open either — the card sits inert
-  // and says so, rather than a bare "Linked" that reads as a broken link. Only
-  // the annual lane reports a section count, so this is only ever false there.
+  // An annual report with nothing written yet leads nowhere: its cycle is still
+  // empty, and there is no review to open either — the card sits inert and says
+  // so, rather than a bare "Linked" that reads as a broken link. Only the annual
+  // lane reports a section count, so this is only ever false there.
   const notReady = !hasSomethingToReview(report.generation, report.status)
   const inert = disabled || notReady
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null

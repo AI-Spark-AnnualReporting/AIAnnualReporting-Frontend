@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
-import { useBuildReadiness, usePMCycleSections, useFinalReport } from "@/hooks/useReportBuilder"
+import {
+  useBuildReadiness,
+  usePMCycleSections,
+  useFinalReport,
+  useReportApproval,
+} from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { PageLoader } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -38,6 +43,8 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const finalReportQuery = useFinalReport(cycleId)
   // isSuccess = a final report exists (404 → isError, loading → isPending)
   const assembled = finalReportQuery.isSuccess
+  // Signed off — from this side's Approve & Lock or a Communication Hub reviewer.
+  const reportLocked = !!useReportApproval(cycleId).data?.locked
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null)
 
@@ -148,6 +155,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
             section={selected}
             cycleId={cycleId}
             assembled={assembled}
+            reportLocked={reportLocked}
             contentLanguage={contentLanguage}
             isRtl={isRtl}
           />

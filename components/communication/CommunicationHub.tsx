@@ -491,13 +491,17 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
+        {/* Out for review now, OR sent back and the comments still need reading —
+            without the second case the author had no way in from the list. */}
+        {(inReview || thread.has_review) && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             style={{ ...BTN_PRIMARY, gap: 7, padding: "7px 13px" }}
             onClick={() => onReview(thread)}
           >
-            Open review
+            {/* Between rounds there is no review to conduct — the author is
+                here to read what came back, not to act on it. */}
+            {inReview ? "Open review" : "View comments"}
             {ICON_OPEN_REVIEW}
           </button>
         )}

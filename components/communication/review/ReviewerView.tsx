@@ -426,6 +426,22 @@ export function ReviewerView({
 
   const report = data?.report
   const assignment = data?.assignment ?? null
+  // The backend refuses a reassign to whoever already holds the review (422
+  // "Review is already assigned to that person"), so drop them from the picker
+  // rather than offering a choice the server will always reject. Matched on the
+  // usr_ id: the option's value is the users.id UUID the API wants, but the
+  // assignment carries the string id.
+  // Neither the person who already holds the review (422 "already assigned")
+  // nor the report's own author (422 "cannot review their own report").
+  const reassignable = members.filter(
+    (m) => m.user_id !== assignment?.user_id && m.user_id !== data?.owner?.user_id,
+  )
+  // Send-back returns the report to its author to be changed. When you ARE the
+  // author — the review was assigned or reassigned to the report's own owner —
+  // there is nobody to send it back to, so the action is dropped rather than
+  // offered as "Send back to <your own name>". Reassign stays: handing the
+  // review to someone else is still a real thing to do.
+  const isOwner = data?.owner?.is_you === true
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null
   const canAct = data?.can_act ?? false
   // Removed from the thread → read the record, add nothing to it. can_act
@@ -434,6 +450,11 @@ export function ReviewerView({
   // be read. The reviewer furniture (the brief, the comment controls, the
   // assignment/comments rail) is all about a review that isn't happening.
   const viewOnly = !data?.assignment
+  // The rail is not only the reviewer's controls — it is also where the
+  // comments live. A report sent back for changes has no assignment, so
+  // gating the whole rail on that hid the feedback from the one person who
+  // has to act on it. Keep the column whenever there is something to read.
+  const showRail = !viewOnly || allComments.length > 0
   const canComment = !viewOnly && (data?.can_comment ?? true)
   const removedAt = data?.removed_at ?? null
   const canApprove = data?.can_approve ?? false
@@ -575,7 +596,7 @@ export function ReviewerView({
               flex: 1,
               minHeight: 0,
               display: "grid",
-              gridTemplateColumns: viewOnly ? "minmax(0, 1fr)" : "minmax(0, 1fr) 340px",
+              gridTemplateColumns: showRail ? "minmax(0, 1fr) 340px" : "minmax(0, 1fr)",
             }}
           >
             {/* Report + sections */}
@@ -666,7 +687,14 @@ export function ReviewerView({
                 // section.id is the report's section_code verbatim.
                 const body = bodies[s.id]
                 return (
-                  <div key={s.id} style={{ marginBottom: 16 }}>
+                  // The anchor jumpToSection scrolls to when a comment row in
+                  // the rail is clicked. scrollMarginTop keeps the heading off
+                  // the top edge of the scroll container.
+                  <div
+                    key={s.id}
+                    id={sectionDomId(s.id)}
+                    style={{ marginBottom: 16, scrollMarginTop: 12 }}
+                  >
                     {/* dir on the row so the order chip sits right of an Arabic title. */}
                     <div dir={dirOf(s.title)} style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
                       <span
@@ -846,8 +874,9 @@ export function ReviewerView({
               )}
             </div>
 
-            {/* Right rail — the review's own controls, so it goes with it. */}
-            {!viewOnly && (
+            {/* Right rail — the review's controls when there is a review on,
+                and the comments list either way. */}
+            {showRail && (
             <div
               style={{
                 borderLeft: "1px solid #ECEEF8",
@@ -858,7 +887,9 @@ export function ReviewerView({
                 gap: 14,
               }}
             >
-              {/* Assignment + reassign */}
+              {/* Assignment + reassign — review controls. Nothing is assigned
+                  on a report that was sent back, so this is the reviewer's. */}
+              {!viewOnly && (
               <div style={{ ...CARD, padding: "14px 16px" }}>
                 <div style={RAIL_LABEL}>Assignment</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -898,7 +929,7 @@ export function ReviewerView({
                       style={INPUT}
                     >
                       <option value="">Choose a person…</option>
-                      {members.map((m) => (
+                      {reassignable.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.full_name} · {m.display_role}
                         </option>
@@ -924,6 +955,7 @@ export function ReviewerView({
                   </>
                 )}
               </div>
+              )}
 
               {/* Comments */}
               <div style={{ ...CARD, padding: "14px 16px" }}>
@@ -966,8 +998,10 @@ export function ReviewerView({
 
               {/* Actions. Order matters: a finished report is "review complete"
                   for everyone (the backend also flips can_act to false), so check
-                  that before the not-the-reviewer messaging. */}
-              {reviewClosed ? (
+                  that before the not-the-reviewer messaging. Skipped entirely for
+                  a reader with no review on — "only the assigned reviewer can
+                  approve" is noise when nobody is assigned. */}
+              {viewOnly ? null : reviewClosed ? (
                 <div
                   style={{
                     marginTop: "auto",
@@ -1097,6 +1131,7 @@ export function ReviewerView({
                         </div>
                       )}
 
+                      {!isOwner && (
                       <button
                         type="button"
                         style={{ ...BTN_SECONDARY, width: "100%", gap: 8, padding: "12px 16px" }}
@@ -1118,6 +1153,7 @@ export function ReviewerView({
                           ? `Send back to ${data.owner.full_name}`
                           : "Send back to the creator"}
                       </button>
+                      )}
                     </>
                   )}
                 </div>

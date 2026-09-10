@@ -1,6 +1,7 @@
 "use client"
 
 import type { CSSProperties, ReactNode } from "react"
+import { Prose } from "./shared"
 
 /**
  * Quarterly section content, ported from the Centrion frontend's assembled
@@ -65,24 +66,6 @@ export function SectionContent({ section }: { section: { mode: string; content: 
 // Honest empty state — shown when a section produced no usable content.
 function NoData() {
   return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>
-}
-
-// ─── prose ────────────────────────────────────────────────────────────────────
-function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-  const blocks = paragraphs.length ? paragraphs : [text]
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{ margin: i === 0 ? 0 : "14px 0 0", fontSize: 14, lineHeight: 1.75, color: "#2A2E47", whiteSpace: "pre-wrap", textAlign: "justify" }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  )
 }
 
 // ─── table ────────────────────────────────────────────────────────────────────

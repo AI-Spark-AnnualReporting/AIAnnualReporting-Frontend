@@ -186,6 +186,30 @@ export interface PlanResponse {
   sections_locked_by: string | null
 }
 
+/**
+ * Sign-off state of a cycle's annual report, from GET /pm/cycles/{id}/approval.
+ *
+ * Read from the shared `reports` row, which the Communication Hub reviewer also
+ * writes — so a Hub approval shows up here without any extra plumbing.
+ */
+export interface ReportApproval {
+  cycle_id: string
+  // The shared reports.id. Null until the report has been assembled — it is what
+  // <ReportHubPanel> needs, so the Hub rail only renders once this exists.
+  report_id: string | null
+  // draft | in_review | pending_approval | approved | locked | published
+  status: string
+  approved_at: string | null
+  // Full name of the approver, display only.
+  approved_by: string | null
+  // True once signed off. Every section / plan / assemble write then 409s.
+  locked: boolean
+  // Assembled and not yet signed off.
+  can_approve: boolean
+  // Latest report_versions label, e.g. "v1". Null until approved.
+  version: string | null
+}
+
 export interface AvailableOptionalSection {
   section_code: string
   title: string
