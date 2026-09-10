@@ -32,9 +32,15 @@ export interface CoverPreviewProps {
   title?: string
   headline?: string
   periodLabel?: string
+  /** The date the file will print, e.g. "10 September 2026". */
+  preparedOn?: string
+  /** The classification line, e.g. "ENERGY · LISTED". Annual reports only. */
+  footnote?: string
   logoUrl?: string | null
   /** An uploaded cover image beats every template — it becomes the whole page. */
   coverImage?: string | null
+  /** Arabic covers lay out right-to-left, as the file does. */
+  isArabic?: boolean
 }
 
 /** Readable ink on a given background, mirroring the renderer's own rule. */
@@ -53,16 +59,30 @@ function family(name: string): string {
 
 export function CoverPreview({
   templateKey, brand, typography, companyName, title, headline,
-  periodLabel, logoUrl, coverImage,
+  periodLabel, preparedOn, footnote, logoUrl, coverImage, isArabic = false,
 }: CoverPreviewProps) {
   const variant = coverVariant(templateKey)
   const primary = brand.primary || "#3C0866"
-  const subtitle = [periodLabel, "Prepared today"].filter(Boolean).join(" · ")
+  // The real date the file prints. This was the literal string "Prepared today"
+  // — so the screen said "FY 2026 · Prepared today" and the PDF said
+  // "FY 2026 · 10 September 2026", in a component whose whole purpose is that
+  // the two agree.
+  const subtitle = [periodLabel, preparedOn].filter(Boolean).join(" · ")
+
+  // The classification line the annual cover prints at its foot. Quiet and
+  // small, matching cover.html's .footnote.
+  const footnoteStyle: React.CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.08em",
+    opacity: 0.7,
+    marginTop: "auto",
+  }
 
   const page: React.CSSProperties = {
     width: PAGE_W,
     height: PAGE_H,
     background: "#fff",
+    direction: isArabic ? "rtl" : "ltr",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
@@ -119,6 +139,8 @@ export function CoverPreview({
         <h1 style={h1}>{title}</h1>
         {headline && <div style={headlineStyle}>{headline}</div>}
         {subtitle && <div style={sub}>{subtitle}</div>}
+        {companyName && <div style={{ ...sub, marginTop: 8 }}>{companyName}</div>}
+        {footnote && <div style={footnoteStyle}>{footnote}</div>}
       </div>
     )
   } else if (variant === "minimal") {
@@ -131,6 +153,8 @@ export function CoverPreview({
         </h1>
         {headline && <div style={{ ...headlineStyle, marginInline: 0 }}>{headline}</div>}
         {subtitle && <div style={sub}>{subtitle}</div>}
+        {companyName && <div style={{ ...sub, marginTop: 8 }}>{companyName}</div>}
+        {footnote && <div style={footnoteStyle}>{footnote}</div>}
       </div>
     )
   } else {
@@ -144,6 +168,7 @@ export function CoverPreview({
         {headline && <div style={headlineStyle}>{headline}</div>}
         {subtitle && <div style={sub}>{subtitle}</div>}
         {companyName && <div style={{ ...sub, marginTop: 24 }}>{companyName}</div>}
+        {footnote && <div style={{ ...footnoteStyle, textAlign: "center" }}>{footnote}</div>}
       </div>
     )
   }

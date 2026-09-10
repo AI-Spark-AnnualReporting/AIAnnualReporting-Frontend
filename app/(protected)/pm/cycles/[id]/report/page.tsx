@@ -228,8 +228,11 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           periodLabel:
             assembled?.cover?.values?.period_label ??
             (pmData?.cycle?.fiscal_year ? `FY ${pmData.cycle.fiscal_year}` : undefined),
+          preparedOn: assembled?.cover?.values?.prepared_on,
+          footnote: assembled?.cover?.values?.footnote,
           logoUrl: assembled?.cover?.values?.logo_url ?? undefined,
           coverImage: assembled?.cover?.values?.cover_image ?? undefined,
+          isArabic: assembled?.content_language === "arabic",
         }}
         onSaved={() =>
           qc.invalidateQueries({

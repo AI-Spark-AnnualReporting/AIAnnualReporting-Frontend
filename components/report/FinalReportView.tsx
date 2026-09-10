@@ -162,6 +162,7 @@ function CoverBlock({
   // the same report saw the designed one.
   const cover = assembled?.cover
   if (cover) {
+    const isArabic = assembled?.content_language === "arabic"
     const values = cover.values ?? {}
     const layoutKey = cover.template_key ?? DEFAULT_LAYOUT_KEY
     const typography = (assembled?.typography as Typography | null)
@@ -186,8 +187,11 @@ function CoverBlock({
             title={values.title}
             headline={values.headline}
             periodLabel={values.period_label}
+            preparedOn={values.prepared_on}
+            footnote={values.footnote}
             logoUrl={values.logo_url}
             coverImage={values.cover_image}
+            isArabic={isArabic}
           />
         </div>
       </section>

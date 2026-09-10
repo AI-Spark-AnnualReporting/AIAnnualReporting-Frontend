@@ -60,8 +60,11 @@ export interface DesignDialogProps {
     title?: string
     headline?: string
     periodLabel?: string
+    preparedOn?: string
+    footnote?: string
     logoUrl?: string | null
     coverImage?: string | null
+    isArabic?: boolean
   }
   onSaved?: () => void
 }
@@ -192,28 +195,52 @@ export function DesignDialog({
               <section className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide
                                text-muted-foreground">Cover</h3>
+                {/* Each option draws itself, through the same component that
+                    draws the big preview and from the same values — so what is
+                    picked, what is previewed and what is printed cannot drift.
+                    They were three text buttons: the user chose a LOOK from
+                    prose, then had to select each one in turn to see it, because
+                    the preview only shows one at a time. The thumbnails also
+                    carry the currently chosen brand colour, so switching palette
+                    re-tints all three at once. */}
                 <div className="grid grid-cols-3 gap-3">
                   {visible.map((t) => (
                     <button key={t.key} type="button" onClick={() => pickLayout(t.key)}
                             aria-pressed={layoutKey === t.key}
+                            title={t.description || t.name}
                             className={cn(
-                              "relative rounded-lg border p-3 text-left text-sm transition-colors",
+                              "group relative rounded-lg border p-2 text-left transition-colors",
                               layoutKey === t.key
-                                ? "border-primary bg-primary/5"
+                                ? "border-primary ring-1 ring-primary bg-primary/5"
                                 : "border-border hover:bg-accent",
                             )}>
                       {layoutKey === t.key && (
-                        <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" />
+                        <Check className="absolute right-3 top-3 z-10 h-3.5 w-3.5
+                                          rounded-full bg-background text-primary" />
                       )}
-                      <div className="font-medium">{t.name}</div>
-                      {t.description && (
-                        <div className="mt-0.5 text-xs text-muted-foreground">
-                          {t.description}
-                        </div>
-                      )}
+                      <PreviewFrame>
+                        <CoverPreview
+                          templateKey={t.key}
+                          brand={brand}
+                          typography={typography}
+                          companyName={cover?.companyName}
+                          title={cover?.title}
+                          periodLabel={cover?.periodLabel}
+                          logoUrl={cover?.logoUrl}
+                          coverImage={null}
+                        />
+                      </PreviewFrame>
+                      <div className="mt-2 text-xs font-medium">{t.name}</div>
                     </button>
                   ))}
                 </div>
+                {visible.length === 0 && (
+                  <p className="rounded-md border border-dashed px-3 py-6 text-center
+                                text-xs text-muted-foreground">
+                    Couldn&apos;t load the cover designs. Close and reopen to try again —
+                    applying now would save the default look.
+                  </p>
+                )}
               </section>
 
               {/* Colour */}
@@ -320,8 +347,11 @@ export function DesignDialog({
                     title={cover?.title}
                     headline={cover?.headline}
                     periodLabel={cover?.periodLabel}
+                    preparedOn={cover?.preparedOn}
+                    footnote={cover?.footnote}
                     logoUrl={cover?.logoUrl}
                     coverImage={cover?.coverImage}
+                    isArabic={cover?.isArabic}
                   />
                 ) : (
                   <PagePreview
@@ -358,7 +388,12 @@ export function DesignDialog({
                     disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={apply} disabled={saving || loading || locked}>
+            {/* Also disabled when the catalogue failed to load: the controls
+                would have fallen back to their initialisers, so applying would
+                silently replace whatever design the report actually had with
+                the defaults. */}
+            <Button size="sm" onClick={apply}
+                    disabled={saving || loading || locked || templates.length === 0}>
               {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}
             </Button>
