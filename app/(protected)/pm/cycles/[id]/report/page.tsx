@@ -173,60 +173,12 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </Button>
               </>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant={approval?.can_approve ? "outline" : "brand"}
-                  disabled={render.isPending}
-                  className="h-8"
-                >
-                  {render.isPending ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      {render.variables?.format === "pdf"
-                        ? "Generating PDF…"
-                        : render.variables?.format === "docx"
-                          ? "Generating Word document…"
-                          : "Generating document…"}
-                    </>
-                  ) : (
-                    <>
-                      <FileDown className="h-3.5 w-3.5 mr-1.5" />
-                      Export
-                      <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-70" />
-                    </>
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[200px]">
-                <DropdownMenuItem
-                  onClick={() => render.mutate({ format: "docx" })}
-                  disabled={render.isPending}
-                  className="flex items-center gap-2"
-                >
-                  <FileText className="h-4 w-4" />
-                  <span className="flex-1">Word (.docx)</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => render.mutate({ format: "pdf" })}
-                  disabled={render.isPending}
-                  className="flex items-center gap-2"
-                >
-                  <FileText className="h-4 w-4" />
-                  <span className="flex-1">PDF</span>
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Financials merged
-                  </span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             {/* Not gated on completeness — the confirm dialog is where the
                 one-way consequence gets spelled out. Same as the board report. */}
             {approval?.can_approve && (
               <Button
                 size="sm"
+                variant="brand"
                 onClick={() => setApproveOpen(true)}
                 disabled={approve.isPending}
                 className="h-8"
@@ -238,6 +190,63 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 )}
                 Approve &amp; Lock
               </Button>
+            )}
+
+            {/* Export is the last step, not a parallel one. Quarterly
+                (AssembledReportPage) and earnings (PublishBar) both hide it
+                until the report is signed off, so a draft cannot be handed
+                round as though it were the final file. Approve & Lock and
+                Export are never on the bar together, which is why both can
+                wear the brand colour. */}
+            {locked && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="brand"
+                    disabled={render.isPending}
+                    className="h-8"
+                  >
+                    {render.isPending ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        {render.variables?.format === "pdf"
+                          ? "Generating PDF…"
+                          : render.variables?.format === "docx"
+                            ? "Generating Word document…"
+                            : "Generating document…"}
+                      </>
+                    ) : (
+                      <>
+                        <FileDown className="h-3.5 w-3.5 mr-1.5" />
+                        Export
+                        <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-70" />
+                      </>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[200px]">
+                  <DropdownMenuItem
+                    onClick={() => render.mutate({ format: "docx" })}
+                    disabled={render.isPending}
+                    className="flex items-center gap-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span className="flex-1">Word (.docx)</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => render.mutate({ format: "pdf" })}
+                    disabled={render.isPending}
+                    className="flex items-center gap-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span className="flex-1">PDF</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Financials merged
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </>
         )}
@@ -330,7 +339,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         open={approveOpen}
         onOpenChange={setApproveOpen}
         title="Approve and lock this report?"
-        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. The report stays available to export."
+        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. Export unlocks at the same moment."
         confirmLabel="Approve & Lock"
         variant="destructive"
         isLoading={approve.isPending}

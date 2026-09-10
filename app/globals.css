@@ -33,8 +33,13 @@
    *
    * Not #3C0866: that is the first report brand PRESET — the document's purple,
    * already wired as the cover preview's fallback — and it reads near-black as
-   * a button. */
-  --color-brand: hsl(240 52% 52%);
+   * a button.
+   *
+   * The literal hex, not an hsl() approximation of it: BTN_PRIMARY in
+   * components/communication/review/shared.tsx paints "Share for review"
+   * #4040C8, and hsl(240 52% 52%) lands on #4545C4 — near enough to look like
+   * a mistake when the two buttons sit on the same screen. */
+  --color-brand: #4040C8;
   --color-brand-foreground: hsl(210 40% 98%);
   --color-brand-muted: hsl(240 52% 96%);
   --color-brand-strong: hsl(240 55% 34%);

@@ -75,7 +75,6 @@ export function CoverPreview({
     fontSize: 9,
     letterSpacing: "0.08em",
     opacity: 0.7,
-    marginTop: "auto",
   }
 
   const page: React.CSSProperties = {
@@ -131,17 +130,26 @@ export function CoverPreview({
       </div>
     )
   } else if (variant === "bold") {
+    // The band is sized by what is in it and the rest of the page stays white
+    // — cover.html gives .band a padding and no height, so it never grew to
+    // fill the sheet. `flex: 1` here did, and the preview was showing a
+    // full-page block of brand colour the file has never printed. The spacer
+    // below takes the remaining height instead, the same shape quarterly's
+    // CoverRenderer uses.
     body = (
-      <div style={{ flex: 1, background: primary, color: onColor(primary),
-                    padding: "40px 50px", display: "flex", flexDirection: "column",
-                    justifyContent: "center", gap: 14 }}>
-        {logo}
-        <h1 style={h1}>{title}</h1>
-        {headline && <div style={headlineStyle}>{headline}</div>}
-        {subtitle && <div style={sub}>{subtitle}</div>}
-        {companyName && <div style={{ ...sub, marginTop: 8 }}>{companyName}</div>}
-        {footnote && <div style={footnoteStyle}>{footnote}</div>}
-      </div>
+      <>
+        <div style={{ background: primary, color: onColor(primary),
+                      padding: "40px 50px", display: "flex",
+                      flexDirection: "column", gap: 14 }}>
+          {logo}
+          <h1 style={h1}>{title}</h1>
+          {headline && <div style={headlineStyle}>{headline}</div>}
+          {subtitle && <div style={sub}>{subtitle}</div>}
+          {companyName && <div style={{ ...sub, marginTop: 8 }}>{companyName}</div>}
+          {footnote && <div style={footnoteStyle}>{footnote}</div>}
+        </div>
+        <div style={{ flex: 1 }} />
+      </>
     )
   } else if (variant === "minimal") {
     body = (
