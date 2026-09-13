@@ -25,6 +25,7 @@ import {
   useRemoveOptional,
   useReorderSections,
   useSetSourceMode,
+  useIsSettingFeeders,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -321,6 +322,8 @@ function SourcesFeederArea({
   readOnly?: boolean
 }) {
   const setSourceMode = useSetSourceMode(cycleId)
+  const saving =
+    useIsSettingFeeders(cycleId, section.section_code) || setSourceMode.isPending
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
@@ -389,9 +392,11 @@ function SourcesFeederArea({
       cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
-      // Extract reads the uploaded document and nothing else, so its checkboxes
-      // are inert. The backend refuses feeders on extract now too.
-      departmentsApply={!isExtract}
+      // An AI-written section keeps its departments live even in extract mode:
+      // the two sources are a reversible choice, and clicking a department flips
+      // the section back to generate (the picker sequences that). Only a section
+      // AI may never draft is document-only, and it has no unticked state.
+      departmentsApply={!isExtract || section.ai_allowed}
       selected={feederCodes}
       // Analyze sections: departments only — no source-mode switcher.
       // Generate sections: show "Upload document later" to switch to extract.
@@ -411,8 +416,11 @@ function SourcesFeederArea({
           ? undefined
           : {
               checked: isExtract,
+              pending: setSourceMode.isPending,
+              // mutateAsync + return: the picker awaits this before writing
+              // feeders, since the switch clears them server-side.
               onChange: (next) =>
-                setSourceMode.mutate({
+                setSourceMode.mutateAsync({
                   sectionCode: section.section_code,
                   mode: next ? "extract" : "generate",
                 }),
@@ -422,7 +430,8 @@ function SourcesFeederArea({
       <button
         type="button"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors text-left",
+          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
+          saving && "opacity-50",
           showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",

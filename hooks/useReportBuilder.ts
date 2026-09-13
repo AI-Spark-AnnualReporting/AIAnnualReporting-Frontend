@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { toast } from "sonner"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
@@ -458,14 +463,13 @@ export function useSetSourceMode(cycleId: string) {
       mode: SectionMode
     }) => pmApi.setSourceMode(cycleId, sectionCode, mode),
     onSuccess: (section) => {
-      // Patch sections cache immediately.
-      qc.setQueryData<CycleReportSection[]>(
-        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
-        (old) =>
-          old?.map((s) =>
-            s.section_code === section.section_code ? section : s,
-          ) ?? old,
-      )
+      // Patch sections cache immediately. MERGE via the shared helper — the
+      // endpoint answers with a SectionView, which carries no `layer`,
+      // `ai_allowed`, `content_source` or `display_order`. Replacing the row
+      // blanked those: the layer badge vanished and, worse, `ai_allowed`
+      // undefined made the extract card drop its source picker, so
+      // "Upload document later" could never be switched back.
+      patchSectionInList(qc, cycleId, section)
       // Also patch the feeder map entry's mode so the badge reflects the new
       // mode instantly — the tile uses entry?.mode ?? s.mode, so a stale feeder
       // entry would show the old badge until the plan refetch completes.
@@ -502,9 +506,26 @@ export function useSetSourceMode(cycleId: string) {
   })
 }
 
+const SET_FEEDERS_KEY = (cycleId: string) => ["setFeeders", cycleId] as const
+
+// True while THIS section's feeder write is in flight, so the card can dim its
+// source badge. Keyed off the mutation's own variables — cheaper than threading
+// pending state down from the picker that owns the mutation.
+export function useIsSettingFeeders(cycleId: string, sectionCode: string) {
+  return (
+    useIsMutating({
+      mutationKey: SET_FEEDERS_KEY(cycleId),
+      predicate: (m) =>
+        (m.state.variables as { sectionCode?: string } | undefined)
+          ?.sectionCode === sectionCode,
+    }) > 0
+  )
+}
+
 export function useSetFeeders(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
+    mutationKey: SET_FEEDERS_KEY(cycleId),
     mutationFn: ({
       sectionCode,
       departmentCodes,
