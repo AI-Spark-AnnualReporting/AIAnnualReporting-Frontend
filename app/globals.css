@@ -92,8 +92,27 @@
   --ring: 224.3 76.3% 48%;
 }
 
-* {
+/* This rule is UNLAYERED, and an unlayered rule beats anything Tailwind emits
+ * inside @layer utilities — so `border-slate-200`, `border-brand` and every
+ * other border-<colour> utility in this app is inert and silently renders
+ * hsl(var(--border)). It has been that way since the file was written; the
+ * report-design popup's selected palette pill has never drawn its purple
+ * border, and the selected layout card only looks brand-coloured because its
+ * ring is a box-shadow and escapes this.
+ *
+ * The popup is now a transcription of Centrion's, which paints real indigo,
+ * slate-100 and amber borders, so it needs those utilities to work. :where()
+ * contributes zero specificity, so this stays exactly the (0,0,0) rule it was
+ * for every element outside [data-report-design].
+ *
+ * The proper fix is to move this into @layer base and let the whole app's
+ * border utilities work. That is a separate change with a blast radius nobody
+ * has measured. */
+*:where(:not([data-report-design], [data-report-design] *)) {
   border-color: hsl(var(--border));
+}
+
+* {
   box-sizing: border-box;
 }
 
@@ -162,3 +181,47 @@ body {
     widows: 3;
   }
 }
+
+/* ── Report-design popup buttons ────────────────────────────────────────
+   Copied verbatim from Centrion_Frontend/src/index.css:451-469 and
+   :1368-1373, which is what the modal this popup mirrors puts in its footer.
+
+   Deliberately UNLAYERED: inside @layer components every Tailwind utility
+   would beat them, and the buttons carry no utilities precisely so these
+   rules are the whole story. `.bsm` is not copied — nothing here uses it. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  transition: .15s;
+  letter-spacing: .1px;
+}
+.btn:hover { transform: translateY(-1px); }
+
+.bp {
+  background: #4040C8;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(64, 64, 200, .3);
+  border-radius: 10px;
+}
+.bp:hover { background: #3333A8; box-shadow: 0 6px 20px rgba(64, 64, 200, .4); }
+
+.bs {
+  background: #fff;
+  color: #5A6080;
+  border: 1.5px solid #E2E4F0;
+  border-radius: 10px;
+}
+.bs:hover { background: #F5F5FF; border-color: #4040C8; color: #4040C8; }
+
+.btn:disabled, .btn[disabled] { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.btn:disabled:hover, .btn[disabled]:hover { transform: none; }
+.bp:disabled:hover, .bp[disabled]:hover { background: #4040C8; box-shadow: none; }
+.bs:disabled:hover, .bs[disabled]:hover { background: #fff; border-color: #E2E4F0; color: #5A6080; }

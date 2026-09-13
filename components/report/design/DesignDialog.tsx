@@ -1,14 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Check, Loader2, Palette } from "lucide-react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import { cn } from "@/lib/utils"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
   DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY,
@@ -16,9 +11,10 @@ import {
   type CoverTemplate, type Typography,
 } from "@/types/report-design"
 import { CoverPreview } from "./CoverPreview"
+import { MiniCover } from "./MiniCover"
 import { PagePreview } from "./PagePreview"
 import { PreviewFrame } from "./PreviewFrame"
-import { TypographyControls } from "./TypographyControls"
+import { TypographyControls, hasCustomTypography } from "./TypographyControls"
 
 /**
  * How this report should look: cover layout, brand colours, type.
@@ -28,6 +24,13 @@ import { TypographyControls } from "./TypographyControls"
  * engine looking like one — rather than like a different product that happens to
  * share a login.
  *
+ * It is also, deliberately, a transcription of the modal the other three report
+ * kinds use: Centrion_Frontend/src/components/quarterly/CoverTemplatePicker.tsx,
+ * which quarterly, earnings and board all mount with identical props. Same
+ * geometry, same type scale, same indigo accents, same .btn/.bp/.bs footer.
+ * Where the two Tailwind majors disagree about what a class means, the pixel
+ * value is written out — see the radius constants below.
+ *
  * Everything previews live. Nothing is saved until Apply, so a user can try the
  * three layouts without committing to any of them.
  */
@@ -35,19 +38,60 @@ import { TypographyControls } from "./TypographyControls"
 /** The fourth catalogue entry, `branded`, has never been offered in any picker. */
 const HIDDEN_TEMPLATES = new Set(["branded"])
 
-function normaliseHex(input: string): string {
-  const v = input.trim().replace(/^#?/, "")
-  if (/^[0-9a-f]{3}$/i.test(v)) return "#" + v.split("").map((c) => c + c).join("").toUpperCase()
-  if (/^[0-9a-f]{6}$/i.test(v)) return "#" + v.toUpperCase()
-  return input
+// The reference writes rounded-2xl / rounded-lg / rounded-md / rounded, which
+// are 16 / 10 / 8 / 4 px there. Under Tailwind v4 here the same four classes
+// are 16 / 8 / 6 / 8 — and note the last pair is inverted, so copying the class
+// names would leave the tiles and the thumbnail clip visibly wrong.
+//
+// The slate / indigo / amber / red literals throughout this file are Tailwind
+// v3.4's palette, which is what the reference paints. v4 re-derived the scales
+// in OKLCH and several land somewhere else in sRGB — measured side by side:
+// indigo-500 #6366F1 -> #615FFF, indigo-700 #4338CA -> #432DD7,
+// indigo-800 #3730A3 -> #372AAC, slate-500 #64748B -> #62748E,
+// slate-700 #334155 -> #314158. Close enough to miss by eye, far enough that a
+// pixel diff of the two modals lit up every label. Written as hex so they
+// cannot drift again.
+const PANEL = "rounded-[16px]"
+const TILE = "rounded-[10px]"
+const FIELD = "rounded-[8px]"
+const THUMB = "rounded-[4px]"
+
+/**
+ * The reference's hex parser: returns null for anything unparseable, so junk
+ * typed into the field is simply not written anywhere. Lowercase output, which
+ * is what the other modal stores.
+ */
+function normalizeHex(v: string): string | null {
+  let s = v.trim()
+  if (!s.startsWith("#")) s = `#${s}`
+  if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+    s = "#" + s.slice(1).split("").map((c) => c + c).join("")
+  }
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : null
 }
 
-/** True when a colour is too pale to read as an accent on white. */
-function isPale(hex?: string): boolean {
-  const h = (hex || "").replace("#", "")
-  if (h.length !== 6) return false
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.7
+/**
+ * Relative luminance, transcribed from Centrion's types/brand.ts:166-172 —
+ * including its blue coefficient of 0.4152, where WCAG says 0.0722.
+ *
+ * Copied rather than corrected on purpose: this only decides whether the "may
+ * be hard to read" warning appears, and the point of this file is that the two
+ * modals warn on exactly the same colours. Fixing it here alone would make them
+ * disagree. #FFD700 is the visible case — it warns today and will not now.
+ */
+function luminance(hex: string): number {
+  const h = normalizeHex(hex) ?? "#000000"
+  const ch = [1, 3, 5].map((i) => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.4152 * ch[2]
+}
+
+const isLight = (hex?: string) => (hex ? luminance(hex) > 0.7 : false)
+
+function templateName(templates: CoverTemplate[], key: string): string {
+  return templates.find((t) => t.key === key)?.name || key || "Classic"
 }
 
 export interface DesignDialogProps {
@@ -72,10 +116,6 @@ export interface DesignDialogProps {
 export function DesignDialog({
   cycleId, open, onOpenChange, cover, onSaved,
 }: DesignDialogProps) {
-  // Which page the preview shows. Starts on the cover because that is what the
-  // layout picker directly above it changes; the page view is where the type
-  // controls become legible.
-  const [view, setView] = useState<"cover" | "page">("cover")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,6 +128,14 @@ export function DesignDialog({
   const [brand, setBrand] = useState<BrandColors>({})
   const [typography, setTypography] = useState<Typography>(
     LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY])
+  // Whether the hex panel is showing. Its own state rather than
+  // `palette_key === "custom"`, so opening the panel to look at the numbers
+  // does not itself mark the palette as custom.
+  const [customOpen, setCustomOpen] = useState(false)
+  // Raised when someone picks a different layout while their type is
+  // customised: the layout changes immediately, the type waits for an answer.
+  const [swapPrompt, setSwapPrompt] = useState<
+    { to: string; toDefaults: Typography } | null>(null)
 
   const visible = useMemo(
     () => templates.filter((t) => !HIDDEN_TEMPLATES.has(t.key)),
@@ -106,6 +154,7 @@ export function DesignDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
+    setSwapPrompt(null)
 
     Promise.all([
       annualDesignApi.get(cycleId),
@@ -131,9 +180,9 @@ export function DesignDialog({
         // used the company's real colours, so the modal and the document
         // disagreed and NEITHER was what the user had picked.
         const hasOwnBrand = Object.keys(current.brand ?? {}).length > 0
-        setBrand(hasOwnBrand
-          ? current.brand
-          : (current.company_default?.brand ?? {}))
+        const seeded = hasOwnBrand ? current.brand : (current.company_default?.brand ?? {})
+        setBrand(seeded)
+        setCustomOpen(seeded.palette_key === "custom")
         setTypography(current.typography
           ?? current.company_default?.typography
           ?? LAYOUT_TYPOGRAPHY[key]
@@ -147,12 +196,27 @@ export function DesignDialog({
     return () => { cancelled = true }
   }, [open, cycleId])
 
-  const pickLayout = (key: string) => {
-    setLayoutKey(key)
-    // Only follow the new layout's type if the user has not set their own —
-    // silently overwriting a deliberate choice is worse than a mismatch.
-    const untouched = JSON.stringify(typography) === JSON.stringify(recommended)
-    if (untouched && LAYOUT_TYPOGRAPHY[key]) setTypography(LAYOUT_TYPOGRAPHY[key])
+  const applyPalette = (p: ColorPalette) => {
+    setCustomOpen(false)
+    setBrand({ primary: p.primary, secondary: p.secondary, palette_key: p.key })
+  }
+
+  const setCustom = (patch: Partial<Pick<BrandColors, "primary" | "secondary">>) =>
+    setBrand((b) => ({ ...b, ...patch, palette_key: "custom" }))
+
+  const pickLayout = (nextKey: string) => {
+    if (nextKey === layoutKey) return
+    const nextDefaults = LAYOUT_TYPOGRAPHY[nextKey] ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY]
+    // Silent switch while the type still matches what this layout recommends;
+    // otherwise ask, because silently overwriting a deliberate choice is worse
+    // than a mismatch.
+    if (hasCustomTypography(typography, recommended)) {
+      setSwapPrompt({ to: templateName(visible, nextKey), toDefaults: nextDefaults })
+      setLayoutKey(nextKey)
+    } else {
+      setLayoutKey(nextKey)
+      setTypography(nextDefaults)
+    }
   }
 
   const apply = async () => {
@@ -177,238 +241,342 @@ export function DesignDialog({
   }
 
   const locked = design?.locked
+  const applyDisabled = saving || loading || !!locked || visible.length === 0
+  const accent = brand.primary || "#3C0866"
+  const layoutName = templateName(visible, layoutKey)
+
+  const coverNode = (
+    <CoverPreview
+      templateKey={layoutKey}
+      brand={brand}
+      typography={typography}
+      companyName={cover?.companyName}
+      title={cover?.title}
+      headline={cover?.headline}
+      periodLabel={cover?.periodLabel}
+      preparedOn={cover?.preparedOn}
+      footnote={cover?.footnote}
+      logoUrl={cover?.logoUrl}
+      coverImage={cover?.coverImage}
+      isArabic={cover?.isArabic}
+    />
+  )
+  const pageNode = (
+    <PagePreview
+      templateKey={layoutKey}
+      brand={brand}
+      typography={typography}
+      companyName={cover?.companyName}
+      periodLabel={cover?.periodLabel}
+      logoUrl={cover?.logoUrl}
+    />
+  )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="space-y-2 border-b bg-brand-muted px-6 py-5 text-left">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl
-                           bg-brand text-brand-foreground shadow-sm">
-            <Palette className="h-5 w-5" />
-          </span>
-          <DialogTitle className="text-brand-strong">Report design</DialogTitle>
-          <DialogDescription>
-            The cover, colours and type your report is published with.
-          </DialogDescription>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[rgba(20,22,40,0.45)] backdrop-blur-[2px]" />
+        {/* data-report-design opts this subtree out of the unlayered
+            `* { border-color }` reset in globals.css, which otherwise beats
+            every border-<colour> utility below. */}
+        <DialogPrimitive.Content
+          data-report-design
+          // The reference is a plain div with nothing focused on open, so Radix
+          // grabbing the close button would put a focus ring on the first frame
+          // that the other modal never shows.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          // focus:outline-none because Radix gives Content tabIndex -1 and the
+          // browser then rings the whole panel; the reference is an ordinary
+          // div and never shows one.
+          className={`fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100%-40px)] max-w-[1080px]
+                      -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden ${PANEL}
+                      bg-white shadow-2xl focus:outline-none`}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
+            <div>
+              <DialogPrimitive.Title className="text-[15px] font-extrabold text-[#0F172A]">
+                Report design
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description className="mt-0.5 text-[12px] text-[#64748B]">
+                Layout, colours and type. Changes preview live.
+              </DialogPrimitive.Description>
+            </div>
+            <DialogPrimitive.Close
+              aria-label="Close"
+              title="Close"
+              className={`flex h-8 w-8 cursor-pointer items-center justify-center ${TILE}
+                          border border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC]`}
+            >
+              <svg width="13" height="13" viewBox="0 0 12 12" fill="none">
+                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </DialogPrimitive.Close>
           </div>
-        ) : (
-          <div className="grid max-h-[70vh] gap-6 overflow-y-auto p-6
-                          lg:grid-cols-[minmax(0,1fr)_minmax(340px,44%)]">
-            <div className="space-y-6">
+
+          {/* Body — 2 panes on desktop, stacks under 1024px */}
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,40%)]">
+            {/* Left pane */}
+            <div className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
               {/* Layout */}
-              <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide
-                               text-muted-foreground">Cover</h3>
-                {/* Each option draws itself, through the same component that
-                    draws the big preview and from the same values — so what is
-                    picked, what is previewed and what is printed cannot drift.
-                    They were three text buttons: the user chose a LOOK from
-                    prose, then had to select each one in turn to see it, because
-                    the preview only shows one at a time. The thumbnails also
-                    carry the currently chosen brand colour, so switching palette
-                    re-tints all three at once. */}
-                <div className="grid grid-cols-3 gap-3">
-                  {visible.map((t) => (
-                    <button key={t.key} type="button" onClick={() => pickLayout(t.key)}
-                            aria-pressed={layoutKey === t.key}
-                            title={t.description || t.name}
-                            className={cn(
-                              "group relative rounded-lg border p-2 text-left transition-colors",
-                              layoutKey === t.key
-                                ? "border-brand ring-1 ring-brand bg-brand/5"
-                                : "border-border hover:bg-accent",
-                            )}>
-                      {layoutKey === t.key && (
-                        <Check className="absolute right-3 top-3 z-10 h-3.5 w-3.5
-                                          rounded-full bg-background text-brand" />
-                      )}
-                      <PreviewFrame>
-                        <CoverPreview
-                          templateKey={t.key}
-                          brand={brand}
-                          typography={typography}
-                          companyName={cover?.companyName}
-                          title={cover?.title}
-                          periodLabel={cover?.periodLabel}
-                          logoUrl={cover?.logoUrl}
-                          coverImage={null}
-                        />
-                      </PreviewFrame>
-                      <div className="mt-2 text-xs font-medium">{t.name}</div>
-                    </button>
-                  ))}
-                </div>
-                {visible.length === 0 && (
-                  <p className="rounded-md border border-dashed px-3 py-6 text-center
-                                text-xs text-muted-foreground">
-                    Couldn&apos;t load the cover designs. Close and reopen to try again —
-                    applying now would save the default look.
-                  </p>
+              <section aria-label="Layout">
+                <SectionHeader>Layout</SectionHeader>
+                {loading ? (
+                  <div className="py-2 text-[12px] text-[#94A3B8]">Loading…</div>
+                ) : visible.length === 0 ? (
+                  <div className="py-2 text-[12px] text-[#94A3B8]">No cover designs available.</div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    {visible.map((t) => {
+                      const active = t.key === layoutKey
+                      return (
+                        <button
+                          key={t.key}
+                          type="button"
+                          onClick={() => pickLayout(t.key)}
+                          aria-pressed={active}
+                          className={
+                            `cursor-pointer ${TILE} border-2 p-2 text-left transition-colors `
+                            + (active
+                              ? "border-[#6366F1] bg-[#EEF2FF]"
+                              : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
+                          }
+                        >
+                          <div className={`relative mb-2 overflow-hidden ${THUMB}`}>
+                            {t.preview_image_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={t.preview_image_url} alt={t.name}
+                                   className="block aspect-[1/1.3] w-full object-cover" />
+                            ) : (
+                              <MiniCover templateKey={t.key} accent={accent} />
+                            )}
+                            {active && (
+                              <span
+                                aria-hidden
+                                className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#6366F1] text-white"
+                              >
+                                <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                                  <path d="M2.5 6.2L5 8.7l4.5-5" stroke="#fff" strokeWidth="1.7"
+                                        strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </span>
+                            )}
+                          </div>
+                          <div className={"text-[12px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
+                            {t.name}
+                          </div>
+                          {t.description && (
+                            <div className="mt-0.5 text-[10.5px] leading-snug text-[#64748B]">
+                              {t.description}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
                 )}
               </section>
 
-              {/* Colour */}
-              <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide
-                               text-muted-foreground">Brand colour</h3>
-                <div className="flex flex-wrap gap-2">
-                  {palettes.map((p) => (
-                    <button key={p.key} type="button"
-                            onClick={() => setBrand({ primary: p.primary,
-                                                      secondary: p.secondary,
-                                                      palette_key: p.key })}
-                            className={cn(
-                              "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
-                              brand.palette_key === p.key
-                                ? "border-brand bg-brand/5"
-                                : "border-border hover:bg-accent",
-                            )}>
-                      <span className="flex h-4 w-4 overflow-hidden rounded-full">
-                        <span className="w-1/2" style={{ background: p.primary }} />
-                        <span className="w-1/2" style={{ background: p.secondary }} />
-                      </span>
-                      {p.name}
-                    </button>
-                  ))}
-                  <button type="button"
-                          onClick={() => setBrand({ ...brand, palette_key: "custom" })}
-                          className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs",
-                            brand.palette_key === "custom"
-                              ? "border-brand bg-brand/5"
-                              : "border-border hover:bg-accent",
-                          )}>
+              {/* Brand colour */}
+              <section aria-label="Brand colour">
+                <SectionHeader>Brand colour</SectionHeader>
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {palettes.map((p) => {
+                    const active = brand.palette_key === p.key && !customOpen
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => applyPalette(p)}
+                        aria-pressed={active}
+                        className={
+                          "inline-flex cursor-pointer items-center gap-2 rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition-colors "
+                          + (active
+                            ? "border-[#6366F1] bg-[#EEF2FF] text-[#3730A3]"
+                            : "border-[#E2E8F0] bg-white text-[#334155] hover:border-[#CBD5E1]")
+                        }
+                      >
+                        <span className="inline-flex">
+                          <span style={{ width: 14, height: 14, borderRadius: "50% 0 0 50%", background: p.primary }} />
+                          <span style={{ width: 14, height: 14, borderRadius: "0 50% 50% 0", background: p.secondary }} />
+                        </span>
+                        {p.name}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setCustomOpen(true)}
+                    aria-pressed={customOpen}
+                    className={
+                      "inline-flex cursor-pointer items-center rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition-colors "
+                      + (customOpen
+                        ? "border-[#6366F1] bg-[#EEF2FF] text-[#3730A3]"
+                        : "border-[#E2E8F0] bg-white text-[#334155] hover:border-[#CBD5E1]")
+                    }
+                  >
                     Custom
                   </button>
                 </div>
-
-                {brand.palette_key === "custom" && (
-                  <div className="flex flex-wrap gap-4">
-                    {(["primary", "secondary"] as const).map((slot) => (
-                      <label key={slot} className="flex items-center gap-2 text-xs">
-                        <span className="capitalize text-muted-foreground">{slot}</span>
-                        <input type="color" className="h-7 w-9 rounded border p-0.5"
-                               value={brand[slot] || "#3C0866"}
-                               onChange={(e) => setBrand({ ...brand, [slot]: e.target.value })} />
-                        <input type="text" className="h-7 w-24 rounded border px-2 font-mono"
-                               value={brand[slot] || ""}
-                               onChange={(e) => setBrand({
-                                 ...brand, [slot]: normaliseHex(e.target.value) })} />
-                      </label>
-                    ))}
+                {customOpen && (
+                  <div className={`flex flex-wrap gap-4 ${TILE} border border-[#E2E8F0] bg-[#F8FAFC] p-3`}>
+                    <HexField label="Primary" value={brand.primary}
+                              onChange={(v) => setCustom({ primary: v })} />
+                    <HexField label="Secondary" value={brand.secondary}
+                              onChange={(v) => setCustom({ secondary: v })} />
                   </div>
                 )}
-
-                {isPale(brand.primary) && (
-                  <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    This colour may be hard to read as an accent.
-                  </p>
+                {isLight(brand.primary) && (
+                  <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[#B45309]">
+                    <span aria-hidden>⚠</span>
+                    This colour may be hard to read as an accent — it&apos;ll be darkened for text on white.
+                  </div>
                 )}
               </section>
 
+              {/* Typography */}
+              {swapPrompt && (
+                <div
+                  role="alert"
+                  className={`flex flex-wrap items-center justify-between gap-2 ${TILE} border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#78350F]`}
+                >
+                  <span>Switch to {swapPrompt.to}&apos;s recommended type?</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSwapPrompt(null)}
+                      className={`cursor-pointer ${FIELD} border border-[#FCD34D] bg-white px-2 py-1 text-[11.5px] font-semibold text-[#78350F] hover:bg-[#FEF3C7]`}
+                    >
+                      Keep mine
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setTypography(swapPrompt.toDefaults); setSwapPrompt(null) }}
+                      className={`cursor-pointer ${FIELD} bg-[#78350F] px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-[#451A03]`}
+                    >
+                      Switch
+                    </button>
+                  </div>
+                </div>
+              )}
               <TypographyControls
                 value={typography}
                 onChange={setTypography}
                 recommended={recommended}
-                layoutName={visible.find((t) => t.key === layoutKey)?.name || "this layout"}
+                layoutName={layoutName}
               />
             </div>
 
-            {/* Live preview */}
-            <div className="lg:sticky lg:top-0 lg:self-start">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide
-                              text-muted-foreground">Preview</p>
-                {/* Two views because the cover alone cannot show the type
-                    settings: it never prints a subheading, a paragraph, a list
-                    or a table, so four of the nine controls changed nothing
-                    visible and read as broken. */}
-                <div className="flex rounded-md border p-0.5" role="tablist"
-                     aria-label="Preview page">
-                  {(["cover", "page"] as const).map((v) => (
-                    <button key={v} type="button" role="tab"
-                            aria-selected={view === v}
-                            onClick={() => setView(v)}
-                            className={cn(
-                              "rounded px-2.5 py-1 text-xs capitalize transition-colors",
-                              view === v
-                                ? "bg-brand text-brand-foreground"
-                                : "text-muted-foreground hover:bg-accent",
-                            )}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
+            {/* Right pane — preview */}
+            <div className="hidden overflow-y-auto border-l border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-5 lg:block">
+              <div className="mx-auto max-w-[380px]">
+                <PreviewFrame cover={coverNode} page={pageNode} />
               </div>
-
-              <PreviewFrame>
-                {view === "cover" ? (
-                  <CoverPreview
-                    templateKey={layoutKey}
-                    brand={brand}
-                    typography={typography}
-                    companyName={cover?.companyName}
-                    title={cover?.title}
-                    headline={cover?.headline}
-                    periodLabel={cover?.periodLabel}
-                    preparedOn={cover?.preparedOn}
-                    footnote={cover?.footnote}
-                    logoUrl={cover?.logoUrl}
-                    coverImage={cover?.coverImage}
-                    isArabic={cover?.isArabic}
-                  />
-                ) : (
-                  <PagePreview
-                    templateKey={layoutKey}
-                    brand={brand}
-                    typography={typography}
-                    companyName={cover?.companyName}
-                    periodLabel={cover?.periodLabel}
-                    logoUrl={cover?.logoUrl}
-                  />
-                )}
-              </PreviewFrame>
-
-              {view === "cover" && cover?.coverImage && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  An uploaded cover image is being used, so the layout above
-                  applies to the rest of the report rather than the front page.
-                </p>
-              )}
-              {view === "page" && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Sample text, real settings — this is how your headings, body
-                  copy and tables will be set.
-                </p>
-              )}
             </div>
-          </div>
-        )}
 
-        <div className="flex items-center justify-between gap-3 border-t px-6 py-4">
-          <p className="text-xs text-destructive">{error}</p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}
-                    disabled={saving}>
-              Cancel
-            </Button>
-            {/* Also disabled when the catalogue failed to load: the controls
-                would have fallen back to their initialisers, so applying would
-                silently replace whatever design the report actually had with
-                the defaults. */}
-            <Button size="sm" variant="brand" onClick={apply}
-                    disabled={saving || loading || locked || templates.length === 0}>
-              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}
-            </Button>
+            {/* Compact preview at the foot on smaller widths — collapsible */}
+            <MobilePreview cover={coverNode} page={pageNode} />
           </div>
+
+          {error && (
+            <div className="border-t border-[#FEE2E2] bg-[#FEF2F2] px-6 py-2 text-[12px] text-[#B91C1C]">
+              {error}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-2 border-t border-[#F1F5F9] px-6 py-3">
+            <button type="button" className="btn bs" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn bp"
+              disabled={applyDisabled}
+              onClick={apply}
+              style={{ opacity: applyDisabled ? 0.6 : 1 }}
+            >
+              {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}
+            </button>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  )
+}
+
+// ── Sub-parts ────────────────────────────────────────────────────────
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-[#64748B]">
+      {children}
+    </div>
+  )
+}
+
+function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="border-t border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-3 lg:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 cursor-pointer text-[12px] font-semibold text-[#4F46E5] hover:underline"
+      >
+        {open ? "Hide preview" : "Show preview"}
+      </button>
+      {open && (
+        <div className="mx-auto max-w-[360px]">
+          <PreviewFrame cover={cover} page={page} />
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+    </div>
+  )
+}
+
+function HexField({ label, value, onChange }: {
+  label: string
+  value?: string
+  onChange: (v: string) => void
+}) {
+  // The field keeps its own text so a half-typed hex is not rewritten under the
+  // cursor, but it has to follow `value` when the colour changes from outside
+  // (the swatch, or a preset). Adjusted during render rather than in an effect
+  // — the reference uses useEffect, which this repo's lint rejects, and the
+  // render-time form is React's own answer for resetting state on a prop change.
+  const [text, setText] = useState(value ?? "")
+  const [lastValue, setLastValue] = useState(value)
+  if (value !== lastValue) {
+    setLastValue(value)
+    setText(value ?? "")
+  }
+  return (
+    <div className="max-w-[220px]">
+      <div className="mb-1 text-[11px] font-bold text-[#475569]">{label}</div>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          // The preview falls back to #3C0866 when no colour is set, so the
+          // swatch has to claim the colour that is actually being drawn.
+          value={normalizeHex(value ?? "") ?? "#3c0866"}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-9 w-10 cursor-pointer ${FIELD} border border-[#E2E8F0] bg-white p-0`}
+          aria-label={`${label} color`}
+        />
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value)
+            const hex = normalizeHex(e.target.value)
+            if (hex) onChange(hex)
+          }}
+          placeholder="#4040C8"
+          className={`w-[110px] ${FIELD} border border-[#E2E8F0] bg-white px-2 py-2 text-[13px] text-[#1E293B] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#A5B4FC]`}
+          style={{ fontFamily: "var(--font-dm-mono), monospace" }}
+        />
+      </div>
+    </div>
   )
 }
