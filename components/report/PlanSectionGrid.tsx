@@ -25,6 +25,7 @@ import {
   useRemoveOptional,
   useReorderSections,
   useSetSourceMode,
+  useIsSettingFeeders,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -321,6 +322,8 @@ function SourcesFeederArea({
   readOnly?: boolean
 }) {
   const setSourceMode = useSetSourceMode(cycleId)
+  const saving =
+    useIsSettingFeeders(cycleId, section.section_code) || setSourceMode.isPending
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
@@ -373,22 +376,51 @@ function SourcesFeederArea({
     )
   }
 
+  // Nothing left to choose: extract has no departments, and a section AI may
+  // never draft has no source-mode toggle either. Show the chips alone rather
+  // than a trigger that opens an empty menu.
+  if (isExtract && !section.ai_allowed) {
+    return (
+      <div className="text-xs">
+        <span className="flex flex-wrap items-center gap-1">{docChip}</span>
+      </div>
+    )
+  }
+
   return (
     <FeederPicker
       cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
+      // An AI-written section keeps its departments live even in extract mode:
+      // the two sources are a reversible choice, and clicking a department flips
+      // the section back to generate (the picker sequences that). Only a section
+      // AI may never draft is document-only, and it has no unticked state.
+      departmentsApply={!isExtract || section.ai_allowed}
       selected={feederCodes}
       // Analyze sections: departments only — no source-mode switcher.
       // Generate sections: show "Upload document later" to switch to extract.
       // Extract sections: "Upload document later" is checked (toggle back to generate).
+      // The toggle is binary: ticked means extract, unticked means generate. A
+      // section AI may never draft has no valid unticked state, so offering it
+      // let a PM set mode='generate' on one the backend will always refuse to
+      // generate — the plan card then read the mode and said "AI-written" while
+      // the builder read ai_allowed and showed an upload box. It was one-way
+      // too: once flipped the section rendered as manual and the toggle
+      // vanished, so it could not be flipped back.
+      //
+      // Department feeders and the analyze toggle stay available — analyze is
+      // the standing configuration for several ai_allowed=false sections.
       documentOption={
-        isAnalyze
+        isAnalyze || !section.ai_allowed
           ? undefined
           : {
               checked: isExtract,
+              pending: setSourceMode.isPending,
+              // mutateAsync + return: the picker awaits this before writing
+              // feeders, since the switch clears them server-side.
               onChange: (next) =>
-                setSourceMode.mutate({
+                setSourceMode.mutateAsync({
                   sectionCode: section.section_code,
                   mode: next ? "extract" : "generate",
                 }),
@@ -398,7 +430,8 @@ function SourcesFeederArea({
       <button
         type="button"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors text-left",
+          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
+          saving && "opacity-50",
           showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",

@@ -24,6 +24,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   useRemoveOptional,
   useReorderSections,
+  useIsSettingFeeders,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -196,6 +197,8 @@ function FeederArea({
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
 }) {
+  const saving = useIsSettingFeeders(cycleId, section.section_code)
+
   if (section.mode === "attach") {
     return (
       <p className="text-xs text-muted-foreground italic">Uploaded separately</p>
@@ -224,7 +227,8 @@ function FeederArea({
       <button
         type="button"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors text-left",
+          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
+          saving && "opacity-50",
           isEmpty
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",
