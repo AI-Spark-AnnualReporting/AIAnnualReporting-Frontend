@@ -36,10 +36,12 @@ import {
   FileText, Loader2, LayoutGrid, Send, ArrowUpRight, Copy, Wand2,
   RotateCcw, PanelLeftOpen,
   PanelLeftClose, List, Ban, Info, Save, Download, FileUp, ListTree,
+  Search, X,
 } from "lucide-react"
 import { ExtractionLoader, type ExtractionResult } from "@/components/department/extraction-loader"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { QuestionTag, QuestionText } from "@/components/ui/question-text"
+import { SegmentedFilter } from "@/components/ui/segmented-filter"
 import { splitQuestion } from "@/lib/questionText"
 import { dirOf } from "@/lib/lang"
 import Link from "next/link"
@@ -70,6 +72,8 @@ const SESSION_PILL: Record<string, { label: string; dot: string; text: string; b
   approved:    { label: "Approved",      dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50" },
   reopened:    { label: "Needs Changes", dot: "bg-red-500",     text: "text-red-700",     bg: "bg-red-50" },
 }
+
+type StatusFilter = "all" | "answered" | "unanswered" | "na"
 
 function SessionStatusPill({ status, deptCode }: { status: string; deptCode?: string }) {
   const s = SESSION_PILL[status] ?? SESSION_PILL.not_started
@@ -121,6 +125,10 @@ export default function SessionWorkspacePage({
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [viewMode, setViewMode] = useState<"focused" | "overview">("focused")
+  // Overview-grid filters. Local, not URL state — this is a view preference
+  // on a screen you arrive at from one place, not something worth sharing.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [query, setQuery] = useState("")
   // Track whether the main nav sidebar is hidden (for the toggle button icon)
   const [navHidden, setNavHidden] = useState(() =>
     typeof window !== "undefined" && localStorage.getItem("sidebar-mode") === "hidden"
@@ -471,6 +479,36 @@ export default function SessionWorkspacePage({
 
   // ── OVERVIEW mode ─────────────────────────────────────────────────────────────
   if (viewMode === "overview") {
+    // The same three expressions the cards themselves use, so the rail can never
+    // disagree with the card sitting under it.
+    const statusOf = (id: string): Exclude<StatusFilter, "all"> =>
+      naQuestions.has(id) ? "na" : answers[id]?.trim() ? "answered" : "unanswered"
+
+    // Counted on the UNFILTERED list so the numbers hold still while you click.
+    const counts = questions.reduce(
+      (acc, q) => { acc[statusOf(q.question_id)] += 1; return acc },
+      { answered: 0, unanswered: 0, na: 0 },
+    )
+
+    const needle = query.trim().toLowerCase()
+    // Pair each question with its ORIGINAL index before filtering: idx is both
+    // the number printed on the card and the argument switchToQuestion uses to
+    // decide which question opens. Re-indexing a filtered list opens the wrong one.
+    const visible = questions
+      .map((q: Question, idx: number) => ({ q, idx }))
+      .filter(({ q }) => {
+        if (statusFilter !== "all" && statusOf(q.question_id) !== statusFilter) return false
+        if (!needle) return true
+        // q.question still carries its "Topic — " prefix, so topics are searchable too.
+        return (
+          q.question.toLowerCase().includes(needle) ||
+          (answers[q.question_id] ?? "").toLowerCase().includes(needle)
+        )
+      })
+
+    const isFiltering = statusFilter !== "all" || needle.length > 0
+    const clearFilters = () => { setStatusFilter("all"); setQuery("") }
+
     return (
       <div className="-m-8 flex h-[calc(100vh-72px)] flex-col bg-[#f5f6fc]">
         {/* Header */}
@@ -505,10 +543,75 @@ export default function SessionWorkspacePage({
           )}
         </div>
 
+        {/* Filter rail + search */}
+        {questions.length > 0 && (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-8 py-3">
+            <SegmentedFilter
+              aria-label="Filter questions by status"
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as StatusFilter)}
+              options={[
+                { value: "all", label: "All", count: questions.length },
+                // Each pill takes the colour this state already wears on the cards.
+                { value: "answered", label: "Answered", count: counts.answered, accent: "bg-emerald-500" },
+                { value: "unanswered", label: "Not answered", count: counts.unanswered, accent: "bg-slate-600" },
+                { value: "na", label: "Not applicable", count: counts.na, accent: "bg-amber-500" },
+              ]}
+            />
+            <div className="relative min-w-0 flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search questions and answers"
+                aria-label="Search questions and answers"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Grid */}
         <div className="flex-1 overflow-y-auto px-8 py-6">
+          {isFiltering && (
+            <p className="mb-4 text-sm text-slate-500">
+              Showing <span className="font-semibold text-slate-900 tabular-nums">{visible.length}</span> of{" "}
+              <span className="tabular-nums">{questions.length}</span>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="ml-2 font-semibold text-indigo-600 transition-colors hover:text-indigo-700"
+              >
+                Clear
+              </button>
+            </p>
+          )}
+          {/* Guarded on questions.length so a session with no questions at all keeps
+              its old blank grid instead of claiming a filter hid something. */}
+          {visible.length === 0 && questions.length > 0 ? (
+            <EmptyState
+              icon={Search}
+              title="No questions match"
+              description="Try a different status, or clear the search."
+              action={
+                <Button variant="outline" className="rounded-xl" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {questions.map((q: Question, idx: number) => {
+            {visible.map(({ q, idx }) => {
               const isNa = naQuestions.has(q.question_id)
               // "Answered" means a real answer — N/A is shown distinctly.
               const answered = !isNa && !!answers[q.question_id]?.trim()
@@ -554,6 +657,7 @@ export default function SessionWorkspacePage({
               )
             })}
           </div>
+          )}
         </div>
       </div>
     )
