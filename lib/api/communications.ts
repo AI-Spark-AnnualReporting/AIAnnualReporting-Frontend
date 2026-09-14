@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
+import { getActingCompany } from "@/lib/actingCompany"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -7,8 +8,10 @@ import { centriyonLoginUrl } from "@/lib/centriyon"
  * These endpoints live on the CENTRION backend (a different host than the
  * Annual Report backend that `apiClient` talks to), so this module uses its own
  * axios instance pointed at NEXT_PUBLIC_CENTRION_API_URL. It reuses the same
- * Centriyon-issued JWT from localStorage. company_id is never sent — the
- * backend derives it from the token.
+ * Centriyon-issued JWT from localStorage. For most users company_id is derived
+ * from the token, but Spark staff carry no company of their own — same as
+ * `apiClient`, this attaches X-Company-Id from the acting company set on
+ * login so those sessions resolve too. See lib/actingCompany.ts.
  *
  * Set NEXT_PUBLIC_CENTRION_API_URL to the Centrion backend base (including the
  * `/api/v1` suffix). Dev default: http://localhost:8000/api/v1
@@ -24,12 +27,18 @@ export const commClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
-// Attach the Centriyon-issued JWT (same token the rest of the app uses).
+// Attach the Centriyon-issued JWT (same token the rest of the app uses) and,
+// for Spark staff, the company they are acting on — absent for everyone else,
+// so no other user's requests change.
 commClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("access_token")
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    const company = getActingCompany()
+    if (company && config.headers) {
+      config.headers["X-Company-Id"] = company
     }
   }
   return config
