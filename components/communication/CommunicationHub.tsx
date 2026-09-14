@@ -32,7 +32,7 @@ import {
 } from "@/lib/api/communications"
 import { ReviewThreadModal } from "@/components/communication/review/ReviewThreadModal"
 import { ReviewerView } from "@/components/communication/review/ReviewerView"
-import { statusPill, isInReview } from "@/lib/report-status"
+import { statusPill, isInReview, isClosed } from "@/lib/report-status"
 import { hasSomethingToReview } from "@/lib/reportRoutes"
 import { MemberPicker, detailMessage } from "@/components/communication/review/shared"
 import {
@@ -491,13 +491,20 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
+        {/* Out for review now, OR sent back and the comments still need reading —
+            without the second case the author had no way in from the list.
+            Gone once the report is signed off: there is nothing left to do and
+            nothing left to act on. The record stays reachable through the
+            thread's own "View report". */}
+        {(inReview || thread.has_review) && !isClosed(report?.status) && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             style={{ ...BTN_PRIMARY, gap: 7, padding: "7px 13px" }}
             onClick={() => onReview(thread)}
           >
-            Open review
+            {/* Between rounds there is no review to conduct — the author is
+                here to read what came back, not to act on it. */}
+            {inReview ? "Open review" : "View comments"}
             {ICON_OPEN_REVIEW}
           </button>
         )}

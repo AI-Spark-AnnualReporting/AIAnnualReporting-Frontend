@@ -402,8 +402,8 @@ export function ReviewThreadModal({
   // screen, and ESG keeps no sections to render there at all.
   const moduleToken = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
   const isEsg = report?.generation?.target.kind === "esg_page"
-  // Same gate the card applies: an annual report offers nothing until it has
-  // been approved.
+  // Same gate the card applies: an annual report offers nothing until at least
+  // one of its sections has been written.
   const offerable = hasSomethingToReview(report?.generation, report?.status)
   const reportHref =
     offerable && report?.generation && opensModulePage(report.generation)

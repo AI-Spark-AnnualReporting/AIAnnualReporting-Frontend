@@ -41,7 +41,26 @@ const ICON_LOCK = (
   </svg>
 )
 
-export function ReportHubPanel({ reportId }: { reportId: string }) {
+export function ReportHubPanel({
+  reportId,
+  showStatus = true,
+  readOnly = false,
+  onChanged,
+}: {
+  reportId: string
+  // Hide the Draft/In-review/Approved status radio group. The annual report's
+  // rail shows the plain <ReportStatusCard> above this panel instead.
+  showStatus?: boolean
+  // Hide the "Share again"/"Share for review" action — once a report is
+  // approved & locked there is nothing left to re-share for review. "Discuss"
+  // (viewing the existing thread) still renders, since past discussion stays
+  // relevant after approval.
+  readOnly?: boolean
+  // Fired whenever the panel re-reads the hub after an action — status change,
+  // share, reviewer approve or send-back. The host page uses it to refresh its
+  // own lock state, which lives on the same `reports` row.
+  onChanged?: () => void
+}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [hub, setHub] = useState<ReportHubResponse | null>(null)
@@ -58,13 +77,14 @@ export function ReportHubPanel({ reportId }: { reportId: string }) {
       const res = await communicationsApi.reportHub(reportId)
       setHub(res)
       setError(null)
+      onChanged?.()
     } catch (e) {
       if (statusOf(e) === 401) return
       setError(detailMessage(e, "Could not load the review panel."))
     } finally {
       setLoading(false)
     }
-  }, [reportId])
+  }, [reportId, onChanged])
 
   useEffect(() => {
     setLoading(true)
@@ -118,6 +138,7 @@ export function ReportHubPanel({ reportId }: { reportId: string }) {
         {label}
 
         {/* Status radio group — built from the API, never hardcoded. */}
+        {showStatus && (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           {statuses.map((s) => {
             const selected = s.code === report.status
@@ -165,8 +186,9 @@ export function ReportHubPanel({ reportId }: { reportId: string }) {
             )
           })}
         </div>
+        )}
 
-        {!can_set_status && (
+        {showStatus && !can_set_status && (
           <div style={{ fontSize: 11.5, color: "#8890AE", marginTop: 8 }}>
             {report.status_label} — this report is read-only.
           </div>
@@ -199,9 +221,11 @@ export function ReportHubPanel({ reportId }: { reportId: string }) {
 
         {/* Actions */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-          <button type="button" style={{ ...BTN_PRIMARY, width: "100%" }} onClick={() => setShowShare(true)}>
-            {thread_id ? "Share again" : "Share for review"}
-          </button>
+          {!readOnly && (
+            <button type="button" style={{ ...BTN_PRIMARY, width: "100%" }} onClick={() => setShowShare(true)}>
+              {thread_id ? "Share again" : "Share for review"}
+            </button>
+          )}
 
           {thread_id && (
             <button
@@ -242,6 +266,7 @@ export function ReportHubPanel({ reportId }: { reportId: string }) {
         <ShareReportModal
           reportId={reportId}
           report={report}
+          ownerUserId={owner?.user_id}
           onClose={() => setShowShare(false)}
           onShared={(payload) => {
             // Share returns the full thread payload — open it straight away.

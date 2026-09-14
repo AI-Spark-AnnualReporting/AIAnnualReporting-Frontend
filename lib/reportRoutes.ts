@@ -80,25 +80,52 @@ export function generationHref(
 
     Until a report is approved there is nothing settled to read in the review
     screen — the module's preview page is where the work actually shows. ESG
-    always goes to its own page: it keeps no sections to render here at all. */
+    always goes to its own page: it keeps no sections to render here at all.
+
+    Annual never leaves. The Hub renders a cycle's sections itself (see
+    reviewAnnualSections), and the cycle page is PM/admin-only in this app — a
+    reviewer sent there is bounced straight back to their dashboard, which is
+    exactly what "shared it, they can't open it" looked like. When an annual
+    report is not readable here at all, hasSomethingToReview has already made
+    the card inert and no href is asked for. */
 export function opensModulePage(generation: Generation): boolean {
+  if (generation.target.kind === "annual_cycle") return false
   return generation.state !== "ready" || generation.target.kind === "esg_page"
 }
 
 /** Whether this thread's controls should offer the report at all.
 
-    Annual is the exception, and the only lane that reports a section count to
-    recognise: it is written in the reporting-cycles system, and until it has
-    been approved there is nothing here worth opening — a cycle mid-draft is not
-    a report to read, and the review screen would be empty headings.
+    The question is "has anything been written yet", not "is it approved". A
+    cycle mid-draft is not a report to read, and the review screen would be
+    empty headings — that is the case worth hiding.
 
-    Every other type is always offerable: they report no count, and approval is
-    their readiness gate, so "not approved" there is the normal state of a
-    report that is out for review right now. */
+    Annual is the only lane that reports a section count, so it is the only one
+    this can answer false for. It used to be gated on approval alone, from when
+    annual reports were never reviewed here. Now they are: sharing one for
+    review is precisely what puts it in front of a reader, and gating on
+    approval hid the report from the very reviewer it had just been sent to.
+
+    So the test is simply whether any section has been written: `done > 0`. A
+    cycle with nothing written reports 0 and stays inert, which is the case the
+    old rule was really guarding.
+
+    Neither of the obvious alternatives works here:
+      - `state === "ready"` — `auto` sections (the cover, the contents page)
+        cannot be locked by design, yet they count toward the cycle's total, so
+        a fully assembled report still reads as e.g. 9/11 and only reaches
+        "ready" by being approved.
+      - `isClosed(status)` — the old rule. Sharing for review sets the status to
+        in_review, and a send-back sets it back to draft, so this hid the report
+        from the reviewer it had just been sent to, and then hid the reviewer's
+        own comments from the author it was sent back to.
+
+    Every other type reports no count and is always offerable: approval is their
+    readiness gate, so "not approved" there is the normal state of a report that
+    is out for review right now. */
 export function hasSomethingToReview(
   generation?: Generation | null,
   status?: string | null,
 ): boolean {
   if (!generation || generation.done == null) return true
-  return isClosed(status)
+  return generation.done > 0 || isClosed(status)
 }
