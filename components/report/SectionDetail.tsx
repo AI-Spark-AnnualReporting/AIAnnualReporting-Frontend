@@ -223,8 +223,18 @@ function AutoSection({
 
 // Read-only view shown for every section once the report has been assembled.
 // Auto sections are excluded — they have no user content and are already
-// handled by AutoSection's own read-only UI.
-function AssembledView({ section, isRtl }: { section: CycleReportSection; isRtl?: boolean }) {
+// handled by AutoSection's own read-only UI. Once the report is APPROVED this
+// covers every section including the cover, and the wording changes: assembly
+// is undoable, sign-off is not.
+function AssembledView({
+  section,
+  isRtl,
+  reportLocked = false,
+}: {
+  section: CycleReportSection
+  isRtl?: boolean
+  reportLocked?: boolean
+}) {
   const content = section.content ?? ""
   const attachment = section.attachment
 
@@ -236,7 +246,9 @@ function AssembledView({ section, isRtl }: { section: CycleReportSection; isRtl?
           <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
             <FileCheck className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes.
+              {reportLocked
+                ? "This report is approved and locked — it can no longer be edited."
+                : "The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes."}
             </span>
           </div>
 
@@ -273,12 +285,16 @@ export function SectionDetail({
   section,
   cycleId,
   assembled = false,
+  reportLocked = false,
   contentLanguage = "english",
   isRtl = false,
 }: {
   section: CycleReportSection | null
   cycleId: string
   assembled?: boolean
+  // The report has been signed off. Every write path 409s, so nothing is
+  // editable — not even the cover, which survives a plain assemble.
+  reportLocked?: boolean
   contentLanguage?: ContentLanguage
   isRtl?: boolean
 }) {
@@ -292,6 +308,12 @@ export function SectionDetail({
         />
       </div>
     )
+  }
+
+  // Approved and locked → everything is read-only, the cover included. Checked
+  // before the cover branch, which is otherwise still interactive after assembly.
+  if (reportLocked) {
+    return <AssembledView section={section} isRtl={isRtl} reportLocked />
   }
 
   // The cover is special: an auto section that accepts an OPTIONAL cover image

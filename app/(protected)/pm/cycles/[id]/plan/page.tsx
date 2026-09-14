@@ -750,12 +750,17 @@ function countSectionsNeedingFeeders(
   // all still needs a source, so counting only feeder rows would miss it.
   const feederByCode = new Map((feeders ?? []).map((f) => [f.section_code, f]))
   return sections.filter((s) => {
-    // Manual sections (`ai_allowed = false`) are written by the PM directly.
-    if (!s.ai_allowed) return false
     const entry = feederByCode.get(s.section_code)
     // The feeder map's mode is authoritative (a mode switch lands there first).
     // Generate and analyze sections require department feeders; extract is
-    // sourced by its document.
+    // sourced by its document, and manual/attach/auto by the PM — the mode test
+    // below covers all of those.
+    //
+    // Deliberately NOT gated on ai_allowed. That was here to skip manual
+    // sections, but it also skipped analyze sections flagged ai_allowed=false —
+    // financial_highlights and five_year_summary are exactly that, and they do
+    // read department digests. Their cards said "Needs a source" while this
+    // counter returned 0, so Continue stayed enabled on an unsourced plan.
     const mode = entry?.mode ?? s.mode
     if (mode !== "generate" && mode !== "analyze") return false
     return (entry?.departments.length ?? 0) === 0

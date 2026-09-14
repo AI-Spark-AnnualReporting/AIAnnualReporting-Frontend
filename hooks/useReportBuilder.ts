@@ -1,5 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { toast } from "sonner"
+
+import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import type {
@@ -7,6 +14,7 @@ import type {
   CycleReportSection,
   FinalReport,
   PlanResponse,
+  ReportApproval,
   ReportTheme,
   SectionMode,
 } from "@/types"
@@ -298,6 +306,28 @@ export function useFinalReport(cycleId: string) {
   })
 }
 
+/**
+ * The document as the export engine will print it — the same payload the
+ * download is built from.
+ *
+ * Read by the report page so the cover on screen is the cover in the file. It
+ * used to draw its own generic front page, so a PM could pick a navy Bold cover,
+ * close the dialog, and see nothing change — while an external reviewer looking
+ * at the same report saw the designed one.
+ *
+ * 422 means "not assembled yet", which the page already handles through the
+ * final-report query; no retry, so that state settles immediately.
+ */
+export function useAssembledReport(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId),
+    queryFn: () => annualDesignApi.assembled(cycleId),
+    enabled: !!cycleId && enabled,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
 export function useAssembleReport(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -306,10 +336,46 @@ export function useAssembleReport(cycleId: string) {
     onSuccess: (report) => {
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
       toast.success("Report assembled")
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to assemble report")),
+  })
+}
+
+// ───── Approve & lock ────────────────────────────────────────────────
+
+// Sign-off state of the cycle's report. Also the source of `report_id`, which
+// the Communication Hub rail needs. Refetched on window focus so a reviewer
+// approving in the Hub shows up here without a manual reload.
+export function useReportApproval(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
+    queryFn: () => pmApi.getApproval(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+}
+
+// One-way. Everything the report page and the builder gate on has to re-read.
+export function useApproveReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.approveReport(cycleId),
+    onSuccess: (approval) => {
+      qc.setQueryData<ReportApproval>(
+        QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
+        approval,
+      )
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+      toast.success("Report approved and locked")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to approve the report")),
   })
 }
 
@@ -319,8 +385,12 @@ export function useAssembleReport(cycleId: string) {
 // meaningful.
 export function useRenderReport(cycleId: string) {
   return useMutation({
+    // Typeset by the shared export engine on the Centriyon side, not by this
+    // app's own renderer — that is where the engine lives, and it is the only
+    // way the cover, colours and type chosen in the design controls reach the
+    // file. The document that comes back is the one the preview showed.
     mutationFn: ({ format }: { format: "docx" | "pdf" }) =>
-      pmApi.renderReport(cycleId, format),
+      downloadAnnualReport(cycleId, format),
     onSuccess: ({ blob, filename }) => {
       const url = URL.createObjectURL(blob)
       const a = window.document.createElement("a")
@@ -331,7 +401,7 @@ export function useRenderReport(cycleId: string) {
       window.document.body.removeChild(a)
       // Revoke on the next tick so the browser has time to start the download.
       setTimeout(() => URL.revokeObjectURL(url), 0)
-      toast.success("Document downloaded")
+      toast.success("Document exported")
     },
     onError: (err: Error) =>
       toast.error(err?.message || "Couldn't generate the document"),
@@ -458,14 +528,13 @@ export function useSetSourceMode(cycleId: string) {
       mode: SectionMode
     }) => pmApi.setSourceMode(cycleId, sectionCode, mode),
     onSuccess: (section) => {
-      // Patch sections cache immediately.
-      qc.setQueryData<CycleReportSection[]>(
-        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
-        (old) =>
-          old?.map((s) =>
-            s.section_code === section.section_code ? section : s,
-          ) ?? old,
-      )
+      // Patch sections cache immediately. MERGE via the shared helper — the
+      // endpoint answers with a SectionView, which carries no `layer`,
+      // `ai_allowed`, `content_source` or `display_order`. Replacing the row
+      // blanked those: the layer badge vanished and, worse, `ai_allowed`
+      // undefined made the extract card drop its source picker, so
+      // "Upload document later" could never be switched back.
+      patchSectionInList(qc, cycleId, section)
       // Also patch the feeder map entry's mode so the badge reflects the new
       // mode instantly — the tile uses entry?.mode ?? s.mode, so a stale feeder
       // entry would show the old badge until the plan refetch completes.
@@ -502,9 +571,26 @@ export function useSetSourceMode(cycleId: string) {
   })
 }
 
+const SET_FEEDERS_KEY = (cycleId: string) => ["setFeeders", cycleId] as const
+
+// True while THIS section's feeder write is in flight, so the card can dim its
+// source badge. Keyed off the mutation's own variables — cheaper than threading
+// pending state down from the picker that owns the mutation.
+export function useIsSettingFeeders(cycleId: string, sectionCode: string) {
+  return (
+    useIsMutating({
+      mutationKey: SET_FEEDERS_KEY(cycleId),
+      predicate: (m) =>
+        (m.state.variables as { sectionCode?: string } | undefined)
+          ?.sectionCode === sectionCode,
+    }) > 0
+  )
+}
+
 export function useSetFeeders(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
+    mutationKey: SET_FEEDERS_KEY(cycleId),
     mutationFn: ({
       sectionCode,
       departmentCodes,

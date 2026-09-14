@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { Loader2 } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -28,15 +29,24 @@ interface FeederPickerProps {
   // checked, departments are disabled (extract is document-sourced, not dept-sourced).
   documentOption?: {
     checked: boolean
-    onChange: (next: boolean) => void
+    // May return a promise — the picker awaits it before writing feeders, so a
+    // department click can flip the section out of extract mode first.
+    onChange: (next: boolean) => void | Promise<unknown>
     label?: string
+    // True while the mode switch is in flight (either direction).
+    pending?: boolean
   }
+  // Whether department feeders mean anything for this section. False on extract:
+  // it reads its uploaded document and nothing else — only the analyze path ever
+  // consumes department digests. Stated explicitly rather than inferred from the
+  // document toggle, which is absent on sections AI may never draft and so read
+  // as "departments apply" for exactly the sections where they don't.
+  departmentsApply?: boolean
 }
 
 // Popover (via DropdownMenu) for selecting which departments feed a section, plus
-// an optional document-source toggle. Department selection batches during the
-// menu's lifetime and commits on close; the document toggle switches mode
-// immediately via its own endpoint.
+// an optional document-source toggle. Both commit immediately on click — the
+// document toggle via its own endpoint, departments via setFeeders.
 export function FeederPicker({
   cycleId,
   sectionCode,
@@ -44,6 +54,7 @@ export function FeederPicker({
   selected,
   children,
   documentOption,
+  departmentsApply = true,
 }: FeederPickerProps) {
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState<Set<string>>(new Set(selected))
@@ -60,37 +71,37 @@ export function FeederPicker({
 
   const docChecked = documentOption?.checked ?? false
 
-  const toggle = (code: string, next: boolean) => {
-    setLocal((prev) => {
-      const updated = new Set(prev)
-      if (next) updated.add(code)
-      else updated.delete(code)
-      return updated
-    })
-  }
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    setOpen(nextOpen)
-    // Commit department changes on close. (Mode is handled live by the document
-    // toggle, not here.) Skip while in extract mode — it has no departments.
-    if (!nextOpen && !docChecked) {
-      const current = [...local].sort()
-      const previous = [...selected].sort()
-      const changed =
-        current.length !== previous.length ||
-        current.some((c, i) => c !== previous[i])
-      if (changed) {
-        setFeeders.mutate({ sectionCode, departmentCodes: current })
+  // Commit on each click, not on close — the card's pill/badge is driven by the
+  // mutation's optimistic cache update, so batching made the card look frozen
+  // until the popover was dismissed.
+  const toggle = async (code: string, next: boolean) => {
+    const updated = new Set(local)
+    if (next) updated.add(code)
+    else updated.delete(code)
+    setLocal(updated)
+    if (!departmentsApply) return
+    // Picking a department on a document-sourced section means "use departments
+    // instead". Switch the mode back FIRST and wait for it: the server refuses
+    // feeders on an extract section, and the switch itself clears them — so a
+    // parallel write would be wiped by the very mutation that enables it.
+    if (docChecked && documentOption) {
+      try {
+        await documentOption.onChange(false)
+      } catch {
+        setLocal(new Set(selected)) // switch failed (it toasts) — undo the tick
+        return
       }
     }
+    setFeeders.mutate({ sectionCode, departmentCodes: [...updated] })
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[240px]">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
           Departments feeding this section
+          {setFeeders.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {departments.length === 0 ? (
@@ -102,9 +113,8 @@ export function FeederPicker({
             <DropdownMenuCheckboxItem
               key={d.department_code}
               checked={local.has(d.department_code)}
-              // Extract mode is document-based — departments don't apply.
               // Analyze mode uses department feeders, so don't disable them.
-              disabled={docChecked}
+              disabled={!departmentsApply}
               onCheckedChange={(checked) => toggle(d.department_code, !!checked)}
               onSelect={(e) => e.preventDefault()} // keep the menu open on click
             >
@@ -112,12 +122,14 @@ export function FeederPicker({
             </DropdownMenuCheckboxItem>
           ))
         )}
-
         {documentOption && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
               Source mode
+              {documentOption.pending && (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              )}
             </DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={docChecked}
