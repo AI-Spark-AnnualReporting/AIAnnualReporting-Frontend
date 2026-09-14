@@ -360,11 +360,24 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
     return [{ user_id: me.user_id, full_name: me.full_name, title: "Answer these questions yourself" }, ...others]
   }, [users, me])
 
-  const self = !!me && userId === me.user_id
+  // A Spark-internal tester hits this modal against a one-person department on
+  // every pass, where the only option opens unselected and Send is disabled — so
+  // the first click is always a no-op. Assume it for them, and only then: with two
+  // or more candidates nothing is assumed, so questions can never be assigned to
+  // the wrong person by default. Derived rather than stored, so when the user list
+  // finishes loading and others appear, this simply stops applying — and so it
+  // never fires while `users` is still undefined and `choices` is briefly [me].
+  const soleChoice =
+    !isLoading && me?.role === "spark_internal" && choices.length === 1
+      ? choices[0].user_id
+      : null
+  const effectiveUserId = userId ?? soleChoice
+
+  const self = !!me && effectiveUserId === me.user_id
 
   const send = () => {
-    if (!userId) return
-    assign.mutate({ user_id: userId, note: note.trim() || undefined }, { onSuccess: () => onAssigned(self) })
+    if (!effectiveUserId) return
+    assign.mutate({ user_id: effectiveUserId, note: note.trim() || undefined }, { onSuccess: () => onAssigned(self) })
   }
 
   return (
@@ -386,7 +399,7 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
             <p className="rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-700">No department users in your department yet. Ask an admin to add one.</p>
           ) : (
             choices.map((u) => {
-              const selected = userId === u.user_id
+              const selected = effectiveUserId === u.user_id
               const isMe = u.user_id === me?.user_id
               return (
                 <button
@@ -426,7 +439,7 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
           <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
           <button
             onClick={send}
-            disabled={!userId || assign.isPending}
+            disabled={!effectiveUserId || assign.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
           >
             {assign.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
