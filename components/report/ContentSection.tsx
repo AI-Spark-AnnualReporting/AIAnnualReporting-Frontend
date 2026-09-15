@@ -223,7 +223,12 @@ export function ContentSection({
         <div
           {...(isLocked ? {} : dz.getRootProps())}
           className={cn(
-            "mx-auto max-w-2xl px-8 py-6 space-y-5",
+            // Full width, matching GenerateSection. These panels sit side by
+            // side in the same rail and a PM clicks between them, so the column
+            // must not resize underneath them. A reading measure would be right
+            // for a finished report and is wrong here: this is where Markdown
+            // gets written, and the extract sections are full of pipe tables.
+            "w-full px-8 py-6 space-y-5",
             dz.isDragActive &&
               "rounded-2xl outline-dashed outline-2 outline-offset-4 outline-indigo-300",
           )}
@@ -493,7 +498,7 @@ function ContentBody({
           // Tall by default. This is the work surface — a PM reads and rewrites
           // a section many times over and uploads to it once, so it gets the
           // height, and an empty one is an invitation rather than a stub.
-          "flex min-h-[26rem] flex-col rounded-xl border border-slate-200 bg-white p-8",
+          "flex min-h-[24rem] w-full flex-col rounded-xl border border-slate-200 bg-white p-8",
           isRtl && "text-right",
         )}
       >
