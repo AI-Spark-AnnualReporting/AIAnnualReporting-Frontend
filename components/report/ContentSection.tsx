@@ -210,15 +210,24 @@ export function ContentSection({
     accept: ACCEPT,
     multiple: false,
     disabled: upload.isPending || isLocked || checkingLang,
-    noClick: !!attachment,
-    noKeyboard: !!attachment,
+    // The Upload button is the click target now, so the panel never steals a
+    // click — it only accepts a dropped file.
+    noClick: true,
+    noKeyboard: true,
   })
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
+        <div
+          {...(isLocked ? {} : dz.getRootProps())}
+          className={cn(
+            "mx-auto max-w-2xl px-8 py-6 space-y-5",
+            dz.isDragActive &&
+              "rounded-2xl outline-dashed outline-2 outline-offset-4 outline-indigo-300",
+          )}
+        >
           {isLocked ? (
             <LockedView
               section={section}
@@ -232,9 +241,8 @@ export function ContentSection({
                 <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                   <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>
-                    This section is written by you and is not AI-generated.
-                    Upload a document, or use the pencil below to write it
-                    yourself.
+                    This section is written by you, not by AI. Upload a
+                    document to pull its text in, or write it yourself.
                   </span>
                 </div>
               )}
@@ -321,9 +329,7 @@ export function ContentSection({
                       </div>
                     }
                   />
-                ) : (
-                  <EmptyDropzone dz={dz} uploading={uploading} />
-                )}
+                ) : null}
               </div>
 
               {upload.isPending && <ExtractingNotice />}
@@ -331,6 +337,11 @@ export function ContentSection({
               {/* Writing lane. Always on screen too — a PM who never uploads
                   can write the section here and lock it. */}
               <ContentBody
+                uploadSlot={
+                  attachment ? null : (
+                    <UploadButton dz={dz} uploading={uploading} />
+                  )
+                }
                 saved={saved}
                 seed={seed}
                 editing={editing}
@@ -401,6 +412,7 @@ function ContentBody({
   onLock,
   contentLanguage,
   isRtl,
+  uploadSlot,
 }: {
   saved: string
   seed: string | null
@@ -416,6 +428,8 @@ function ContentBody({
   onLock: () => void
   contentLanguage: ContentLanguage
   isRtl?: boolean
+  /** The Upload button, rendered in the toolbar beside Edit. */
+  uploadSlot?: React.ReactNode
 }) {
   const busy = saving || locking || uploading
   // The stricter of the two old rules: locking needs saved, non-empty content.
@@ -428,9 +442,13 @@ function ContentBody({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          {editing ? "Editing section content" : "Section content"}
+      {/* One toolbar for the whole section: what state it's in on the left,
+          both ways to fill it on the right. The upload used to be a separate
+          hero block above; it belongs beside Edit, because they are two routes
+          to the same box rather than two stages. */}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-slate-500">
+          {editing ? "Editing the source text" : "Section content"}
         </p>
         {!editing && (
           <div className="flex items-center gap-2">
@@ -439,19 +457,17 @@ function ContentBody({
                 <CheckCircle2 className="h-3 w-3" />
                 Saved
               </span>
-            ) : (
-              <span className="text-xs text-slate-400">Not saved yet</span>
-            )}
+            ) : null}
+            {uploadSlot}
             <Button
               variant="outline"
-              size="icon"
+              size="sm"
               onClick={onEdit}
               disabled={busy || prefilling}
-              title="Edit this section"
-              aria-label="Edit this section"
-              className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
             >
               <Pencil className="h-3.5 w-3.5" />
+              {saved.trim() ? "Edit" : "Write"}
             </Button>
           </div>
         )}
@@ -474,7 +490,10 @@ function ContentBody({
       <div
         dir={isRtl ? "rtl" : "ltr"}
         className={cn(
-          "rounded-xl border border-slate-200 bg-white p-6",
+          // Tall by default. This is the work surface — a PM reads and rewrites
+          // a section many times over and uploads to it once, so it gets the
+          // height, and an empty one is an invitation rather than a stub.
+          "flex min-h-[26rem] flex-col rounded-xl border border-slate-200 bg-white p-8",
           isRtl && "text-right",
         )}
       >
@@ -500,10 +519,27 @@ function ContentBody({
         ) : saved.trim() ? (
           <ProsePreview content={saved} />
         ) : (
-          <p className="text-sm text-slate-400 italic">
-            Nothing here yet — upload a document above, or use the pencil to
-            write this section yourself.
-          </p>
+          // An empty screen is an invitation to act, so it carries the action
+          // rather than describing where to find it. The old copy had to teach
+          // the control — "use the pencil" — which is the tell that the control
+          // was in the wrong place.
+          <button
+            type="button"
+            onClick={onEdit}
+            disabled={busy || prefilling}
+            className="group flex flex-1 flex-col items-center justify-center gap-3 rounded-lg text-center transition-colors hover:bg-slate-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:pointer-events-none disabled:opacity-60"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500">
+              <PenLine className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium text-slate-700">
+              Write this section
+            </span>
+            <span className="max-w-xs text-xs leading-relaxed text-slate-400">
+              Or upload a Word document and we&apos;ll pull its text in here for
+              you to edit.
+            </span>
+          </button>
         )}
       </div>
 
@@ -548,7 +584,12 @@ function ExtractingNotice() {
   )
 }
 
-function EmptyDropzone({
+// No document yet. This used to be a 350px dashed hero for an action most
+// sections take once and many never take at all, which pushed the writing area
+// — the actual work — into a short box below the fold. It is a button now.
+// Drag-and-drop still works, over the whole panel rather than over a target you
+// have to aim at; the input stays mounted so dz.open() has something to click.
+function UploadButton({
   dz,
   uploading,
 }: {
@@ -556,40 +597,29 @@ function EmptyDropzone({
   uploading: boolean
 }) {
   return (
-    <div className="space-y-2.5">
-      <div
-        {...dz.getRootProps()}
-        className={cn(
-          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-slate-50 px-6 py-10 text-center transition-colors cursor-pointer",
-          dz.isDragActive
-            ? "border-indigo-400 bg-indigo-50"
-            : "border-slate-200 hover:border-indigo-300 hover:bg-slate-100/60",
-          uploading && "cursor-wait opacity-70",
-        )}
+    <>
+      <input {...dz.getInputProps()} />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={dz.open}
+        disabled={uploading}
+        className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
       >
-        <input {...dz.getInputProps()} />
-        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-background border">
-          {uploading ? (
-            <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
-          ) : (
-            <Upload className="h-5 w-5 text-muted-foreground" />
-          )}
-        </div>
-        <p className="text-sm font-medium mb-0.5">
-          {uploading
-            ? "Uploading & extracting…"
-            : dz.isDragActive
-              ? "Drop the file to upload"
-              : "Drag a file here, or click to browse"}
-        </p>
-        <p className="text-xs text-muted-foreground">DOCX</p>
-      </div>
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        Optional: upload the source document and we&apos;ll pull its text into
-        the section below for you to review and edit. You can skip this and
-        simply write the content yourself.
-      </p>
-    </div>
+        {uploading ? (
+          <>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Extracting…
+          </>
+        ) : (
+          <>
+            <Upload className="h-3.5 w-3.5" />
+            Upload a document
+          </>
+        )}
+      </Button>
+    </>
   )
 }
 
