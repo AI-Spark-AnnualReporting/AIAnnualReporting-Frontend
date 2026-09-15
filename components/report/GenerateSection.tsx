@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/ManualSection"
+import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useGenerateSection,
   useLockSection,

@@ -20,9 +20,8 @@ import { ProsePreview } from "@/components/ui/prose-preview"
 import { AnalyzeSection } from "@/components/report/AnalyzeSection"
 import { AttachSection } from "@/components/report/AttachSection"
 import { CoverSection } from "@/components/report/CoverSection"
-import { ExtractSection } from "@/components/report/ExtractSection"
+import { ContentSection } from "@/components/report/ContentSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
-import { ManualSection } from "@/components/report/ManualSection"
 
 // Shared header for every mode sub-component — title, layer chip, mode badge,
 // and the section's content source. Exported so other mode panels (e.g.
@@ -327,10 +326,14 @@ export function SectionDetail({
     return <AssembledView section={section} isRtl={isRtl} />
   }
 
-  // Extract-mode is document-driven: upload runs AI extraction, the PM edits
-  // the result, then locks. Takes priority over the ai_allowed branch below.
+  // Extract-mode takes its content from a person: upload a document (the
+  // backend extracts its text) OR type it — either alone is enough to lock.
+  // Same panel as the manual sections below. Takes priority over the
+  // ai_allowed branch. Keyed by section_code for the same reason as there:
+  // the editor is always mounted, so without a remount an unsaved draft would
+  // bleed into the next section.
   if (section.mode === "extract") {
-    return <ExtractSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
+    return <ContentSection key={section.section_code} section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
   }
 
   // Analyze-mode: structured Markdown findings from the analyze agent. No
@@ -342,7 +345,7 @@ export function SectionDetail({
   // Manual sections (PM provides the content themselves) override mode-based
   // UI — no source picker and no Generate button. The input shape depends on
   // the section's content_source:
-  //   - narrative → free-text editor (ManualSection)
+  //   - narrative → upload-or-type editor (ContentSection)
   //   - structured / financials / composite → file upload (AttachSection)
   if (!section.ai_allowed) {
     if (section.content_source === "narrative") {
@@ -350,7 +353,7 @@ export function SectionDetail({
       // resets) when switching sections — without it, an unsaved section's
       // seeded draft would bleed into the next unsaved section (both have empty
       // server content, so the in-place reset can't tell them apart).
-      return <ManualSection key={section.section_code} section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
+      return <ContentSection key={section.section_code} section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
     }
     return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
   }
