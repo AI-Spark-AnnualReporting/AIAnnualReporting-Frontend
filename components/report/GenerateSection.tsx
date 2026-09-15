@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import {
   AlertCircle,
@@ -10,15 +10,12 @@ import {
   LockOpen,
   Pencil,
   RefreshCw,
-  Save,
   Sparkles,
-  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { Textarea } from "@/components/ui/textarea"
-import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
+import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import { LockedBanner } from "@/components/report/LockedBanner"
@@ -198,156 +195,6 @@ function PendingView({
           </>
         )}
       </Button>
-    </div>
-  )
-}
-
-/**
- * The section body as raw Markdown, in a textarea that grows with its text.
- *
- * Saves on blur, on ⌘/Ctrl-Enter and on the Save button; Escape cancels.
- * Unchanged text is deliberately never sent — a no-op PUT would still mark the
- * section hand-edited. Ported from the board report's ProseEditor so the two
- * reports behave the same way under the same fingers.
- */
-function SectionBodyEditor({
-  value,
-  saving,
-  isRtl,
-  onSave,
-  onCancel,
-}: {
-  value: string
-  saving: boolean
-  isRtl: boolean
-  onSave: (content: string) => void
-  onCancel: () => void
-}) {
-  const [draft, setDraft] = useState(value)
-  const taRef = useRef<HTMLTextAreaElement>(null)
-  // The text this editor opened on. A background refetch can move `value` while
-  // the PM is typing, so "unchanged" has to mean "unchanged since I started",
-  // not "same as whatever the cache holds this instant". State rather than a
-  // ref because it is read during render, to decide whether Save is live.
-  const [openedOn] = useState(value)
-  // A blur normally means "I'm done" — except when something else has already
-  // decided. Escape and Cancel set this, and so does the cheat sheet, which
-  // takes focus on purpose and must not end the edit.
-  const skipBlur = useRef(false)
-
-  // Focus the box on open, size it to its text, and put the caret at the end
-  // rather than wherever the click happened to land.
-  useEffect(() => {
-    const el = taRef.current
-    if (!el) return
-    el.focus()
-    el.style.height = "auto"
-    el.style.height = `${el.scrollHeight}px`
-    el.setSelectionRange(el.value.length, el.value.length)
-  }, [])
-
-  const trimmed = draft.trim()
-  const changed = trimmed !== openedOn.trim()
-
-  const commit = () => {
-    if (saving || !trimmed || !changed) return
-    onSave(trimmed)
-  }
-
-  return (
-    <div className="space-y-3">
-      <MarkdownHelpChip
-        onOpenChange={(open) => {
-          if (open) {
-            skipBlur.current = true
-            return
-          }
-          // The dialog is still mounted here and its focus trap bounces any
-          // focus taken back too early — and that bounce arrives as a blur,
-          // i.e. as "the edit is over". Wait a frame: by then it has unmounted
-          // and handed focus back to the textarea itself, and dropping the
-          // guard is safe.
-          requestAnimationFrame(() => {
-            taRef.current?.focus()
-            skipBlur.current = false
-          })
-        }}
-      />
-      <Textarea
-        ref={taRef}
-        value={draft}
-        disabled={saving}
-        rows={14}
-        dir={isRtl ? "rtl" : "ltr"}
-        aria-label="Section content (Markdown)"
-        placeholder={"### Sub-heading\n\nWrite the section body here…"}
-        onChange={(e) => {
-          setDraft(e.target.value)
-          // Grow with the text instead of scrolling inside a fixed window — a
-          // section body is reviewed as a whole.
-          e.target.style.height = "auto"
-          e.target.style.height = `${e.target.scrollHeight}px`
-        }}
-        onBlur={() => {
-          if (skipBlur.current || saving) return
-          if (trimmed && changed) onSave(trimmed)
-          else onCancel()
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault()
-            skipBlur.current = true
-            onCancel()
-          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            commit()
-          }
-        }}
-        className={cn(
-          "resize-none rounded-xl text-sm leading-relaxed",
-          isRtl && "text-right",
-        )}
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          onClick={commit}
-          // Clicking away already saves, but nobody should have to know that:
-          // without this, mousedown blurs the textarea and saves once, then the
-          // click saves a second time.
-          onMouseDown={(e) => e.preventDefault()}
-          disabled={saving || !trimmed || !changed}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-          title={
-            !trimmed
-              ? "Add some content before saving"
-              : !changed
-                ? "No changes to save"
-                : "Save (⌘+Enter)"
-          }
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4 mr-2" />
-          )}
-          {saving ? "Saving…" : "Save"}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={onCancel}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            skipBlur.current = true
-          }}
-          disabled={saving}
-        >
-          <X className="h-4 w-4 mr-2" />
-          Cancel
-        </Button>
-        <span className="ml-auto text-xs text-slate-400">
-          Saves when you click away · ⌘+Enter to save · Esc to cancel
-        </span>
-      </div>
     </div>
   )
 }

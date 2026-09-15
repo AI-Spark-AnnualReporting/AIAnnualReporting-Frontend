@@ -9,8 +9,8 @@ import {
   Lock,
   LockOpen,
   PenLine,
+  Pencil,
   RefreshCw,
-  Save,
   Sparkles,
   Trash2,
   Upload,
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { Textarea } from "@/components/ui/textarea"
+import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import { LockedBanner } from "@/components/report/LockedBanner"
 import {
@@ -35,18 +35,18 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
 import { documentsApi } from "@/lib/api/documents"
-import {
-  documentLanguageWarning,
-  isLanguageAcceptable,
-  languageMismatchWarning,
-} from "@/lib/lang"
+import { documentLanguageWarning, languageMismatchWarning } from "@/lib/lang"
 import type { ContentLanguage, CycleReportSection } from "@/types"
 
 // The two human-authored modes — `manual` (chairman/CEO/auditor statements) and
 // `extract` (financial statements, notes, auditor's report) — share this one
 // panel. Both accept EITHER input: drop a document and the backend returns its
-// extracted text in `section.content`, or just type the body. Either one alone
-// is enough to save and lock; an attachment is never required.
+// extracted text in `section.content`, or write the body by hand. Either one
+// alone is enough to save and lock; an attachment is never required.
+//
+// Either way the body is Markdown — the extractor emits it, and the PM edits it
+// through the same pencil-and-preview editor the AI-written sections use
+// (SectionBodyEditor), so there is one editing model across the report.
 //
 // PDF is excluded on purpose — these sections feed their text layer to the AI
 // agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS.
@@ -76,7 +76,13 @@ export function ContentSection({
   // its own existing endpoint — so pick by mode, not by what's on screen.
   const isExtract = section.mode === "extract"
 
-  const [draft, setDraft] = useState(saved)
+  // Same editing model as the AI-written sections: the body is read-only
+  // Markdown until the pencil swaps a textarea over its source.
+  const [editing, setEditing] = useState(false)
+  // Text the editor opens on when it is NOT the server's — today only the
+  // previous-cycle pre-fill. Non-null exactly while that unconfirmed text is on
+  // screen, which is what the pre-fill notice keys off too.
+  const [seed, setSeed] = useState<string | null>(null)
   const [unlockOpen, setUnlockOpen] = useState(false)
   // Wrong-language guard for uploads: verify the dropped file's language BEFORE
   // uploading, so a source in the wrong language is never sent.
@@ -103,30 +109,31 @@ export function ContentSection({
       ? prevSection
       : null
 
-  // Re-seed the editor when the server content changes externally — after an
-  // upload (extraction result), a remove (cleared), an unlock, or a section
-  // switch. React's "store previous value" pattern, not an effect.
+  // Close the editor whenever the server's content moves underneath it — an
+  // upload's extraction, a Remove, an unlock, or our own save's echo. Whatever
+  // is in the textarea was written against text that no longer exists, and an
+  // extraction in particular must never be overwritten by a draft that predates
+  // it. React's "store previous value" pattern, not an effect.
   const [prevSaved, setPrevSaved] = useState(saved)
   if (prevSaved !== saved) {
     setPrevSaved(saved)
-    setDraft(saved)
+    setEditing(false)
+    setSeed(null)
   }
 
-  // Auto-seed the empty editor with the company's previous content for this
-  // section. Runs once per section (guarded by seededFor) and only while the
-  // editor is still untouched (draft === saved) and nothing is saved — so it
-  // never clobbers in-progress typing or saved content. The seeded draft is
-  // intentionally dirty so the PM can review and Save it. Pre-fill, not
-  // auto-save: this never writes to the server on its own.
+  // Pre-fill an empty section from the company's previous content. Runs once
+  // per section (guarded by seededFor) and only while nothing is saved and the
+  // editor is closed, so it never lands on top of typing or saved content.
+  //
+  // With a pencil there is no draft to seed, so the pre-fill OPENS the editor
+  // with its text already in it. The PM reads it and saves it — or cancels it —
+  // rather than finding it saved behind their back. Pre-fill, not auto-save:
+  // this never writes to the server on its own.
   const [seededFor, setSeededFor] = useState<string | null>(null)
-  if (
-    suggestion &&
-    seededFor !== sectionCode &&
-    draft === saved &&
-    !saved.trim()
-  ) {
+  if (suggestion && seededFor !== sectionCode && !editing && !saved.trim()) {
     setSeededFor(sectionCode)
-    setDraft(suggestion.content ?? "")
+    setSeed(suggestion.content ?? "")
+    setEditing(true)
   }
 
   const upload = useAttachUpload(cycleId)
@@ -137,15 +144,30 @@ export function ContentSection({
   const unlock = useUnlockSection(cycleId)
   const remove = useRemoveAttachment(cycleId)
 
-  const dirty = draft !== saved
   const uploading = upload.isPending || checkingLang
 
-  // While the previous-content query is in flight for an empty, untouched
-  // section, show an interactive loader so the PM knows a pre-fill might be
-  // arriving (and doesn't start typing into what's about to be replaced). Only
-  // relevant when nothing is saved and the editor is still empty — a populated
-  // section never auto-seeds, so there's nothing to wait for.
-  const prefilling = previousLoading && !saved.trim() && !draft.trim()
+  // While the previous-content query is in flight for an empty section, show an
+  // interactive loader so the PM knows a pre-fill might be arriving (and
+  // doesn't start writing into what's about to open). Only relevant when
+  // nothing is saved and the editor is closed — a populated section never
+  // auto-seeds, and an already-open editor blocks the seed, so in both cases
+  // there's nothing to wait for.
+  const prefilling = previousLoading && !saved.trim() && !editing
+
+  // The server normalises heading depth on save — a `#` or `##` the PM types is
+  // stored as `###` — so the preview must end up rendering the echo the hook
+  // patched into the cache, never the local draft. Closing the editor here does
+  // exactly that; `saved` is already the server's text by the time we return.
+  const handleSave = async (next: string) => {
+    try {
+      await save.mutateAsync({ sectionCode, content: next })
+      setSeed(null)
+      setEditing(false)
+    } catch {
+      // The hook owns the message and the cache. Staying in the editor keeps
+      // the typed text on screen so the PM can retry rather than retype.
+    }
+  }
 
   const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
@@ -173,6 +195,11 @@ export function ContentSection({
     } finally {
       setCheckingLang(false)
     }
+    // The extraction is about to replace the body wholesale, so stop editing the
+    // version it replaces. (Clicking the dropzone blurred the textarea first,
+    // which already committed anything the PM had typed.)
+    setEditing(false)
+    setSeed(null)
     upload.mutate({ sectionCode, file })
   }
 
@@ -206,15 +233,16 @@ export function ContentSection({
                   <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>
                     This section is written by you and is not AI-generated.
-                    Upload a document or type the content below, then Save.
+                    Upload a document, or use the pencil below to write it
+                    yourself.
                   </span>
                 </div>
               )}
 
-              {/* Pre-fill loader: the previous-content query is still running for
-                  an empty section, so a suggestion may be about to seed the
-                  editor. Surface it so the PM waits instead of typing into a
-                  field that's about to be overwritten. */}
+              {/* Pre-fill loader: the previous-content query is still running
+                  for an empty section, so a suggestion may be about to open the
+                  editor with last year's text in it. Surface it so the PM waits
+                  instead of starting on something that's about to be replaced. */}
               {prefilling && (
                 <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
@@ -225,7 +253,7 @@ export function ContentSection({
               {/* Pre-fill notice: shown while the editor holds unsaved suggested
                   content seeded from the company's prior data. The copy depends
                   on where that content came from — branch on `source`. */}
-              {suggestion && dirty && (
+              {suggestion && seed !== null && (
                 <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
                   <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>
@@ -300,26 +328,30 @@ export function ContentSection({
 
               {upload.isPending && <ExtractingNotice />}
 
-              {/* Typing lane. Always mounted too — a PM who never uploads can
-                  write the section here and lock it. */}
-              <ContentEditor
-                draft={draft}
+              {/* Writing lane. Always on screen too — a PM who never uploads
+                  can write the section here and lock it. */}
+              <ContentBody
                 saved={saved}
-                dirty={dirty}
+                seed={seed}
+                editing={editing}
                 // The document produced nothing usable — say so instead of
                 // leaving an unexplained empty box.
                 extractedEmpty={!!attachment && saved.trim() === ""}
-                // Disable while the editor is about to be re-seeded — by the
-                // pre-fill query or by the extraction now running — so typing
-                // can't be silently clobbered.
-                disabled={prefilling || upload.isPending}
+                // No pencil while the body is about to change under it — the
+                // pre-fill query may still open the editor itself, and an
+                // extraction is on its way in.
                 prefilling={prefilling}
+                uploading={uploading}
                 saving={save.isPending}
                 locking={lock.isPending}
                 contentLanguage={contentLanguage}
                 isRtl={isRtl}
-                onChange={setDraft}
-                onSave={() => save.mutate({ sectionCode, content: draft })}
+                onEdit={() => setEditing(true)}
+                onSave={handleSave}
+                onCancel={() => {
+                  setSeed(null)
+                  setEditing(false)
+                }}
                 onLock={() => lock.mutate({ sectionCode })}
               />
             </>
@@ -354,127 +386,134 @@ export function ContentSection({
   )
 }
 
-function ContentEditor({
-  draft,
+function ContentBody({
   saved,
-  dirty,
+  seed,
+  editing,
   extractedEmpty,
-  disabled,
   prefilling,
+  uploading,
   saving,
   locking,
-  onChange,
+  onEdit,
   onSave,
+  onCancel,
   onLock,
   contentLanguage,
   isRtl,
 }: {
-  draft: string
   saved: string
-  dirty: boolean
+  seed: string | null
+  editing: boolean
   extractedEmpty: boolean
-  disabled: boolean
   prefilling: boolean
+  uploading: boolean
   saving: boolean
   locking: boolean
-  onChange: (next: string) => void
-  onSave: () => void
+  onEdit: () => void
+  onSave: (content: string) => void
+  onCancel: () => void
   onLock: () => void
   contentLanguage: ContentLanguage
   isRtl?: boolean
 }) {
-  const busy = saving || locking
-  const trimmed = draft.trim()
-  // Content must be in the cycle's language (warn + block Save), like the dept
-  // answer box and the kickoff brief.
-  const langWarning = languageMismatchWarning(draft, contentLanguage)
-  const langOk = isLanguageAcceptable(draft, contentLanguage)
+  const busy = saving || locking || uploading
   // The stricter of the two old rules: locking needs saved, non-empty content.
   // A document alone is no longer enough — and never was on the backend, which
-  // rejects a lock with empty content.
-  const lockDisabled = busy || dirty || !saved.trim()
+  // rejects a lock with empty content. `editing` stands in for the old
+  // long-lived `dirty`: with a pencil, the only unsaved text there can be is
+  // inside an open editor. Disabled rather than hidden, so Save-then-Lock stays
+  // visible as an order rather than as a button that appears out of nowhere.
+  const lockDisabled = busy || editing || !saved.trim()
 
   return (
     <div className="space-y-2">
-      <label
-        htmlFor="section-content"
-        className="text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        Section content
-      </label>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {editing ? "Editing section content" : "Section content"}
+        </p>
+        {!editing && (
+          <div className="flex items-center gap-2">
+            {saved.trim() ? (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                <CheckCircle2 className="h-3 w-3" />
+                Saved
+              </span>
+            ) : (
+              <span className="text-xs text-slate-400">Not saved yet</span>
+            )}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onEdit}
+              disabled={busy || prefilling}
+              title="Edit this section"
+              aria-label="Edit this section"
+              className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
 
-      {extractedEmpty && !dirty && (
+      {extractedEmpty && !editing && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
-            No content extracted from the document — enter it manually below.
+            No content extracted from the document — use the pencil to enter it
+            manually.
           </span>
         </div>
       )}
 
-      <Textarea
-        id="section-content"
-        value={draft}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={
-          prefilling
-            ? "Checking for previous content…"
-            : "Write the content for this section, or upload a document above…"
-        }
-        rows={14}
+      {/* Same box in both states, so the text doesn't jump between the rendered
+          preview and its Markdown source. Uploads arrive as Markdown too now
+          (### headings, - lists, **bold**), which is exactly why the default is
+          the preview and not the raw text. */}
+      <div
         dir={isRtl ? "rtl" : "ltr"}
-        disabled={disabled}
         className={cn(
-          "rounded-xl text-sm leading-relaxed",
+          "rounded-xl border border-slate-200 bg-white p-6",
           isRtl && "text-right",
         )}
-      />
-
-      {langWarning && <p className="text-xs text-amber-600">{langWarning}</p>}
-
-      <div className="flex items-center justify-between text-xs">
-        {dirty ? (
-          <span className="text-amber-600">Unsaved changes</span>
+      >
+        {editing ? (
+          <SectionBodyEditor
+            // A pre-fill opens on text the server does not hold: show it, but
+            // measure "changed" against the server's own (empty) content so
+            // Save works even if the PM accepts it word for word.
+            value={seed ?? saved}
+            baseline={saved}
+            autoFocus={seed === null}
+            saving={saving}
+            isRtl={!!isRtl}
+            placeholder={
+              "Write the content for this section, or upload a document above…"
+            }
+            // Content must be in the cycle's language (warn + block Save), like
+            // the dept answer box and the kickoff brief.
+            warn={(text) => languageMismatchWarning(text, contentLanguage)}
+            onSave={onSave}
+            onCancel={onCancel}
+          />
         ) : saved.trim() ? (
-          <span className="inline-flex items-center gap-1 text-emerald-600">
-            <CheckCircle2 className="h-3 w-3" />
-            Saved
-          </span>
+          <ProsePreview content={saved} />
         ) : (
-          <span className="text-slate-400">Not saved yet</span>
+          <p className="text-sm text-slate-400 italic">
+            Nothing here yet — upload a document above, or use the pencil to
+            write this section yourself.
+          </p>
         )}
-        <span className="text-slate-400 tabular-nums">{draft.length} chars</span>
       </div>
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        <Button
-          variant="outline"
-          onClick={onSave}
-          disabled={saving || !dirty || !trimmed || !langOk}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-          title={
-            !trimmed
-              ? "Add some content before saving"
-              : !langOk
-                ? langWarning ?? undefined
-                : !dirty
-                  ? "No changes to save"
-                  : undefined
-          }
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4 mr-2" />
-          )}
-          Save
-        </Button>
         <Button
           onClick={onLock}
           disabled={lockDisabled}
           className="bg-indigo-600 text-white hover:bg-indigo-700"
           title={
-            dirty
+            editing
               ? "Save your changes before locking"
               : !saved.trim()
                 ? "Save some content first"
@@ -547,8 +586,8 @@ function EmptyDropzone({
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
         Optional: upload the source document and we&apos;ll pull its text into
-        the editor below for you to review. You can skip this and simply write
-        the content yourself.
+        the section below for you to review and edit. You can skip this and
+        simply write the content yourself.
       </p>
     </div>
   )
