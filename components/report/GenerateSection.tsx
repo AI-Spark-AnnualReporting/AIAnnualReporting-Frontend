@@ -15,6 +15,10 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionChat } from "@/components/report/SectionChat"
+import {
+  SubsectionEditor,
+  SubsectionPreview,
+} from "@/components/report/SubsectionEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import { LockedBanner } from "@/components/report/ManualSection"
 import {
@@ -26,7 +30,7 @@ import {
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { cn } from "@/lib/utils"
-import type { CycleReportSection } from "@/types"
+import type { CycleReportSection, SectionBlock } from "@/types"
 
 interface DashboardData {
   departments?: Array<{ department_code: string; department_name: string }>
@@ -44,6 +48,10 @@ export function GenerateSection({
   const sectionCode = section.section_code
   const status = section.status
   const content = section.content ?? ""
+  // Structured subsections. null/absent = a LEGACY section written before the
+  // writer returned blocks — those keep rendering from `content` via
+  // ProsePreview, which is what the fallbacks below are for.
+  const blocks = section.content_blocks ?? null
 
   const { data: plan } = usePlan(cycleId)
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
@@ -80,6 +88,7 @@ export function GenerateSection({
           ) : status === "locked" ? (
             <LockedView
               content={content}
+              blocks={blocks}
               lockedAt={section.locked_at}
               unlocking={unlock.isPending}
               isRtl={isRtl}
@@ -87,7 +96,10 @@ export function GenerateSection({
             />
           ) : (
             <DraftingView
+              cycleId={cycleId}
+              sectionCode={sectionCode}
               content={content}
+              blocks={blocks}
               regenerating={generate.isPending}
               locking={lock.isPending}
               refining={refine.isPending}
@@ -191,7 +203,10 @@ function PendingView({
 }
 
 function DraftingView({
+  cycleId,
+  sectionCode,
   content,
+  blocks,
   regenerating,
   locking,
   refining,
@@ -200,7 +215,10 @@ function DraftingView({
   onLock,
   onRefine,
 }: {
+  cycleId: string
+  sectionCode: string
   content: string
+  blocks: SectionBlock[] | null
   regenerating: boolean
   locking: boolean
   refining: boolean
@@ -223,7 +241,14 @@ function DraftingView({
             refining && "opacity-60 pointer-events-none",
           )}
         >
-          {content.trim() ? (
+          {blocks && blocks.length > 0 ? (
+            <SubsectionEditor
+              cycleId={cycleId}
+              sectionCode={sectionCode}
+              blocks={blocks}
+              isRtl={isRtl}
+            />
+          ) : content.trim() ? (
             <ProsePreview content={content} />
           ) : (
             <p className="text-sm text-slate-400 italic">
@@ -286,12 +311,14 @@ function DraftingView({
 
 function LockedView({
   content,
+  blocks,
   lockedAt,
   unlocking,
   isRtl,
   onUnlock,
 }: {
   content: string
+  blocks: SectionBlock[] | null
   lockedAt: string | null
   unlocking: boolean
   isRtl: boolean
@@ -303,7 +330,13 @@ function LockedView({
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
       >
-        {content.trim() ? (
+        {/* Locked sections are read-only, so the structure is shown but not
+            editable — SubsectionPreview, not SubsectionEditor. Falling back to
+            the flat Markdown here would make a locked section look different
+            from the same section a moment earlier. */}
+        {blocks && blocks.length > 0 ? (
+          <SubsectionPreview blocks={blocks} isRtl={isRtl} />
+        ) : content.trim() ? (
           <ProsePreview content={content} />
         ) : (
           <p className="text-sm text-slate-400 italic">No content available.</p>

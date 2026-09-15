@@ -23,6 +23,7 @@ import { CoverSection } from "@/components/report/CoverSection"
 import { ExtractSection } from "@/components/report/ExtractSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 import { ManualSection } from "@/components/report/ManualSection"
+import { SubsectionPreview } from "@/components/report/SubsectionEditor"
 
 // Shared header for every mode sub-component — title, layer chip, mode badge,
 // and the section's content source. Exported so other mode panels (e.g.
@@ -236,6 +237,11 @@ function AssembledView({
   reportLocked?: boolean
 }) {
   const content = section.content ?? ""
+  // Structured sections keep their subheadings here too. `content` is only a
+  // derived Markdown mirror of these blocks, so falling back to it would show
+  // the same words with the subheadings flattened to prose weight — the
+  // assembled view would look unlike the builder the PM just left.
+  const blocks = section.content_blocks ?? null
   const attachment = section.attachment
 
   return (
@@ -267,7 +273,9 @@ function AssembledView({
             dir={isRtl ? "rtl" : "ltr"}
             className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
           >
-            {content.trim() ? (
+            {blocks?.length ? (
+              <SubsectionPreview blocks={blocks} isRtl={isRtl} />
+            ) : content.trim() ? (
               <ProsePreview content={content} />
             ) : (
               <p className="text-sm text-slate-400 italic">No content.</p>

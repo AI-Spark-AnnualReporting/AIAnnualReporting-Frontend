@@ -16,6 +16,7 @@ import type {
   PlanResponse,
   ReportApproval,
   ReportTheme,
+  SectionBlock,
   SectionMode,
 } from "@/types"
 
@@ -67,6 +68,9 @@ export function usePreviousManualSections(
 // if handed an object child.
 type MutationError = {
   message?: unknown
+  // HTTP status, set by the apiClient error normalizer. Callers that treat a
+  // specific code as a state (e.g. 409 = locked) read it from here.
+  status?: number
   response?: { data?: { detail?: unknown } }
 }
 
@@ -261,6 +265,61 @@ export function useSetAnalyzeContent(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save content")),
+  })
+}
+
+// Structured subsections (generate/analyze). Rename, reorder and delete are all
+// the same call: the editor sends the whole block array and the backend replaces
+// it, re-deriving section.content.
+//
+// Silent on success, like useRefineSection below — a rename fires on every
+// typing pause, so a toast per save would nag; the preview re-rendering (plus
+// the editor's own per-field tick) is the feedback. Errors still toast.
+export function useSaveSubsections(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      blocks,
+    }: {
+      sectionCode: string
+      blocks: SectionBlock[]
+    }) => pmApi.saveSubsections(cycleId, sectionCode, blocks),
+    // A drop or a delete must feel instant, so write the new array into the
+    // cache before the round-trip and roll it back if the PUT fails — same
+    // shape as useReorderSections.
+    onMutate: async ({ sectionCode, blocks }) => {
+      await qc.cancelQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      const previous = qc.getQueryData<CycleReportSection[]>(
+        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+      )
+      if (previous) {
+        qc.setQueryData<CycleReportSection[]>(
+          QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+          previous.map((s) =>
+            s.section_code === sectionCode ? { ...s, content_blocks: blocks } : s,
+          ),
+        )
+      }
+      return { previous }
+    },
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+    },
+    onError: (err: MutationError, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId), context.previous)
+      }
+      if (err?.status === 409) {
+        // Locked while the PM was editing (another tab, or another PM). Refetch
+        // so the panel flips to its read-only view instead of quietly dropping
+        // the edit.
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+        toast.error("This section is locked.")
+        return
+      }
+      toast.error(readError(err, "Failed to save subheadings"))
+    },
   })
 }
 

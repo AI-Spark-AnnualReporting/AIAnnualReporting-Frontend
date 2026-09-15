@@ -4,7 +4,7 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
-  ContentLanguage,
+  ContentLanguage, SectionBlock,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -772,6 +772,22 @@ export const pmApi = {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
       { content },
+    )
+    return data.section
+  },
+
+  // Structured subsections (generate/analyze sections). Rename, reorder and
+  // delete are ALL this one call — send the whole new array and the backend
+  // replaces it, re-deriving section.content from it. Returns 409 when the
+  // section is locked.
+  saveSubsections: async (
+    cycleId: string,
+    sectionCode: string,
+    blocks: SectionBlock[],
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/subsections`,
+      { blocks },
     )
     return data.section
   },
