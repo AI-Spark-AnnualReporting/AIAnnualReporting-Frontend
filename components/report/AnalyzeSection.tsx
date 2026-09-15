@@ -19,11 +19,8 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { Textarea } from "@/components/ui/textarea"
+import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
 import { SectionChat } from "@/components/report/SectionChat"
-import {
-  SubsectionEditor,
-  SubsectionPreview,
-} from "@/components/report/SubsectionEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import { LockedBanner } from "@/components/report/ManualSection"
 import {
@@ -37,7 +34,7 @@ import {
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { cn } from "@/lib/utils"
 import { languageMismatchWarning, isLanguageAcceptable } from "@/lib/lang"
-import type { ContentLanguage, CycleReportSection, SectionBlock } from "@/types"
+import type { ContentLanguage, CycleReportSection } from "@/types"
 
 interface DashboardData {
   departments?: Array<{ department_code: string; department_name: string }>
@@ -57,9 +54,6 @@ export function AnalyzeSection({
   const sectionCode = section.section_code
   const status = section.status
   const content = section.content ?? ""
-  // Structured subsections from the analyze agent. null/absent = a LEGACY
-  // section whose findings predate blocks — it keeps rendering from `content`.
-  const blocks = section.content_blocks ?? null
   // Analyze pipeline state drives the panel. Missing/undefined → "pending"
   // (older responses that predate the field).
   const analysisState = section.analysis_state ?? "pending"
@@ -102,7 +96,6 @@ export function AnalyzeSection({
           {status === "locked" ? (
             <LockedView
               content={content}
-              blocks={blocks}
               lockedAt={section.locked_at}
               unlocking={unlock.isPending}
               isRtl={isRtl}
@@ -111,7 +104,6 @@ export function AnalyzeSection({
           ) : editMode ? (
             <EditView
               draft={draft}
-              hasBlocks={!!blocks && blocks.length > 0}
               saving={setContent.isPending}
               contentLanguage={contentLanguage}
               isRtl={isRtl}
@@ -144,10 +136,7 @@ export function AnalyzeSection({
             />
           ) : (
             <DraftingView
-              cycleId={cycleId}
-              sectionCode={sectionCode}
               content={content}
-              blocks={blocks}
               feederNames={feederNames}
               running={runAnalysis.isPending}
               refining={refine.isPending}
@@ -322,10 +311,7 @@ function PendingView({
 }
 
 function DraftingView({
-  cycleId,
-  sectionCode,
   content,
-  blocks,
   feederNames,
   running,
   refining,
@@ -338,10 +324,7 @@ function DraftingView({
   onClear,
   onLock,
 }: {
-  cycleId: string
-  sectionCode: string
   content: string
-  blocks: SectionBlock[] | null
   feederNames: string[]
   running: boolean
   refining: boolean
@@ -355,7 +338,6 @@ function DraftingView({
   onLock: () => void
 }) {
   const busy = running || refining || locking
-  const hasBlocks = !!blocks && blocks.length > 0
 
   return (
     <div className="space-y-4">
@@ -376,14 +358,7 @@ function DraftingView({
           (running || refining) && "opacity-60 pointer-events-none",
         )}
       >
-        {hasBlocks ? (
-          <SubsectionEditor
-            cycleId={cycleId}
-            sectionCode={sectionCode}
-            blocks={blocks}
-            isRtl={isRtl}
-          />
-        ) : content.trim() ? (
+        {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
           <p className="text-sm text-slate-400 italic">
@@ -429,14 +404,10 @@ function DraftingView({
             size="sm"
             onClick={onEdit}
             disabled={busy}
-            title={
-              hasBlocks
-                ? "Hand-edit the findings as raw Markdown — an escape hatch that bypasses the subheading editor"
-                : "Hand-edit the findings"
-            }
+            title="Hand-edit the findings"
           >
             <Edit2 className="h-3.5 w-3.5 mr-1.5" />
-            {hasBlocks ? "Edit Markdown" : "Edit"}
+            Edit
           </Button>
           {content.trim() && (
             <Button
@@ -478,7 +449,6 @@ function DraftingView({
 
 function EditView({
   draft,
-  hasBlocks,
   saving,
   contentLanguage,
   isRtl,
@@ -487,8 +457,6 @@ function EditView({
   onCancel,
 }: {
   draft: string
-  /** True when the section also has structured subsections behind this text. */
-  hasBlocks: boolean
   saving: boolean
   contentLanguage: ContentLanguage
   isRtl?: boolean
@@ -509,22 +477,15 @@ function EditView({
         </label>
         <span className="text-xs text-slate-400">Markdown supported</span>
       </div>
-      {hasBlocks && (
-        // The subheading editor and this textarea edit the SAME section through
-        // two different endpoints. Keeping both is deliberate — the structured
-        // editor covers the common case (rename/reorder/drop a subheading) and
-        // this stays the escape hatch for rewriting the body by hand — but the
-        // PM should know which surface they are on.
-        <p className="text-xs text-slate-500">
-          This edits the section&apos;s raw Markdown, not the subheadings. The
-          panel re-renders from whatever the server returns after you save.
-        </p>
-      )}
+      <MarkdownHelpChip />
       <Textarea
         id="analyze-section-content"
         value={draft}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="## Key Findings&#10;- …&#10;&#10;## Trends&#10;- …"
+        // `###`, not `##`: section TITLES are the `##` level in the flat
+        // Markdown a report is assembled from, and the server normalises a
+        // body heading down to `###` on save anyway.
+        placeholder="### Key Findings&#10;- …&#10;&#10;### Trends&#10;- …"
         rows={18}
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl text-sm leading-relaxed font-mono", isRtl && "text-right")}
@@ -555,14 +516,12 @@ function EditView({
 
 function LockedView({
   content,
-  blocks,
   lockedAt,
   unlocking,
   isRtl,
   onUnlock,
 }: {
   content: string
-  blocks: SectionBlock[] | null
   lockedAt: string | null
   unlocking: boolean
   isRtl?: boolean
@@ -574,11 +533,8 @@ function LockedView({
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
       >
-        {/* Read-only: locked sections keep their structure on screen but lose
-            the rename/reorder/delete affordances. */}
-        {blocks && blocks.length > 0 ? (
-          <SubsectionPreview blocks={blocks} isRtl={isRtl} />
-        ) : content.trim() ? (
+        {/* Read-only: a locked section shows its findings but offers no Edit. */}
+        {content.trim() ? (
           <ProsePreview content={content} />
         ) : (
           <p className="text-sm text-slate-400 italic">No content available.</p>

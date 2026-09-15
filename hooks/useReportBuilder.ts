@@ -16,7 +16,6 @@ import type {
   PlanResponse,
   ReportApproval,
   ReportTheme,
-  SectionBlock,
   SectionMode,
 } from "@/types"
 
@@ -268,27 +267,26 @@ export function useSetAnalyzeContent(cycleId: string) {
   })
 }
 
-// Structured subsections (generate/analyze). Rename, reorder and delete are all
-// the same call: the editor sends the whole block array and the backend replaces
-// it, re-deriving section.content.
+// Hand-edited body for an AI-written section (generate/analyze): one PUT of the
+// raw Markdown the PM typed.
 //
-// Silent on success, like useRefineSection below — a rename fires on every
-// typing pause, so a toast per save would nag; the preview re-rendering (plus
-// the editor's own per-field tick) is the feedback. Errors still toast.
-export function useSaveSubsections(cycleId: string) {
+// Silent on success, like useRefineSection below — the preview re-rendering is
+// the feedback, and a toast per edit would nag in a screen built for many small
+// passes. Errors still toast.
+export function useSaveGenerateContent(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({
       sectionCode,
-      blocks,
+      content,
     }: {
       sectionCode: string
-      blocks: SectionBlock[]
-    }) => pmApi.saveSubsections(cycleId, sectionCode, blocks),
-    // A drop or a delete must feel instant, so write the new array into the
-    // cache before the round-trip and roll it back if the PUT fails — same
-    // shape as useReorderSections.
-    onMutate: async ({ sectionCode, blocks }) => {
+      content: string
+    }) => pmApi.saveContent(cycleId, sectionCode, content),
+    // Write the typed text into the cache before the round-trip so the preview
+    // swaps the instant the editor closes, and roll it back if the PUT fails —
+    // same shape as useReorderSections.
+    onMutate: async ({ sectionCode, content }) => {
       await qc.cancelQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
       const previous = qc.getQueryData<CycleReportSection[]>(
         QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
@@ -297,12 +295,14 @@ export function useSaveSubsections(cycleId: string) {
         qc.setQueryData<CycleReportSection[]>(
           QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
           previous.map((s) =>
-            s.section_code === sectionCode ? { ...s, content_blocks: blocks } : s,
+            s.section_code === sectionCode ? { ...s, content } : s,
           ),
         )
       }
       return { previous }
     },
+    // The server normalises headings inside the body, so its echo — not the
+    // optimistic draft above — is what the preview must end up rendering.
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
     },
@@ -318,7 +318,7 @@ export function useSaveSubsections(cycleId: string) {
         toast.error("This section is locked.")
         return
       }
-      toast.error(readError(err, "Failed to save subheadings"))
+      toast.error(readError(err, "Failed to save section"))
     },
   })
 }

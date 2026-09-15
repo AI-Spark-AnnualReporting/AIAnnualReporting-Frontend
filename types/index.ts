@@ -122,19 +122,6 @@ export interface AttachmentInfo {
   uploaded_at: string
 }
 
-// One structured subsection of an AI-written section. The writer returns the
-// body as an ordered list of these instead of one blob of prose.
-//
-// `heading` is null only on the FIRST block — a lead-in paragraph that precedes
-// the first subheading. It has no rename/reorder/delete affordance.
-export interface SectionBlock {
-  // Server-minted and stable across renames/reorders. Use it as the React key
-  // and the drag id; never regenerate it client-side.
-  id: string
-  heading: string | null
-  paragraphs: string[]
-}
-
 // A resolved report section, enriched via the section-definitions join.
 export interface CycleReportSection {
   section_code: string
@@ -149,16 +136,12 @@ export interface CycleReportSection {
   verified: boolean
   locked_at: string | null
   attachment: AttachmentInfo | null
-  // The section body as Markdown. Populated after the LLM pass for generate
-  // sections; null on pending generate sections and irrelevant for attach/auto.
-  // When `content_blocks` is present this is a DERIVED mirror of them — read it
-  // for the legacy/fallback render, but never write to it as the source of
-  // truth for a structured section.
+  // The section body as raw Markdown, and the single source of truth for it.
+  // Populated after the LLM pass for generate/analyze sections; null on pending
+  // generate sections and irrelevant for attach/auto. The PM hand-edits this
+  // string directly — the server normalises any `#`/`##` heading in it to `###`
+  // on save, so the echoed value can differ from what was typed.
   content: string | null
-  // Structured subsections for AI-written (generate/analyze) sections, in
-  // render order. null (or absent, on responses that predate the field) means a
-  // LEGACY section written before this change — render those from `content`.
-  content_blocks?: SectionBlock[] | null
   // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
   // modes and for older responses (treat missing as "pending").
   analysis_state?: SectionAnalysisState | null
