@@ -19,7 +19,6 @@ import {
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { AnalyzeSection } from "@/components/report/AnalyzeSection"
 import { AttachSection } from "@/components/report/AttachSection"
-import { CoverSection } from "@/components/report/CoverSection"
 import { ContentSection } from "@/components/report/ContentSection"
 import { GenerateSection } from "@/components/report/GenerateSection"
 
@@ -91,16 +90,15 @@ function Placeholder({
   )
 }
 
-// System-rendered sections (cover, table of contents). The PM doesn't write
-// or lock content for these — they're composed at assembly time from cycle
-// metadata and the ordered section list. The TOC, for example, is always
-// generated from the live section order; the cover from the cycle name +
-// fiscal year + headline. No lock or input is needed.
+// System-rendered sections. The PM doesn't write or lock content for these —
+// they're composed at assembly time from cycle metadata and the ordered section
+// list. The TOC, for example, is always generated from the live section order.
+// No lock or input is needed.
 //
-// For PMs who want to inject custom text into a system section (e.g. a custom
-// cover blurb), we offer a notes textarea that persists locally per cycle +
-// section. Backend persistence is a future enhancement; the note shown here is
-// a placeholder so the PM has somewhere to capture intent.
+// For PMs who want to inject custom text into a system section, we offer a
+// notes textarea that persists locally per cycle + section. Backend persistence
+// is a future enhancement; the note shown here is a placeholder so the PM has
+// somewhere to capture intent.
 function AutoSection({
   section,
   cycleId,
@@ -223,8 +221,8 @@ function AutoSection({
 // Read-only view shown for every section once the report has been assembled.
 // Auto sections are excluded — they have no user content and are already
 // handled by AutoSection's own read-only UI. Once the report is APPROVED this
-// covers every section including the cover, and the wording changes: assembly
-// is undoable, sign-off is not.
+// covers every section, and the wording changes: assembly is undoable,
+// sign-off is not.
 function AssembledView({
   section,
   isRtl,
@@ -292,7 +290,7 @@ export function SectionDetail({
   cycleId: string
   assembled?: boolean
   // The report has been signed off. Every write path 409s, so nothing is
-  // editable — not even the cover, which survives a plain assemble.
+  // editable.
   reportLocked?: boolean
   contentLanguage?: ContentLanguage
   isRtl?: boolean
@@ -309,18 +307,11 @@ export function SectionDetail({
     )
   }
 
-  // Approved and locked → everything is read-only, the cover included. Checked
-  // before the cover branch, which is otherwise still interactive after assembly.
+  // Approved and locked → everything is read-only.
   if (reportLocked) {
     return <AssembledView section={section} isRtl={isRtl} reportLocked />
   }
 
-  // The cover is special: an auto section that accepts an OPTIONAL cover image
-  // (PNG/JPG) which becomes the report's front cover. Handle it before the
-  // mode-based routing below.
-  if (section.section_code === "cover") {
-    return <CoverSection section={section} cycleId={cycleId} />
-  }
   // Once assembled, all non-auto sections are view-only.
   if (assembled && section.mode !== "auto") {
     return <AssembledView section={section} isRtl={isRtl} />
