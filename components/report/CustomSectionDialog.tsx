@@ -167,7 +167,7 @@ export function CustomSectionDialog({
                 active={mode === "generate"}
                 onClick={() => setMode("generate")}
                 icon={<Sparkles className="h-3.5 w-3.5" />}
-                label="AI-written"
+                label="AI-refine"
                 hint="From department data"
               />
               <SourceOption
@@ -209,7 +209,7 @@ export function CustomSectionDialog({
           ) : (
             <p className="text-[11px] text-muted-foreground">
               You&apos;ll upload the document from the section card. Departments
-              don&apos;t apply — you can switch back to AI-written any time.
+              don&apos;t apply — you can switch back to AI-refine any time.
             </p>
           )}
         </div>
