@@ -29,6 +29,7 @@ import {
 import { PageLoader } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
+import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import { DepartmentCoverage } from "@/components/report/DepartmentCoverage"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
@@ -62,6 +63,16 @@ import type {
 
 type Step = 1 | 2
 
+// What the save actually does, in order. Each changed section has its source
+// type written before its departments, because switching to "Upload later"
+// clears departments server-side.
+const SAVE_MILESTONES = [
+  "Checking the plan is still editable",
+  "Updating each section's source type",
+  "Assigning the departments you chose",
+  "Refreshing the plan",
+]
+
 export default function PlanReviewPage({
   params,
 }: {
@@ -92,6 +103,9 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   // step indicator, the back arrow — has to save or warn about them.
   const [pending, setPending] = useState<PendingSources>({})
   const [saving, setSaving] = useState(false)
+  // Real save progress, so the loader shows a measured percentage rather than
+  // a simulated climb. { done, total } in sections.
+  const [saveProgress, setSaveProgress] = useState({ done: 0, total: 0 })
   const setFeeders = useSetFeeders(cycleId)
   const setSourceMode = useSetSourceMode(cycleId)
 
@@ -172,9 +186,11 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   // message specific and stops a wobbly connection being hit in a burst.
   const saveThen = async (after: () => void) => {
     if (!hasUnsaved) return after()
-    setSaving(true)
     const count = Object.keys(pending).length
+    setSaveProgress({ done: 0, total: count })
+    setSaving(true)
     const remaining: PendingSources = { ...pending }
+    let done = 0
     try {
       for (const [sectionCode, change] of Object.entries(pending)) {
         if (change.mode) {
@@ -192,6 +208,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           })
         }
         delete remaining[sectionCode]
+        done += 1
+        setSaveProgress({ done, total: count })
       }
       setPending({})
       // One message for the batch. The per-section mutations are deliberately
@@ -208,6 +226,27 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Saving is a per-section round trip, so a plan with several edited sections
+  // takes long enough to need a real loader rather than a button spinner.
+  if (saving) {
+    const { done, total } = saveProgress
+    return (
+      <div className="fixed inset-0 z-[1400] overflow-y-auto">
+        <AiLoadingScreen
+          title="Saving your section sources"
+          subtitle="Writing the departments and source types you picked for each section."
+          milestones={SAVE_MILESTONES}
+          controlledProgress={total > 0 ? Math.round((done / total) * 100) : 0}
+          progressCaption={
+            total > 0
+              ? `${done} of ${total} section${total === 1 ? "" : "s"} saved`
+              : "Starting…"
+          }
+        />
+      </div>
+    )
   }
 
   return (
