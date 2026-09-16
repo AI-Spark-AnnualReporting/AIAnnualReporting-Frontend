@@ -173,6 +173,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const saveThen = async (after: () => void) => {
     if (!hasUnsaved) return after()
     setSaving(true)
+    const count = Object.keys(pending).length
     const remaining: PendingSources = { ...pending }
     try {
       for (const [sectionCode, change] of Object.entries(pending)) {
@@ -193,6 +194,12 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         delete remaining[sectionCode]
       }
       setPending({})
+      // One message for the batch. The per-section mutations are deliberately
+      // silent: they only ever run from here, and toasting inside them fired
+      // once per changed section on a single click of Continue.
+      toast.success(
+        count === 1 ? "Source saved" : `Sources saved for ${count} sections`,
+      )
       after()
     } catch {
       // The mutation already toasted the reason. Keep whatever did not land so

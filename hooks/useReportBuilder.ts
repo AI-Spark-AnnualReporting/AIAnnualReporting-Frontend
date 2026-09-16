@@ -1,9 +1,4 @@
-import {
-  useIsMutating,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
@@ -573,20 +568,6 @@ export function useSetSourceMode(cycleId: string) {
 
 const SET_FEEDERS_KEY = (cycleId: string) => ["setFeeders", cycleId] as const
 
-// True while THIS section's feeder write is in flight, so the card can dim its
-// source badge. Keyed off the mutation's own variables — cheaper than threading
-// pending state down from the picker that owns the mutation.
-export function useIsSettingFeeders(cycleId: string, sectionCode: string) {
-  return (
-    useIsMutating({
-      mutationKey: SET_FEEDERS_KEY(cycleId),
-      predicate: (m) =>
-        (m.state.variables as { sectionCode?: string } | undefined)
-          ?.sectionCode === sectionCode,
-    }) > 0
-  )
-}
-
 export function useSetFeeders(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -643,8 +624,9 @@ export function useSetFeeders(cycleId: string) {
       // rename has shipped (was `department_codes` on the server, silently
       // dropping our `departments` key). Cache write is safe again; matches
       // the optimistic patch on the happy path.
+      // No toast: the only caller is the Sections step's batch save, which
+      // reports once for the whole set. Toasting here fired once per section.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Feeders updated")
     },
     onError: (err: MutationError, _vars, context) => {
       if (context?.previous) {
