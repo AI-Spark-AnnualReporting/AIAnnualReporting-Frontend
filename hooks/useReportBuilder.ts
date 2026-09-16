@@ -61,6 +61,25 @@ export function usePreviousManualSections(
   })
 }
 
+// Draft a whole human-voice statement (Chairman's Statement, CEO's Review) on
+// demand.
+//
+// A mutation, not a query, and deliberately so: this is an LLM call that must
+// fire on the PM's press and on nothing else. A query would invite a refetch on
+// mount, on window focus, or as a side effect of an unrelated invalidation.
+//
+// It writes nothing server-side, so there is no section cache to patch — the
+// drafted text lands in the panel's editor, and the existing manual-content save
+// is what stores it once the PM accepts. Failures are rendered in the panel next
+// to the button that caused them (with a Try again) instead of toasted, because
+// "not enough material yet" needs a sentence, not a red flash.
+export function useDraftStatement(cycleId: string) {
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.draftStatement(cycleId, sectionCode),
+  })
+}
+
 // Shared error shape. apiClient normalizes errors to { message, status, ... } but
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash

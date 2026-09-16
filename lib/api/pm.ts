@@ -72,6 +72,48 @@ export interface PreviousManualSectionsResponse {
   sections: PreviousManualSection[]
 }
 
+// POST /pm/cycles/{id}/sections/{code}/draft — a whole first version of one of
+// the human-voice statements (Chairman's Statement, CEO's Review), written from
+// this cycle's material.
+//
+// The endpoint saves nothing. The text comes back for the PM to read, and the
+// existing manual-content save is what stores it if they accept it. It is an
+// LLM call, so it is only ever sent on an explicit press.
+//
+// "Not enough material yet" is a legitimate answer here, not a failure: the
+// reply carries no content and a plain-language `reason` to show in its place.
+export interface StatementDraft {
+  // The drafted statement, or null when there wasn't enough to draft from.
+  content: string | null
+  // Why nothing was drafted, in the server's own words. Null when text came back.
+  reason: string | null
+}
+
+// Read the draft reply tolerantly. This endpoint is new, so take the statement
+// from whichever of the usual keys carries it and the refusal from whichever
+// carries the sentence. Anything blank is read as "nothing was drafted", which
+// is an answer this endpoint is allowed to give — the caller renders the reason
+// rather than an error.
+function readStatementDraft(payload: unknown): StatementDraft {
+  const body = (payload ?? {}) as Record<string, unknown>
+  const section = (body.section ?? {}) as Record<string, unknown>
+  const content = firstSentence([
+    body.content,
+    body.draft,
+    body.text,
+    section.content,
+  ])
+  const reason = firstSentence([body.reason, body.message, body.detail])
+  return { content, reason: content ? null : reason }
+}
+
+function firstSentence(candidates: unknown[]): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+  }
+  return null
+}
+
 // GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
 // Strategic Brief wizard. Order is stable per cycle (safe to index by
 // position for a stepper). `options: null` means a plain free-text question;
@@ -391,6 +433,21 @@ export const pmApi = {
         : undefined,
     )
     return data
+  },
+
+  // Draft a whole human-voice statement. Costs an LLM call server-side and
+  // stores nothing, so it is sent only when the PM presses the button — never
+  // on mount. Long timeout, same order as generateSection.
+  draftStatement: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraft> => {
+    const { data } = await apiClient.post<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return readStatementDraft(data)
   },
 
   // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.
