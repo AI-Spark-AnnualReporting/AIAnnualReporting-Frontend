@@ -24,10 +24,12 @@ import { SectionHeader } from "@/components/report/SectionDetail"
 import {
   isAssistedStatement,
   StatementSourcePicker,
+  type DraftOptionState,
   type StatementSource,
 } from "@/components/report/StatementSourcePicker"
 import {
   useAttachUpload,
+  useDraftAvailability,
   useDraftStatement,
   useLockSection,
   usePreviousManualSections,
@@ -70,9 +72,10 @@ type PendingConfirm =
 //     auditor_reservations, auditor_change, shariah_board_report) open on the
 //     editor, silently pre-filled from the company's previous cycle;
 //   - the two human-voice statements (Chairman's Statement, CEO's Review) open
-//     on a choice of three sources instead, and skip the pre-fill entirely —
-//     the choice is the front door, so seeding the editor behind it would put
-//     words in the section nobody asked for.
+//     on a choice of sources instead, and skip the pre-fill entirely — the
+//     choice is the front door, so seeding the editor behind it would put words
+//     in the section nobody asked for. The suggestion is one of those sources
+//     only when the server says a draft is possible.
 export function ManualSection({
   section,
   cycleId,
@@ -286,6 +289,38 @@ export function ManualSection({
           : "picker"
       : view
 
+  // Can this statement be drafted at all? Asked once the picker is actually on
+  // screen, and only for the two assisted codes — never on a plain manual
+  // section, never on a locked one, and never merely because this panel
+  // mounted. The answer is cached per section, so flipping between the picker
+  // and the editor doesn't re-ask.
+  const availability = useDraftAvailability(
+    cycleId,
+    sectionCode,
+    assisted && !isLocked && pane === "picker",
+  )
+
+  // Unknown until it answers, and the picker holds its cards until then rather
+  // than show a suggestion it may have to take away.
+  //
+  // A FAILED check reads as available: a network blip must not silently remove
+  // a feature, and the draft endpoint refuses gracefully anyway, so the cost of
+  // being wrong in that direction is one explained refusal.
+  const draftOption: DraftOptionState = availability.isError
+    ? "available"
+    : availability.data
+      ? availability.data.available
+        ? "available"
+        : "unavailable"
+      : "checking"
+
+  // The editor offers the same suggestion from its own button. Withdraw it only
+  // on a definite "no" that we already hold — if the check never ran (the PM
+  // landed straight in the editor because the section already had content),
+  // leave the button alone and let the refusal path cover it. Nothing here
+  // fetches.
+  const draftUnavailable = availability.data?.available === false
+
   if (isLocked) {
     return (
       <div className="flex flex-1 flex-col min-h-0">
@@ -425,6 +460,7 @@ export function ManualSection({
               hasExisting={hasText || hasDoc}
               drafting={drafter.isPending}
               busy={busy}
+              draftOption={draftOption}
               onChoose={chooseSource}
               onKeep={() => setView("auto")}
             />
@@ -570,19 +606,21 @@ export function ManualSection({
                       >
                         Change source
                       </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => chooseSource("draft")}
-                        disabled={busy}
-                        className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      >
-                        {drafter.isPending ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-4 w-4 mr-2" />
-                        )}
-                        {drafted ? "Draft it again" : "Draft it for me"}
-                      </Button>
+                      {!draftUnavailable && (
+                        <Button
+                          variant="outline"
+                          onClick={() => chooseSource("draft")}
+                          disabled={busy}
+                          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        >
+                          {drafter.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-4 w-4 mr-2" />
+                          )}
+                          {drafted ? "Draft it again" : "Draft it for me"}
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>
@@ -684,7 +722,7 @@ function confirmDescription(
 ): string {
   if (!pending) return ""
   if (pending.kind === "removeDoc") {
-    return "The file is deleted from this section and you'll be back to the three choices."
+    return "The file is deleted from this section and you'll be back to the choices."
   }
   if (pending.source === "draft") {
     return hasText

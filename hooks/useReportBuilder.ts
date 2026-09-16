@@ -80,6 +80,37 @@ export function useDraftStatement(cycleId: string) {
   })
 }
 
+// Whether a draft is possible for one of the assisted statements, asked before
+// the option is offered. A brand-new company has no previous statement and often
+// no submitted department material, so the draft would refuse — and we should
+// not offer something we cannot deliver.
+//
+// A query, unlike the draft itself, and safely so: it costs no model call and
+// writes nothing, so a refetch on mount or on an unrelated invalidation is
+// harmless. `enabled` is the caller's promise that this is one of the two
+// assisted codes AND that the picker is actually on screen; nothing else asks.
+//
+// One short retry and no more: the picker is held in front of the PM until this
+// answers, and the caller reads a failure as "available" anyway, so a long
+// backoff would only delay a fallback it is going to make regardless.
+export function useDraftAvailability(
+  cycleId: string,
+  sectionCode: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_DRAFT_AVAILABILITY(cycleId, sectionCode),
+    queryFn: () => pmApi.draftAvailability(cycleId, sectionCode),
+    enabled: enabled && !!cycleId && !!sectionCode,
+    // Material keeps arriving as departments submit, so don't hold the answer
+    // for long — but don't re-ask every time the PM flips back to the picker
+    // either.
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  })
+}
+
 // Shared error shape. apiClient normalizes errors to { message, status, ... } but
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash

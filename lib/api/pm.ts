@@ -114,6 +114,34 @@ function firstSentence(candidates: unknown[]): string | null {
   return null
 }
 
+// GET /pm/cycles/{id}/sections/{code}/draft-availability — whether there is
+// anything to draft this statement FROM, asked before the option is offered.
+//
+// Cheap and model-free, unlike the draft itself, so it is safe to send when the
+// source picker renders. It answers in advance the same question the draft
+// endpoint answers by refusing — which is what lets the app stop offering a
+// statement it cannot write.
+export interface StatementDraftAvailability {
+  available: boolean
+  // Why not, in the server's own words. Not shown to the PM: the option is
+  // simply absent, and a company with nothing to draft from has no reason to be
+  // told about a feature that doesn't apply to it yet.
+  reason: string | null
+}
+
+// Read the availability reply tolerantly, and default to AVAILABLE. Only an
+// explicit `false` takes the option away; a reply in a shape we don't recognise
+// must never remove a feature, because the draft endpoint still refuses
+// gracefully and the cost of being wrong in this direction is one explained
+// refusal.
+function readDraftAvailability(payload: unknown): StatementDraftAvailability {
+  const body = (payload ?? {}) as Record<string, unknown>
+  return {
+    available: body.available !== false,
+    reason: firstSentence([body.reason, body.message, body.detail]),
+  }
+}
+
 // GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
 // Strategic Brief wizard. Order is stable per cycle (safe to index by
 // position for a stepper). `options: null` means a plain free-text question;
@@ -448,6 +476,20 @@ export const pmApi = {
       { timeout: 120000 },
     )
     return readStatementDraft(data)
+  },
+
+  // Ask whether a draft is possible before offering it. No model call and no
+  // write, so — unlike draftStatement — this may be sent on render. Read
+  // tolerantly: anything other than an explicit `available: false` leaves the
+  // option in place.
+  draftAvailability: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraftAvailability> => {
+    const { data } = await apiClient.get<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft-availability`,
+    )
+    return readDraftAvailability(data)
   },
 
   // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.

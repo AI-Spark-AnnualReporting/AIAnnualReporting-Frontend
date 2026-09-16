@@ -2,6 +2,7 @@
 
 import { FileUp, Loader2, PenLine, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeletons"
 import { cn } from "@/lib/utils"
 
 // The two human-voice statements that open on a choice of source instead of a
@@ -14,15 +15,32 @@ export function isAssistedStatement(sectionCode: string): boolean {
   return ASSISTED_STATEMENT_CODES.has(sectionCode)
 }
 
-// The three ways one of these statements can get its content.
+// The ways one of these statements can get its content.
 export type StatementSource = "draft" | "write" | "upload"
+
+/**
+ * Whether the suggestion is on the menu at all.
+ *
+ * "checking" is the honest starting state: the availability call is still in
+ * flight and we do not yet know. It is not the same as "unavailable", and the
+ * picker must not guess in either direction — guessing available flashes a card
+ * that then disappears, guessing unavailable hides one that then appears.
+ */
+export type DraftOptionState = "checking" | "available" | "unavailable"
 
 /**
  * The opening choice for the Chairman's Statement and the CEO's Review.
  *
- * Three cards, one press each. Nothing here fires a request on its own — the
- * draft card's press is the only thing that reaches the LLM, and it does so
- * because the PM asked.
+ * One card per source, one press each. Nothing here fires a request on its own
+ * — the draft card's press is the only thing that reaches the LLM, and it does
+ * so because the PM asked.
+ *
+ * The suggestion card is offered only when the server says a draft is possible.
+ * A brand-new company has no previous statement and often no submitted
+ * department material, so the draft would refuse; rather than let the PM find
+ * that out by pressing and waiting, the card is simply absent. Nothing explains
+ * the absence — a company the feature doesn't apply to yet has no reason to be
+ * told about it.
  *
  * `hasExisting` is true when the section already holds text or a document, i.e.
  * the PM reached these choices from the editor rather than from an empty
@@ -34,19 +52,29 @@ export function StatementSourcePicker({
   hasExisting = false,
   drafting = false,
   busy = false,
+  draftOption = "available",
   onChoose,
   onKeep,
 }: {
   hasExisting?: boolean
   drafting?: boolean
   busy?: boolean
+  draftOption?: DraftOptionState
   onChoose: (source: StatementSource) => void
   onKeep?: () => void
 }) {
   const disabled = drafting || busy
+  const showDraft = draftOption === "available"
+  // With no suggestion above it, writing it yourself is the lead action — so it
+  // takes the primary tone the suggestion card would have had. Two outlined
+  // cards and no primary would read as an unfinished screen rather than a
+  // deliberate pair.
+  const writeTone = showDraft ? "slate" : "indigo"
 
   return (
     <div className="space-y-4">
+      {/* Real from the first paint: neither line depends on the availability
+          answer, so there is no reason to hold the top of the panel. */}
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-slate-500">
           {hasExisting
@@ -65,37 +93,78 @@ export function StatementSourcePicker({
         )}
       </div>
 
-      <div className="space-y-3">
-        <SourceCard
-          icon={Sparkles}
-          tone="indigo"
-          title="Use our suggestion"
-          body="We write the whole statement from this cycle's material. It arrives as a draft for you to check and edit — it is saved only when you save it."
-          action="Write a draft"
-          pendingAction="Writing the draft…"
-          pending={drafting}
-          disabled={disabled}
-          onClick={() => onChoose("draft")}
-        />
-        <SourceCard
-          icon={PenLine}
-          tone="slate"
-          title="Write it myself"
-          body="Open an empty editor and write the statement yourself."
-          action="Open the editor"
-          disabled={disabled}
-          onClick={() => onChoose("write")}
-        />
-        <SourceCard
-          icon={FileUp}
-          tone="slate"
-          title="Upload a document"
-          body="Use a statement you already have. The file goes into the report as it is, in place of any text here."
-          action="Choose a file"
-          disabled={disabled}
-          onClick={() => onChoose("upload")}
-        />
-      </div>
+      {draftOption === "checking" ? (
+        <CardStackSkeleton />
+      ) : (
+        // A plain vertical stack, so dropping the suggestion removes a row
+        // rather than leaving a hole: the two remaining cards sit at the top of
+        // the same space, full width, evenly spaced, exactly as three would.
+        <div className="space-y-3">
+          {showDraft && (
+            <SourceCard
+              icon={Sparkles}
+              tone="indigo"
+              title="Use our suggestion"
+              body="We write the whole statement from this cycle's material. It arrives as a draft for you to check and edit — it is saved only when you save it."
+              action="Write a draft"
+              pendingAction="Writing the draft…"
+              pending={drafting}
+              disabled={disabled}
+              onClick={() => onChoose("draft")}
+            />
+          )}
+          <SourceCard
+            icon={PenLine}
+            tone={writeTone}
+            title="Write it myself"
+            body="Open an empty editor and write the statement yourself."
+            action="Open the editor"
+            disabled={disabled}
+            onClick={() => onChoose("write")}
+          />
+          <SourceCard
+            icon={FileUp}
+            tone="slate"
+            title="Upload a document"
+            body="Use a statement you already have. The file goes into the report as it is, in place of any text here."
+            action="Choose a file"
+            disabled={disabled}
+            onClick={() => onChoose("upload")}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The card stack while we don't yet know whether the suggestion belongs here.
+ *
+ * Deliberately not a mimic of the cards' words — nothing readable, nothing
+ * pressable, nothing to mistake for an option that might vanish. Three slots,
+ * so the common case (a cycle with material, three cards) settles without
+ * moving at all. The short case settles upward into two, at a point where
+ * nothing has been read yet.
+ */
+function CardStackSkeleton() {
+  return (
+    <div className="space-y-3" role="status" aria-busy="true">
+      <span className="sr-only">Loading…</span>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start gap-3">
+            <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-1/3" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-4/5" />
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Skeleton className="h-8 w-28 rounded-md" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
