@@ -19,8 +19,12 @@ import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
 import type { ContentLanguage } from "@/types"
 import { AssembleEntry } from "@/components/report/AssembleEntry"
+import {
+  ExecutiveSummaryPanel,
+  EXECUTIVE_SUMMARY_CODE,
+} from "@/components/report/ExecutiveSummaryPanel"
 import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
-import { isTableOfContentsSection, isSectionReady } from "@/lib/section-filters"
+import { isReportGeneratedSection, isSectionReady } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
   params,
@@ -50,7 +54,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   const readiness = readinessQuery.data
   const sections = (sectionsQuery.data ?? []).filter(
-    (s) => !isTableOfContentsSection(s),
+    (s) => !isReportGeneratedSection(s),
   )
 
   // Defend against deep-linking into an unbuildable cycle.
@@ -83,9 +87,9 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
   const total = sections.length
-  // Auto sections are system-rendered at assembly time, and the cover is always
-  // ready (optional image) — count them as ready so they don't block the
-  // progress bar from reaching 100%.
+  // Auto sections are system-rendered at assembly time — count them as ready so
+  // they don't block the progress bar from reaching 100%. The Executive Summary
+  // is not in this list at all: it is synthetic, so it can't move the counter.
   const locked = sections.filter(isSectionReady).length
   const lockedPct = total > 0 ? Math.round((locked / total) * 100) : 0
   // Default to the first section until the PM picks one — derived during render
@@ -93,6 +97,9 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const effectiveCode = selectedCode ?? ordered[0]?.section_code ?? null
   const selected =
     sections.find((s) => s.section_code === effectiveCode) ?? null
+  // The Executive Summary has no section row — the rail selects it by its
+  // synthetic code and the right pane swaps in its own read-only panel.
+  const execSummarySelected = effectiveCode === EXECUTIVE_SUMMARY_CODE
   const cycleMeta = (pmData as { cycle?: { cycle_name?: string; content_language?: ContentLanguage } } | undefined)?.cycle
   const cycleName = cycleMeta?.cycle_name
   const contentLanguage = cycleMeta?.content_language ?? "english"
@@ -145,20 +152,25 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
               selectedCode={effectiveCode}
               onSelect={setSelectedCode}
               isRtl={isRtl}
+              showExecutiveSummary
             />
           </div>
         </div>
 
         {/* Right — mode-appropriate detail */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-          <SectionDetail
-            section={selected}
-            cycleId={cycleId}
-            assembled={assembled}
-            reportLocked={reportLocked}
-            contentLanguage={contentLanguage}
-            isRtl={isRtl}
-          />
+          {execSummarySelected ? (
+            <ExecutiveSummaryPanel />
+          ) : (
+            <SectionDetail
+              section={selected}
+              cycleId={cycleId}
+              assembled={assembled}
+              reportLocked={reportLocked}
+              contentLanguage={contentLanguage}
+              isRtl={isRtl}
+            />
+          )}
         </div>
       </div>
     </div>

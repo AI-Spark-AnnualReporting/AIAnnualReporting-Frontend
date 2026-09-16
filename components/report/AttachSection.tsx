@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/ManualSection"
+import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useAttachUpload,
   useLockSection,

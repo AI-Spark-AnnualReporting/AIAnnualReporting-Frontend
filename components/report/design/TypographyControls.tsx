@@ -4,6 +4,8 @@ import { useMemo } from "react"
 import {
   FAMILIES,
   SIZE_RANGES,
+  SUBHEADING_STYLE_CONTROLS,
+  subheadingStyle,
   type Typography,
   type TypographyFamily,
   type TypographyRole,
@@ -24,6 +26,12 @@ import {
  *
  * There is deliberately no line-height control — the renderer fixes body line
  * height at 1.5 and ignores anything sent for it.
+ *
+ * Subheading carries four extras on a second line inside its own row —
+ * numbering, case, spacing and colour — which style the h3/h4 *inside* a
+ * section, not the section title. They sit in a sub-row rather than as more
+ * columns because the grid is already at its 537px minimum; a fifth column
+ * would push the panel past the width it has.
  */
 
 // Centrion writes these as rounded-lg / rounded-md, which are 10px and 8px
@@ -50,7 +58,19 @@ const WEIGHT_OPTIONS: { label: string; value: TypographyWeight }[] = [
 const STEP = 0.5
 
 function rolesEqual(a: TypographyRole, b: TypographyRole): boolean {
-  return a.family === b.family && a.size === b.size && a.weight === b.weight
+  // The four subheading extras go through subheadingStyle() rather than being
+  // compared raw: they are optional, so a role stored before they existed has
+  // them as `undefined` and would never equal a recommended set that spells
+  // them out — every untouched design would read "Customised" forever.
+  // Resolving both sides to the defaults first makes the old shape and the new
+  // one compare equal, which is what they mean.
+  const sa = subheadingStyle(a)
+  const sb = subheadingStyle(b)
+  return (
+    a.family === b.family && a.size === b.size && a.weight === b.weight
+    && sa.numbering === sb.numbering && sa.case === sb.case
+    && sa.spacing === sb.spacing && sa.color === sb.color
+  )
 }
 
 /**
@@ -139,11 +159,24 @@ export function TypographyControls({ value, onChange, recommended, layoutName }:
                 fieldId={`typo-size-${role}`}
               />
 
-              <WeightSegment
+              <Segment
                 value={spec.weight}
+                options={WEIGHT_OPTIONS}
                 onChange={(weight) => setRole(role, { weight })}
+                label="Font weight"
                 fieldId={`typo-weight-${role}`}
               />
+
+              {/* Only Subheading takes a second line — Heading and Body have
+                  nothing to put there, and giving all three the divider would
+                  make two empty rows to keep one company. `col-span-4` spans
+                  the whole card without the grid template changing. */}
+              {role === "subheading" && (
+                <SubheadingStyleRow
+                  spec={spec}
+                  onChange={(patch) => setRole("subheading", patch)}
+                />
+              )}
             </div>
           )
         })}
@@ -243,19 +276,77 @@ function SizeStepper({ value, min, max, onChange, fieldId }: {
   )
 }
 
-function WeightSegment({ value, onChange, fieldId }: {
-  value: TypographyWeight
-  onChange: (v: TypographyWeight) => void
+/**
+ * Numbering, case, spacing and colour for the subheadings inside a section.
+ *
+ * These are the engine's h3/h4, not the section title — so what moves when you
+ * press one of these is the "4.1 Segment performance" line in the page preview,
+ * not the "4. Operating Review" above it.
+ *
+ * Wraps rather than scrolls: the four controls run to roughly 680px and the
+ * panel gives them about 576px, so at the dialog's own width they settle onto
+ * two lines. That is the intended look, not an overflow.
+ */
+function SubheadingStyleRow({ spec, onChange }: {
+  spec: TypographyRole
+  onChange: (patch: Partial<TypographyRole>) => void
+}) {
+  const resolved = subheadingStyle(spec)
+  return (
+    <div className="col-span-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#F1F5F9] pt-2">
+      {SUBHEADING_STYLE_CONTROLS.map((control) => (
+        <div key={control.key} className="flex items-center gap-1.5">
+          <span className="text-[11px] text-[#64748B]">{control.label}</span>
+          <Segment<string>
+            value={resolved[control.key]}
+            options={control.options}
+            onChange={(v) =>
+              // Spread first so touching any one of the four writes all four
+              // concretely: a design stored before these existed has none of
+              // the keys, and patching a single one would leave the other three
+              // absent in what Apply sends. `resolved` is already the defaults
+              // where they were missing, so this changes no meaning.
+              //
+              // The cast is the one in this file. A computed key types as
+              // `{ [x: string]: string }`, which no amount of generics narrows
+              // back to the literal union — but the value came out of
+              // SUBHEADING_STYLE_CONTROLS, which is that union by construction.
+              onChange({ ...resolved, [control.key]: v } as Partial<TypographyRole>)
+            }
+            label={control.label}
+            fieldId={`typo-sub-${control.key}`}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The two- or three-button segmented control this panel uses for every small
+ * choice — weight, and each of the four subheading options.
+ *
+ * This surface has no switches: `switch.tsx`, `toggle.tsx` and
+ * `radio-group.tsx` sit unused in components/ui precisely because a labelled
+ * pair of buttons says which state is which, and a switch only says on/off.
+ * Generic over the value so `Regular | Bold` and `Body ink | Brand` are the
+ * same widget with a different list rather than five copies of it.
+ */
+function Segment<T extends string | number>({ value, options, onChange, label, fieldId }: {
+  value: T
+  options: readonly { readonly value: T; readonly label: string }[]
+  onChange: (v: T) => void
+  label: string
   fieldId: string
 }) {
   return (
     <div
       role="group"
-      aria-label="Font weight"
+      aria-label={label}
       id={fieldId}
       className={`inline-flex overflow-hidden ${FIELD} border border-[#E2E8F0] bg-white`}
     >
-      {WEIGHT_OPTIONS.map((opt) => {
+      {options.map((opt) => {
         const active = opt.value === value
         return (
           <button

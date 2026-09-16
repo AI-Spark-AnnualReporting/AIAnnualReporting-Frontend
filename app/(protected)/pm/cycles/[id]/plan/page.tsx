@@ -43,7 +43,7 @@ import {
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
-import { isTableOfContentsSection } from "@/lib/section-filters"
+import { isReportGeneratedSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
 import type {
   ContentLanguage,
@@ -116,7 +116,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   }
 
   const sections = [...(sectionsQuery.data ?? [])]
-    .filter((s) => !isTableOfContentsSection(s))
+    .filter((s) => !isReportGeneratedSection(s))
     .sort((a, b) => a.display_order - b.display_order)
   const sectionsLocked = plan.sections_locked
   const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
