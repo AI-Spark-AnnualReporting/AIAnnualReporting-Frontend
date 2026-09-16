@@ -500,9 +500,12 @@ export function useLockPlan(cycleId: string) {
   return useMutation({
     mutationFn: () => pmApi.lockPlan(cycleId),
     onSuccess: (plan) => {
+      // No success toast: the only caller is Start Building, whose loader is
+      // already on screen ticking "Locking the report plan" as this resolves.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Sections locked")
     },
+    // The error toast stays — StartBuildingAction aborts the run on a failed
+    // lock and relies on this to say why.
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to lock sections")),
   })
