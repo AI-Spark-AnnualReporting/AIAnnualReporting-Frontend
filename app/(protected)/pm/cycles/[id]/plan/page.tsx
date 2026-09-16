@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  CheckCircle2,
   Layers,
   Loader2,
   Lock,
@@ -18,16 +17,7 @@ import {
 } from "lucide-react"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { PageLoader } from "@/components/ui/spinner"
-import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import { DepartmentCoverage } from "@/components/report/DepartmentCoverage"
@@ -71,10 +61,29 @@ type Step = 1 | 2
 // closing "refreshing the plan" were neither: the first is a guard inside each
 // write, not a phase of its own, and the second is a cache invalidation the PM
 // never waits on. Both would have sat there claiming work that wasn't happening.
-const SAVE_MILESTONES = [
-  "Updating each section's source type",
-  "Assigning the departments you chose",
+// Start Building is now the only wait on this page: it writes the sources the
+// PM picked on step 1, freezes the plan, then drafts every eligible section.
+// Each entry is a step that actually happens — an opening "checking the plan is
+// editable" and a closing "refreshing the plan" were dropped because the first
+// is a guard inside each write and the second is a cache invalidation nobody
+// waits on. Both claimed work that was not happening.
+const BUILD_MILESTONES = [
+  "Saving the sources you picked",
+  "Locking the report plan",
+  "Writing each AI section",
 ]
+
+type Phase = "idle" | "saving" | "locking" | "generating" | "done"
+
+// Which checklist row is lit for each phase, rather than inferring it from a
+// percentage — the phases are known here, so guessing would only be wrong.
+const PHASE_MILESTONE: Record<Phase, number> = {
+  idle: 0,
+  saving: 0,
+  locking: 1,
+  generating: 2,
+  done: 2,
+}
 
 export default function PlanReviewPage({
   params,
@@ -101,19 +110,16 @@ interface PMDashboardData {
 
 function PlanShell({ cycleId }: { cycleId: string }) {
   const [step, setStep] = useState<Step>(1)
-  // Source edits live here, not on the server, until the PM leaves step 1.
-  // PlanShell owns them because every route out of the step — Continue, the
-  // step indicator, the back arrow — has to save or warn about them.
+  // Source edits live here, not on the server, until Start Building writes
+  // them. PlanShell owns them because they outlive step 1: the PM can move to
+  // Themes and back with picks still unsaved, and every way out of the page has
+  // to warn about them.
   const [pending, setPending] = useState<PendingSources>({})
-  const [saving, setSaving] = useState(false)
-  // Real save progress, so the loader shows a measured percentage rather than
-  // a simulated climb. { done, total } in sections.
-  const [saveProgress, setSaveProgress] = useState({ done: 0, total: 0 })
   const setFeeders = useSetFeeders(cycleId)
   const setSourceMode = useSetSourceMode(cycleId)
 
-  // Source edits only exist in this component until Continue writes them, so a
-  // reload or tab close would silently drop them. The browser shows its own
+  // Source edits only exist in this component until Start Building writes them,
+  // so a reload or tab close would silently drop them. The browser shows its own
   // generic prompt; the text here is ignored by every modern browser.
   const unsavedCount = Object.keys(pending).length
   useEffect(() => {
@@ -183,15 +189,24 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     setPending((prev) => mergePending(prev, section, entry, change))
   }
 
-  // Write every unsaved edit, then advance. Sequential rather than parallel:
-  // within a section the mode must land before the feeders (switching to
-  // extract clears them server-side), and one-at-a-time keeps the failure
-  // message specific and stops a wobbly connection being hit in a burst.
-  const saveThen = async (after: () => void) => {
-    if (!hasUnsaved) return after()
+  // Write every unsaved source edit. Called from Start Building, not from
+  // Continue: moving between the two steps changes nothing on the server, so
+  // making the PM wait there bought nothing. The one unavoidable wait is the
+  // build, and this now happens inside it.
+  //
+  // Sequential rather than parallel: within a section the mode must land before
+  // the feeders (switching to extract clears them server-side), and one at a
+  // time keeps the failure message specific and stops a wobbly connection being
+  // hit in a burst.
+  //
+  // Returns true when everything landed; false leaves the unsaved edits in
+  // place so the caller can stop and the PM can retry without re-picking.
+  const saveSources = async (
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<boolean> => {
+    if (!hasUnsaved) return true
     const count = Object.keys(pending).length
-    setSaveProgress({ done: 0, total: count })
-    setSaving(true)
+    onProgress?.(0, count)
     const remaining: PendingSources = { ...pending }
     let done = 0
     try {
@@ -212,39 +227,16 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         }
         delete remaining[sectionCode]
         done += 1
-        setSaveProgress({ done, total: count })
+        onProgress?.(done, count)
       }
       setPending({})
-      // No success toast: the loader just showed this happening, section by
-      // section, and then the next step appears. Announcing it again after the
-      // fact only repeats what the PM watched.
-      after()
+      return true
     } catch {
       // The mutation already toasted the reason. Keep whatever did not land so
       // the PM can retry without re-picking anything.
       setPending(remaining)
-    } finally {
-      setSaving(false)
+      return false
     }
-  }
-
-  // Saving is a per-section round trip, so a plan with several edited sections
-  // takes long enough to need a real loader rather than a button spinner.
-  if (saving) {
-    const { done, total } = saveProgress
-    return (
-      <div className="fixed inset-0 z-[1400] overflow-y-auto">
-        <AiLoadingScreen
-          title="Saving your section sources"
-          subtitle="Writing the departments and source types you picked for each section."
-          milestones={SAVE_MILESTONES}
-          // No bar: the milestone checklist already shows how far along this
-          // is, and controlledProgress still steps it section by section.
-          showProgress={false}
-          controlledProgress={total > 0 ? Math.round((done / total) * 100) : 0}
-        />
-      </div>
-    )
   }
 
   return (
@@ -262,12 +254,11 @@ function PlanShell({ cycleId }: { cycleId: string }) {
 
       <StepIndicator
         step={step}
-        canAdvance={canLockSections && !saving}
+        canAdvance={canLockSections}
         onStep={(s) => {
-          // Allow free backward nav; gate forward. Leaving step 1 forward is
-          // the save point, so it goes through the same path as Continue.
+          // Both directions are free: nothing is written until Start Building.
           if (s === 1) setStep(1)
-          else if (s === 2 && canLockSections) saveThen(() => setStep(2))
+          else if (s === 2 && canLockSections) setStep(2)
         }}
       />
 
@@ -281,15 +272,15 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           locked={sectionsLocked}
           lockedAt={plan.sections_locked_at}
           isRtl={isRtl}
-          hasUnsaved={hasUnsaved}
-          saving={saving}
           onPendingChange={onPendingChange}
-          onContinue={() => saveThen(() => setStep(2))}
+          onContinue={() => setStep(2)}
         />
       ) : (
         <ThemesStep
           cycleId={cycleId}
           plan={plan}
+          feeders={feeders}
+          saveSources={saveSources}
           sections={sections}
           areasOfFocus={areasOfFocus}
           suggestedThemes={suggestedThemes}
@@ -489,8 +480,6 @@ function SectionsStep({
   locked,
   lockedAt,
   isRtl,
-  hasUnsaved,
-  saving,
   onPendingChange,
   onContinue,
 }: {
@@ -502,8 +491,6 @@ function SectionsStep({
   locked: boolean
   lockedAt: string | null
   isRtl: boolean
-  hasUnsaved: boolean
-  saving: boolean
   onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   onContinue: () => void
 }) {
@@ -568,24 +555,19 @@ function SectionsStep({
             </Button>
           ) : (
             <>
-              {!canLock && needsSource > 0 ? (
+              {!canLock && needsSource > 0 && (
                 <span className="hidden text-xs text-amber-700 sm:block">
                   Assign a source to every flagged section to continue.
                 </span>
-              ) : hasUnsaved ? (
-                <span className="hidden text-xs text-slate-500 sm:block">
-                  Your source changes are saved when you continue.
-                </span>
-              ) : null}
+              )}
               {/* Advancing no longer locks — the plan is locked at "Start Building". */}
               <Button
                 onClick={onContinue}
-                disabled={!canLock || saving}
+                disabled={!canLock}
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
-                {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                {saving ? "Saving…" : "Continue"}
-                {!saving && <ArrowRight className="ml-1.5 h-4 w-4" />}
+                Continue
+                <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </>
           )}
@@ -600,6 +582,8 @@ function SectionsStep({
 function ThemesStep({
   cycleId,
   plan,
+  feeders,
+  saveSources,
   sections,
   areasOfFocus,
   suggestedThemes,
@@ -609,6 +593,9 @@ function ThemesStep({
 }: {
   cycleId: string
   plan: PlanResponse
+  /** Saved sources with any still-unsaved edits merged in. */
+  feeders: FeederMapEntry[]
+  saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
   sections: CycleReportSection[]
   areasOfFocus: AreaOfFocus[]
   suggestedThemes: SuggestedTheme[]
@@ -653,7 +640,13 @@ function ThemesStep({
           <ArrowLeft className="mr-1.5 h-4 w-4" />
           Back to sections
         </Button>
-        <StartBuildingAction cycleId={cycleId} plan={plan} sections={sections} />
+        <StartBuildingAction
+          cycleId={cycleId}
+          plan={plan}
+          feeders={feeders}
+          saveSources={saveSources}
+          sections={sections}
+        />
       </div>
     </section>
   )
@@ -664,25 +657,33 @@ function ThemesStep({
 function StartBuildingAction({
   cycleId,
   plan,
+  feeders,
+  saveSources,
   sections,
 }: {
   cycleId: string
   plan: PlanResponse
+  feeders: FeederMapEntry[]
+  saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
   sections: CycleReportSection[]
 }) {
   const router = useRouter()
   const qc = useQueryClient()
   const lockPlan = useLockPlan(cycleId)
   const alreadyLocked = plan.sections_locked
-  const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
+  // Reads the merged sources, not the saved ones: a section whose department was
+  // picked a moment ago but not yet written is still sourced.
+  const needsSource = countSectionsNeedingFeeders(feeders, sections)
   const disabled = needsSource > 0
 
-  const [running, setRunning] = useState(false)
+  // One wait, three phases. Saving runs first because locking freezes the
+  // blueprint — set_section_feeders asserts the plan is unlocked, so a source
+  // written after the lock would 409.
+  const [phase, setPhase] = useState<Phase>("idle")
+  const [saved, setSaved] = useState({ done: 0, total: 0 })
   const [total, setTotal] = useState(0)
   const [completed, setCompleted] = useState(0)
   const [failed, setFailed] = useState(0)
-  const [pendingTitles, setPendingTitles] = useState<string[]>([])
-  const [allDone, setAllDone] = useState(false)
 
   const patchSection = (updated: CycleReportSection) => {
     qc.setQueryData<CycleReportSection[]>(
@@ -697,58 +698,18 @@ function StartBuildingAction({
   }
 
   const eligibleToGenerate = sections.filter((s) => {
-    if (s.mode !== "generate") return false
+    // The merged map is authoritative for mode too — a section switched to
+    // extract a moment ago must not be queued for AI drafting.
+    const entry = feeders.find((f) => f.section_code === s.section_code)
+    const mode = entry?.mode ?? s.mode
+    if (mode !== "generate") return false
     // Never invoke the AI for manual sections — the PM writes those directly.
     if (!s.ai_allowed) return false
     if (s.status !== "pending") return false
-    const feeders =
-      plan.feeders?.find((f) => f.section_code === s.section_code)
-        ?.departments ?? []
-    return feeders.length > 0
+    return (entry?.departments.length ?? 0) > 0
   })
 
-  const totalWork = eligibleToGenerate.length
-
-  const onStart = async () => {
-    // Lock the plan — the one-way freeze that used to live on Step 1. Theme
-    // selection is already persisted per-theme, so there's nothing else to save.
-    // Abort the build if the lock fails (the hook already surfaces the error).
-    if (!alreadyLocked) {
-      try {
-        await lockPlan.mutateAsync()
-      } catch {
-        return
-      }
-    }
-    if (totalWork === 0) {
-      router.push(`/pm/cycles/${cycleId}/build`)
-      return
-    }
-    setRunning(true)
-    setTotal(totalWork)
-    setCompleted(0)
-    setFailed(0)
-    setAllDone(false)
-    setPendingTitles(eligibleToGenerate.map((s) => s.title))
-
-    await Promise.allSettled(
-      eligibleToGenerate.map(async (s) => {
-        try {
-          const updated = await pmApi.generateSection(cycleId, s.section_code)
-          patchSection(updated)
-          setCompleted((c) => c + 1)
-        } catch {
-          setFailed((f) => f + 1)
-        } finally {
-          setPendingTitles((titles) => titles.filter((t) => t !== s.title))
-        }
-      }),
-    )
-    setAllDone(true)
-  }
-
   const goToBuilder = () => {
-    setRunning(false)
     if (failed > 0) {
       toast.error(
         `${failed} section${failed === 1 ? "" : "s"} failed to generate. You can retry from the builder.`,
@@ -757,101 +718,110 @@ function StartBuildingAction({
     router.push(`/pm/cycles/${cycleId}/build`)
   }
 
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0
+  const onStart = async () => {
+    // 1. Write the sources the PM picked on step 1. Stop here if any failed —
+    //    locking on top of a half-written plan would freeze the wrong thing.
+    setPhase("saving")
+    const ok = await saveSources((done, totalToSave) =>
+      setSaved({ done, total: totalToSave }),
+    )
+    if (!ok) {
+      setPhase("idle")
+      return
+    }
+
+    // 2. The one-way blueprint freeze.
+    if (!alreadyLocked) {
+      setPhase("locking")
+      try {
+        await lockPlan.mutateAsync()
+      } catch {
+        setPhase("idle") // the hook already surfaced the error
+        return
+      }
+    }
+
+    // 3. Draft every eligible section.
+    const work = eligibleToGenerate
+    if (work.length === 0) {
+      setPhase("done")
+      return
+    }
+    setPhase("generating")
+    setTotal(work.length)
+    setCompleted(0)
+    setFailed(0)
+
+    await Promise.allSettled(
+      work.map(async (s) => {
+        try {
+          const updated = await pmApi.generateSection(cycleId, s.section_code)
+          patchSection(updated)
+          setCompleted((c) => c + 1)
+        } catch {
+          setFailed((f) => f + 1)
+        }
+      }),
+    )
+    setPhase("done")
+  }
+
+  if (phase !== "idle") {
+    const done = phase === "done"
+    // Progress across the whole run, not just the drafting: with nothing to
+    // save the first phase completes instantly, which is honest.
+    const percent = done
+      ? 100
+      : phase === "generating" && total > 0
+        ? Math.round((completed / total) * 100)
+        : phase === "locking"
+          ? 10
+          : saved.total > 0
+            ? Math.round((saved.done / saved.total) * 10)
+            : 0
+
+    return (
+      <div className="fixed inset-0 z-[1400] overflow-y-auto">
+        <AiLoadingScreen
+          title="Building your report"
+          subtitle={
+            phase === "generating" && total > 0
+              ? `Writing ${Math.min(completed + 1, total)} of ${total} sections from your department content.`
+              : "Saving your choices, then drafting each section from your department content."
+          }
+          milestones={BUILD_MILESTONES}
+          activeMilestone={PHASE_MILESTONE[phase]}
+          showProgress={false}
+          controlledProgress={percent}
+          done={done}
+          doneTitle="Your report is ready to review"
+          doneSubtitle={
+            failed > 0
+              ? `Wrote ${completed} of ${total} sections. Opening the builder.`
+              : "Opening the builder so you can review and lock."
+          }
+          onDone={goToBuilder}
+        />
+      </div>
+    )
+  }
 
   return (
-    <>
-      <Button
-        disabled={disabled || running || lockPlan.isPending}
-        onClick={onStart}
-        className="bg-indigo-600 text-white hover:bg-indigo-700"
-        title={
-          disabled
-            ? "Assign a department to each flagged section before building."
-            : totalWork > 0
-              ? `Auto-generate ${totalWork} narrative section${totalWork === 1 ? "" : "s"} then open the builder`
-              : undefined
-        }
-      >
-        Start Building
-        <ArrowRight className="ml-1.5 h-4 w-4" />
-      </Button>
-
-      <Dialog
-        open={running}
-        onOpenChange={(open) => {
-          if (!open && allDone) goToBuilder()
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {allDone ? (
-                <CheckCircle2 className="h-5 w-5 text-green-600" />
-              ) : (
-                <Sparkles className="h-5 w-5 text-indigo-600" />
-              )}
-              {allDone
-                ? failed > 0
-                  ? "Finished with some errors"
-                  : "All sections generated"
-                : "Generating sections"}
-            </DialogTitle>
-            <DialogDescription>
-              {allDone
-                ? `Wrote ${completed} of ${total} section${total === 1 ? "" : "s"}. Opening the builder so you can review and lock.`
-                : `Writing the AI narrative for each section that has a source assigned. This usually takes 30–60 seconds.`}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {completed} of {total} complete
-                {failed > 0 ? ` · ${failed} failed` : ""}
-              </span>
-              <span className="tabular-nums">{percent}%</span>
-            </div>
-            <Progress value={percent} />
-
-            {!allDone && pendingTitles.length > 0 && (
-              <div className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-3">
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Still writing
-                </p>
-                <ul className="space-y-1">
-                  {pendingTitles.map((t) => (
-                    <li
-                      key={t}
-                      className="flex items-center gap-2 text-xs text-muted-foreground"
-                    >
-                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                      <span className="truncate">{t}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            {allDone ? (
-              <Button
-                onClick={goToBuilder}
-                className="bg-indigo-600 text-white hover:bg-indigo-700"
-              >
-                Open Builder
-                <ArrowRight className="ml-1.5 h-4 w-4" />
-              </Button>
-            ) : (
-              <Button variant="outline" onClick={goToBuilder}>
-                Skip and continue
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Button
+      disabled={disabled || lockPlan.isPending}
+      onClick={onStart}
+      className="bg-indigo-600 text-white hover:bg-indigo-700"
+      title={
+        disabled
+          ? "Assign a department to each flagged section before building."
+          : eligibleToGenerate.length > 0
+            ? `Auto-generate ${eligibleToGenerate.length} narrative section${eligibleToGenerate.length === 1 ? "" : "s"} then open the builder`
+            : undefined
+      }
+    >
+      Start Building
+      <ArrowRight className="ml-1.5 h-4 w-4" />
+    </Button>
   )
 }
 
