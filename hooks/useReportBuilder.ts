@@ -60,7 +60,7 @@ export function usePreviousManualSections(
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash
 // if handed an object child.
-type MutationError = {
+export type MutationError = {
   message?: unknown
   response?: { data?: { detail?: unknown } }
 }
@@ -106,7 +106,7 @@ function patchSectionInList(
   qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
 }
 
-function readError(err: MutationError, fallback: string): string {
+export function readError(err: MutationError, fallback: string): string {
   const candidate = err?.message ?? err?.response?.data?.detail
   if (typeof candidate === "string" && candidate.trim()) return candidate
   return fallback
@@ -740,8 +740,9 @@ export function useAddCustomSection(cycleId: string) {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
       toast.success("Section added")
     },
-    onError: (err: MutationError) =>
-      toast.error(readError(err, "Failed to add section")),
+    // No error toast: every failure here is about the name or the departments
+    // the PM just typed, and the dialog shows it inline beside that field. A
+    // toast in the far corner left them hunting for what to change.
   })
 }
 

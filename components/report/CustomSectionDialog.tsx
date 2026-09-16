@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { useAddCustomSection } from "@/hooks/useReportBuilder"
+import { readError, useAddCustomSection } from "@/hooks/useReportBuilder"
 import type { FeederDepartment } from "./FeederPicker"
 
 // The name doubles as the section_code server-side, so these two rules mirror
@@ -83,6 +83,10 @@ export function CustomSectionDialog({
   const [name, setName] = useState("")
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [mode, setMode] = useState<"generate" | "extract">("generate")
+  // Server rejections (duplicate name, a name that clashes with a built-in
+  // section, an unknown department) are all about what was just typed, so they
+  // are shown beside the field rather than in a corner toast.
+  const [error, setError] = useState<string | null>(null)
 
   // Reset on close rather than in an effect, so a cancelled draft never
   // reappears on the next section without costing a cascading render.
@@ -91,6 +95,7 @@ export function CustomSectionDialog({
       setName("")
       setSelected(new Set())
       setMode("generate")
+      setError(null)
     }
     onOpenChange(next)
   }
@@ -110,13 +115,19 @@ export function CustomSectionDialog({
 
   const submit = async () => {
     if (!canSubmit) return
-    // Feeders are meaningless for extract — the server ignores them anyway.
-    await add.mutateAsync({
-      name: trimmed,
-      feeders: mode === "generate" ? [...selected] : [],
-      mode,
-    })
-    setOpen(false)
+    setError(null)
+    try {
+      // Feeders are meaningless for extract — the server ignores them anyway.
+      await add.mutateAsync({
+        name: trimmed,
+        feeders: mode === "generate" ? [...selected] : [],
+        mode,
+      })
+      setOpen(false)
+    } catch (err) {
+      // Stay open with everything intact so the name can just be edited.
+      setError(readError(err as Parameters<typeof readError>[0], "Couldn't add the section."))
+    }
   }
 
   return (
@@ -141,7 +152,10 @@ export function CustomSectionDialog({
               id="custom-section-name"
               value={name}
               maxLength={NAME_MAX}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                if (error) setError(null)
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit()
               }}
@@ -149,9 +163,15 @@ export function CustomSectionDialog({
               autoFocus
             />
             <div className="flex items-start justify-between gap-2">
-              <p className="text-[11px] text-amber-600">
-                {badChars ? "Cannot contain / \\ or %." : ""}
-              </p>
+              {/* A server rejection outranks the local hint — it is the reason
+                  the section wasn't added, and it names what to change. */}
+              {error ? (
+                <p className="text-[11px] text-red-600">{error}</p>
+              ) : (
+                <p className="text-[11px] text-amber-600">
+                  {badChars ? "Cannot contain / \\ or %." : ""}
+                </p>
+              )}
               <p className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                 {trimmed.length}/{NAME_MAX}
               </p>
