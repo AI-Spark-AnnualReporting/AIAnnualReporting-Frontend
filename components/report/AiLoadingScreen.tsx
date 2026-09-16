@@ -146,6 +146,9 @@ export interface AiLoadingScreenProps {
   progressCaption?: ReactNode
   /** Force the active milestone; otherwise it is inferred from progress. */
   activeMilestone?: number
+  /** Hide the bar and its caption. `controlledProgress` still steps the
+   *  milestone checklist, which carries the progress on its own. */
+  showProgress?: boolean
   headerExtra?: ReactNode
   footer?: ReactNode
 }
@@ -163,6 +166,7 @@ export function AiLoadingScreen({
   indeterminate = false,
   progressCaption,
   activeMilestone,
+  showProgress = true,
   headerExtra,
   footer,
 }: AiLoadingScreenProps) {
@@ -362,43 +366,49 @@ export function AiLoadingScreen({
           ))}
         </div>
 
-        <div
-          style={{
-            position: "relative",
-            height: 9,
-            background: "#E8EAF5",
-            borderRadius: 9,
-            overflow: "hidden",
-            margin: "22px 0 8px",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: shimmer ? "32%" : `${Math.round(shown)}%`,
-              borderRadius: 9,
-              background: "linear-gradient(90deg,#4040C8,#5BC9E2,#4040C8)",
-              backgroundSize: "200% auto",
-              animation: shimmer
-                ? "onb-indeterminate 1.5s ease-in-out infinite, onb-sheen 1.6s linear infinite"
-                : "onb-sheen 1.6s linear infinite",
-              transition: shimmer ? undefined : "width .25s ease",
-            }}
-          />
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "#5A6080",
-            fontFamily: "var(--font-dm-mono), monospace",
-            fontWeight: 700,
-            marginBottom: 24,
-          }}
-        >
-          {progressCaption != null && !allDone
-            ? progressCaption
-            : `${Math.round(shown)}% complete`}
-        </div>
+        {showProgress ? (
+          <>
+            <div
+              style={{
+                position: "relative",
+                height: 9,
+                background: "#E8EAF5",
+                borderRadius: 9,
+                overflow: "hidden",
+                margin: "22px 0 8px",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: shimmer ? "32%" : `${Math.round(shown)}%`,
+                  borderRadius: 9,
+                  background: "linear-gradient(90deg,#4040C8,#5BC9E2,#4040C8)",
+                  backgroundSize: "200% auto",
+                  animation: shimmer
+                    ? "onb-indeterminate 1.5s ease-in-out infinite, onb-sheen 1.6s linear infinite"
+                    : "onb-sheen 1.6s linear infinite",
+                  transition: shimmer ? undefined : "width .25s ease",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#5A6080",
+                fontFamily: "var(--font-dm-mono), monospace",
+                fontWeight: 700,
+                marginBottom: 24,
+              }}
+            >
+              {progressCaption != null && !allDone
+                ? progressCaption
+                : `${Math.round(shown)}% complete`}
+            </div>
+          </>
+        ) : (
+          <div style={{ height: 24 }} />
+        )}
 
         <div
           key={currentTip}

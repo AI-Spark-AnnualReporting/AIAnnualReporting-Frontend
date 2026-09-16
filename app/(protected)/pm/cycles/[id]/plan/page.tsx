@@ -212,12 +212,9 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         setSaveProgress({ done, total: count })
       }
       setPending({})
-      // One message for the batch. The per-section mutations are deliberately
-      // silent: they only ever run from here, and toasting inside them fired
-      // once per changed section on a single click of Continue.
-      toast.success(
-        count === 1 ? "Source saved" : `Sources saved for ${count} sections`,
-      )
+      // No success toast: the loader just showed this happening, section by
+      // section, and then the next step appears. Announcing it again after the
+      // fact only repeats what the PM watched.
       after()
     } catch {
       // The mutation already toasted the reason. Keep whatever did not land so
@@ -238,12 +235,10 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           title="Saving your section sources"
           subtitle="Writing the departments and source types you picked for each section."
           milestones={SAVE_MILESTONES}
+          // No bar: the milestone checklist already shows how far along this
+          // is, and controlledProgress still steps it section by section.
+          showProgress={false}
           controlledProgress={total > 0 ? Math.round((done / total) * 100) : 0}
-          progressCaption={
-            total > 0
-              ? `${done} of ${total} section${total === 1 ? "" : "s"} saved`
-              : "Starting…"
-          }
         />
       </div>
     )
