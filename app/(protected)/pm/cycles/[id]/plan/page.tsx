@@ -66,11 +66,14 @@ type Step = 1 | 2
 // What the save actually does, in order. Each changed section has its source
 // type written before its departments, because switching to "Upload later"
 // clears departments server-side.
+//
+// Only real steps belong here. An opening "checking the plan is editable" and a
+// closing "refreshing the plan" were neither: the first is a guard inside each
+// write, not a phase of its own, and the second is a cache invalidation the PM
+// never waits on. Both would have sat there claiming work that wasn't happening.
 const SAVE_MILESTONES = [
-  "Checking the plan is still editable",
   "Updating each section's source type",
   "Assigning the departments you chose",
-  "Refreshing the plan",
 ]
 
 export default function PlanReviewPage({
