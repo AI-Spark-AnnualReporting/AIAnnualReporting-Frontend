@@ -29,6 +29,7 @@ import {
 import { PageLoader } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
+import { DepartmentCoverage } from "@/components/report/DepartmentCoverage"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
 import { ConceptMessagesSummary } from "@/components/report/ConceptMessagesSummary"
@@ -377,6 +378,12 @@ function SectionsStep({
           )}
         </div>
       </div>
+
+      <DepartmentCoverage
+        departments={departments}
+        feeders={feeders}
+        isRtl={isRtl}
+      />
 
       <PlanSectionGrid
         cycleId={cycleId}
