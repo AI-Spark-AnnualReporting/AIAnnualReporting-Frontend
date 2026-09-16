@@ -19,10 +19,36 @@ export type TypographyFamily =
 /** Regular or Bold. The renderer supports no other weights. */
 export type TypographyWeight = 400 | 700
 
+/**
+ * The four settings that style a subheading *inside* a section's body — the
+ * engine's h3/h4 — as opposed to the section title (h2), which the `heading`
+ * role owns. They live on `typography.subheading` because that is the role
+ * already carrying the family, size and weight those headings are drawn with.
+ *
+ * Every default below reproduces what the renderer printed before these
+ * existed, so an untouched design looks exactly as it did.
+ */
+export type SubheadingNumbering = "numbered" | "plain"
+export type SubheadingCase = "normal" | "upper"
+export type SubheadingSpacing = "tight" | "normal" | "loose"
+export type SubheadingColor = "body" | "brand"
+
 export interface TypographyRole {
   family: TypographyFamily
   size: number
   weight: TypographyWeight
+  // Subheading-only, and optional: a typography object stored before these
+  // controls shipped simply has no such keys. Read them through
+  // `subheadingStyle()` rather than directly so a missing key resolves to the
+  // default instead of `undefined`.
+  /** `plain` drops the "N.M " prefix the document numbers subheadings with. */
+  numbering?: SubheadingNumbering
+  /** `upper` prints the subheading in capitals (text-transform, not the text). */
+  case?: SubheadingCase
+  /** How much air sits above and below a subheading. */
+  spacing?: SubheadingSpacing
+  /** Body ink, or the report's own primary. */
+  color?: SubheadingColor
 }
 
 export interface Typography {
@@ -95,6 +121,101 @@ export const SIZE_RANGES: Record<keyof Typography, [number, number]> = {
   body: [10, 12],
 }
 
+/** Every subheading option resolved — nothing optional, nothing undefined. */
+export interface SubheadingStyle {
+  numbering: SubheadingNumbering
+  case: SubheadingCase
+  spacing: SubheadingSpacing
+  color: SubheadingColor
+}
+
+/**
+ * One segmented control: which key it writes, its label, and its buttons.
+ *
+ * Written as a union of per-key shapes rather than one widened shape so each
+ * control's values are checked against *its own* key — `{ key: "case", options:
+ * [{ value: "loose" }] }` is a compile error, which a `value: string` list
+ * would have waved through.
+ */
+type ControlFor<K extends keyof SubheadingStyle> = {
+  key: K
+  label: string
+  options: readonly { readonly value: SubheadingStyle[K]; readonly label: string }[]
+}
+
+export type SubheadingStyleControl =
+  | ControlFor<"numbering">
+  | ControlFor<"case">
+  | ControlFor<"spacing">
+  | ControlFor<"color">
+
+/**
+ * The allowlist the subheading controls are built from, in button order.
+ *
+ * One list, walked by the UI to draw the segments — adding a value means
+ * editing this and nothing else. The first value of each control is its
+ * default, i.e. what the renderer did before any of this was settable.
+ */
+export const SUBHEADING_STYLE_CONTROLS: readonly SubheadingStyleControl[] = [
+  {
+    key: "numbering",
+    label: "Numbering",
+    options: [
+      { value: "numbered", label: "Numbered" },
+      { value: "plain", label: "Plain" },
+    ],
+  },
+  {
+    key: "case",
+    label: "Case",
+    options: [
+      { value: "normal", label: "Normal" },
+      { value: "upper", label: "UPPERCASE" },
+    ],
+  },
+  {
+    key: "spacing",
+    label: "Spacing",
+    options: [
+      { value: "tight", label: "Tight" },
+      { value: "normal", label: "Normal" },
+      { value: "loose", label: "Loose" },
+    ],
+  },
+  {
+    key: "color",
+    label: "Colour",
+    options: [
+      { value: "body", label: "Body ink" },
+      { value: "brand", label: "Brand" },
+    ],
+  },
+]
+
+export const SUBHEADING_STYLE_DEFAULTS: SubheadingStyle = {
+  numbering: "numbered",
+  case: "normal",
+  spacing: "normal",
+  color: "body",
+}
+
+/**
+ * A role's subheading options with the defaults filled in.
+ *
+ * The single place a missing key becomes a concrete value. Both previews and
+ * the "Customised" comparison go through it, so a design saved before these
+ * controls existed renders — and compares — as the defaults rather than as a
+ * hole.
+ */
+export function subheadingStyle(role: TypographyRole): SubheadingStyle {
+  return {
+    numbering: role.numbering ?? SUBHEADING_STYLE_DEFAULTS.numbering,
+    case: role.case ?? SUBHEADING_STYLE_DEFAULTS.case,
+    spacing: role.spacing ?? SUBHEADING_STYLE_DEFAULTS.spacing,
+    color: role.color ?? SUBHEADING_STYLE_DEFAULTS.color,
+  }
+}
+
 export const FAMILIES: { value: TypographyFamily; label: string }[] = [
   { value: "DejaVu Sans", label: "Default (system sans)" },
   { value: "Inter", label: "Inter" },
@@ -113,17 +234,26 @@ export const FAMILIES: { value: TypographyFamily; label: string }[] = [
 export const LAYOUT_TYPOGRAPHY: Record<string, Typography> = {
   classic: {
     heading: { family: "Libre Baskerville", size: 16, weight: 700 },
-    subheading: { family: "Libre Baskerville", size: 12, weight: 700 },
+    subheading: {
+      family: "Libre Baskerville", size: 12, weight: 700,
+      ...SUBHEADING_STYLE_DEFAULTS,
+    },
     body: { family: "Source Serif 4", size: 11, weight: 400 },
   },
   minimal: {
     heading: { family: "Inter", size: 16, weight: 400 },
-    subheading: { family: "Inter", size: 11, weight: 700 },
+    subheading: {
+      family: "Inter", size: 11, weight: 700,
+      ...SUBHEADING_STYLE_DEFAULTS,
+    },
     body: { family: "Lato", size: 11, weight: 400 },
   },
   bold: {
     heading: { family: "Inter", size: 18, weight: 700 },
-    subheading: { family: "Inter", size: 12, weight: 700 },
+    subheading: {
+      family: "Inter", size: 12, weight: 700,
+      ...SUBHEADING_STYLE_DEFAULTS,
+    },
     body: { family: "Inter", size: 11, weight: 400 },
   },
 }

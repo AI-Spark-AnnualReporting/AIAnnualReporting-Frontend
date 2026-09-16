@@ -1,5 +1,6 @@
+import { useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload, PatchOutlineTitlesPayload } from "@/lib/api/department"
+import { departmentApi, SubmitAnswersPayload, FinalizePayload, AdjustTonePayload, PatchOutlineTitlesPayload, AdditionalInsightsResponse } from "@/lib/api/department"
 import { pmApi, ReviewPayload, ReminderPayload, KickoffBriefPayload, EscalationPayload, GenerateBriefPayload } from "@/lib/api/pm"
 import { KickoffBriefResponse, PMDashboard, Session } from "@/types"
 import { toast } from "sonner"
@@ -234,15 +235,41 @@ export function useSetInsightInclusion(sessionId: string) {
  * Only runs once `insightId` is non-empty — the page passes "" until a card is
  * expanded, the same enable-by-truthy-id idiom used elsewhere in this file.
  * Cheap (plain DB read), so unlike useAdditionalInsights it can refetch freely.
+ *
+ * A 404 here means the card is gone from the server's stored blob: insights are
+ * recomputed whenever a document or a citation lands, and a recompute can
+ * replace every card. The list we are showing then belongs to an older compute,
+ * which invalidateAfterDocumentWork cannot fix on its own — that invalidation
+ * only reaches the React Query cache of the tab that ran the extraction, and
+ * this query is configured never to refetch on focus. So a second tab sat on a
+ * dead list until the user reloaded by hand, and clicking a card printed a red
+ * error. Recover here instead: refresh the list so it matches the server.
  */
 export function useInsightSources(sessionId: string, insightId: string) {
-  return useQuery({
+  const qc = useQueryClient()
+  const query = useQuery({
     queryKey: ["session", sessionId, "insight-sources", insightId],
     queryFn: () => departmentApi.getInsightSources(sessionId, insightId),
     enabled: !!sessionId && !!insightId,
     retry: false,
     staleTime: Infinity,
   })
+
+  const status = (query.error as { status?: number } | null)?.status
+  useEffect(() => {
+    if (status !== 404) return
+    // Only act while OUR list still claims this card exists. Once the refetch
+    // lands the card is gone from the list, this condition is false, and the
+    // effect stops — which is what keeps it from invalidating in a loop against
+    // a card the server genuinely does not have.
+    const list = qc.getQueryData<AdditionalInsightsResponse>([
+      "session", sessionId, "additional-insights",
+    ])
+    if (!list?.items?.some((i) => i.id === insightId)) return
+    qc.invalidateQueries({ queryKey: ["session", sessionId, "additional-insights"] })
+  }, [status, qc, sessionId, insightId])
+
+  return query
 }
 
 // ── Draft working copy ──────────────────────────────────────────────────────

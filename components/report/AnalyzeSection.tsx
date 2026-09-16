@@ -19,9 +19,10 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { Textarea } from "@/components/ui/textarea"
+import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/ManualSection"
+import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useLockSection,
   usePlan,
@@ -476,11 +477,15 @@ function EditView({
         </label>
         <span className="text-xs text-slate-400">Markdown supported</span>
       </div>
+      <MarkdownHelpChip />
       <Textarea
         id="analyze-section-content"
         value={draft}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="## Key Findings&#10;- …&#10;&#10;## Trends&#10;- …"
+        // `###`, not `##`: section TITLES are the `##` level in the flat
+        // Markdown a report is assembled from, and the server normalises a
+        // body heading down to `###` on save anyway.
+        placeholder="### Key Findings&#10;- …&#10;&#10;### Trends&#10;- …"
         rows={18}
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl text-sm leading-relaxed font-mono", isRtl && "text-right")}
@@ -528,6 +533,7 @@ function LockedView({
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
       >
+        {/* Read-only: a locked section shows its findings but offers no Edit. */}
         {content.trim() ? (
           <ProsePreview content={content} />
         ) : (

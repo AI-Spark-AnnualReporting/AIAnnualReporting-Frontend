@@ -42,7 +42,7 @@ function VerbatimSources({
   open: boolean
   isRtl: boolean
 }) {
-  const { data, isLoading, isError } = useInsightSources(sessionId, open ? insightId : "")
+  const { data, isLoading, isError, error } = useInsightSources(sessionId, open ? insightId : "")
 
   if (!open) return null
 
@@ -54,9 +54,15 @@ function VerbatimSources({
     )
   }
   if (isError) {
+    // 404 is not a failure: the cards were recomputed and this one no longer
+    // exists. useInsightSources has already asked for a fresh list, so say what
+    // is happening rather than printing an error the user can do nothing with.
+    const gone = (error as { status?: number } | null)?.status === 404
     return (
-      <p className="border-t border-slate-100 px-5 py-4 text-sm text-red-600">
-        Couldn&apos;t load the source text.
+      <p className={`border-t border-slate-100 px-5 py-4 text-sm ${gone ? "text-slate-500" : "text-red-600"}`}>
+        {gone
+          ? "These insights were rebuilt after your answers were extracted — refreshing the list."
+          : "Couldn't load the source text."}
       </p>
     )
   }
