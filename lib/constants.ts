@@ -88,6 +88,7 @@ export const SECTION_LAYERS: Record<
   cma: { label: "CMA Required", color: "bg-blue-100 text-blue-700 border-blue-200" },
   sector: { label: "Sector", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
   optional: { label: "Optional", color: "bg-gray-100 text-gray-700 border-gray-200" },
+  custom: { label: "Custom", color: "bg-violet-50 text-violet-700 border-violet-200" },
 }
 
 export const SECTION_STATUSES: Record<

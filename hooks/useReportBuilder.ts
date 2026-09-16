@@ -466,12 +466,12 @@ function setSectionsCache(
   )
 }
 
-// Generate or regenerate the plan. Backend runs two LLM passes.
+// Generate the plan. Backend runs two LLM passes. There is no regenerate —
+// the plan is built once, then edited by hand.
 export function useBuildPlan(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ refresh = false }: { refresh?: boolean } = {}) =>
-      pmApi.buildPlan(cycleId, refresh),
+    mutationFn: () => pmApi.buildPlan(cycleId),
     onSuccess: (plan) => {
       setPlanCache(qc, cycleId, plan)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
@@ -731,6 +731,27 @@ export function useAddOptional(cycleId: string) {
   return useMutation({
     mutationFn: ({ sectionCode }: { sectionCode: string }) =>
       pmApi.addOptionalSection(cycleId, sectionCode),
+    onSuccess: (sections) => {
+      setSectionsCache(qc, cycleId, sections)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+      toast.success("Section added")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to add section")),
+  })
+}
+
+// A section the PM invents, rather than one picked from the catalogue. Same
+// cache handling as useAddOptional — the response is the full section list.
+export function useAddCustomSection(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      name: string
+      feeders: string[]
+      mode: "generate" | "extract"
+    }) => pmApi.addCustomSection(cycleId, payload),
     onSuccess: (sections) => {
       setSectionsCache(qc, cycleId, sections)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })

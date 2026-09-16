@@ -30,7 +30,6 @@ import { PageLoader } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
-import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
 import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
 import { ConceptMessagesSummary } from "@/components/report/ConceptMessagesSummary"
 import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
@@ -128,12 +127,9 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         cycleId={cycleId}
         cycleName={cycleName}
         right={
-          <div className="flex items-center gap-4">
-            <p className="hidden max-w-xs text-right text-sm text-slate-500 lg:block">
-              Edit anything here — the build uses your revisions.
-            </p>
-            <RegeneratePlanButton cycleId={cycleId} disabled={sectionsLocked} />
-          </div>
+          <p className="hidden max-w-xs text-right text-sm text-slate-500 lg:block">
+            Edit anything here — the build uses your revisions.
+          </p>
         }
       />
 
@@ -400,7 +396,7 @@ function SectionsStep({
             structure can&apos;t be changed.
           </span>
         ) : (
-          <AddSectionPicker cycleId={cycleId} />
+          <AddSectionPicker cycleId={cycleId} departments={departments} />
         )}
         <div className="flex items-center gap-3">
           {locked ? (
@@ -714,7 +710,7 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           takes 30–60 seconds.
         </p>
         <Button
-          onClick={() => build.mutate({})}
+          onClick={() => build.mutate()}
           disabled={build.isPending}
           size="lg"
           className="bg-indigo-600 text-white hover:bg-indigo-700"

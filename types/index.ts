@@ -26,7 +26,9 @@ export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
-export type SectionLayer = "common" | "cma" | "sector" | "optional"
+// "custom" is not a catalogue layer — the backend reports it for a
+// PM-authored section, which has no catalogue row to take a layer from.
+export type SectionLayer = "common" | "cma" | "sector" | "optional" | "custom"
 export type SectionStatus = "pending" | "drafting" | "locked"
 // Analyze-mode only (null for other modes):
 //   "ready"   → findings present in `content`.
@@ -127,7 +129,8 @@ export interface CycleReportSection {
   section_code: string
   title: string
   layer: SectionLayer
-  content_source: "narrative" | "structured" | "financials" | "composite"
+  // "" for a PM-authored section: no catalogue row, so no content_source.
+  content_source: "narrative" | "structured" | "financials" | "composite" | ""
   mode: SectionMode
   status: SectionStatus
   display_order: number

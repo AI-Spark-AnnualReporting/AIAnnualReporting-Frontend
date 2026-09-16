@@ -18,27 +18,35 @@ import {
   useAddOptional,
   useAvailableOptional,
 } from "@/hooks/useReportBuilder"
+import { CustomSectionDialog } from "./CustomSectionDialog"
+import type { FeederDepartment } from "./FeederPicker"
 
 interface AddSectionPickerProps {
   cycleId: string
+  departments: FeederDepartment[]
 }
 
-export function AddSectionPicker({ cycleId }: AddSectionPickerProps) {
+export function AddSectionPicker({ cycleId, departments }: AddSectionPickerProps) {
   const available = useAvailableOptional(cycleId)
   const add = useAddOptional(cycleId)
   const [open, setOpen] = useState(false)
+  const [customOpen, setCustomOpen] = useState(false)
   const [query, setQuery] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Move focus from Radix's default first-item target to the search input,
-  // and clear the query whenever the dropdown closes.
+  // Move focus from Radix's default first-item target to the search input.
   useEffect(() => {
-    if (open) {
-      const id = requestAnimationFrame(() => inputRef.current?.focus())
-      return () => cancelAnimationFrame(id)
-    }
-    setQuery("")
+    if (!open) return
+    const id = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
   }, [open])
+
+  // Clearing the query belongs on the close itself, not in an effect reacting
+  // to it — setState in an effect body costs a cascading render.
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setQuery("")
+    setOpen(next)
+  }
 
   const items = available.data ?? []
   const empty = !available.isLoading && items.length === 0
@@ -53,9 +61,11 @@ export function AddSectionPicker({ cycleId }: AddSectionPickerProps) {
 
   return (
     <section className="pt-2">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" disabled={empty || add.isPending}>
+          {/* Never disabled on `empty`: running out of catalogue sections is
+              exactly when "Create your own section" is wanted. */}
+          <Button variant="outline" size="sm" disabled={add.isPending}>
             {add.isPending ? (
               <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
             ) : (
@@ -129,13 +139,28 @@ export function AddSectionPicker({ cycleId }: AddSectionPickerProps) {
               {filtered.length} of {items.length}
             </div>
           )}
+
+          <DropdownMenuSeparator className="my-0" />
+          <DropdownMenuItem
+            onSelect={() => setCustomOpen(true)}
+            className="flex items-center gap-2 font-medium"
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" />
+            Create your own section
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {empty && (
         <p className="text-xs text-muted-foreground mt-1">
-          Every section for this cycle is already in the plan.
+          Every built-in section is already in the plan — add your own instead.
         </p>
       )}
+      <CustomSectionDialog
+        cycleId={cycleId}
+        departments={departments}
+        open={customOpen}
+        onOpenChange={setCustomOpen}
+      />
     </section>
   )
 }
