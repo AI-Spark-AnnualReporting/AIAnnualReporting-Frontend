@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useState } from "react"
+import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -39,10 +39,18 @@ import {
   useLockPlan,
   usePMCycleSections,
   usePlan,
+  useSetFeeders,
+  useSetSourceMode,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
+import {
+  applyPending,
+  mergePending,
+  type PendingSourceChange,
+  type PendingSources,
+} from "@/lib/pendingSectionSources"
 import { isTableOfContentsSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
 import type {
@@ -79,6 +87,24 @@ interface PMDashboardData {
 
 function PlanShell({ cycleId }: { cycleId: string }) {
   const [step, setStep] = useState<Step>(1)
+  // Source edits live here, not on the server, until the PM leaves step 1.
+  // PlanShell owns them because every route out of the step — Continue, the
+  // step indicator, the back arrow — has to save or warn about them.
+  const [pending, setPending] = useState<PendingSources>({})
+  const [saving, setSaving] = useState(false)
+  const setFeeders = useSetFeeders(cycleId)
+  const setSourceMode = useSetSourceMode(cycleId)
+
+  // Source edits only exist in this component until Continue writes them, so a
+  // reload or tab close would silently drop them. The browser shows its own
+  // generic prompt; the text here is ignored by every modern browser.
+  const unsavedCount = Object.keys(pending).length
+  useEffect(() => {
+    if (unsavedCount === 0) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [unsavedCount])
   // The lock is authoritative on the server (`plan.sections_locked`). Once set,
   // the blueprint is frozen one-way: no reordering, removing, source editing,
   // theme/headline edits, or regeneration. There is no unlock. Locking now
@@ -119,14 +145,70 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     .filter((s) => !isTableOfContentsSection(s))
     .sort((a, b) => a.display_order - b.display_order)
   const sectionsLocked = plan.sections_locked
-  const needsSource = countSectionsNeedingFeeders(plan.feeders, sections)
+  // One merged view of the sources, used by the cards, the counter and the
+  // coverage strip alike, so an unsaved tick shows everywhere at once.
+  const feeders = applyPending(plan.feeders ?? [], sections, pending)
+  const needsSource = countSectionsNeedingFeeders(feeders, sections)
   const canLockSections = needsSource === 0 && sections.length > 0
+  const hasUnsaved = Object.keys(pending).length > 0
+
+  const onPendingChange = (
+    sectionCode: string,
+    change: PendingSourceChange,
+  ) => {
+    const section = sections.find((x) => x.section_code === sectionCode)
+    if (!section) return
+    // Compared against the saved map, so an edit that returns a section to its
+    // stored value drops out of `pending` entirely.
+    const entry = (plan.feeders ?? []).find(
+      (f) => f.section_code === sectionCode,
+    )
+    setPending((prev) => mergePending(prev, section, entry, change))
+  }
+
+  // Write every unsaved edit, then advance. Sequential rather than parallel:
+  // within a section the mode must land before the feeders (switching to
+  // extract clears them server-side), and one-at-a-time keeps the failure
+  // message specific and stops a wobbly connection being hit in a burst.
+  const saveThen = async (after: () => void) => {
+    if (!hasUnsaved) return after()
+    setSaving(true)
+    const remaining: PendingSources = { ...pending }
+    try {
+      for (const [sectionCode, change] of Object.entries(pending)) {
+        if (change.mode) {
+          await setSourceMode.mutateAsync({ sectionCode, mode: change.mode })
+        }
+        // Extract reads its document and nothing else; the mode switch above
+        // already cleared its feeders, so writing them would be refused.
+        const finalMode =
+          change.mode ??
+          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode
+        if (change.feeders && finalMode !== "extract") {
+          await setFeeders.mutateAsync({
+            sectionCode,
+            departmentCodes: change.feeders,
+          })
+        }
+        delete remaining[sectionCode]
+      }
+      setPending({})
+      after()
+    } catch {
+      // The mutation already toasted the reason. Keep whatever did not land so
+      // the PM can retry without re-picking anything.
+      setPending(remaining)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-7">
       <PlanHeader
         cycleId={cycleId}
         cycleName={cycleName}
+        confirmLeave={hasUnsaved}
         right={
           <p className="hidden max-w-xs text-right text-sm text-slate-500 lg:block">
             Edit anything here — the build uses your revisions.
@@ -136,11 +218,12 @@ function PlanShell({ cycleId }: { cycleId: string }) {
 
       <StepIndicator
         step={step}
-        canAdvance={canLockSections}
+        canAdvance={canLockSections && !saving}
         onStep={(s) => {
-          // Allow free backward nav; gate forward.
+          // Allow free backward nav; gate forward. Leaving step 1 forward is
+          // the save point, so it goes through the same path as Continue.
           if (s === 1) setStep(1)
-          else if (s === 2 && canLockSections) setStep(2)
+          else if (s === 2 && canLockSections) saveThen(() => setStep(2))
         }}
       />
 
@@ -148,13 +231,16 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         <SectionsStep
           cycleId={cycleId}
           sections={sections}
-          feeders={plan.feeders ?? []}
+          feeders={feeders}
           departments={departments}
           needsSource={needsSource}
           locked={sectionsLocked}
           lockedAt={plan.sections_locked_at}
           isRtl={isRtl}
-          onContinue={() => setStep(2)}
+          hasUnsaved={hasUnsaved}
+          saving={saving}
+          onPendingChange={onPendingChange}
+          onContinue={() => saveThen(() => setStep(2))}
         />
       ) : (
         <ThemesStep
@@ -178,16 +264,31 @@ function PlanHeader({
   cycleId,
   cycleName,
   right,
+  confirmLeave,
 }: {
   cycleId: string
   cycleName: string | undefined
   right: React.ReactNode
+  /** Unsaved source edits would be lost — ask before navigating away. */
+  confirmLeave?: boolean
 }) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 items-start gap-4">
         <Link
           href={`/pm/cycles/${cycleId}`}
+          onClick={(e) => {
+            if (!confirmLeave) return
+            // beforeunload does not fire on a client-side route change, so the
+            // back arrow needs its own guard.
+            if (
+              !window.confirm(
+                "Your source changes haven't been saved yet. Leave without saving?",
+              )
+            ) {
+              e.preventDefault()
+            }
+          }}
           className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
           aria-label="Back to cycle"
         >
@@ -344,6 +445,9 @@ function SectionsStep({
   locked,
   lockedAt,
   isRtl,
+  hasUnsaved,
+  saving,
+  onPendingChange,
   onContinue,
 }: {
   cycleId: string
@@ -354,6 +458,9 @@ function SectionsStep({
   locked: boolean
   lockedAt: string | null
   isRtl: boolean
+  hasUnsaved: boolean
+  saving: boolean
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   onContinue: () => void
 }) {
   const canLock = needsSource === 0 && sections.length > 0
@@ -390,6 +497,7 @@ function SectionsStep({
         sections={sections}
         feeders={feeders}
         departments={departments}
+        onPendingChange={onPendingChange}
         readOnly={locked}
         isRtl={isRtl}
       />
@@ -416,19 +524,24 @@ function SectionsStep({
             </Button>
           ) : (
             <>
-              {!canLock && needsSource > 0 && (
+              {!canLock && needsSource > 0 ? (
                 <span className="hidden text-xs text-amber-700 sm:block">
                   Assign a source to every flagged section to continue.
                 </span>
-              )}
+              ) : hasUnsaved ? (
+                <span className="hidden text-xs text-slate-500 sm:block">
+                  Your source changes are saved when you continue.
+                </span>
+              ) : null}
               {/* Advancing no longer locks — the plan is locked at "Start Building". */}
               <Button
                 onClick={onContinue}
-                disabled={!canLock}
+                disabled={!canLock || saving}
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
-                Continue
-                <ArrowRight className="ml-1.5 h-4 w-4" />
+                {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                {saving ? "Saving…" : "Continue"}
+                {!saving && <ArrowRight className="ml-1.5 h-4 w-4" />}
               </Button>
             </>
           )}
