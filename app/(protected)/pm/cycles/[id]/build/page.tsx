@@ -24,7 +24,7 @@ import {
   ExecutiveSummaryPanel,
   EXECUTIVE_SUMMARY_CODE,
 } from "@/components/report/ExecutiveSummaryPanel"
-import { ArrowLeft, ClipboardList, Lock, ShieldAlert } from "lucide-react"
+import { ArrowLeft, ClipboardList, List, Lock, ShieldAlert } from "lucide-react"
 import { isReportGeneratedSection, isSectionReady } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
@@ -130,6 +130,16 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
         <h1 className="min-w-0 flex-1 truncate text-xl font-bold text-slate-900">
           Report Builder{cycleName ? ` — ${cycleName}` : ""}
         </h1>
+        {/* Same dialog as the rail's own "View all sections" row — up here it
+            is reachable without scrolling the rail to the bottom. */}
+        <Button
+          variant="outline"
+          onClick={() => setOutlineOpen(true)}
+          className="shrink-0 border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        >
+          <List className="mr-1.5 h-4 w-4" />
+          View all sections
+        </Button>
         <Link href={`/pm/cycles/${cycleId}/plan`} className="shrink-0">
           <Button variant="outline" className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
             <ClipboardList className="mr-1.5 h-4 w-4" />
