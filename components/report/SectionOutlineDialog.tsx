@@ -247,9 +247,17 @@ export function SectionOutlineDialog({
                     {subs.map((sub, j) => (
                       <li
                         key={`${sub.line}-${j}`}
-                        className="truncate py-0.5 text-xs text-slate-600"
+                        // Bulleted rather than a bare indented line: against a
+                        // bold section title above and another below, an
+                        // unmarked run of text read as spillover from the
+                        // section rather than as its own list. Matches the
+                        // rail's subsection rows.
+                        className="flex items-center gap-2 py-0.5"
                       >
-                        {sub.title}
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-700">
+                          {sub.title}
+                        </span>
                       </li>
                     ))}
                   </ul>
