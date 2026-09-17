@@ -104,13 +104,10 @@ function ConceptCard({
 
           <div className="mt-3 rounded-lg border bg-white p-4">
             {bodyTitle && (
-              <p
-                dir={dir}
-                className={cn(
-                  "mb-2 text-sm font-bold text-slate-900",
-                  isRtl && "text-right",
-                )}
-              >
+              // Centred: it titles the copy beneath it, so it reads as a
+              // heading over the block rather than as its first line. No RTL
+              // variant — centring is direction-neutral.
+              <p dir={dir} className="mb-2 text-center text-sm font-bold text-slate-900">
                 {bodyTitle}
               </p>
             )}
