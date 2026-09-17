@@ -9,7 +9,7 @@ import {
   EXECUTIVE_SUMMARY_TITLE,
 } from "@/components/report/ExecutiveSummaryPanel"
 import { Check, Circle, CircleDot, List } from "lucide-react"
-import { subsectionsOf } from "@/lib/sectionOutline"
+import { headingAnchorId, subsectionsOf } from "@/lib/sectionOutline"
 
 // "Handled for you" — the same filled green check the system-rendered sections
 // used to carry. Nothing to lock, nothing to chase.
@@ -120,7 +120,9 @@ function SubsectionRow({
 interface SectionListProps {
   sections: CycleReportSection[]
   selectedCode: string | null
-  onSelect: (code: string) => void
+  /** `anchorId` is set when a subsection row was clicked, so the panel can
+   *  scroll to that heading rather than just opening the section at the top. */
+  onSelect: (code: string, anchorId?: string) => void
   isRtl?: boolean
   // Prepend the synthetic Executive Summary row. It is not a section: it never
   // counts toward "N of N sections locked" and never blocks Assemble.
@@ -188,7 +190,9 @@ export function SectionList({
                 key={`${sub.line}-${j}`}
                 title={sub.title}
                 active={section.section_code === selectedCode}
-                onClick={() => onSelect(section.section_code)}
+                onClick={() =>
+                  onSelect(section.section_code, headingAnchorId(sub.title))
+                }
                 isRtl={isRtl}
               />
             ))}

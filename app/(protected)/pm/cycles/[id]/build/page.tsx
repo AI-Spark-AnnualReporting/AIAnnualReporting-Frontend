@@ -43,6 +43,11 @@ export default function ReportBuilderPage({
 function BuilderShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
   const [outlineOpen, setOutlineOpen] = useState(false)
+  // Set when a subsection row is clicked; cleared once the heading has been
+  // scrolled to. Kept in state rather than scrolled inline because selecting a
+  // different section has to render its body first — the element does not
+  // exist yet at the moment of the click.
+  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null)
   const readinessQuery = useBuildReadiness(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmData } = usePMCycleDashboard(cycleId)
@@ -58,6 +63,29 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const sections = (sectionsQuery.data ?? []).filter(
     (s) => !isReportGeneratedSection(s),
   )
+
+  // Scroll to the clicked subsection once its section's body has rendered.
+  //
+  // Two frames, not one: selecting a different section re-renders the panel,
+  // and on the first frame after that state change the new body — and so the
+  // heading — is not in the DOM yet. Missing the element is harmless, it just
+  // leaves the panel at the top, which is where it would have been anyway.
+  useEffect(() => {
+    if (!pendingAnchor) return
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        document
+          .getElementById(pendingAnchor)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+        setPendingAnchor(null)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [pendingAnchor, selectedCode])
 
   // Defend against deep-linking into an unbuildable cycle.
   useEffect(() => {
@@ -171,7 +199,10 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
             <SectionList
               sections={ordered}
               selectedCode={effectiveCode}
-              onSelect={setSelectedCode}
+              onSelect={(code, anchorId) => {
+                setSelectedCode(code)
+                setPendingAnchor(anchorId ?? null)
+              }}
               isRtl={isRtl}
               showExecutiveSummary
               onViewAll={() => setOutlineOpen(true)}

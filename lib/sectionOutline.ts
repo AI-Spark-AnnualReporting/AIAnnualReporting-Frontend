@@ -44,6 +44,28 @@ export function subsectionsOf(content: string | null | undefined): Subsection[] 
   return out
 }
 
+/**
+ * The DOM id given to a rendered subsection heading, so the rail can scroll to
+ * it.
+ *
+ * Derived from the heading text rather than its position, so it survives the
+ * section being re-rendered or re-ordered. Two sections could produce the same
+ * id, but only one section's body is on screen at a time, so it stays unique
+ * where it matters.
+ *
+ * Both the rail and ProsePreview call this — a slug computed twice in two
+ * places is a link that breaks the first time one of them changes.
+ */
+export function headingAnchorId(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+  // Arabic headings slug to something non-empty; a heading of only punctuation
+  // does not, and an id of "sub-" collides with every other such heading.
+  return `sub-${slug || "heading"}`
+}
+
 /** Where a new subsection goes, relative to the ones already there. */
 export type Placement =
   | { at: "top" }
@@ -216,6 +238,30 @@ export function demo() {
       instruction.includes('"Operational Risk"') &&
       instruction.includes("Leave every existing heading"),
     "instruction names the subsection, the anchor, and protects the rest",
+  )
+
+  // Anchors are stable, slug punctuation away, and survive non-Latin text.
+  console.assert(
+    headingAnchorId("Operational Risk") === "sub-operational-risk",
+    "slug lowercases and hyphenates",
+  )
+  console.assert(
+    headingAnchorId("Dear Shareholders,") === "sub-dear-shareholders",
+    "trailing punctuation does not leave a dangling hyphen",
+  )
+  console.assert(
+    headingAnchorId("H.E. Yasir O. Al-Rumayyan") ===
+      headingAnchorId("H.E. Yasir O. Al-Rumayyan"),
+    "same title gives the same id",
+  )
+  console.assert(
+    headingAnchorId("إدارة المخاطر").startsWith("sub-") &&
+      headingAnchorId("إدارة المخاطر") !== "sub-heading",
+    "Arabic headings keep their letters rather than slugging to nothing",
+  )
+  console.assert(
+    headingAnchorId("***") === "sub-heading",
+    "a heading with no letters still gets a usable id",
   )
 
   console.log("sectionOutline: all checks passed")

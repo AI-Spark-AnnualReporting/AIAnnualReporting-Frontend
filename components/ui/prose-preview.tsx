@@ -7,6 +7,7 @@ import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import { cn } from "@/lib/utils"
 import { normalizeMarkdownTables } from "@/lib/report-format"
+import { headingAnchorId } from "@/lib/sectionOutline"
 
 interface ProsePreviewProps {
   content: string
@@ -23,6 +24,19 @@ interface ProsePreviewProps {
 // it as markdown. The peek at the first 200 chars keeps this cheap.
 const HTML_RE = /<[a-z][\s\S]*>/i
 
+// A heading's own text, for the anchor id. react-markdown hands the renderer
+// React children rather than the raw string — a heading carrying emphasis or a
+// link arrives as nested elements, so it has to be walked rather than cast.
+function flattenText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(flattenText).join("")
+  if (node && typeof node === "object" && "props" in node) {
+    const props = (node as { props?: { children?: React.ReactNode } }).props
+    return flattenText(props?.children)
+  }
+  return ""
+}
+
 // Build a heading-demotion renderer for the given content. The shallowest
 // heading the author used is mapped to <h3> so section content never out-sizes
 // the section title above it; deeper headings step down from there (capped at
@@ -34,13 +48,16 @@ function makeHeadingRenderer(content: string): Components {
   const HeadingRenderer: Components["h1"] = ({ node, children }) => {
     const mdLevel = Number(node?.tagName.slice(1) ?? 1) // "h1" -> 1
     const clamped = Math.min(Math.max(3 + (mdLevel - base), 3), 6)
+    // An id derived from the heading text, so the builder's rail can scroll to
+    // a subsection. Same slug on both sides — see headingAnchorId.
+    const id = headingAnchorId(flattenText(children))
     // The demoted h3 is where a section's own subheadings land, and the `prose`
     // cascade only gives it weight 600 — barely distinguishable from the bold
     // runs inside the paragraphs beneath it. Bold it so a subheading still
     // reads as one. Deeper levels keep the cascade's own steps.
     return createElement(
       `h${clamped}`,
-      clamped === 3 ? { className: "font-bold" } : null,
+      clamped === 3 ? { id, className: "font-bold" } : { id },
       children,
     )
   }
