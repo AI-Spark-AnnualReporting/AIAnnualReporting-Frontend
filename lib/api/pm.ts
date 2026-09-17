@@ -776,6 +776,23 @@ export const pmApi = {
     return data.section
   },
 
+  // Hand-edit an AI-written section's body as raw Markdown (generate and
+  // analyze). The server normalises any `#`/`##` heading inside the body down
+  // to `###`, so the content that comes back can differ from what was sent —
+  // callers must render the echoed section, not their local draft. Returns 409
+  // when the section is locked.
+  saveContent: async (
+    cycleId: string,
+    sectionCode: string,
+    content: string,
+  ): Promise<CycleReportSection> => {
+    const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/content`,
+      { content },
+    )
+    return data.section
+  },
+
   // Stage 7b — refine an existing draft with a natural-language instruction.
   // Backend takes the current section + the instruction, runs an LLM pass, and
   // returns the wholly-rewritten section. Stateless on the backend: each call

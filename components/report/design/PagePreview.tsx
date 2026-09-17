@@ -1,7 +1,7 @@
 "use client"
 
-import type { BrandColors, Typography } from "@/types/report-design"
-import { coverVariant } from "@/types/report-design"
+import type { BrandColors, SubheadingSpacing, Typography } from "@/types/report-design"
+import { coverVariant, subheadingStyle } from "@/types/report-design"
 import { PAGE_H, PAGE_W } from "./PreviewFrame"
 
 /**
@@ -17,12 +17,20 @@ import { PAGE_H, PAGE_W } from "./PreviewFrame"
  * (templates/reports/default/base.css) and its page furniture:
  *
  *   h2  heading family/size/weight, brand ink
- *   h3  sub family/size/weight
- *   h4  sub family/weight, one px smaller than h3
+ *   h3  sub family/size/weight, plus the four subheading options below
+ *   h4  sub family/weight, one px smaller than h3, same four options
  *   p   body family/size/weight, justified, --lh-body
  *   table  body size minus one, header row brand ink over a 3px brand rule
  *   p.units  fixed 9px muted, deliberately NOT following the body size — it is
  *            a label, not body copy
+ *
+ * The four subheading options are transcribed from the same stylesheet: `case`
+ * is base.css's text-transform on h3/h4, `color` picks between its body ink and
+ * the brand variable, `spacing` swaps the h3 margin pair (h4 always sitting one
+ * step inside it), and `numbering` is the engine's own decision whether to
+ * print the "N.M " the outline numbers each subheading with. Change one and the
+ * sample headings below move — a control this view does not answer to is a
+ * control nobody can judge, which is the whole reason the file exists.
  *
  * The furniture differs by layout, which is most of why this view is worth
  * having: Classic prints a letterhead line and a rule, Minimal prints the logo
@@ -37,6 +45,27 @@ import { PAGE_H, PAGE_W } from "./PreviewFrame"
  */
 
 const MARGIN = 50
+
+/**
+ * base.css's own numbers: the (above, below) margin an h3 carries, in px, for
+ * each spacing option. `normal` is what the stylesheet has always printed.
+ *
+ * Exported because FinalReportView draws the same headings from the same
+ * settings and must not invent its own second set of numbers — the two views
+ * disagreeing about the document is the defect this pair of files exists to
+ * prevent.
+ */
+export const SUBHEADING_MARGINS: Record<SubheadingSpacing, [number, number]> = {
+  tight: [8, 4],
+  normal: [14, 6],
+  loose: [22, 10],
+}
+
+/** h4 sits one step inside h3, whatever h3's spacing is. */
+export const H4_MARGIN_INSET: [number, number] = [2, 1]
+
+/** base.css's body ink — the default subheading colour, and the page's text. */
+export const BODY_INK = "#1A1A1A"
 
 // Mirrors report_export._BODY_PAGE_MARGIN_PT — Bold needs a taller top margin
 // so its full-bleed header bar does not crowd the section content.
@@ -99,17 +128,28 @@ export function PagePreview({
     color: primary,
     margin: "0 0 10px 0",
   }
+  // The four subheading options, with anything a stored design predates filled
+  // in with the value that reproduces the old rendering.
+  const sub = subheadingStyle(typography.subheading)
+  const [subAbove, subBelow] = SUBHEADING_MARGINS[sub.spacing]
   const h3: React.CSSProperties = {
     fontFamily: family(typography.subheading.family),
     fontSize: typography.subheading.size,
     fontWeight: typography.subheading.weight,
-    margin: "14px 0 6px 0",
+    color: sub.color === "brand" ? primary : BODY_INK,
+    textTransform: sub.case === "upper" ? "uppercase" : "none",
+    margin: `${subAbove}px 0 ${subBelow}px 0`,
   }
   const h4: React.CSSProperties = {
     ...h3,
     fontSize: typography.subheading.size - 1,
-    margin: "12px 0 5px 0",
+    margin: `${subAbove - H4_MARGIN_INSET[0]}px 0 ${subBelow - H4_MARGIN_INSET[1]}px 0`,
   }
+  // The "4.1 " the outline numbers each subheading with, or nothing at all.
+  // The trailing space is part of the prefix, so `plain` closes the gap too
+  // rather than leaving the heading indented by a space that lost its number.
+  const subNum = (n: number) =>
+    sub.numbering === "plain" ? "" : `${sectionNumber}.${n} `
   const p: React.CSSProperties = {
     fontFamily: family(typography.body.family),
     fontSize: typography.body.size,
@@ -239,7 +279,7 @@ export function PagePreview({
 
   return (
     <div style={{
-      width: PAGE_W, height: PAGE_H, background: "#fff", color: "#1A1A1A",
+      width: PAGE_W, height: PAGE_H, background: "#fff", color: BODY_INK,
       position: "relative", overflow: "hidden",
     }}>
       {header}
@@ -258,7 +298,7 @@ export function PagePreview({
           debt one turn below the prior period.
         </p>
 
-        <h3 style={h3}>{sectionNumber}.1 Segment performance</h3>
+        <h3 style={h3}>{subNum(1)}Segment performance</h3>
         <p style={p}>
           Upstream volumes were broadly flat year on year. Downstream benefited
           from higher throughput and a favourable product mix, while chemicals
@@ -294,7 +334,7 @@ export function PagePreview({
           </tbody>
         </table>
 
-        <h4 style={h4}>{sectionNumber}.2 Outlook</h4>
+        <h4 style={h4}>{subNum(2)}Outlook</h4>
         <p style={p}>
           Management expects demand to remain firm into the first half, with
           capital expenditure weighted towards the completion of two downstream

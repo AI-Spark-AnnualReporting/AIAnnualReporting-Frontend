@@ -42,7 +42,7 @@ import {
   type PendingSourceChange,
   type PendingSources,
 } from "@/lib/pendingSectionSources"
-import { isTableOfContentsSection } from "@/lib/section-filters"
+import { isReportGeneratedSection } from "@/lib/section-filters"
 import { cn, formatDateTime } from "@/lib/utils"
 import type {
   ContentLanguage,
@@ -178,7 +178,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   }
 
   const sections = [...(sectionsQuery.data ?? [])]
-    .filter((s) => !isTableOfContentsSection(s))
+    .filter((s) => !isReportGeneratedSection(s))
     .sort((a, b) => a.display_order - b.display_order)
   const sectionsLocked = plan.sections_locked
   // One merged view of the sources, used by the cards, the counter and the

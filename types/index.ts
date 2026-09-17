@@ -139,8 +139,11 @@ export interface CycleReportSection {
   verified: boolean
   locked_at: string | null
   attachment: AttachmentInfo | null
-  // Generate-mode content. Populated after the LLM pass for generate sections;
-  // null on pending generate sections and irrelevant for attach/auto.
+  // The section body as raw Markdown, and the single source of truth for it.
+  // Populated after the LLM pass for generate/analyze sections; null on pending
+  // generate sections and irrelevant for attach/auto. The PM hand-edits this
+  // string directly — the server normalises any `#`/`##` heading in it to `###`
+  // on save, so the echoed value can differ from what was typed.
   content: string | null
   // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
   // modes and for older responses (treat missing as "pending").

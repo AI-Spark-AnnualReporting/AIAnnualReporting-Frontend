@@ -34,7 +34,15 @@ function makeHeadingRenderer(content: string): Components {
   const HeadingRenderer: Components["h1"] = ({ node, children }) => {
     const mdLevel = Number(node?.tagName.slice(1) ?? 1) // "h1" -> 1
     const clamped = Math.min(Math.max(3 + (mdLevel - base), 3), 6)
-    return createElement(`h${clamped}`, null, children)
+    // The demoted h3 is where a section's own subheadings land, and the `prose`
+    // cascade only gives it weight 600 — barely distinguishable from the bold
+    // runs inside the paragraphs beneath it. Bold it so a subheading still
+    // reads as one. Deeper levels keep the cascade's own steps.
+    return createElement(
+      `h${clamped}`,
+      clamped === 3 ? { className: "font-bold" } : null,
+      children,
+    )
   }
 
   return {
