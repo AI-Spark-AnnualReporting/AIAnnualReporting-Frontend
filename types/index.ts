@@ -229,9 +229,12 @@ export interface AvailableOptionalSection {
 export interface AssemblyReadiness {
   cycle_id: string
   total: number
-  locked: number
+  /** Sections that would appear in the report — i.e. have something in them. */
+  ready: number
+  /** False only when nothing has been written anywhere. Empty sections no
+   *  longer block: they are listed below and left out of the report. */
   can_assemble: boolean
-  unlocked_sections: Array<{
+  incomplete_sections: Array<{
     section_code: string
     title: string
     layer: SectionLayer

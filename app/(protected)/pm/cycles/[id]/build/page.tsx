@@ -24,7 +24,7 @@ import {
   ExecutiveSummaryPanel,
   EXECUTIVE_SUMMARY_CODE,
 } from "@/components/report/ExecutiveSummaryPanel"
-import { ArrowLeft, ClipboardList, List, Lock, ShieldAlert } from "lucide-react"
+import { ArrowLeft, ClipboardList, FileText, List, ShieldAlert } from "lucide-react"
 import { isReportGeneratedSection, isSectionReady } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
@@ -117,11 +117,11 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
   const total = sections.length
-  // Auto sections are system-rendered at assembly time — count them as ready so
-  // they don't block the progress bar from reaching 100%. The Executive Summary
-  // is not in this list at all: it is synthetic, so it can't move the counter.
-  const locked = sections.filter(isSectionReady).length
-  const lockedPct = total > 0 ? Math.round((locked / total) * 100) : 0
+  // How much of the report has something in it. Auto sections are rendered at
+  // assembly time, so they count as done. The Executive Summary is not in this
+  // list at all: it is synthetic, so it can't move the counter.
+  const written = sections.filter(isSectionReady).length
+  const writtenPct = total > 0 ? Math.round((written / total) * 100) : 0
   // Default to the first section until the PM picks one — derived during render
   // (no effect) so the initial selection never causes a cascading re-render.
   const effectiveCode = selectedCode ?? ordered[0]?.section_code ?? null
@@ -184,14 +184,14 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
           <div className="shrink-0 border-b border-slate-100 px-5 py-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-slate-900">
-                {locked} of {total} sections locked
+                {written} of {total} sections written
               </span>
-              <Lock className="h-4 w-4 text-slate-400" />
+              <FileText className="h-4 w-4 text-slate-400" />
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-indigo-500 transition-all"
-                style={{ width: `${lockedPct}%` }}
+                style={{ width: `${writtenPct}%` }}
               />
             </div>
           </div>

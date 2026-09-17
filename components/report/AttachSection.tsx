@@ -1,12 +1,9 @@
 "use client"
 
-import { useState } from "react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import {
   FileText,
   Loader2,
-  Lock,
-  LockOpen,
   RefreshCw,
   Trash2,
   Upload,
@@ -14,15 +11,10 @@ import {
 import { toast } from "sonner"
 import { CycleReportSection } from "@/types"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useAttachUpload,
-  useLockSection,
   useRemoveAttachment,
-  useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
 
@@ -45,26 +37,9 @@ export function AttachSection({
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
-  const isLocked = section.status === "locked"
   const attachment = section.attachment
 
-  // Coerce to boolean — until the backend GET /sections returns `verified`,
-  // this field arrives undefined on initial load and would flip a checkbox from
-  // uncontrolled to controlled on first click.
-  const [verified, setVerified] = useState(section.verified ?? false)
-  const [unlockOpen, setUnlockOpen] = useState(false)
-
-  // Reset the verify gate when the server flips us out of locked — React's
-  // recommended "store prev value" pattern, not an effect.
-  const [prevStatus, setPrevStatus] = useState(section.status)
-  if (prevStatus !== section.status) {
-    setPrevStatus(section.status)
-    if (section.status !== "locked") setVerified(false)
-  }
-
   const upload = useAttachUpload(cycleId)
-  const lock = useLockSection(cycleId)
-  const unlock = useUnlockSection(cycleId)
   const remove = useRemoveAttachment(cycleId)
 
   const onDrop = (accepted: File[], rejections: FileRejection[]) => {
@@ -83,7 +58,7 @@ export function AttachSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked,
+    disabled: upload.isPending,
     noClick: !!attachment,
     noKeyboard: !!attachment,
   })
@@ -93,21 +68,11 @@ export function AttachSection({
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
-          {isLocked ? (
-            <LockedView
-              section={section}
-              onUnlock={() => setUnlockOpen(true)}
-              unlocking={unlock.isPending}
-            />
-          ) : attachment ? (
+          {attachment ? (
             <AttachedView
               attachment={attachment}
-              verified={verified}
-              onVerifiedChange={setVerified}
               onReplace={dz.open}
               onRemove={() => remove.mutate({ sectionCode })}
-              onLock={() => lock.mutate({ sectionCode })}
-              locking={lock.isPending}
               removing={remove.isPending}
               uploading={upload.isPending}
             />
@@ -117,7 +82,7 @@ export function AttachSection({
 
           {/* Replace flow reuses the same dropzone hook — render an off-screen
               root so `dz.open()` has an input to trigger. */}
-          {attachment && !isLocked && (
+          {attachment && (
             <div className="sr-only">
               <div {...dz.getRootProps()}>
                 <input {...dz.getInputProps()} />
@@ -127,19 +92,6 @@ export function AttachSection({
         </div>
       </div>
 
-      <ConfirmDialog
-        open={unlockOpen}
-        onOpenChange={setUnlockOpen}
-        title="Unlock this section?"
-        description="You'll need to verify it again before re-locking."
-        confirmLabel="Unlock"
-        variant="destructive"
-        isLoading={unlock.isPending}
-        onConfirm={async () => {
-          await unlock.mutateAsync({ sectionCode })
-          setUnlockOpen(false)
-        }}
-      />
     </div>
   )
 }
@@ -192,27 +144,18 @@ function EmptyDropzone({
 
 function AttachedView({
   attachment,
-  verified,
-  onVerifiedChange,
   onReplace,
   onRemove,
-  onLock,
-  locking,
   removing,
   uploading,
 }: {
   attachment: NonNullable<CycleReportSection["attachment"]>
-  verified: boolean
-  onVerifiedChange: (next: boolean) => void
   onReplace: () => void
   onRemove: () => void
-  onLock: () => void
-  locking: boolean
   removing: boolean
   uploading: boolean
 }) {
-  const busy = uploading || locking || removing
-  const lockDisabled = !verified || busy
+  const busy = uploading || removing
 
   return (
     <div className="space-y-5">
@@ -256,79 +199,6 @@ function AttachedView({
         }
       />
 
-      <Checkbox
-        id="attach-verify"
-        checked={verified}
-        onCheckedChange={onVerifiedChange}
-        label="I have verified this document against the official source."
-        description="Locking the section records this attestation."
-        disabled={locking}
-      />
-
-      <div className="flex items-center justify-between gap-3 pt-1">
-        <p className="text-xs text-muted-foreground">
-          {verified
-            ? "Ready to lock."
-            : "Confirm verification above to enable lock."}
-        </p>
-        <Button
-          onClick={onLock}
-          disabled={lockDisabled}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-          title={
-            !verified
-              ? "Upload a document and confirm verification to lock."
-              : undefined
-          }
-        >
-          {locking ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Locking…
-            </>
-          ) : (
-            <>
-              <Lock className="h-4 w-4 mr-2" />
-              Lock section
-            </>
-          )}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-function LockedView({
-  section,
-  onUnlock,
-  unlocking,
-}: {
-  section: CycleReportSection
-  onUnlock: () => void
-  unlocking: boolean
-}) {
-  const attachment = section.attachment
-  return (
-    <div className="space-y-4">
-      {attachment && <FileCard attachment={attachment} />}
-
-      <LockedBanner lockedAt={section.locked_at} />
-
-      <div className="flex items-center justify-end pt-1">
-        <Button
-          variant="outline"
-          onClick={onUnlock}
-          disabled={unlocking}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {unlocking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <LockOpen className="h-4 w-4 mr-2" />
-          )}
-          Unlock
-        </Button>
-      </div>
     </div>
   )
 }

@@ -702,26 +702,6 @@ export const pmApi = {
     return data.section
   },
 
-  lockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/lock`,
-    )
-    return data.section
-  },
-
-  unlockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/unlock`,
-    )
-    return data.section
-  },
-
   removeAttachment: async (
     cycleId: string,
     sectionCode: string,

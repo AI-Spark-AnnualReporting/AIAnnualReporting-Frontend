@@ -16,9 +16,19 @@ export function isReportGeneratedSection(s: {
   )
 }
 
-// Whether a section counts as "ready" for assembly progress. Mirrors the
-// backend assembly-readiness rule: auto sections are system-rendered, so they
-// need no lock. Everything else must be locked.
-export function isSectionReady(s: { mode: string; status: string }): boolean {
-  return s.status === "locked" || s.mode === "auto"
+// Whether a section would appear in the assembled report. Mirrors the backend
+// assembly-readiness rule, which is about CONTENT rather than locks: auto
+// sections are rendered by the report itself, an attach section's document IS
+// its content, and everything else needs something written.
+//
+// Locks are gone from this: the whole report is signed off in one step at the
+// end, so a section no longer has to be stamped before it counts.
+export function isSectionReady(s: {
+  mode: string
+  content?: string | null
+  attachment?: unknown
+}): boolean {
+  if (s.mode === "auto") return true
+  if ((s.content ?? "").trim()) return true
+  return !!s.attachment
 }

@@ -157,32 +157,6 @@ export function useSetExtractContent(cycleId: string) {
   })
 }
 
-export function useLockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.lockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section locked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to lock section")),
-  })
-}
-
-export function useUnlockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.unlockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section unlocked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to unlock section")),
-  })
-}
-
 export function useRemoveAttachment(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({

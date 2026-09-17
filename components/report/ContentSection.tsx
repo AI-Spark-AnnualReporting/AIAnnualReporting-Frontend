@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
-  Lock,
-  LockOpen,
   PenLine,
   Pencil,
   RefreshCw,
@@ -17,20 +15,16 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useAttachUpload,
-  useLockSection,
   usePreviousManualSections,
   useRemoveAttachment,
   useSaveManualContent,
   useSetExtractContent,
-  useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { useAuth } from "@/contexts/AuthContext"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
@@ -42,7 +36,7 @@ import type { ContentLanguage, CycleReportSection } from "@/types"
 // `extract` (financial statements, notes, auditor's report) — share this one
 // panel. Both accept EITHER input: drop a document and the backend returns its
 // extracted text in `section.content`, or write the body by hand. Either one
-// alone is enough to save and lock; an attachment is never required.
+// alone is enough to save; an attachment is never required.
 //
 // Either way the body is Markdown — the extractor emits it, and the PM edits it
 // through the same pencil-and-preview editor the AI-written sections use
@@ -72,7 +66,6 @@ export function ContentSection({
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
-  const isLocked = section.status === "locked"
   const attachment = section.attachment
   const saved = section.content ?? ""
   // Both content routes behave identically now, but each mode keeps writing to
@@ -86,7 +79,6 @@ export function ContentSection({
   // previous-cycle pre-fill. Non-null exactly while that unconfirmed text is on
   // screen, which is what the pre-fill notice keys off too.
   const [seed, setSeed] = useState<string | null>(null)
-  const [unlockOpen, setUnlockOpen] = useState(false)
   // Wrong-language guard for uploads: verify the dropped file's language BEFORE
   // uploading, so a source in the wrong language is never sent.
   const [fileLangWarning, setFileLangWarning] = useState<string | null>(null)
@@ -143,8 +135,6 @@ export function ContentSection({
   const saveExtract = useSetExtractContent(cycleId)
   const saveManual = useSaveManualContent(cycleId)
   const save = isExtract ? saveExtract : saveManual
-  const lock = useLockSection(cycleId)
-  const unlock = useUnlockSection(cycleId)
   const remove = useRemoveAttachment(cycleId)
 
   const uploading = upload.isPending || checkingLang
@@ -212,7 +202,7 @@ export function ContentSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked || checkingLang,
+    disabled: upload.isPending || checkingLang,
     // The Upload button is the click target now, so the panel never steals a
     // click — it only accepts a dropped file.
     noClick: true,
@@ -224,7 +214,7 @@ export function ContentSection({
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
         <div
-          {...(isLocked ? {} : dz.getRootProps())}
+          {...dz.getRootProps()}
           className={cn(
             // Full width, matching GenerateSection. These panels sit side by
             // side in the same rail and a PM clicks between them, so the column
@@ -236,149 +226,136 @@ export function ContentSection({
               "rounded-2xl outline-dashed outline-2 outline-offset-4 outline-indigo-300",
           )}
         >
-          {isLocked ? (
-            <LockedView
-              section={section}
-              onUnlock={() => setUnlockOpen(true)}
-              unlocking={unlock.isPending}
-              isRtl={isRtl}
-            />
-          ) : (
-            <>
-              {!isExtract && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    This section is written by you, not by AI. Upload a
-                    document to pull its text in, or write it yourself.
-                  </span>
-                </div>
-              )}
-
-              {/* Pre-fill loader: the previous-content query is still running
-                  for an empty section, so a suggestion may be about to open the
-                  editor with last year's text in it. Surface it so the PM waits
-                  instead of starting on something that's about to be replaced. */}
-              {prefilling && (
-                <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                  <span>Checking for previous content to pre-fill…</span>
-                </div>
-              )}
-
-              {/* Pre-fill notice: shown while the editor holds unsaved suggested
-                  content seeded from the company's prior data. The copy depends
-                  on where that content came from — branch on `source`. */}
-              {suggestion && seed !== null && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
-                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    {suggestion.source === "previous_cycle" ? (
-                      <>
-                        Pre-filled from
-                        {suggestion.fiscal_year
-                          ? ` FY${suggestion.fiscal_year}`
-                          : " a previous cycle"}
-                        . Review and edit before saving.
-                      </>
-                    ) : (
-                      <>
-                        Seeded from the company profile — please review and
-                        rewrite before saving.
-                      </>
-                    )}
-                  </span>
-                </div>
-              )}
-
-              {/* Upload lane. Always on screen, attachment or not — it's one of
-                  two independent ways to fill the section, never a gate in
-                  front of the editor below. */}
-              <div className="space-y-2.5">
-                <LanguageMismatchAlert message={fileLangWarning} />
-                {attachment ? (
-                  <FileCard
-                    attachment={attachment}
-                    right={
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={dz.open}
-                          disabled={upload.isPending || remove.isPending}
-                          className="h-8 px-2.5 text-xs"
-                          title="Replace document — extraction re-runs"
-                        >
-                          {upload.isPending ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <>
-                              <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                              Replace
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => remove.mutate({ sectionCode })}
-                          disabled={upload.isPending || remove.isPending}
-                          className="h-8 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                        >
-                          {remove.isPending ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <>
-                              <Trash2 className="h-3.5 w-3.5 mr-1" />
-                              Remove
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    }
-                  />
-                ) : null}
+            {!isExtract && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>
+                  This section is written by you, not by AI. Upload a
+                  document to pull its text in, or write it yourself.
+                </span>
               </div>
+            )}
 
-              {upload.isPending && <ExtractingNotice />}
+            {/* Pre-fill loader: the previous-content query is still running
+                for an empty section, so a suggestion may be about to open the
+                editor with last year's text in it. Surface it so the PM waits
+                instead of starting on something that's about to be replaced. */}
+            {prefilling && (
+              <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                <span>Checking for previous content to pre-fill…</span>
+              </div>
+            )}
 
-              {/* Writing lane. Always on screen too — a PM who never uploads
-                  can write the section here and lock it. */}
-              <ContentBody
-                uploadSlot={
-                  attachment ? null : (
-                    <UploadButton dz={dz} uploading={uploading} />
-                  )
-                }
-                saved={saved}
-                seed={seed}
-                editing={editing}
-                // The document produced nothing usable — say so instead of
-                // leaving an unexplained empty box.
-                extractedEmpty={!!attachment && saved.trim() === ""}
-                // No pencil while the body is about to change under it — the
-                // pre-fill query may still open the editor itself, and an
-                // extraction is on its way in.
-                prefilling={prefilling}
-                uploading={uploading}
-                saving={save.isPending}
-                locking={lock.isPending}
-                contentLanguage={contentLanguage}
-                isRtl={isRtl}
-                onEdit={() => setEditing(true)}
-                onSave={handleSave}
-                onCancel={() => {
-                  setSeed(null)
-                  setEditing(false)
-                }}
-                onLock={() => lock.mutate({ sectionCode })}
-              />
-            </>
-          )}
+            {/* Pre-fill notice: shown while the editor holds unsaved suggested
+                content seeded from the company's prior data. The copy depends
+                on where that content came from — branch on `source`. */}
+            {suggestion && seed !== null && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>
+                  {suggestion.source === "previous_cycle" ? (
+                    <>
+                      Pre-filled from
+                      {suggestion.fiscal_year
+                        ? ` FY${suggestion.fiscal_year}`
+                        : " a previous cycle"}
+                      . Review and edit before saving.
+                    </>
+                  ) : (
+                    <>
+                      Seeded from the company profile — please review and
+                      rewrite before saving.
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Upload lane. Always on screen, attachment or not — it's one of
+                two independent ways to fill the section, never a gate in
+                front of the editor below. */}
+            <div className="space-y-2.5">
+              <LanguageMismatchAlert message={fileLangWarning} />
+              {attachment ? (
+                <FileCard
+                  attachment={attachment}
+                  right={
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={dz.open}
+                        disabled={upload.isPending || remove.isPending}
+                        className="h-8 px-2.5 text-xs"
+                        title="Replace document — extraction re-runs"
+                      >
+                        {upload.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                            Replace
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => remove.mutate({ sectionCode })}
+                        disabled={upload.isPending || remove.isPending}
+                        className="h-8 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        {remove.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            Remove
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  }
+                />
+              ) : null}
+            </div>
+
+            {upload.isPending && <ExtractingNotice />}
+
+            {/* Writing lane. Always on screen too — a PM who never uploads
+                can write the section here. */}
+            <ContentBody
+              uploadSlot={
+                attachment ? null : (
+                  <UploadButton dz={dz} uploading={uploading} />
+                )
+              }
+              saved={saved}
+              seed={seed}
+              editing={editing}
+              // The document produced nothing usable — say so instead of
+              // leaving an unexplained empty box.
+              extractedEmpty={!!attachment && saved.trim() === ""}
+              // No pencil while the body is about to change under it — the
+              // pre-fill query may still open the editor itself, and an
+              // extraction is on its way in.
+              prefilling={prefilling}
+              uploading={uploading}
+              saving={save.isPending}
+              contentLanguage={contentLanguage}
+              isRtl={isRtl}
+              onEdit={() => setEditing(true)}
+              onSave={handleSave}
+              onCancel={() => {
+                setSeed(null)
+                setEditing(false)
+              }}
+            />
 
           {/* Replace flow reuses the dropzone hook — render an off-screen root
               so `dz.open()` has an input to trigger. */}
-          {attachment && !isLocked && (
+          {attachment && (
             <div className="sr-only">
               <div {...dz.getRootProps()}>
                 <input {...dz.getInputProps()} />
@@ -388,19 +365,6 @@ export function ContentSection({
         </div>
       </div>
 
-      <ConfirmDialog
-        open={unlockOpen}
-        onOpenChange={setUnlockOpen}
-        title="Unlock this section?"
-        description="You can edit the content or replace the document, then re-lock."
-        confirmLabel="Unlock"
-        variant="destructive"
-        isLoading={unlock.isPending}
-        onConfirm={async () => {
-          await unlock.mutateAsync({ sectionCode })
-          setUnlockOpen(false)
-        }}
-      />
     </div>
   )
 }
@@ -413,11 +377,9 @@ function ContentBody({
   prefilling,
   uploading,
   saving,
-  locking,
   onEdit,
   onSave,
   onCancel,
-  onLock,
   contentLanguage,
   isRtl,
   uploadSlot,
@@ -429,24 +391,15 @@ function ContentBody({
   prefilling: boolean
   uploading: boolean
   saving: boolean
-  locking: boolean
   onEdit: () => void
   onSave: (content: string) => void
   onCancel: () => void
-  onLock: () => void
   contentLanguage: ContentLanguage
   isRtl?: boolean
   /** The Upload button, rendered in the toolbar beside Edit. */
   uploadSlot?: React.ReactNode
 }) {
-  const busy = saving || locking || uploading
-  // The stricter of the two old rules: locking needs saved, non-empty content.
-  // A document alone is no longer enough — and never was on the backend, which
-  // rejects a lock with empty content. `editing` stands in for the old
-  // long-lived `dirty`: with a pencil, the only unsaved text there can be is
-  // inside an open editor. Disabled rather than hidden, so Save-then-Lock stays
-  // visible as an order rather than as a button that appears out of nowhere.
-  const lockDisabled = busy || editing || !saved.trim()
+  const busy = saving || uploading
 
   return (
     <div className="space-y-2">
@@ -551,27 +504,6 @@ function ContentBody({
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-2 pt-2">
-        <Button
-          onClick={onLock}
-          disabled={lockDisabled}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-          title={
-            editing
-              ? "Save your changes before locking"
-              : !saved.trim()
-                ? "Save some content first"
-                : undefined
-          }
-        >
-          {locking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Lock className="h-4 w-4 mr-2" />
-          )}
-          Lock section
-        </Button>
-      </div>
     </div>
   )
 }
@@ -632,59 +564,6 @@ function UploadButton({
         )}
       </Button>
     </>
-  )
-}
-
-function LockedView({
-  section,
-  onUnlock,
-  unlocking,
-  isRtl,
-}: {
-  section: CycleReportSection
-  onUnlock: () => void
-  unlocking: boolean
-  isRtl?: boolean
-}) {
-  const attachment = section.attachment
-  const content = section.content ?? ""
-
-  return (
-    <div className="space-y-4">
-      {attachment && <FileCard attachment={attachment} />}
-
-      <div
-        dir={isRtl ? "rtl" : "ltr"}
-        className={cn(
-          "rounded-xl border border-slate-200 bg-white p-6",
-          isRtl && "text-right",
-        )}
-      >
-        {content.trim() ? (
-          <ProsePreview content={content} />
-        ) : (
-          <p className="text-sm text-slate-400 italic">No content saved.</p>
-        )}
-      </div>
-
-      <LockedBanner lockedAt={section.locked_at} />
-
-      <div className="flex items-center justify-end pt-1">
-        <Button
-          variant="outline"
-          onClick={onUnlock}
-          disabled={unlocking}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {unlocking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <LockOpen className="h-4 w-4 mr-2" />
-          )}
-          Unlock
-        </Button>
-      </div>
-    </div>
   )
 }
 

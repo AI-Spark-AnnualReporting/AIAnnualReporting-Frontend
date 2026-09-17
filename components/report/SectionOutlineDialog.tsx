@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Lock, Plus } from "lucide-react"
+import { Loader2, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -22,12 +22,10 @@ import type { CycleReportSection } from "@/types"
 //
 // A subsection is a heading in the body, so a section needs a body to put one
 // in: `attach` embeds a file whole and `auto` is rendered by the report itself.
-// A locked section is refused by the server either way — refine says "Unlock
-// the section before refining" and the content saves 409 — so the button is
-// disabled rather than offered and then rejected.
+// Attach and auto sections have no body to add a heading to, and a
+// signed-off report is read-only.
 function canAddTo(section: CycleReportSection, reportLocked: boolean): boolean {
   if (reportLocked) return false
-  if (section.status === "locked") return false
   return section.mode !== "attach" && section.mode !== "auto"
 }
 
@@ -205,9 +203,6 @@ export function SectionOutlineDialog({
                     {section.title}
                   </button>
 
-                  {section.status === "locked" && (
-                    <Lock className="h-3 w-3 shrink-0 text-slate-400" />
-                  )}
                   <span
                     className={cn(
                       "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium",

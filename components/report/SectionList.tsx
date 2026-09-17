@@ -156,7 +156,7 @@ interface SectionListProps {
   onSelect: (code: string, anchorId?: string) => void
   isRtl?: boolean
   // Prepend the synthetic Executive Summary row. It is not a section: it never
-  // counts toward "N of N sections locked" and never blocks Assemble.
+  // counts toward "N of N sections written" and never blocks Assemble.
   showExecutiveSummary?: boolean
   /** Opens the full hierarchy dialog. Omitted = no "View all" row. */
   onViewAll?: () => void

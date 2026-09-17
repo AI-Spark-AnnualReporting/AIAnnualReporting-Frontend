@@ -7,8 +7,6 @@ import {
   ClipboardList,
   Edit2,
   Loader2,
-  Lock,
-  LockOpen,
   RefreshCw,
   Save,
   SearchX,
@@ -22,14 +20,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/LockedBanner"
 import {
-  useLockSection,
   usePlan,
   useRefineSection,
   useRunAnalysis,
   useSetAnalyzeContent,
-  useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { cn } from "@/lib/utils"
@@ -52,7 +47,6 @@ export function AnalyzeSection({
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
-  const status = section.status
   const content = section.content ?? ""
   // Analyze pipeline state drives the panel. Missing/undefined → "pending"
   // (older responses that predate the field).
@@ -72,12 +66,9 @@ export function AnalyzeSection({
   const runAnalysis = useRunAnalysis(cycleId)
   const refine = useRefineSection(cycleId)
   const setContent = useSetAnalyzeContent(cycleId)
-  const lock = useLockSection(cycleId)
-  const unlock = useUnlockSection(cycleId)
 
   const [editMode, setEditMode] = useState(false)
   const [draft, setDraft] = useState(content)
-  const [unlockOpen, setUnlockOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
 
   // Re-seed editor when server content changes externally (e.g. re-run result).
@@ -93,15 +84,7 @@ export function AnalyzeSection({
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
         <div className="px-8 py-6 space-y-5">
-          {status === "locked" ? (
-            <LockedView
-              content={content}
-              lockedAt={section.locked_at}
-              unlocking={unlock.isPending}
-              isRtl={isRtl}
-              onUnlock={() => setUnlockOpen(true)}
-            />
-          ) : editMode ? (
+          {editMode ? (
             <EditView
               draft={draft}
               saving={setContent.isPending}
@@ -140,32 +123,15 @@ export function AnalyzeSection({
               feederNames={feederNames}
               running={runAnalysis.isPending}
               refining={refine.isPending}
-              locking={lock.isPending}
-              canLock={content.trim() !== ""}
               isRtl={isRtl}
               onRun={() => runAnalysis.mutate({ sectionCode })}
               onRefine={(instruction) => refine.mutate({ sectionCode, instruction })}
               onEdit={() => setEditMode(true)}
               onClear={() => setClearOpen(true)}
-              onLock={() => lock.mutate({ sectionCode })}
             />
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={unlockOpen}
-        onOpenChange={setUnlockOpen}
-        title="Unlock this section?"
-        description="You can edit or re-run the analysis, then re-lock."
-        confirmLabel="Unlock"
-        variant="destructive"
-        isLoading={unlock.isPending}
-        onConfirm={async () => {
-          await unlock.mutateAsync({ sectionCode })
-          setUnlockOpen(false)
-        }}
-      />
 
       <ConfirmDialog
         open={clearOpen}
@@ -315,29 +281,23 @@ function DraftingView({
   feederNames,
   running,
   refining,
-  locking,
-  canLock,
   isRtl,
   onRun,
   onRefine,
   onEdit,
   onClear,
-  onLock,
 }: {
   content: string
   feederNames: string[]
   running: boolean
   refining: boolean
-  locking: boolean
-  canLock: boolean
   isRtl?: boolean
   onRun: () => void
   onRefine: (instruction: string) => void
   onEdit: () => void
   onClear: () => void
-  onLock: () => void
 }) {
-  const busy = running || refining || locking
+  const busy = running || refining
 
   return (
     <div className="space-y-4">
@@ -424,24 +384,6 @@ function DraftingView({
           )}
         </div>
 
-        <Button
-          onClick={onLock}
-          disabled={busy || !canLock}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-          title={!canLock ? "Run the analysis first — content is required to lock" : undefined}
-        >
-          {locking ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Locking…
-            </>
-          ) : (
-            <>
-              <Lock className="h-4 w-4 mr-2" />
-              Lock section
-            </>
-          )}
-        </Button>
       </div>
     </div>
   )
@@ -508,54 +450,6 @@ function EditView({
             <Save className="h-4 w-4 mr-2" />
           )}
           Save
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-function LockedView({
-  content,
-  lockedAt,
-  unlocking,
-  isRtl,
-  onUnlock,
-}: {
-  content: string
-  lockedAt: string | null
-  unlocking: boolean
-  isRtl?: boolean
-  onUnlock: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      <div
-        dir={isRtl ? "rtl" : "ltr"}
-        className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
-      >
-        {/* Read-only: a locked section shows its findings but offers no Edit. */}
-        {content.trim() ? (
-          <ProsePreview content={content} />
-        ) : (
-          <p className="text-sm text-slate-400 italic">No content available.</p>
-        )}
-      </div>
-
-      <LockedBanner lockedAt={lockedAt} />
-
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          onClick={onUnlock}
-          disabled={unlocking}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {unlocking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <LockOpen className="h-4 w-4 mr-2" />
-          )}
-          Unlock
         </Button>
       </div>
     </div>
