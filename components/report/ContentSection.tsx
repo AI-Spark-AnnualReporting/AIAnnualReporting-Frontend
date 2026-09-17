@@ -613,6 +613,10 @@ function UploadButton({
         size="sm"
         onClick={dz.open}
         disabled={uploading}
+        // The accepted formats are on the button rather than in a tooltip: the
+        // picker filters to them anyway, so a PM holding a PDF should learn it
+        // will not be taken before opening a dialog that hides their file.
+        title="Word (.docx, .doc) or plain text (.txt). PDFs extract poorly and are not accepted."
         className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
       >
         {uploading ? (
@@ -624,6 +628,7 @@ function UploadButton({
           <>
             <Upload className="h-3.5 w-3.5" />
             Upload a document
+            <span className="font-normal text-slate-400">· DOCX or TXT</span>
           </>
         )}
       </Button>
