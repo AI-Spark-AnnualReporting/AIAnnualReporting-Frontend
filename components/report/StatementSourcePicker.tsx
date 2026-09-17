@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 
 // The two human-voice statements that open on a choice of source instead of a
 // blank editor. Both are ai_allowed=false / content_source="narrative" in the
-// catalogue, so both render through ManualSection. Every other manual section
+// catalogue, so both render through ContentSection. Every other manual section
 // keeps the silent previous-cycle pre-fill and the plain editor.
 const ASSISTED_STATEMENT_CODES = new Set(["chairman_statement", "ceo_review"])
 

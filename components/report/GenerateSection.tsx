@@ -8,20 +8,23 @@ import {
   Loader2,
   Lock,
   LockOpen,
+  Pencil,
   RefreshCw,
   Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/ManualSection"
+import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   useGenerateSection,
   useLockSection,
   usePlan,
   useRefineSection,
+  useSaveGenerateContent,
   useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
@@ -87,6 +90,12 @@ export function GenerateSection({
             />
           ) : (
             <DraftingView
+              // Remount the editor's draft when the panel switches sections —
+              // without it, an open editor would carry one section's text into
+              // the next.
+              key={sectionCode}
+              cycleId={cycleId}
+              sectionCode={sectionCode}
               content={content}
               regenerating={generate.isPending}
               locking={lock.isPending}
@@ -191,6 +200,8 @@ function PendingView({
 }
 
 function DraftingView({
+  cycleId,
+  sectionCode,
   content,
   regenerating,
   locking,
@@ -200,6 +211,8 @@ function DraftingView({
   onLock,
   onRefine,
 }: {
+  cycleId: string
+  sectionCode: string
   content: string
   regenerating: boolean
   locking: boolean
@@ -209,9 +222,41 @@ function DraftingView({
   onLock: () => void
   onRefine: (instruction: string) => void
 }) {
+  const save = useSaveGenerateContent(cycleId)
+  const [editing, setEditing] = useState(false)
   const busy = regenerating || locking || refining
+
+  const handleSave = async (next: string) => {
+    try {
+      await save.mutateAsync({ sectionCode, content: next })
+      setEditing(false)
+    } catch {
+      // The hook owns the message and the cache rollback. Staying in the editor
+      // keeps the typed text on screen so the PM can retry rather than retype.
+    }
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {editing ? "Editing section" : "Draft"}
+        </p>
+        {!editing && (
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setEditing(true)}
+            disabled={busy}
+            title="Edit this section"
+            aria-label="Edit this section"
+            className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+
       {/* Preview with a refining dim + overlay so the PM has clear feedback
           while the LLM is rewriting the section. */}
       <div className="relative">
@@ -223,11 +268,20 @@ function DraftingView({
             refining && "opacity-60 pointer-events-none",
           )}
         >
-          {content.trim() ? (
+          {editing ? (
+            <SectionBodyEditor
+              value={content}
+              saving={save.isPending}
+              isRtl={isRtl}
+              onSave={handleSave}
+              onCancel={() => setEditing(false)}
+            />
+          ) : content.trim() ? (
             <ProsePreview content={content} />
           ) : (
             <p className="text-sm text-slate-400 italic">
-              Draft is empty — try regenerating.
+              Draft is empty — regenerate it, or use the pencil to write it
+              yourself.
             </p>
           )}
         </div>
@@ -241,45 +295,52 @@ function DraftingView({
         )}
       </div>
 
-      <SectionChat refining={refining} onRefine={onRefine} />
+      {/* Hidden while the editor is open. Refine and Regenerate both replace the
+          body from the server, which would pull the text out from under the
+          textarea mid-edit; Lock would 409 the save that follows it. */}
+      {!editing && (
+        <>
+          <SectionChat refining={refining} onRefine={onRefine} />
 
-      <p className="text-xs text-slate-500">
-        Review the draft. Lock it when you&apos;re satisfied — you can unlock
-        and regenerate any time.
-      </p>
+          <p className="text-xs text-slate-500">
+            Review the draft. Lock it when you&apos;re satisfied — you can unlock
+            and regenerate any time.
+          </p>
 
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="outline"
-          onClick={onRegenerate}
-          disabled={busy}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {regenerating ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4 mr-2" />
-          )}
-          Regenerate
-        </Button>
-        <Button
-          onClick={onLock}
-          disabled={busy}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-        >
-          {locking ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Locking…
-            </>
-          ) : (
-            <>
-              <Lock className="h-4 w-4 mr-2" />
-              Lock section
-            </>
-          )}
-        </Button>
-      </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={onRegenerate}
+              disabled={busy}
+              className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            >
+              {regenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Regenerate
+            </Button>
+            <Button
+              onClick={onLock}
+              disabled={busy}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              {locking ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Locking…
+                </>
+              ) : (
+                <>
+                  <Lock className="h-4 w-4 mr-2" />
+                  Lock section
+                </>
+              )}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -299,6 +360,8 @@ function LockedView({
 }) {
   return (
     <div className="space-y-4">
+      {/* No pencil here: a locked section is read-only and the save endpoint
+          409s. Unlock first. */}
       <div
         dir={isRtl ? "rtl" : "ltr"}
         className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}

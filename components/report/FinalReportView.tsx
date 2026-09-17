@@ -3,12 +3,21 @@
 import { useMemo } from "react"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { CoverPreview } from "@/components/report/design/CoverPreview"
+import {
+  BODY_INK,
+  H4_MARGIN_INSET,
+  SUBHEADING_MARGINS,
+} from "@/components/report/design/PagePreview"
 import { PAGE_H, PAGE_W } from "@/components/report/design/PreviewFrame"
 import { ReportSectionRenderer } from "@/components/report/ReportSectionRenderer"
 import { COMPANY_PROFILES, SECTORS } from "@/lib/constants"
 import { computeSectionNumbering, toArabicDigits } from "@/lib/report-format"
 import type { AssembledReport } from "@/lib/api/annual-design"
-import { DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY } from "@/types/report-design"
+import {
+  DEFAULT_LAYOUT_KEY,
+  LAYOUT_TYPOGRAPHY,
+  subheadingStyle,
+} from "@/types/report-design"
 import type { BrandColors, Typography } from "@/types/report-design"
 import type {
   CompanyProfile,
@@ -21,9 +30,14 @@ import type {
 // wide with 48px padding, so a 672px text column standing in for a 794px page.
 // Every measurement a reader takes off it (line length, how much fits above the
 // fold, how a wide table sits) was therefore wrong by 15%.
-const SHEET_W = PAGE_W * (96 / 72)          // 793.3
+//
+// The renderer measures in points; this sheet is that page at 96dpi, so one of
+// its points is this many CSS px here. Every number taken off the document —
+// the width, the margin, a type size — comes through this one conversion.
+const PX_PER_PT = 96 / 72
+const SHEET_W = PAGE_W * PX_PER_PT          // 793.3
 // The renderer's 50pt page margin, in the same units.
-const SHEET_PAD = 50 * (96 / 72)            // 66.7
+const SHEET_PAD = 50 * PX_PER_PT            // 66.7
 
 interface CycleMeta {
   cycle_name?: string
@@ -82,6 +96,13 @@ export function FinalReportView({
     ?? LAYOUT_TYPOGRAPHY[layoutKey]
     ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY]
 
+  // The subheading options, with the defaults filled in for a design stored
+  // before they existed. `numbering` is not a CSS property — it decides whether
+  // the outline's "4.1" is prefixed to the markdown at all, further down.
+  const sub = subheadingStyle(typography.subheading)
+  const [subAbove, subBelow] = SUBHEADING_MARGINS[sub.spacing]
+  const pt = (v: number) => `${(v * PX_PER_PT).toFixed(2)}px`
+
   // Handed to the sheet as custom properties rather than applied per element:
   // the body prose is rendered from markdown by ProsePreview, which has no
   // per-report styling hook, and inheritance reaches every heading and
@@ -90,6 +111,20 @@ export function FinalReportView({
     "--report-brand": brand.primary || "#3C0866",
     "--report-font-heading": typography.heading.family,
     "--report-font-body": typography.body.family,
+    // The subheading role, which this sheet used to have no opinion about at
+    // all — see the note on the h3/h4 rules below.
+    "--report-font-sub": typography.subheading.family,
+    "--report-sub-size": pt(typography.subheading.size),
+    "--report-sub-size-h4": pt(typography.subheading.size - 1),
+    "--report-sub-weight": String(typography.subheading.weight),
+    "--report-sub-color": sub.color === "brand"
+      ? (brand.primary || "#3C0866")
+      : BODY_INK,
+    "--report-sub-case": sub.case === "upper" ? "uppercase" : "none",
+    "--report-sub-above": pt(subAbove),
+    "--report-sub-below": pt(subBelow),
+    "--report-sub-above-h4": pt(subAbove - H4_MARGIN_INSET[0]),
+    "--report-sub-below-h4": pt(subBelow - H4_MARGIN_INSET[1]),
   } as React.CSSProperties
 
   return (
@@ -112,12 +147,38 @@ export function FinalReportView({
       {/* Section titles and their numbers carry the report's own brand colour,
           and its heading font, so the design is visible in the body and not
           only on the front page. Scoped to this sheet — the surrounding app
-          keeps its own type. */}
+          keeps its own type.
+
+          h3/h4 are the subheadings *inside* a section, and the document draws
+          them from the subheading role. This sheet used to hand them the
+          heading family and nothing else — no size, no weight, and none of the
+          four options below — so a subheading on screen and the same one in the
+          file were two different things. The rules below close that: the same
+          role, converted from the renderer's points at the same 96dpi the
+          sheet's own width uses.
+
+          Sizes and margins land on h3/h4 as absolute lengths rather than the
+          `prose` scale, which is why they beat @tailwindcss/typography's own
+          `:where()` rules on specificity without an !important. */}
       <style>{`
-        .report-sheet h1, .report-sheet h2, .report-sheet h3, .report-sheet h4 {
+        .report-sheet h1, .report-sheet h2 {
           font-family: var(--report-font-heading), ui-sans-serif, system-ui, sans-serif;
         }
         .report-sheet h2 { color: var(--report-brand); }
+        .report-sheet h3, .report-sheet h4 {
+          font-family: var(--report-font-sub), ui-sans-serif, system-ui, sans-serif;
+          font-weight: var(--report-sub-weight);
+          color: var(--report-sub-color);
+          text-transform: var(--report-sub-case);
+        }
+        .report-sheet h3 {
+          font-size: var(--report-sub-size);
+          margin: var(--report-sub-above) 0 var(--report-sub-below);
+        }
+        .report-sheet h4 {
+          font-size: var(--report-sub-size-h4);
+          margin: var(--report-sub-above-h4) 0 var(--report-sub-below-h4);
+        }
         .report-sheet .prose p, .report-sheet .prose li, .report-sheet .prose td {
           font-family: var(--report-font-body), ui-sans-serif, system-ui, sans-serif;
         }
@@ -142,7 +203,11 @@ export function FinalReportView({
             section={section}
             index={i}
             number={n?.number ?? null}
-            subNumbers={n?.subNumbers ?? []}
+            // `plain` drops the "4.1" the outline numbers subheadings with.
+            // An empty list is how that is said here: the prefixer this feeds
+            // walks numbers onto headings and stops when it runs out, so none
+            // means none — the same thing the PDF does with the option set.
+            subNumbers={sub.numbering === "plain" ? [] : (n?.subNumbers ?? [])}
             isArabic={isArabic}
           />
         )

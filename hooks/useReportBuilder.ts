@@ -117,6 +117,9 @@ export function useDraftAvailability(
 // if handed an object child.
 type MutationError = {
   message?: unknown
+  // HTTP status, set by the apiClient error normalizer. Callers that treat a
+  // specific code as a state (e.g. 409 = locked) read it from here.
+  status?: number
   response?: { data?: { detail?: unknown } }
 }
 
@@ -311,6 +314,62 @@ export function useSetAnalyzeContent(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save content")),
+  })
+}
+
+// Hand-edited body for an AI-written section (generate/analyze): one PUT of the
+// raw Markdown the PM typed.
+//
+// Silent on success, like useRefineSection below — the preview re-rendering is
+// the feedback, and a toast per edit would nag in a screen built for many small
+// passes. Errors still toast.
+export function useSaveGenerateContent(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      sectionCode,
+      content,
+    }: {
+      sectionCode: string
+      content: string
+    }) => pmApi.saveContent(cycleId, sectionCode, content),
+    // Write the typed text into the cache before the round-trip so the preview
+    // swaps the instant the editor closes, and roll it back if the PUT fails —
+    // same shape as useReorderSections.
+    onMutate: async ({ sectionCode, content }) => {
+      await qc.cancelQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      const previous = qc.getQueryData<CycleReportSection[]>(
+        QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+      )
+      if (previous) {
+        qc.setQueryData<CycleReportSection[]>(
+          QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+          previous.map((s) =>
+            s.section_code === sectionCode ? { ...s, content } : s,
+          ),
+        )
+      }
+      return { previous }
+    },
+    // The server normalises headings inside the body, so its echo — not the
+    // optimistic draft above — is what the preview must end up rendering.
+    onSuccess: (section) => {
+      patchSectionInList(qc, cycleId, section)
+    },
+    onError: (err: MutationError, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId), context.previous)
+      }
+      if (err?.status === 409) {
+        // Locked while the PM was editing (another tab, or another PM). Refetch
+        // so the panel flips to its read-only view instead of quietly dropping
+        // the edit.
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+        toast.error("This section is locked.")
+        return
+      }
+      toast.error(readError(err, "Failed to save section"))
+    },
   })
 }
 
