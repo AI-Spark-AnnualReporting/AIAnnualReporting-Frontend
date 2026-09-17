@@ -22,58 +22,92 @@ const DEFAULT_TIPS = [
   "Sections you create yourself sit alongside the built-in ones and are written the same way.",
 ]
 
-// Rotating ring with expanding pulse halos and an "AI" label.
+// The brand mark inside a rotating ring with expanding pulse halos, over the
+// Centriyon wordmark. It used to read "AI" — the same tile the sidebar carries
+// says whose product is working, which the surrounding copy no longer has to.
 function AnimatedLoader() {
   return (
-    <div
-      style={{
-        position: "relative",
-        width: 92,
-        height: 92,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      {[0, 0.6, 1.2].map((d) => (
-        <span
-          key={d}
-          style={{
-            position: "absolute",
-            inset: 6,
-            borderRadius: "50%",
-            border: `2px solid ${PRIMARY}`,
-            animation: "onb-ring 2.1s ease-out infinite",
-            animationDelay: `${d}s`,
-          }}
-        />
-      ))}
-      <svg width="92" height="92" viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r="34" fill="#fff" stroke="#ECEEF8" strokeWidth="4" />
-        <circle
-          cx="40"
-          cy="40"
-          r="34"
-          fill="none"
-          stroke={PRIMARY}
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeDasharray="58 220"
-          transform="rotate(-90 40 40)"
-        >
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from="-90 40 40"
-            to="270 40 40"
-            dur="1.3s"
-            repeatCount="indefinite"
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+      <div style={{ position: "relative", width: 92, height: 92, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {[0, 0.6, 1.2].map((d) => (
+          <span
+            key={d}
+            style={{
+              position: "absolute",
+              inset: 6,
+              borderRadius: "50%",
+              border: `2px solid ${PRIMARY}`,
+              animation: "onb-ring 2.1s ease-out infinite",
+              animationDelay: `${d}s`,
+            }}
           />
-        </circle>
-        <text x="40" y="47" textAnchor="middle" fontSize="20" fontWeight="800" fill={PRIMARY}>
-          AI
-        </text>
-      </svg>
+        ))}
+        <svg width="92" height="92" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="34" fill="#fff" stroke="#ECEEF8" strokeWidth="4" />
+          <circle
+            cx="40"
+            cy="40"
+            r="34"
+            fill="none"
+            stroke={PRIMARY}
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeDasharray="58 220"
+            transform="rotate(-90 40 40)"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="-90 40 40"
+              to="270 40 40"
+              dur="1.3s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        </svg>
+        {/* The tile is markup, not SVG: it is the sidebar's brand tile at the
+            size the ring allows, so the two stay the same shape. */}
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 11,
+              background: PRIMARY,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#fff"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect width="7" height="7" x="3" y="3" rx="1" />
+              <rect width="7" height="7" x="14" y="3" rx="1" />
+              <rect width="7" height="7" x="14" y="14" rx="1" />
+              <rect width="7" height="7" x="3" y="14" rx="1" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: "2.4px",
+          color: "#6f74a0",
+          textTransform: "uppercase",
+        }}
+      >
+        Centriyon
+      </div>
     </div>
   )
 }
