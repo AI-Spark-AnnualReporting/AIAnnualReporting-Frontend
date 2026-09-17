@@ -49,12 +49,15 @@ import type { ContentLanguage, CycleReportSection } from "@/types"
 // (SectionBodyEditor), so there is one editing model across the report.
 //
 // PDF is excluded on purpose — these sections feed their text layer to the AI
-// agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS.
+// agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS on
+// the backend, which is the list that actually decides: anything missing here
+// is simply unpickable, even though the server would have taken it.
 const ACCEPT = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
     ".docx",
   ],
   "application/msword": [".doc"],
+  "text/plain": [".txt"],
 }
 
 export function ContentSection({
@@ -171,7 +174,7 @@ export function ContentSection({
 
   const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
-      toast.error("Unsupported file type. Use DOCX.")
+      toast.error("Unsupported file type. Use a Word document or a .txt file.")
       return
     }
     const file = accepted[0]
@@ -541,7 +544,7 @@ function ContentBody({
               Write this section
             </span>
             <span className="max-w-xs text-xs leading-relaxed text-slate-400">
-              Or upload a Word document and we&apos;ll pull its text in here for
+              Or upload a Word or text document and we&apos;ll pull its text in here for
               you to edit.
             </span>
           </button>
