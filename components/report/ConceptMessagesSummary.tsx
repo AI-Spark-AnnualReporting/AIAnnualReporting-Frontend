@@ -66,27 +66,28 @@ function ConceptCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              {/* The area of focus is what the card is about, so it reads as the
-                  heading. The message's own title sits with the copy it titles,
-                  inside the box below. A hand-added message has no slogan to
-                  link back to, so there the title keeps the heading slot —
-                  otherwise the card would have no heading at all. */}
-              <p
-                dir={dir}
-                className={cn(
-                  "mb-0.5 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground",
-                  isRtl && "flex-row-reverse text-right",
-                )}
-              >
-                <Target className="h-3 w-3 shrink-0" />
-                {hasSlogan ? "Area of focus" : "Concept message"}
-              </p>
+              {/* The area of focus is what the card is about, so it heads it —
+                  label and slogan on one bold line, so the area is readable at a
+                  glance rather than sitting in small grey text. The message's
+                  own title sits with the copy it titles, inside the box below.
+
+                  A hand-added message has no slogan to link back to, so there
+                  the title keeps the heading slot — otherwise the card would
+                  have no heading at all. */}
               <h4
                 dir={dir}
-                className={cn("text-base font-bold text-indigo-700", isRtl && "text-right")}
+                className={cn(
+                  "flex min-w-0 items-center gap-1.5 text-base font-bold text-indigo-700",
+                  isRtl && "flex-row-reverse text-right",
+                )}
                 title={heading || undefined}
               >
-                {heading || (
+                <Target className="h-4 w-4 shrink-0" />
+                {heading ? (
+                  <span className="truncate">
+                    {hasSlogan ? `Area of focus: ${slogan}` : title}
+                  </span>
+                ) : (
                   <span className="font-normal italic text-muted-foreground">Untitled message</span>
                 )}
               </h4>
