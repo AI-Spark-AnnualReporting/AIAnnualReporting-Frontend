@@ -113,8 +113,8 @@ function SubsectionRow({
         active ? "bg-slate-50" : "hover:bg-slate-50",
       )}
     >
-      <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
-      <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-700">
         {title}
       </span>
     </button>
