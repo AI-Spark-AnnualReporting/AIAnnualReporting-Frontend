@@ -102,13 +102,22 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
     <div className="flex h-[calc(100vh-8.5rem)] flex-col gap-6">
       {/* Header */}
       <div className="flex items-center gap-3 shrink-0">
-        <Link
-          href={`/pm/cycles/${cycleId}`}
+        <button
+          type="button"
+          onClick={() => {
+            // Go back to wherever the PM actually came from. This used to be a
+            // fixed link to the cycle, which skipped the plan entirely for
+            // anyone who arrived through Start Building — the screen they were
+            // on a moment earlier. Falling back to the cycle covers a direct
+            // link or a reload, where there is no in-app history to return to.
+            if (window.history.length > 1) router.back()
+            else router.push(`/pm/cycles/${cycleId}`)
+          }}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
-          aria-label="Back to cycle"
+          aria-label="Go back"
         >
           <ArrowLeft className="h-4 w-4" />
-        </Link>
+        </button>
         <h1 className="min-w-0 flex-1 truncate text-xl font-bold text-slate-900">
           Report Builder{cycleName ? ` — ${cycleName}` : ""}
         </h1>
