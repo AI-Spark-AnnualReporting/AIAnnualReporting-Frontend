@@ -169,7 +169,7 @@ export function SectionOutlineDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>All sections</DialogTitle>
+          <DialogTitle>Report outline</DialogTitle>
           <DialogDescription>
             Every section in this report and the subsections inside it.
           </DialogDescription>

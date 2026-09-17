@@ -205,7 +205,7 @@ export function SectionList({
           className="mt-2 flex w-full items-center gap-2.5 rounded-lg border-t border-slate-100 px-3 pb-2 pt-3 text-start text-sm font-medium text-indigo-600 transition-colors hover:bg-slate-50"
         >
           <List className="h-4 w-4 shrink-0" />
-          View all sections
+          Outline
         </button>
       )}
     </div>
