@@ -105,7 +105,7 @@ export function ContentSection({
       : null
 
   // Close the editor whenever the server's content moves underneath it — an
-  // upload's extraction, a Remove, an unlock, or our own save's echo. Whatever
+  // upload's extraction, a Remove, or our own save's echo. Whatever
   // is in the textarea was written against text that no longer exists, and an
   // extraction in particular must never be overwritten by a draft that predates
   // it. React's "store previous value" pattern, not an effect.

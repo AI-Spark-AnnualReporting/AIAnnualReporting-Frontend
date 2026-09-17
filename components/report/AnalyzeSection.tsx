@@ -338,11 +338,6 @@ function DraftingView({
 
       <SectionChat refining={refining} onRefine={onRefine} />
 
-      <p className="text-xs text-slate-500">
-        Review the findings. Lock when you&apos;re satisfied — you can unlock
-        and re-run any time.
-      </p>
-
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button
