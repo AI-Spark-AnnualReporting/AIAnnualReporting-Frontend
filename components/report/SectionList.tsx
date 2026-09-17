@@ -63,15 +63,11 @@ function RailRow({
       )}
     >
       {status}
-      <span
-        className={cn(
-          // Semibold whether or not the row is selected: the filled background
-          // already marks selection, so weight is free to carry the hierarchy
-          // against the subsection rows instead.
-          "min-w-0 flex-1 truncate text-start text-sm font-semibold",
-          active ? "text-slate-900" : "text-slate-700",
-        )}
-      >
+      {/* Semibold and full black whether or not the row is selected: the
+          filled background already marks selection, so neither weight nor
+          colour has to carry it, and both are free to separate sections from
+          the subsections beneath them. */}
+      <span className="min-w-0 flex-1 truncate text-start text-sm font-semibold text-black">
         {title}
       </span>
       <span
