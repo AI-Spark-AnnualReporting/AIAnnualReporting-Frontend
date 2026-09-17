@@ -42,6 +42,14 @@ function ConceptCard({
   isRtl: boolean
 }) {
   const dir = isRtl ? "rtl" : "ltr"
+  const slogan = message.area_slogan?.trim() ?? ""
+  const title = message.title.trim()
+  const hasSlogan = slogan.length > 0
+  // The slogan heads the card; the title only moves into the box when there is
+  // a slogan above it, so it is never printed twice.
+  const heading = hasSlogan ? slogan : title
+  const bodyTitle = hasSlogan ? title : ""
+
   return (
     <div
       className={cn(
@@ -58,28 +66,27 @@ function ConceptCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              {/* Which area this was written from. The title is read off the
-                  copy and no longer echoes the slogan, so this is the only
-                  link back — and it's absent on hand-added messages. */}
-              {message.area_slogan?.trim() && (
-                <p
-                  dir={dir}
-                  className={cn(
-                    "mb-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
-                    isRtl && "flex-row-reverse text-right",
-                  )}
-                >
-                  <Target className="h-3 w-3 shrink-0" />
-                  <span className="truncate" title={message.area_slogan}>
-                    <span className="font-medium">Area of focus:</span> {message.area_slogan}
-                  </span>
-                </p>
-              )}
+              {/* The area of focus is what the card is about, so it reads as the
+                  heading. The message's own title sits with the copy it titles,
+                  inside the box below. A hand-added message has no slogan to
+                  link back to, so there the title keeps the heading slot —
+                  otherwise the card would have no heading at all. */}
+              <p
+                dir={dir}
+                className={cn(
+                  "mb-0.5 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground",
+                  isRtl && "flex-row-reverse text-right",
+                )}
+              >
+                <Target className="h-3 w-3 shrink-0" />
+                {hasSlogan ? "Area of focus" : "Concept message"}
+              </p>
               <h4
                 dir={dir}
                 className={cn("text-base font-bold text-indigo-700", isRtl && "text-right")}
+                title={heading || undefined}
               >
-                {message.title.trim() || (
+                {heading || (
                   <span className="font-normal italic text-muted-foreground">Untitled message</span>
                 )}
               </h4>
@@ -96,6 +103,17 @@ function ConceptCard({
           </div>
 
           <div className="mt-3 rounded-lg border bg-white p-4">
+            {bodyTitle && (
+              <p
+                dir={dir}
+                className={cn(
+                  "mb-2 text-sm font-bold text-slate-900",
+                  isRtl && "text-right",
+                )}
+              >
+                {bodyTitle}
+              </p>
+            )}
             {message.description.trim() ? (
               // Three paragraphs of 100-120 words, split on blank lines.
               <ProsePreview content={message.description} className="prose-indigo" dir={dir} />
