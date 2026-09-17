@@ -143,13 +143,17 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
         <button
           type="button"
           onClick={() => {
-            // Go back to wherever the PM actually came from. This used to be a
-            // fixed link to the cycle, which skipped the plan entirely for
-            // anyone who arrived through Start Building — the screen they were
-            // on a moment earlier. Falling back to the cycle covers a direct
-            // link or a reload, where there is no in-app history to return to.
+            // Go back to wherever the PM actually came from. The plan page
+            // mirrors its wizard step into the URL, so this returns to Themes
+            // — the screen Start Building launches from — rather than to
+            // Sections.
+            //
+            // The fallback covers a direct link or a new tab, where there is
+            // no history to pop. It goes to that same Themes step, not to the
+            // cycle page: the builder's predecessor is the plan, and landing a
+            // step further out than the arrow promises is its own surprise.
             if (window.history.length > 1) router.back()
-            else router.push(`/pm/cycles/${cycleId}`)
+            else router.push(`/pm/cycles/${cycleId}/plan?step=2`)
           }}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50"
           aria-label="Go back"
