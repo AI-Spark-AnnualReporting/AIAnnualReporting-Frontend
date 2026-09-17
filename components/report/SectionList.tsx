@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -8,7 +9,7 @@ import {
   EXECUTIVE_SUMMARY_CODE,
   EXECUTIVE_SUMMARY_TITLE,
 } from "@/components/report/ExecutiveSummaryPanel"
-import { Check, Circle, CircleDot, List } from "lucide-react"
+import { Check, ChevronRight, Circle, CircleDot, List } from "lucide-react"
 import { headingAnchorId, subsectionsOf } from "@/lib/sectionOutline"
 
 // "Handled for you" — the same filled green check the system-rendered sections
@@ -41,6 +42,8 @@ function RailRow({
   modeColor,
   onClick,
   isRtl,
+  expanded,
+  onToggle,
 }: {
   title: string
   active: boolean
@@ -49,27 +52,55 @@ function RailRow({
   modeColor: string
   onClick: () => void
   isRtl?: boolean
+  /** Only passed when the section has subsections to disclose. */
+  expanded?: boolean
+  onToggle?: () => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      // dir on the row (not just the title) so the status icon and mode
-      // chip swap sides too.
+    // A div, not a button: the chevron is its own control and a button cannot
+    // nest inside one. The title carries the row's click instead.
+    <div
+      // dir on the row (not just the title) so the chevron, status icon and
+      // mode chip all swap sides too.
       dir={isRtl ? "rtl" : "ltr"}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-start transition-colors",
+        "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 transition-colors",
         active ? "bg-slate-100" : "hover:bg-slate-50",
       )}
     >
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={expanded ? `Hide ${title} subsections` : `Show ${title} subsections`}
+          className="-m-1 shrink-0 rounded p-1 text-slate-400 transition-colors hover:text-slate-700"
+        >
+          <ChevronRight
+            className={cn(
+              "h-3.5 w-3.5 transition-transform",
+              expanded && "rotate-90",
+              isRtl && !expanded && "rotate-180",
+            )}
+          />
+        </button>
+      ) : (
+        // Keeps titles aligned down the rail whether or not a section has
+        // subsections — matches the chevron's width plus its gap.
+        <span className="w-3.5 shrink-0" aria-hidden />
+      )}
       {status}
       {/* Semibold and full black whether or not the row is selected: the
           filled background already marks selection, so neither weight nor
           colour has to carry it, and both are free to separate sections from
           the subsections beneath them. */}
-      <span className="min-w-0 flex-1 truncate text-start text-sm font-semibold text-black">
+      <button
+        type="button"
+        onClick={onClick}
+        className="min-w-0 flex-1 truncate text-start text-sm font-semibold text-black"
+      >
         {title}
-      </span>
+      </button>
       <span
         className={cn(
           "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium",
@@ -78,7 +109,7 @@ function RailRow({
       >
         {modeLabel}
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -143,8 +174,42 @@ export function SectionList({
 }: SectionListProps) {
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
 
+  // Which sections are showing their subsections. Starts empty: seventeen
+  // sections with up to six subsections each is sixty-odd rows, and the rail is
+  // for finding a section first.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  // Only sections that actually have subsections can be disclosed, so the
+  // expand-all control hides entirely on a report that has none yet.
+  const withSubs = ordered.filter((s) => subsectionsOf(s.content).length > 0)
+  const allOpen = withSubs.length > 0 && withSubs.every((s) => expanded.has(s.section_code))
+
+  const toggle = (code: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+
   return (
     <div className="flex flex-col px-2 py-2">
+      {withSubs.length > 0 && (
+        <button
+          type="button"
+          onClick={() =>
+            setExpanded(
+              allOpen
+                ? new Set()
+                : new Set(withSubs.map((s) => s.section_code)),
+            )
+          }
+          className="mb-1 self-end rounded px-2 py-1 text-xs font-medium text-indigo-600 transition-colors hover:bg-slate-50"
+        >
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
+      )}
+
       {/* First in the rail — the assembled report opens with it. */}
       {showExecutiveSummary && (
         <RailRow
@@ -164,6 +229,8 @@ export function SectionList({
         const prevLayer = i > 0 ? ordered[i - 1].layer : null
         const showDivider = section.layer !== prevLayer
         const mode = SECTION_MODES[section.mode]
+        const subs = subsectionsOf(section.content)
+        const isOpen = expanded.has(section.section_code)
 
         return (
           <div key={section.section_code}>
@@ -180,22 +247,27 @@ export function SectionList({
               modeColor={mode?.color ?? "bg-slate-100 text-slate-600"}
               onClick={() => onSelect(section.section_code)}
               isRtl={isRtl}
+              expanded={subs.length > 0 ? isOpen : undefined}
+              onToggle={
+                subs.length > 0 ? () => toggle(section.section_code) : undefined
+              }
             />
             {/* The section's own subsections — the `###` headings in its body.
                 A section written before the writer was told to use them, or one
                 the PM has not split up, simply has none and renders as it did
                 before. */}
-            {subsectionsOf(section.content).map((sub, j) => (
-              <SubsectionRow
-                key={`${sub.line}-${j}`}
-                title={sub.title}
-                active={section.section_code === selectedCode}
-                onClick={() =>
-                  onSelect(section.section_code, headingAnchorId(sub.title))
-                }
-                isRtl={isRtl}
-              />
-            ))}
+            {isOpen &&
+              subs.map((sub, j) => (
+                <SubsectionRow
+                  key={`${sub.line}-${j}`}
+                  title={sub.title}
+                  active={section.section_code === selectedCode}
+                  onClick={() =>
+                    onSelect(section.section_code, headingAnchorId(sub.title))
+                  }
+                  isRtl={isRtl}
+                />
+              ))}
           </div>
         )
       })}
