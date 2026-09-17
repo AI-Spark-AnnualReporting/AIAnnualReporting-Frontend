@@ -53,15 +53,7 @@ import type {
 
 type Step = 1 | 2
 
-// What the save actually does, in order. Each changed section has its source
-// type written before its departments, because switching to "Upload later"
-// clears departments server-side.
-//
-// Only real steps belong here. An opening "checking the plan is editable" and a
-// closing "refreshing the plan" were neither: the first is a guard inside each
-// write, not a phase of its own, and the second is a cache invalidation the PM
-// never waits on. Both would have sat there claiming work that wasn't happening.
-// Start Building is now the only wait on this page: it writes the sources the
+// Start Building is the only wait on this page: it writes the sources the
 // PM picked on step 1, freezes the plan, then drafts every eligible section.
 // Each entry is a step that actually happens — an opening "checking the plan is
 // editable" and a closing "refreshing the plan" were dropped because the first
@@ -281,6 +273,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           plan={plan}
           feeders={feeders}
           saveSources={saveSources}
+          hasUnsaved={hasUnsaved}
           sections={sections}
           areasOfFocus={areasOfFocus}
           suggestedThemes={suggestedThemes}
@@ -584,6 +577,7 @@ function ThemesStep({
   plan,
   feeders,
   saveSources,
+  hasUnsaved,
   sections,
   areasOfFocus,
   suggestedThemes,
@@ -596,6 +590,7 @@ function ThemesStep({
   /** Saved sources with any still-unsaved edits merged in. */
   feeders: FeederMapEntry[]
   saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
+  hasUnsaved: boolean
   sections: CycleReportSection[]
   areasOfFocus: AreaOfFocus[]
   suggestedThemes: SuggestedTheme[]
@@ -645,6 +640,7 @@ function ThemesStep({
           plan={plan}
           feeders={feeders}
           saveSources={saveSources}
+          hasUnsaved={hasUnsaved}
           sections={sections}
         />
       </div>
@@ -659,12 +655,14 @@ function StartBuildingAction({
   plan,
   feeders,
   saveSources,
+  hasUnsaved,
   sections,
 }: {
   cycleId: string
   plan: PlanResponse
   feeders: FeederMapEntry[]
   saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
+  hasUnsaved: boolean
   sections: CycleReportSection[]
 }) {
   const router = useRouter()
@@ -709,6 +707,12 @@ function StartBuildingAction({
     return (entry?.departments.length ?? 0) > 0
   })
 
+  // Nothing left for this button to do: the plan is already frozen, no source
+  // edits are waiting, and every eligible section has been drafted. All that is
+  // left is to open the builder — so the button says so and goes straight there.
+  const nothingToDo =
+    alreadyLocked && !hasUnsaved && eligibleToGenerate.length === 0
+
   const goToBuilder = () => {
     if (failed > 0) {
       toast.error(
@@ -719,15 +723,25 @@ function StartBuildingAction({
   }
 
   const onStart = async () => {
+    // Revisiting a finished plan has nothing to write, freeze or draft, so go
+    // straight to the builder. Showing a loader for a run with no work in it
+    // would be theatre.
+    if (nothingToDo) {
+      goToBuilder()
+      return
+    }
+
     // 1. Write the sources the PM picked on step 1. Stop here if any failed —
     //    locking on top of a half-written plan would freeze the wrong thing.
-    setPhase("saving")
-    const ok = await saveSources((done, totalToSave) =>
-      setSaved({ done, total: totalToSave }),
-    )
-    if (!ok) {
-      setPhase("idle")
-      return
+    if (hasUnsaved) {
+      setPhase("saving")
+      const ok = await saveSources((done, totalToSave) =>
+        setSaved({ done, total: totalToSave }),
+      )
+      if (!ok) {
+        setPhase("idle")
+        return
+      }
     }
 
     // 2. The one-way blueprint freeze.
@@ -744,7 +758,7 @@ function StartBuildingAction({
     // 3. Draft every eligible section.
     const work = eligibleToGenerate
     if (work.length === 0) {
-      setPhase("done")
+      goToBuilder()
       return
     }
     setPhase("generating")
@@ -814,12 +828,14 @@ function StartBuildingAction({
       title={
         disabled
           ? "Assign a department to each flagged section before building."
-          : eligibleToGenerate.length > 0
-            ? `Auto-generate ${eligibleToGenerate.length} narrative section${eligibleToGenerate.length === 1 ? "" : "s"} then open the builder`
-            : undefined
+          : nothingToDo
+            ? "Open the builder — this plan is already locked and drafted"
+            : eligibleToGenerate.length > 0
+              ? `Auto-generate ${eligibleToGenerate.length} narrative section${eligibleToGenerate.length === 1 ? "" : "s"} then open the builder`
+              : undefined
       }
     >
-      Start Building
+      {nothingToDo ? "Continue" : "Start Building"}
       <ArrowRight className="ml-1.5 h-4 w-4" />
     </Button>
   )
