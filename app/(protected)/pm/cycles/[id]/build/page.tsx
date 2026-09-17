@@ -8,7 +8,7 @@ import { RouteGuard } from "@/components/auth/RouteGuard"
 import {
   useBuildReadiness,
   usePMCycleSections,
-  useFinalReport,
+  useAssemblyReadiness,
   useReportApproval,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
@@ -51,9 +51,10 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const readinessQuery = useBuildReadiness(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmData } = usePMCycleDashboard(cycleId)
-  const finalReportQuery = useFinalReport(cycleId)
-  // isSuccess = a final report exists (404 → isError, loading → isPending)
-  const assembled = finalReportQuery.isSuccess
+  // A report was assembled and a section has changed since. Same query the
+  // header's AssembleEntry reads, so the banner below and the "Assemble again"
+  // button can never disagree — React Query serves both from one fetch.
+  const stale = !!useAssemblyReadiness(cycleId).data?.stale
   // Signed off — from this side's Approve & Lock or a Communication Hub reviewer.
   const reportLocked = !!useReportApproval(cycleId).data?.locked
 
@@ -218,7 +219,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
             <SectionDetail
               section={selected}
               cycleId={cycleId}
-              assembled={assembled}
+              stale={stale}
               reportLocked={reportLocked}
               contentLanguage={contentLanguage}
               isRtl={isRtl}

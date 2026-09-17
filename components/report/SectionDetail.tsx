@@ -276,14 +276,16 @@ function AssembledView({
 export function SectionDetail({
   section,
   cycleId,
-  assembled = false,
+  stale = false,
   reportLocked = false,
   contentLanguage = "english",
   isRtl = false,
 }: {
   section: CycleReportSection | null
   cycleId: string
-  assembled?: boolean
+  // A report was assembled and a section has changed since, so what is on the
+  // report page no longer matches what is on screen here.
+  stale?: boolean
   // The report has been signed off. Every write path 409s, so nothing is
   // editable.
   reportLocked?: boolean
@@ -311,6 +313,11 @@ export function SectionDetail({
   // still accepts section writes (`_assert_report_editable` only fires on the
   // signed-off statuses). So an assembled report is editable — it just goes
   // stale until it is assembled again, which the notice says out loud.
+  //
+  // Keyed off `stale`, not "a report exists", so this and the header button
+  // are driven by one fact. Wired to the latter it appeared the moment a
+  // report was assembled, telling the PM to press an "Assemble again" button
+  // that only appears once something has actually changed.
   const panel = (
     <SectionPanel
       section={section}
@@ -319,7 +326,7 @@ export function SectionDetail({
       isRtl={isRtl}
     />
   )
-  if (!assembled) return panel
+  if (!stale) return panel
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
