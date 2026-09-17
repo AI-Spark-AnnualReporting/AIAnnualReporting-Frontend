@@ -4,6 +4,11 @@ import { toast } from "sonner"
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
+import {
+  addSubsectionInstruction,
+  insertSubsection,
+  type Placement,
+} from "@/lib/sectionOutline"
 import type {
   ContentLanguage,
   CycleReportSection,
@@ -336,6 +341,64 @@ export function useRefineSection(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Refinement failed")),
+  })
+}
+
+// Add one subsection to a section.
+//
+// Two different operations behind one call, because a subsection is a heading
+// in the body and the two kinds of section own their bodies differently:
+//
+//   generate / analyze — refine rewrites the whole body, so the AI writes the
+//     new subsection's prose from the department material and places it where
+//     the instruction says. Rule 4 of the refiner prompt reproduces every other
+//     heading verbatim, so nothing else moves.
+//
+//   manual / extract — refine refuses these modes outright; the PM owns the
+//     text. The heading is spliced into the body and they write under it.
+//
+// The caller passes the section itself rather than a code, because the branch
+// and the splice both need its mode and its current content.
+export function useAddSubsection(cycleId: string) {
+  const qc = useQueryClient()
+  const refine = useRefineSection(cycleId)
+  const saveManual = useSaveManualContent(cycleId)
+  const saveExtract = useSetExtractContent(cycleId)
+
+  return useMutation({
+    mutationFn: async ({
+      section,
+      name,
+      placement,
+    }: {
+      section: CycleReportSection
+      name: string
+      placement: Placement
+    }) => {
+      const sectionCode = section.section_code
+
+      if (section.mode === "generate" || section.mode === "analyze") {
+        return refine.mutateAsync({
+          sectionCode,
+          instruction: addSubsectionInstruction(name, placement),
+        })
+      }
+
+      const content = insertSubsection(section.content, name, placement)
+      if (section.mode === "extract") {
+        return saveExtract.mutateAsync({ sectionCode, content })
+      }
+      return saveManual.mutateAsync({ sectionCode, content })
+    },
+    onSuccess: () => {
+      // Both paths already patch the section into the list cache; this refetch
+      // is what makes the rail's subsection rows appear without a reload.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      toast.success("Subsection added")
+    },
+    // No error toast: refine and the content saves each toast their own
+    // failure, and the reasons differ — a refine that could not run says
+    // something quite different from a rejected save.
   })
 }
 

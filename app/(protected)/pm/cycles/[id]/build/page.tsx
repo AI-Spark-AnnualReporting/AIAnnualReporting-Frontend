@@ -19,6 +19,7 @@ import { SectionList } from "@/components/report/SectionList"
 import { SectionDetail } from "@/components/report/SectionDetail"
 import type { ContentLanguage } from "@/types"
 import { AssembleEntry } from "@/components/report/AssembleEntry"
+import { SectionOutlineDialog } from "@/components/report/SectionOutlineDialog"
 import {
   ExecutiveSummaryPanel,
   EXECUTIVE_SUMMARY_CODE,
@@ -41,6 +42,7 @@ export default function ReportBuilderPage({
 
 function BuilderShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
+  const [outlineOpen, setOutlineOpen] = useState(false)
   const readinessQuery = useBuildReadiness(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
   const { data: pmData } = usePMCycleDashboard(cycleId)
@@ -162,6 +164,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
               onSelect={setSelectedCode}
               isRtl={isRtl}
               showExecutiveSummary
+              onViewAll={() => setOutlineOpen(true)}
             />
           </div>
         </div>
@@ -182,6 +185,16 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
           )}
         </div>
       </div>
+
+      <SectionOutlineDialog
+        cycleId={cycleId}
+        sections={ordered}
+        open={outlineOpen}
+        onOpenChange={setOutlineOpen}
+        onSelect={setSelectedCode}
+        reportLocked={reportLocked}
+        isRtl={isRtl}
+      />
     </div>
   )
 }
