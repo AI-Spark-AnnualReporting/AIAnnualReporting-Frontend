@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, FileCheck } from "lucide-react"
+import { AlertTriangle, FileCheck, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import {
@@ -67,6 +67,19 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     [router, cycleId],
   )
 
+  const runAssemble = async (refresh: boolean) => {
+    setConfirmOpen(false)
+    setPhase("running")
+    try {
+      await assemble.mutateAsync({ refresh })
+      setPhase("done")
+    } catch {
+      // Error already toasted by the mutation. Drop the loader so the PM lands
+      // back on the builder exactly where they were.
+      setPhase("idle")
+    }
+  }
+
   // Before every other early return: assembling makes the final-report query
   // succeed, and the `hasReport` branch below would swap the loader out for a
   // "View Report" link halfway through its finish animation.
@@ -97,15 +110,14 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readiness = readinessQuery.data
   if (!readiness) return null
 
-  const { can_assemble, ready, total, incomplete_sections } = readiness
+  const { can_assemble, ready, total, incomplete_sections, stale } = readiness
 
   // Use the final-report query as the source of truth for whether a report
   // exists — assembly-readiness may not return has_final_report reliably.
   const hasReport = finalReportQuery.isSuccess
 
-  // Final report already exists → View Report only (redirect, no API call).
-  // Re-assemble is available on the report page itself.
-  if (hasReport) {
+  // A report exists and nothing has changed since → nothing to do but read it.
+  if (hasReport && !stale) {
     return (
       <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
         <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
@@ -116,18 +128,24 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     )
   }
 
-  const run = async () => {
-    setConfirmOpen(false)
-    setPhase("running")
-    try {
-      await assemble.mutateAsync({})
-      setPhase("done")
-    } catch {
-      // Error already toasted by the mutation. Drop the loader so the PM lands
-      // back on the builder exactly where they were.
-      setPhase("idle")
-    }
+  // A report exists but a section has been edited since it was built. Offer
+  // the rebuild instead of the link — refresh: true is what makes it a rebuild
+  // rather than a re-read, since assemble_report returns the stored report
+  // untouched without it.
+  if (hasReport) {
+    return (
+      <Button
+        onClick={() => runAssemble(true)}
+        className="shrink-0 bg-amber-500 text-white hover:bg-amber-600"
+        title="A section changed after this report was built — rebuild it to include the change."
+      >
+        <RefreshCw className="h-4 w-4 mr-1.5" />
+        Assemble again
+      </Button>
+    )
   }
+
+  const run = () => runAssemble(false)
 
   const missing = incomplete_sections.length
 

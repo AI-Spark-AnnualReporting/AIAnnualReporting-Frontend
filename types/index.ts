@@ -239,6 +239,10 @@ export interface AssemblyReadiness {
     title: string
     layer: SectionLayer
   }>
+  /** A report was assembled and a section has changed since — the assembled
+   *  report is a snapshot, so it no longer matches the cycle. Re-assembling
+   *  requires refresh=true; without it the server returns the stored one. */
+  stale?: boolean
   has_final_report: boolean
   final_report_generated_at: string | null
 }

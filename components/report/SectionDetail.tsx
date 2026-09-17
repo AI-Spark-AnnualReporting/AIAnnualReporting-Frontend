@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
 import { toast } from "sonner"
 import { ContentLanguage, CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
@@ -324,7 +323,7 @@ export function SectionDetail({
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <StaleReportNotice cycleId={cycleId} />
+      <StaleReportNotice />
       {panel}
     </div>
   )
@@ -332,20 +331,19 @@ export function SectionDetail({
 
 // Editing after an assemble leaves the assembled report behind — say so, and
 // say what to do about it. A banner rather than a wall: the edit is allowed.
-function StaleReportNotice({ cycleId }: { cycleId: string }) {
+//
+// It points at the header button rather than linking anywhere: once a section
+// changes, AssembleEntry turns itself into "Assemble again", so the fix is
+// already on screen.
+function StaleReportNotice() {
   return (
     <div className="flex items-start gap-2.5 border-b border-amber-200 bg-amber-50 px-8 py-3 text-sm text-amber-800">
       <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
       <span>
         This report has already been assembled. Anything you change here
-        won&apos;t appear in it until you{" "}
-        <Link
-          href={`/pm/cycles/${cycleId}/report`}
-          className="font-medium underline underline-offset-2 hover:text-amber-900"
-        >
-          assemble it again
-        </Link>
-        .
+        won&apos;t appear in it until you press{" "}
+        <span className="font-medium">Assemble again</span> at the top of the
+        page.
       </span>
     </div>
   )
