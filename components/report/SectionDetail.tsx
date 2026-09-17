@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { toast } from "sonner"
 import { ContentLanguage, CycleReportSection } from "@/types"
 import { SECTION_MODES, SECTION_LAYERS } from "@/lib/constants"
@@ -9,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import {
+  AlertTriangle,
   CheckCircle2,
   FileCheck,
   FileText,
@@ -218,19 +220,15 @@ function AutoSection({
   )
 }
 
-// Read-only view shown for every section once the report has been assembled.
-// Auto sections are excluded — they have no user content and are already
-// handled by AutoSection's own read-only UI. Once the report is APPROVED this
-// covers every section, and the wording changes: assembly is undoable,
-// sign-off is not.
+// Read-only view for a signed-off report. Assembly alone no longer lands here
+// — it is undoable and the backend still takes writes, so an assembled report
+// stays editable. Sign-off is the one thing that is final.
 function AssembledView({
   section,
   isRtl,
-  reportLocked = false,
 }: {
   section: CycleReportSection
   isRtl?: boolean
-  reportLocked?: boolean
 }) {
   const content = section.content ?? ""
   const attachment = section.attachment
@@ -243,9 +241,7 @@ function AssembledView({
           <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
             <FileCheck className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              {reportLocked
-                ? "This report is approved and locked — it can no longer be edited."
-                : "The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes."}
+              This report is approved and locked — it can no longer be edited.
             </span>
           </div>
 
@@ -309,14 +305,65 @@ export function SectionDetail({
 
   // Approved and locked → everything is read-only.
   if (reportLocked) {
-    return <AssembledView section={section} isRtl={isRtl} reportLocked />
-  }
-
-  // Once assembled, all non-auto sections are view-only.
-  if (assembled && section.mode !== "auto") {
     return <AssembledView section={section} isRtl={isRtl} />
   }
 
+  // Assembling is not approving: the report is still a draft and the backend
+  // still accepts section writes (`_assert_report_editable` only fires on the
+  // signed-off statuses). So an assembled report is editable — it just goes
+  // stale until it is assembled again, which the notice says out loud.
+  const panel = (
+    <SectionPanel
+      section={section}
+      cycleId={cycleId}
+      contentLanguage={contentLanguage}
+      isRtl={isRtl}
+    />
+  )
+  if (!assembled) return panel
+
+  return (
+    <div className="flex flex-1 flex-col min-h-0">
+      <StaleReportNotice cycleId={cycleId} />
+      {panel}
+    </div>
+  )
+}
+
+// Editing after an assemble leaves the assembled report behind — say so, and
+// say what to do about it. A banner rather than a wall: the edit is allowed.
+function StaleReportNotice({ cycleId }: { cycleId: string }) {
+  return (
+    <div className="flex items-start gap-2.5 border-b border-amber-200 bg-amber-50 px-8 py-3 text-sm text-amber-800">
+      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+      <span>
+        This report has already been assembled. Anything you change here
+        won&apos;t appear in it until you{" "}
+        <Link
+          href={`/pm/cycles/${cycleId}/report`}
+          className="font-medium underline underline-offset-2 hover:text-amber-900"
+        >
+          assemble it again
+        </Link>
+        .
+      </span>
+    </div>
+  )
+}
+
+// The mode switch. Every branch here is editable — the read-only cases are
+// handled by SectionDetail above, before this is reached.
+function SectionPanel({
+  section,
+  cycleId,
+  contentLanguage,
+  isRtl,
+}: {
+  section: CycleReportSection
+  cycleId: string
+  contentLanguage: ContentLanguage
+  isRtl?: boolean
+}) {
   // Extract-mode takes its content from a person: upload a document (the
   // backend extracts its text) OR type it — either alone is enough to lock.
   // Same panel as the manual sections below. Takes priority over the
