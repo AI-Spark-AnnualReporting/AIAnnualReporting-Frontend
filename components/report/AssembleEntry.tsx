@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, FileCheck, Loader2 } from "lucide-react"
+import { AlertTriangle, FileCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,32 @@ import {
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS } from "@/lib/constants"
 
+// The four phases assemble_report actually runs, in order: read the sections,
+// write the executive summary from the AI-written ones, lay the report out
+// (including the per-section title-echo pass), then save it and index it for
+// the dashboard.
+const ASSEMBLE_MILESTONES = [
+  "Collecting your written sections",
+  "Writing the executive summary",
+  "Laying out the report",
+  "Saving and indexing it",
+]
+
+const ASSEMBLE_TIPS = [
+  "Empty sections are skipped — assemble again once you have filled them in.",
+  "The executive summary is written last, from the sections the AI wrote.",
+  "Assembling is not approving — you review the whole report before signing it off.",
+  "Attached documents go into the report exactly as you uploaded them.",
+]
+
+// Assembly is one request that reports nothing back until it finishes, so the
+// bar is a timed climb rather than a real percentage. This is how long it
+// takes to reach 90%, where it then holds: one long LLM call for the summary,
+// a short one per narrative section, then the embedding pass. Retune it from a
+// real run if reports get much longer — a bar that parks at 90% for a minute
+// looks broken.
+const ASSEMBLE_ESTIMATE_MS = 60_000
+
 interface AssembleEntryProps {
   cycleId: string
 }
@@ -30,6 +57,36 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const assemble = useAssembleReport(cycleId)
   const router = useRouter()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Drives the loader on its own rather than off `assemble.isPending`: the
+  // mutation resolves the instant the response lands, which would tear the
+  // screen away mid-animation. "done" lets it finish, then onDone navigates.
+  const [phase, setPhase] = useState<"idle" | "running" | "done">("idle")
+
+  const goToReport = useCallback(
+    () => router.push(`/pm/cycles/${cycleId}/report`),
+    [router, cycleId],
+  )
+
+  // Before every other early return: assembling makes the final-report query
+  // succeed, and the `hasReport` branch below would swap the loader out for a
+  // "View Report" link halfway through its finish animation.
+  if (phase !== "idle") {
+    return (
+      <div className="fixed inset-0 z-[1400] overflow-y-auto">
+        <AiLoadingScreen
+          title="Assembling your report"
+          subtitle="Pulling every written section together and writing the executive summary."
+          milestones={ASSEMBLE_MILESTONES}
+          tips={ASSEMBLE_TIPS}
+          estimatedMs={ASSEMBLE_ESTIMATE_MS}
+          done={phase === "done"}
+          doneTitle="Your report is assembled"
+          doneSubtitle="Opening it so you can review and sign it off."
+          onDone={goToReport}
+        />
+      </div>
+    )
+  }
 
   if (readinessQuery.isLoading) {
     return (
@@ -61,11 +118,14 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   const run = async () => {
     setConfirmOpen(false)
+    setPhase("running")
     try {
       await assemble.mutateAsync({})
-      router.push(`/pm/cycles/${cycleId}/report`)
+      setPhase("done")
     } catch {
-      // Error already toasted by the mutation
+      // Error already toasted by the mutation. Drop the loader so the PM lands
+      // back on the builder exactly where they were.
+      setPhase("idle")
     }
   }
 
@@ -77,7 +137,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
         // Assembling with empty sections is allowed — they are simply left
         // out. The confirm below is what stops that happening silently.
         onClick={() => (missing > 0 ? setConfirmOpen(true) : run())}
-        disabled={!can_assemble || assemble.isPending}
+        disabled={!can_assemble}
         title={
           can_assemble
             ? undefined
@@ -85,21 +145,12 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
         }
         className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
       >
-        {assemble.isPending ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            Assembling…
-          </>
-        ) : (
-          <>
-            <FileCheck className="h-4 w-4 mr-1.5" />
-            Assemble Report
-            {missing > 0 && (
-              <span className="ml-1.5 font-normal opacity-80">
-                ({ready}/{total})
-              </span>
-            )}
-          </>
+        <FileCheck className="h-4 w-4 mr-1.5" />
+        Assemble Report
+        {missing > 0 && (
+          <span className="ml-1.5 font-normal opacity-80">
+            ({ready}/{total})
+          </span>
         )}
       </Button>
 

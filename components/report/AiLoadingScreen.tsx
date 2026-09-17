@@ -146,6 +146,11 @@ export interface AiLoadingScreenProps {
   progressCaption?: ReactNode
   /** Force the active milestone; otherwise it is inferred from progress. */
   activeMilestone?: number
+  /** Roughly how long the wait runs, in ms — the simulated climb reaches 90%
+   *  here and then holds. Set it from a measured run: too short and the PM
+   *  watches a frozen bar, which reads as broken far more than a slow one
+   *  does. Ignored when `controlledProgress` is supplied. */
+  estimatedMs?: number
   /** Hide the bar and its caption. `controlledProgress` still steps the
    *  milestone checklist, which carries the progress on its own. */
   showProgress?: boolean
@@ -166,6 +171,7 @@ export function AiLoadingScreen({
   indeterminate = false,
   progressCaption,
   activeMilestone,
+  estimatedMs,
   showProgress = true,
   headerExtra,
   footer,
@@ -180,8 +186,10 @@ export function AiLoadingScreen({
   // onDone. Disabled whenever the caller supplies a real percentage.
   useEffect(() => {
     if (controlled) return
-    const target = 9000 + milestones.length * 1400 // ms
-    const start = Date.now()
+    const target = estimatedMs ?? 9000 + milestones.length * 1400 // ms
+    // Resume where the bar already is rather than snapping back to 0, so a
+    // re-run of this effect (an unmemoised `onDone`, say) never rewinds it.
+    const start = Date.now() - (progressRef.current / 100) * target
     let raf = 0
     const tick = () => {
       let p = progressRef.current
@@ -202,7 +210,7 @@ export function AiLoadingScreen({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [controlled, done, milestones.length, onDone])
+  }, [controlled, done, estimatedMs, milestones.length, onDone])
 
   // Controlled + running: the caller's percentage IS the value, so derive it
   // during render (below) instead of mirroring a prop into state.
