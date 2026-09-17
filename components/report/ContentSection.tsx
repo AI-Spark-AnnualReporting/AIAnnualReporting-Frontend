@@ -179,6 +179,12 @@ export function ContentSection({
   // deliberately session-only: the backend stores no provenance, so claiming it
   // after a reload would be an invention.
   const [drafted, setDrafted] = useState(false)
+  // What the draft on screen took from the company's last statement: the
+  // subheadings it mirrored, and which of those had no material behind them.
+  // Session-only and cleared whenever the draft is — both describe THIS draft,
+  // and keeping either past one would caption the wrong text.
+  const [mirroredHeadings, setMirroredHeadings] = useState<string[]>([])
+  const [thinHeadings, setThinHeadings] = useState<string[]>([])
   const [confirmSource, setConfirmSource] = useState<StatementSource | null>(null)
 
   const hasDoc = !!attachment
@@ -257,6 +263,8 @@ export function ContentSection({
           // own content. Nothing reaches the section until the PM saves.
           setSeed(result.content)
           setDrafted(true)
+          setMirroredHeadings(result.mirroredHeadings)
+          setThinHeadings(result.thinHeadings)
           setEditing(true)
           setView("editor")
         },
@@ -293,6 +301,8 @@ export function ContentSection({
     drafter.reset()
     if (source === "write") {
       setDrafted(false)
+      setMirroredHeadings([])
+      setThinHeadings([])
       setSeed(null)
       setEditing(true)
       setView("editor")
@@ -373,6 +383,8 @@ export function ContentSection({
           // no longer a draft of ours and the panel goes back to showing
           // whatever the section itself now says.
           setDrafted(false)
+          setMirroredHeadings([])
+          setThinHeadings([])
           setView("auto")
         },
       },
@@ -484,8 +496,29 @@ export function ContentSection({
                 <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
                   <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>
-                    Drafted from this year&apos;s approved material. Read it,
-                    change it, and save it when it reads like you.
+                    Drafted from this year&apos;s approved material
+                    {mirroredHeadings.length > 0
+                      ? ", following the structure of your last statement"
+                      : ""}
+                    . Read it, change it, and save it when it reads like you.
+                  </span>
+                </div>
+              )}
+
+              {/* Which carried-over subheadings had nothing behind them. Not an
+                  error and not a toast: the heading was still written, and what
+                  to do about it — chase the department, or cut the heading — is
+                  the PM's call, not ours. */}
+              {assisted && drafted && seed !== null && thinHeadings.length > 0 && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    No approved material covered{" "}
+                    <span className="font-medium">
+                      {thinHeadings.join(", ")}
+                    </span>
+                    . {thinHeadings.length > 1 ? "Those sections are" : "That section is"}{" "}
+                    thin — chase the department, or delete the heading.
                   </span>
                 </div>
               )}

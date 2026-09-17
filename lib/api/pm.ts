@@ -87,6 +87,14 @@ export interface StatementDraft {
   content: string | null
   // Why nothing was drafted, in the server's own words. Null when text came back.
   reason: string | null
+  // The subheadings carried over verbatim from the company's previous
+  // statement. Empty when they write in unbroken prose, or when there is no
+  // previous statement — in both cases the draft has no subheadings either.
+  mirroredHeadings: string[]
+  // Which of those this year's approved material did not support. The heading
+  // is still in `content`; naming it lets the PM chase the department that did
+  // not report, or delete it.
+  thinHeadings: string[]
 }
 
 // Read the draft reply tolerantly. This endpoint is new, so take the statement
@@ -104,7 +112,22 @@ function readStatementDraft(payload: unknown): StatementDraft {
     section.content,
   ])
   const reason = firstSentence([body.reason, body.message, body.detail])
-  return { content, reason: content ? null : reason }
+  return {
+    content,
+    reason: content ? null : reason,
+    mirroredHeadings: stringList(body.mirrored_headings),
+    thinHeadings: stringList(body.thin_headings),
+  }
+}
+
+// A list of non-empty strings, or nothing. Same tolerance as the readers above:
+// these two fields only ever ADD a note to the screen, so an unexpected shape
+// must read as "no note" rather than throw away the draft beside it.
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  )
 }
 
 function firstSentence(candidates: unknown[]): string | null {
