@@ -361,9 +361,6 @@ export function useRefineSection(cycleId: string) {
 // and the splice both need its mode and its current content.
 export function useAddSubsection(cycleId: string) {
   const qc = useQueryClient()
-  const refine = useRefineSection(cycleId)
-  const saveManual = useSaveManualContent(cycleId)
-  const saveExtract = useSetExtractContent(cycleId)
 
   return useMutation({
     mutationFn: async ({
@@ -377,28 +374,42 @@ export function useAddSubsection(cycleId: string) {
     }) => {
       const sectionCode = section.section_code
 
-      if (section.mode === "generate" || section.mode === "analyze") {
-        return refine.mutateAsync({
-          sectionCode,
-          instruction: addSubsectionInstruction(name, placement),
-        })
-      }
+      // pmApi directly rather than the useRefineSection / useSaveManualContent
+      // wrappers: each announces its own outcome ("Section saved", "Refinement
+      // failed"), which for one click of "Add" is either a second toast or the
+      // wrong description of what happened. Going under them lets this hook say
+      // one true thing, once, on both paths. The cache patch they do is the
+      // line below.
+      const saved =
+        section.mode === "generate" || section.mode === "analyze"
+          ? await pmApi.refineSection(
+              cycleId,
+              sectionCode,
+              addSubsectionInstruction(name, placement),
+            )
+          : section.mode === "extract"
+            ? await pmApi.setExtractContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
+            : await pmApi.saveManualContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
 
-      const content = insertSubsection(section.content, name, placement)
-      if (section.mode === "extract") {
-        return saveExtract.mutateAsync({ sectionCode, content })
-      }
-      return saveManual.mutateAsync({ sectionCode, content })
+      patchSectionInList(qc, cycleId, saved)
+      return saved
     },
     onSuccess: () => {
-      // Both paths already patch the section into the list cache; this refetch
-      // is what makes the rail's subsection rows appear without a reload.
+      // The refetch is what makes the rail's new subsection row appear without
+      // a reload — the parse reads whatever content came back.
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
       toast.success("Subsection added")
     },
-    // No error toast: refine and the content saves each toast their own
-    // failure, and the reasons differ — a refine that could not run says
-    // something quite different from a rejected save.
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not add the subsection")),
   })
 }
 
