@@ -65,8 +65,11 @@ function RailRow({
       {status}
       <span
         className={cn(
-          "min-w-0 flex-1 truncate text-sm text-start",
-          active ? "font-semibold text-slate-900" : "text-slate-700",
+          // Semibold whether or not the row is selected: the filled background
+          // already marks selection, so weight is free to carry the hierarchy
+          // against the subsection rows instead.
+          "min-w-0 flex-1 truncate text-start text-sm font-semibold",
+          active ? "text-slate-900" : "text-slate-700",
         )}
       >
         {title}
@@ -111,7 +114,7 @@ function SubsectionRow({
       )}
     >
       <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
-      <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+      <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
         {title}
       </span>
     </button>
