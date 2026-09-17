@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
@@ -101,7 +101,28 @@ interface PMDashboardData {
 }
 
 function PlanShell({ cycleId }: { cycleId: string }) {
-  const [step, setStep] = useState<Step>(1)
+  // The step is mirrored into the URL so history remembers it: the builder's
+  // back arrow returns here, and without this the PM always landed on Sections
+  // rather than the Themes step they actually left from.
+  //
+  // Written with history.replaceState — the shallow update Next documents for
+  // App Router — rather than router.replace. Going through the router would
+  // re-render this tree, and it is holding the PM's unsaved source picks.
+  // replace, not push, so stepping through the wizard doesn't bury the page
+  // they arrived from under extra history entries.
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [step, setStepState] = useState<Step>(
+    searchParams.get("step") === "2" ? 2 : 1,
+  )
+  const setStep = (next: Step) => {
+    setStepState(next)
+    window.history.replaceState(
+      null,
+      "",
+      next === 2 ? `${pathname}?step=2` : pathname,
+    )
+  }
   // Source edits live here, not on the server, until Start Building writes
   // them. PlanShell owns them because they outlive step 1: the PM can move to
   // Themes and back with picks still unsaved, and every way out of the page has
