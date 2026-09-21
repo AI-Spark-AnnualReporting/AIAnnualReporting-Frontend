@@ -338,7 +338,15 @@ export function SectionDetail({
   // the section's content_source:
   //   - narrative → upload-or-type editor (ContentSection)
   //   - structured / financials / composite → file upload (AttachSection)
-  if (!section.ai_allowed) {
+  //
+  // Two ways to be manual. The catalogue's human-voice sections say so with
+  // ai_allowed=false. A company's own section says so with mode='manual' while
+  // keeping ai_allowed=true, because on those rows the flag means "AI is
+  // permitted if you choose it" and the PM must stay able to switch back.
+  // Testing only the flag sent those straight past every branch below into the
+  // switch's `default:` — "Unknown section mode.", a dead screen, right after
+  // the PM had explicitly chosen Manual on the plan.
+  if (section.mode === "manual" || !section.ai_allowed) {
     if (section.content_source === "narrative") {
       // key by section_code so the editor remounts (and its draft/seed state
       // resets) when switching sections — without it, an unsaved section's
@@ -349,6 +357,9 @@ export function SectionDetail({
     return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
   }
 
+  // Only generate / attach / auto can still be here — tsc narrows the rest away, so
+  // adding a `case "manual"` below is a compile error. That narrowing is the proof the
+  // branch above catches every manual section.
   switch (section.mode) {
     case "generate":
       return <GenerateSection section={section} cycleId={cycleId} isRtl={isRtl} />
