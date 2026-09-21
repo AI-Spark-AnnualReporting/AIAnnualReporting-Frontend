@@ -12,6 +12,7 @@ import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
 import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
+import { useAuth } from "@/contexts/AuthContext"
 import {
   QuestionnaireForm,
   QuestionnaireValue,
@@ -83,7 +84,15 @@ export default function KickoffQuestionnairePage({
   const sendBackShare = useSendBackShare(id)
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [sendBackNote, setSendBackNote] = useState("")
-  const share = shares?.questionnaire
+  // The client sign-off belongs to spark_internal: they are the only role
+  // that can send a link, approve a response or chase one. For everyone else
+  // the share simply does not exist here — no button, and none of the locks
+  // it brings — because gating a cycle on a sign-off they cannot obtain would
+  // strand them on a screen with a dead Continue and no way forward. The
+  // server skips the same gates for the same reason.
+  const { user } = useAuth()
+  const sparkFlow = user?.role === "spark_internal"
+  const share = sparkFlow ? shares?.questionnaire : undefined
   // Only while the client still holds the link. Once they submit they're
   // locked out, so their answers become Spark's to correct before sign-off.
   const awaitingClient = share?.status === "pending"
@@ -209,7 +218,9 @@ export default function KickoffQuestionnairePage({
   // `allAnswered` works for a client submission too: the questions they skipped
   // come back marked rejected, which takes them out of the denominator — so a
   // 10-of-12 submission reads as complete rather than permanently short.
-  const canGenerate = allAnswered && (clientApproved || needsApproval)
+  // Without the sign-off in play this is the rule the wizard always had:
+  // answer everything, then continue.
+  const canGenerate = allAnswered && (!sparkFlow || clientApproved || needsApproval)
 
   const [approveOpen, setApproveOpen] = useState(false)
 
@@ -266,7 +277,7 @@ export default function KickoffQuestionnairePage({
 
           {/* Client sign-off. The client answers these questions, so this gate
               comes before anything else on the page can be finished. */}
-          {!questionsError && total > 0 && (
+          {sparkFlow && !questionsError && total > 0 && (
             <ShareWithClientButton cycleId={id} stage="questionnaire" share={share} />
           )}
         </div>
@@ -477,13 +488,17 @@ export default function KickoffQuestionnairePage({
               onClick={handleGenerate}
               disabled={!canGenerate}
               title={
-                share?.status === "pending"
-                  ? "Waiting on the client's answers"
-                  : !share
-                    ? "Share the questionnaire with the client first"
-                    : !needsApproval && !allAnswered
-                      ? "Answer every question to continue"
-                      : undefined
+                // Without the sign-off in play there is only one reason this
+                // can be off, and it is not the client.
+                !sparkFlow
+                  ? (!allAnswered ? "Answer every question to continue" : undefined)
+                  : share?.status === "pending"
+                    ? "Waiting on the client's answers"
+                    : !share
+                      ? "Share the questionnaire with the client first"
+                      : !needsApproval && !allAnswered
+                        ? "Answer every question to continue"
+                        : undefined
               }
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >

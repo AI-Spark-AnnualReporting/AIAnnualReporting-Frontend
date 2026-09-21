@@ -33,6 +33,7 @@ import {
 import { AreaConceptCard } from "@/components/report/AreaConceptCard"
 import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
 import { ClientDriftNotice } from "@/components/pm/ClientDriftNotice"
+import { useAuth } from "@/contexts/AuthContext"
 import { driftSinceResponse } from "@/lib/shareDrift"
 import { ApproveDeadlineDialog } from "@/components/pm/approve-deadline-dialog"
 import { cn, formatDate } from "@/lib/utils"
@@ -166,13 +167,20 @@ export default function ReviewBriefPage({
   const sendBackShare = useSendBackShare(id)
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [sendBackNote, setSendBackNote] = useState("")
-  const awaitingClient = shares?.brief?.status === "pending"
+  // The client sign-off belongs to spark_internal — the only role that can
+  // send a link, approve a response or chase one. For every other role the
+  // share does not exist on this screen: no button, none of the locks, and
+  // the primary/secondary choice goes back to being the PM's own, because
+  // there is no client coming to make it. The server skips the same gates.
+  const { user } = useAuth()
+  const sparkFlow = user?.role === "spark_internal"
+  const briefShare = sparkFlow ? shares?.brief : undefined
+
+  const awaitingClient = briefShare?.status === "pending"
   // A bundle can't be shared without concept messages — the server refuses it.
   // So once a share exists they exist, and going forward is "continue", not
   // "write them".
-  const bundleShared = !!shares?.brief
-
-  const briefShare = shares?.brief
+  const bundleShared = !!briefShare
   // They've replied and nobody has signed it off yet.
   const needsApproval = briefShare?.status === "responded"
   const clientApproved = briefShare?.status === "approved"
@@ -777,7 +785,7 @@ export default function ReviewBriefPage({
           </div>
 
           {/* All three go to the client together — this is where it's sent. */}
-          {phase === "result" && (
+          {sparkFlow && phase === "result" && (
             <ShareWithClientButton
               cycleId={id}
               stage="brief"
@@ -1050,7 +1058,7 @@ export default function ReviewBriefPage({
                     readOnly={awaitingClient}
                     // Primary/secondary is the client's call, made on their own
                     // link. Shown here, never set here.
-                    lockRole
+                    lockRole={sparkFlow}
                     onAreaChange={(next) =>
                       commitAreas(
                         areas.map((a, k) => (k === i ? { ...a, ...next } : a)),
@@ -1120,7 +1128,7 @@ export default function ReviewBriefPage({
                 phase !== "result" ||
                 list.length === 0 ||
                 !areaChoiceValid ||
-                !(clientApproved || needsApproval)
+                (sparkFlow && !(clientApproved || needsApproval))
               }
               onClick={openApprove}
               title={
