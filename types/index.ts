@@ -226,6 +226,24 @@ export interface AvailableOptionalSection {
   section_code: string
   title: string
   layer: SectionLayer
+  // "optional" = always optional; "required" = a required section that was removed
+  // from this cycle and can be re-added.
+  tag: "optional" | "required"
+  // True for the company's OWN sections (read from their report, or typed by a PM).
+  // Only these can be permanently deleted — a shared catalogue section belongs to
+  // every company on the platform.
+  is_company_section: boolean
+}
+
+// GET /pm/cycles/{id}/sections/optional/available.
+// `can_create` answers a different question from "is this list empty": a PM may only
+// invent a section on a cycle actually built from the company's own list, which is NOT
+// the same as outline_source === "previous" — that falls back to the shared catalogue
+// for a company whose report has never been read.
+export interface AvailableOptionals {
+  available: AvailableOptionalSection[]
+  can_create: boolean
+  create_blocked_reason: string | null
 }
 
 // ──────────────────────────────────────────────────────────────────────

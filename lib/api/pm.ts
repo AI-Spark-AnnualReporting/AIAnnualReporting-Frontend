@@ -2,7 +2,7 @@ import apiClient from "./client"
 import {
   Session, KickoffBriefResponse, PMReviewAction, SessionStatus,
   BuildReadiness, CycleReportSection,
-  PlanResponse, ReportTheme, AvailableOptionalSection,
+  PlanResponse, ReportTheme, AvailableOptionals,
   AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
   ContentLanguage,
 } from "@/types"
@@ -1058,13 +1058,48 @@ export const pmApi = {
     return data.sections ?? data
   },
 
-  getAvailableOptional: async (
-    cycleId: string,
-  ): Promise<AvailableOptionalSection[]> => {
+  // Returns the whole envelope, not just the array: `can_create` rides along on it and
+  // is what the "Create section" button gates on.
+  getAvailableOptional: async (cycleId: string): Promise<AvailableOptionals> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${cycleId}/sections/optional/available`,
     )
-    return data.available ?? data
+    return {
+      available: data.available ?? [],
+      can_create: data.can_create ?? false,
+      create_blocked_reason: data.create_blocked_reason ?? null,
+    }
+  },
+
+  // Invent a section that has never existed. Unlike addOptionalSection it does not take
+  // a code — the server slugs one from the title — and the section joins the company's
+  // own list, so next year's cycle offers it again.
+  createCustomSection: async (
+    cycleId: string,
+    title: string,
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/sections/custom`,
+      { title },
+    )
+    return data.sections ?? data
+  },
+
+  // Delete one of the company's own sections for good. Distinct from
+  // removeOptionalSection, which only takes it off THIS report and leaves it to be
+  // offered again. 409 while any of the company's reports still carries it.
+  deleteCustomSection: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<AvailableOptionals> => {
+    const { data } = await apiClient.delete(
+      `/pm/cycles/${cycleId}/sections/custom/${sectionCode}`,
+    )
+    return {
+      available: data.available ?? [],
+      can_create: data.can_create ?? false,
+      create_blocked_reason: data.create_blocked_reason ?? null,
+    }
   },
 
   // ───── Stage 8 — Assemble & Final Report ─────────────────────────────

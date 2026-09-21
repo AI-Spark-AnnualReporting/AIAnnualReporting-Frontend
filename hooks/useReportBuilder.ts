@@ -851,6 +851,39 @@ export function useAddOptional(cycleId: string) {
   })
 }
 
+export function useCreateCustomSection(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ title }: { title: string }) =>
+      pmApi.createCustomSection(cycleId, title),
+    onSuccess: (sections) => {
+      setSectionsCache(qc, cycleId, sections)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+      toast.success("Section created")
+    },
+    // The server's message is the useful one here — duplicate title, a company whose
+    // report has not been read yet, a reserved name. Do not flatten them to one string.
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to create section")),
+  })
+}
+
+export function useDeleteCustomSection(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.deleteCustomSection(cycleId, sectionCode),
+    onSuccess: (available) => {
+      // The response IS the refreshed picker list, so seed it rather than refetching.
+      qc.setQueryData(QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId), available)
+      toast.success("Section deleted")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Failed to delete section")),
+  })
+}
+
 export function useRemoveOptional(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
