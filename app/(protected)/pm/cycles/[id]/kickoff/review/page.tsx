@@ -1068,7 +1068,23 @@ export default function ReviewBriefPage({
                     onMessageChange={(next) =>
                       editMessages(list.map((m, k) => (k === i ? { ...m, ...next } : m)))
                     }
-                    onRoleChange={() => {}}
+                    // Live only when there is no client coming to choose —
+                    // lockRole hides the control for Spark, and a no-op here
+                    // would leave a PM clicking a toggle wired to nothing.
+                    // One primary across the whole list: marking a new one
+                    // demotes the old rather than leaving two.
+                    onRoleChange={(role) =>
+                      commitAreas(
+                        areas.map((a, k) =>
+                          k === i
+                            ? { ...a, role }
+                            : role === "primary" && (a.role ?? "none") === "primary"
+                              ? { ...a, role: "secondary" }
+                              : a,
+                        ),
+                        true,
+                      )
+                    }
                     // Same line as Add: the set is fixed from the first
                     // share, and a delete would clear every concept message
                     // with no regenerate left to rebuild them.
