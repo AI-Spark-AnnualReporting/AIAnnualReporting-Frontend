@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Sparkles, X } from "lucide-react"
+import { Check, Sparkles, Star, X } from "lucide-react"
 import { RoleToggle } from "@/components/report/RoleToggle"
 import { InlineRefineBox } from "@/components/report/InlineRefineBox"
 import { cn } from "@/lib/utils"
@@ -185,6 +185,25 @@ export function ThemeChipCard({
           {/* Role — native radio (one primary across all cards) + checkbox */}
           {onRoleChange && !readOnly && role && (
             <RoleToggle role={role} group={roleGroup} onChange={onRoleChange} className="mt-2" />
+          )}
+
+          {/* Read-only role. Without this, a card whose role was set elsewhere
+              (the client picks it on their own link) shows only a colour — and
+              "which one did they choose?" is not a question a border answers. */}
+          {!onRoleChange && role && (
+            <span
+              className={cn(
+                "mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
+                role === "primary"
+                  ? "bg-indigo-100 text-indigo-700"
+                  : role === "secondary"
+                    ? "bg-indigo-50 text-indigo-600"
+                    : "bg-muted text-muted-foreground",
+              )}
+            >
+              {role === "primary" && <Star className="h-3 w-3 fill-indigo-600 text-indigo-600" />}
+              {role === "primary" ? "Primary" : role === "secondary" ? "Secondary" : "Not used"}
+            </span>
           )}
 
           {/* Keyword chips — omitted entirely when the caller doesn't handle

@@ -70,21 +70,26 @@ export const CONCEPT_MESSAGE_LOADER = {
 /** Copy for the initial generate-brief call, which returns BOTH the strategic
  *  brief and the first set of areas of focus. */
 export const BRIEF_LOADER = {
-  title: "Generating your strategic brief",
-  subtitle: "And the first set of areas of focus to go with it.",
+  title: "Writing your strategic direction",
+  subtitle: "The brief, the areas of focus, and the message behind each one.",
+  // Three things now, not two: the concept messages are written in this same
+  // run so the client can be shown the whole thing at once. The stages say so,
+  // because a loader that stops describing what it is doing is a loader people
+  // assume has hung.
   stages: [
     "Reading your answers…",
-    "Reading your supporting document…",
+    "Reading the client's document…",
     "Shaping the objective & narrative…",
     "Writing the strategic brief…",
     "Proposing areas of focus…",
+    "Writing a concept message for each…",
     "Running a final read-through…",
   ],
   tips: [
-    "This one step writes the brief and proposes your areas of focus together.",
+    "One run writes all three: the brief, the areas of focus, and a message for each.",
     "Everything here is a draft — you can edit or refine all of it afterwards.",
-    "Attaching an existing brief on the previous step steers the draft closer to it.",
-    "Regenerating later starts over from your questionnaire answers, not from this draft.",
+    "The document your client attached steers the draft closer to it.",
+    "Once this goes to the client it can't be regenerated — only edited by hand.",
   ],
 } as const
 

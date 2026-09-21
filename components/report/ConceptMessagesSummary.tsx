@@ -177,7 +177,7 @@ export function ConceptMessagesSummary({
             Nothing has been written for this cycle, or the last generation came back empty.
             They&apos;re written and edited on the kickoff wizard&apos;s Concept Messages step.
           </p>
-          <Link href={`/pm/cycles/${cycleId}/kickoff/concept`}>
+          <Link href={`/pm/cycles/${cycleId}/kickoff/review`}>
             <Button variant="outline">Go to Concept Messages</Button>
           </Link>
         </div>

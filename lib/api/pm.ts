@@ -90,7 +90,9 @@ export interface PreviousManualSectionsResponse {
 export interface SurveyQuestion {
   id: string
   text: string
-  source: "template" | "generated"
+  // "manual" = typed in by Spark. Those sort just before the catch-all and are
+  // always free text — no option pills.
+  source: "template" | "generated" | "manual"
   options: string[] | null
 }
 
@@ -400,6 +402,20 @@ export const pmApi = {
   getSurveyQuestions: async (cycleId: string): Promise<SurveyQuestionsResponse> => {
     const { data } = await apiClient.get<SurveyQuestionsResponse>(
       `/pm/cycles/${cycleId}/survey-questions`,
+    )
+    return data
+  },
+
+  // Replace the whole question set — how Spark's own questions are added and
+  // removed. 409 while the client holds the link: they are answering the list
+  // as it was sent.
+  saveSurveyQuestions: async (
+    cycleId: string,
+    questions: SurveyQuestion[],
+  ): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.put<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/survey-questions`,
+      { questions },
     )
     return data
   },
