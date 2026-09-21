@@ -68,6 +68,11 @@ export const SECTION_MODES: Record<
     color: "bg-neutral-100 text-neutral-700 border-neutral-200",
     hint: "Generated automatically at render (cover, contents)",
   },
+  manual: {
+    label: "Manual",
+    color: "bg-amber-100 text-amber-700 border-amber-200",
+    hint: "You write or paste it yourself; nothing is generated",
+  },
   extract: {
     label: "Extract",
     color: "bg-emerald-100 text-emerald-700 border-emerald-200",

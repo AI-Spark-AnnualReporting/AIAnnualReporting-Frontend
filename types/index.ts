@@ -25,7 +25,11 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
-export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
+export type SectionMode = "generate" | "attach" | "auto" | "manual" | "extract" | "analyze"
+// The subset a PM actually picks on the plan screen. "attach" is embed-a-file-as-filed
+// (no catalogue row uses it) and "auto" is drawn by the renderer, so neither is offered.
+export const PICKABLE_SECTION_MODES = ["generate", "extract", "manual"] as const
+export type PickableSectionMode = (typeof PICKABLE_SECTION_MODES)[number]
 export type SectionLayer = "common" | "cma" | "sector" | "optional"
 export type SectionStatus = "pending" | "drafting" | "locked"
 // Analyze-mode only (null for other modes):
@@ -129,6 +133,11 @@ export interface CycleReportSection {
   layer: SectionLayer
   content_source: "narrative" | "structured" | "financials" | "composite"
   mode: SectionMode
+  // false = nobody has chosen this section's mode yet, so `mode` is only a
+  // placeholder. The plan screen renders the picker EMPTY and blocks Continue
+  // until the PM decides. Sections the extraction-time classifier was at least
+  // 95% sure about arrive true and preselected.
+  mode_confirmed: boolean
   status: SectionStatus
   display_order: number
   ai_allowed: boolean

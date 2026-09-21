@@ -18,8 +18,14 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { useState } from "react"
-import { AlertCircle, CheckCircle2, GripVertical, Upload, X } from "lucide-react"
+import { AlertCircle, Check, CheckCircle2, ChevronDown, GripVertical, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   useRemoveOptional,
@@ -29,7 +35,7 @@ import {
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
-import type { CycleReportSection, FeederMapEntry } from "@/types"
+import { PICKABLE_SECTION_MODES, type CycleReportSection, type FeederMapEntry, type PickableSectionMode } from "@/types"
 import { FeederPicker, type FeederDepartment } from "./FeederPicker"
 
 interface PlanSectionGridProps {
@@ -153,7 +159,6 @@ function SectionTile({
 
   // The feeder map's mode wins (the sections list can lag a mode switch).
   const effectiveMode = isExtract ? "extract" : isAnalyze ? "analyze" : section.mode
-  const mode = SECTION_MODES[effectiveMode]
   const layer = SECTION_LAYERS[section.layer]
   // Generate and analyze sections both require department feeders as their source.
   const needsSource =
@@ -161,6 +166,9 @@ function SectionTile({
     (isAnalyze || section.mode === "generate") &&
     section.ai_allowed &&
     feederCodes.length === 0
+  // A section whose mode nobody has chosen yet gets the same amber treatment: it is
+  // the other thing that blocks Continue, so it should look the same.
+  const needsMode = !section.mode_confirmed
 
   return (
     <div
@@ -169,11 +177,11 @@ function SectionTile({
       className={cn(
         "group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all",
         "hover:shadow-md",
-        needsSource && "border-amber-200",
+        (needsSource || needsMode) && "border-amber-200",
         isDragging && "z-10 opacity-60 shadow-lg ring-2 ring-indigo-300",
       )}
     >
-      {needsSource && (
+      {(needsSource || needsMode) && (
         <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-amber-400" />
       )}
       {/* dir on the row so the drag handle, the "01" number chip and the badges
@@ -208,19 +216,12 @@ function SectionTile({
             >
               {layer?.label ?? section.layer}
             </span>
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
-                mode?.color ?? "bg-slate-100 text-slate-600",
-              )}
-            >
-              {mode?.label ?? section.mode}
-            </span>
-            {!section.ai_allowed && !isExtract && (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                Manual
-              </span>
-            )}
+            <ModePicker
+              cycleId={cycleId}
+              section={section}
+              effectiveMode={effectiveMode}
+              readOnly={readOnly}
+            />
           </div>
           <FeederArea
             cycleId={cycleId}
@@ -238,6 +239,99 @@ function SectionTile({
         {!readOnly && <RemoveSection cycleId={cycleId} section={section} />}
       </div>
     </div>
+  )
+}
+
+// How this section gets produced. Three choices, and they are the PM's — a section
+// arrives preselected only when the extraction-time classifier was at least 95% sure,
+// and `mode_confirmed: false` means nobody has decided, so the trigger shows nothing
+// chosen rather than quietly claiming the section is AI-written.
+//
+// 'analyze', 'auto' and 'attach' are not offered. Analyze is reached from the source
+// dropdown below (it is a department-feeder configuration, not a source choice), and the
+// other two are set by the system. Those render as a plain badge, as before.
+function ModePicker({
+  cycleId,
+  section,
+  effectiveMode,
+  readOnly,
+}: {
+  cycleId: string
+  section: CycleReportSection
+  effectiveMode: string
+  readOnly?: boolean
+}) {
+  const setSourceMode = useSetSourceMode(cycleId)
+  const badge = SECTION_MODES[effectiveMode as keyof typeof SECTION_MODES]
+  const pickable = (PICKABLE_SECTION_MODES as readonly string[]).includes(effectiveMode)
+  const undecided = !section.mode_confirmed
+
+  const pill = (extra?: string) =>
+    cn(
+      "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+      extra,
+    )
+
+  if (readOnly || !pickable) {
+    return (
+      <span className={pill(badge?.color ?? "bg-slate-100 text-slate-600")}>
+        {badge?.label ?? section.mode}
+      </span>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={setSourceMode.isPending}>
+        <button
+          type="button"
+          className={pill(
+            cn(
+              "border transition-colors",
+              setSourceMode.isPending && "opacity-50",
+              undecided
+                ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                : cn(badge?.color, "hover:brightness-95"),
+            ),
+          )}
+        >
+          {undecided ? (
+            <>
+              <AlertCircle className="h-3 w-3" />
+              Choose a mode
+            </>
+          ) : (
+            badge?.label ?? section.mode
+          )}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {PICKABLE_SECTION_MODES.map((m: PickableSectionMode) => {
+          const meta = SECTION_MODES[m]
+          const active = !undecided && effectiveMode === m
+          return (
+            <DropdownMenuItem
+              key={m}
+              className="flex items-start gap-2"
+              onSelect={() =>
+                setSourceMode.mutate({ sectionCode: section.section_code, mode: m })
+              }
+            >
+              <Check
+                className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", !active && "opacity-0")}
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-medium">{meta.label}</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground">
+                  {meta.hint}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -263,7 +357,11 @@ function FeederArea({
   readOnly?: boolean
 }) {
   // Manual sections (PM writes/uploads directly) — no sources to assign.
-  if (!section.ai_allowed && !isExtract && !isAnalyze) {
+  // Two ways to be manual now. The catalogue's human-voice sections say so with
+  // ai_allowed=false; a company section says so with mode='manual' while keeping
+  // ai_allowed=true, because on those rows the flag means "AI is permitted if you
+  // choose it" and the PM must stay able to switch back.
+  if ((section.mode === "manual" || !section.ai_allowed) && !isExtract && !isAnalyze) {
     return (
       <p className="text-xs text-muted-foreground italic">
         {section.content_source === "narrative"
@@ -392,40 +490,13 @@ function SourcesFeederArea({
       cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
-      // An AI-written section keeps its departments live even in extract mode:
-      // the two sources are a reversible choice, and clicking a department flips
-      // the section back to generate (the picker sequences that). Only a section
-      // AI may never draft is document-only, and it has no unticked state.
-      departmentsApply={!isExtract || section.ai_allowed}
+      // Extract is sourced by document, and the backend only accepts feeders on
+      // generate and analyze — so ticking a department here would just 409. This
+      // used to be reachable because the old binary tick flipped the section back
+      // to generate on the way; mode is chosen in ModePicker now, so the only
+      // honest thing left is to grey the checkboxes out.
+      departmentsApply={!isExtract}
       selected={feederCodes}
-      // Analyze sections: departments only — no source-mode switcher.
-      // Generate sections: show "Upload document later" to switch to extract.
-      // Extract sections: "Upload document later" is checked (toggle back to generate).
-      // The toggle is binary: ticked means extract, unticked means generate. A
-      // section AI may never draft has no valid unticked state, so offering it
-      // let a PM set mode='generate' on one the backend will always refuse to
-      // generate — the plan card then read the mode and said "AI-written" while
-      // the builder read ai_allowed and showed an upload box. It was one-way
-      // too: once flipped the section rendered as manual and the toggle
-      // vanished, so it could not be flipped back.
-      //
-      // Department feeders and the analyze toggle stay available — analyze is
-      // the standing configuration for several ai_allowed=false sections.
-      documentOption={
-        isAnalyze || !section.ai_allowed
-          ? undefined
-          : {
-              checked: isExtract,
-              pending: setSourceMode.isPending,
-              // mutateAsync + return: the picker awaits this before writing
-              // feeders, since the switch clears them server-side.
-              onChange: (next) =>
-                setSourceMode.mutateAsync({
-                  sectionCode: section.section_code,
-                  mode: next ? "extract" : "generate",
-                }),
-            }
-      }
     >
       <button
         type="button"
