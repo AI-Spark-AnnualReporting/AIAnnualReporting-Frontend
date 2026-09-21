@@ -69,14 +69,27 @@ function remindedToday(share: ShareRequest) {
 }
 
 /** Button label and colour follow the state — this is the only bit of the
- *  feature visible without clicking, so it has to carry the whole story. */
-function trigger(share?: ShareRequest | null) {
+ *  feature visible without clicking, so it has to carry the whole story.
+ *
+ *  Only Spark can share, approve or chase, so only Spark is offered a verb.
+ *  Everyone else gets the same button reporting the same state: they need to
+ *  know why their Continue is dead, and "Share with client" on a screen where
+ *  the server would 403 them is a promise the product cannot keep. */
+function trigger(share: ShareRequest | null | undefined, isSpark: boolean) {
   if (!share)
-    return { label: "Share with client", icon: Mail, className: "bg-indigo-600 text-white hover:bg-indigo-700" }
+    return isSpark
+      ? { label: "Share with client", icon: Mail, className: "bg-indigo-600 text-white hover:bg-indigo-700" }
+      : { label: "Not yet with the client", icon: Clock, className: "border-border bg-muted/60 text-muted-foreground hover:bg-muted" }
   if (share.status === "pending")
-    return { label: "Waiting on client", icon: Clock, className: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" }
+    return {
+      label: isSpark ? "Waiting on client" : "With your client",
+      icon: Clock,
+      className: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+    }
   if (share.status === "responded")
-    return { label: "Client responded", icon: Check, className: "bg-indigo-600 text-white hover:bg-indigo-700" }
+    return isSpark
+      ? { label: "Client responded", icon: Check, className: "bg-indigo-600 text-white hover:bg-indigo-700" }
+      : { label: "Client responded", icon: Check, className: "border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" }
   return { label: "Client approved", icon: CheckCircle2, className: "border-green-300 bg-green-50 text-green-800 hover:bg-green-100" }
 }
 
@@ -124,7 +137,7 @@ export function ShareWithClientButton({
   const [confirm, setConfirm] = useState<"send" | "approve" | null>(null)
 
   const copy = STAGE_COPY[stage]
-  const t = trigger(share)
+  const t = trigger(share, isSpark)
   const TriggerIcon = t.icon
 
   const copyLink = async () => {
@@ -154,7 +167,7 @@ export function ShareWithClientButton({
     <>
       <Button
         type="button"
-        variant={share && share.status !== "responded" ? "outline" : "default"}
+        variant={isSpark && (!share || share.status === "responded") ? "default" : "outline"}
         onClick={() => setOpen(true)}
         className={cn("shrink-0", t.className)}
       >
@@ -166,7 +179,7 @@ export function ShareWithClientButton({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {!share && "Share with client"}
+              {!share && (isSpark ? "Share with client" : "Not yet with the client")}
               {share?.status === "pending" && "Waiting on the client"}
               {share?.status === "responded" && "The client has responded"}
               {share?.status === "approved" && "Signed off by the client"}
