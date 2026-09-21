@@ -7,7 +7,7 @@ import {
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
   useEscalations, useBulkReminder, usePreviousBrief, useSetQuestionsDeadline,
 } from "@/hooks/useSessions"
-import { useBuildReadiness } from "@/hooks/useReportBuilder"
+import { useBuildReadiness, usePlan } from "@/hooks/useReportBuilder"
 import { PageHeader } from "@/components/ui/page-header"
 import { KickoffLoader } from "@/components/pm/kickoff-loader"
 import { Button } from "@/components/ui/button"
@@ -83,6 +83,10 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const { data: escalationsData } = useEscalations(id)
   const bulkReminder = useBulkReminder()
   const { data: readiness } = useBuildReadiness(id)
+  // Only to decide where "Open Report Builder" goes. Once the plan is locked
+  // the plan screen has nothing left to do, so the builder is the resume point.
+  const { data: plan } = usePlan(id)
+  const planLocked = !!plan?.sections_locked
   const setQuestionsDeadline = useSetQuestionsDeadline(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -854,10 +858,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             const approved = readiness?.departments_approved ?? 0
 
             if (readiness?.can_build) {
+              // Pick up where the PM left off. Once the plan is locked the plan
+              // screen is read-only — nothing there can be changed — so landing
+              // on it means an extra click past a page that can only be looked
+              // at. The drafting happens in the builder.
+              const href = planLocked
+                ? `/pm/cycles/${id}/build`
+                : `/pm/cycles/${id}/plan`
               return (
-                <Link href={`/pm/cycles/${id}/plan`}>
+                <Link href={href}>
                   <Button>
-                    Open Report Builder
+                    {planLocked ? "Continue Report Builder" : "Open Report Builder"}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </Link>

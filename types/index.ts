@@ -30,7 +30,9 @@ export type SectionMode = "generate" | "attach" | "auto" | "manual" | "extract" 
 // (no catalogue row uses it) and "auto" is drawn by the renderer, so neither is offered.
 export const PICKABLE_SECTION_MODES = ["generate", "extract", "manual"] as const
 export type PickableSectionMode = (typeof PICKABLE_SECTION_MODES)[number]
-export type SectionLayer = "common" | "cma" | "sector" | "optional"
+// "custom" is not a catalogue layer — the backend reports it for a
+// PM-authored section, which has no catalogue row to take a layer from.
+export type SectionLayer = "common" | "cma" | "sector" | "optional" | "custom"
 export type SectionStatus = "pending" | "drafting" | "locked"
 // Analyze-mode only (null for other modes):
 //   "ready"   → findings present in `content`.
@@ -131,7 +133,8 @@ export interface CycleReportSection {
   section_code: string
   title: string
   layer: SectionLayer
-  content_source: "narrative" | "structured" | "financials" | "composite"
+  // "" for a PM-authored section: no catalogue row, so no content_source.
+  content_source: "narrative" | "structured" | "financials" | "composite" | ""
   mode: SectionMode
   // false = nobody has chosen this section's mode yet, so `mode` is only a
   // placeholder. The plan screen renders the picker EMPTY and blocks Continue
@@ -235,16 +238,6 @@ export interface AvailableOptionalSection {
   is_company_section: boolean
 }
 
-// GET /pm/cycles/{id}/sections/optional/available.
-// `can_create` answers a different question from "is this list empty": a PM may only
-// invent a section on a cycle actually built from the company's own list, which is NOT
-// the same as outline_source === "previous" — that falls back to the shared catalogue
-// for a company whose report has never been read.
-export interface AvailableOptionals {
-  available: AvailableOptionalSection[]
-  can_create: boolean
-  create_blocked_reason: string | null
-}
 
 // ──────────────────────────────────────────────────────────────────────
 // Stage 8 — Assemble & Final Report
@@ -253,13 +246,20 @@ export interface AvailableOptionals {
 export interface AssemblyReadiness {
   cycle_id: string
   total: number
-  locked: number
+  /** Sections that would appear in the report — i.e. have something in them. */
+  ready: number
+  /** False only when nothing has been written anywhere. Empty sections no
+   *  longer block: they are listed below and left out of the report. */
   can_assemble: boolean
-  unlocked_sections: Array<{
+  incomplete_sections: Array<{
     section_code: string
     title: string
     layer: SectionLayer
   }>
+  /** A report was assembled and a section has changed since — the assembled
+   *  report is a snapshot, so it no longer matches the cycle. Re-assembling
+   *  requires refresh=true; without it the server returns the stored one. */
+  stale?: boolean
   has_final_report: boolean
   final_report_generated_at: string | null
 }

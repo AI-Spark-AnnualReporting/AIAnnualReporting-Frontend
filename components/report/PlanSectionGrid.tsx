@@ -27,15 +27,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import {
-  useRemoveOptional,
-  useReorderSections,
-  useSetSourceMode,
-  useIsSettingFeeders,
-} from "@/hooks/useReportBuilder"
+import { useRemoveOptional, useReorderSections } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
-import { PICKABLE_SECTION_MODES, type CycleReportSection, type FeederMapEntry, type PickableSectionMode } from "@/types"
+import {
+  PICKABLE_SECTION_MODES,
+  type CycleReportSection,
+  type FeederMapEntry,
+  type PickableSectionMode,
+  type SectionMode,
+} from "@/types"
+import type { PendingSourceChange, PendingSources } from "@/lib/pendingSectionSources"
 import { FeederPicker, type FeederDepartment } from "./FeederPicker"
 
 interface PlanSectionGridProps {
@@ -43,6 +45,10 @@ interface PlanSectionGridProps {
   sections: CycleReportSection[]
   feeders: FeederMapEntry[]
   departments: FeederDepartment[]
+  /** Report a source edit upward; the step saves them all on Continue. */
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  /** Unsaved edits, so a staged mode shows on the card and stops it reading as undecided. */
+  pending?: PendingSources
   readOnly?: boolean
   /** Arabic cycles render section titles right-to-left. */
   isRtl?: boolean
@@ -53,6 +59,8 @@ export function PlanSectionGrid({
   sections,
   feeders,
   departments,
+  onPendingChange,
+  pending = {},
   readOnly,
   isRtl,
 }: PlanSectionGridProps) {
@@ -91,8 +99,14 @@ export function PlanSectionGrid({
       <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {sections.map((s, i) => {
+            // `feeders` already carries any unsaved edits (applyPending runs
+            // once at the top of the step), so this is what the PM sees.
             const entry = feederByCode.get(s.section_code)
-            const effectiveMode = entry?.mode ?? s.mode
+            // A staged mode wins over both. It has to be read separately rather than
+            // off the merged feeder map, because manual sections are not IN that map —
+            // the backend's feeder view carries only generate/extract/analyze.
+            const pendingMode = pending[s.section_code]?.mode
+            const effectiveMode = pendingMode ?? entry?.mode ?? s.mode
             const isExtract = effectiveMode === "extract"
             const isAnalyze = effectiveMode === "analyze"
             return (
@@ -107,6 +121,8 @@ export function PlanSectionGrid({
                 isAnalyze={isAnalyze}
                 departments={departments}
                 deptByCode={deptByCode}
+                onPendingChange={onPendingChange}
+                pendingMode={pendingMode}
                 readOnly={readOnly}
                 isRtl={isRtl}
               />
@@ -128,6 +144,8 @@ function SectionTile({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
+  pendingMode,
   readOnly,
   isRtl,
 }: {
@@ -140,6 +158,8 @@ function SectionTile({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  pendingMode?: SectionMode
   readOnly?: boolean
   isRtl?: boolean
 }) {
@@ -217,14 +237,14 @@ function SectionTile({
               {layer?.label ?? section.layer}
             </span>
             <ModePicker
-              cycleId={cycleId}
               section={section}
               effectiveMode={effectiveMode}
+              pendingMode={pendingMode}
+              onPendingChange={onPendingChange}
               readOnly={readOnly}
             />
           </div>
           <FeederArea
-            cycleId={cycleId}
             section={section}
             feederCodes={feederCodes}
             documentUploaded={documentUploaded}
@@ -232,6 +252,7 @@ function SectionTile({
             isAnalyze={isAnalyze}
             departments={departments}
             deptByCode={deptByCode}
+            onPendingChange={onPendingChange}
             readOnly={readOnly}
           />
         </div>
@@ -251,20 +272,26 @@ function SectionTile({
 // dropdown below (it is a department-feeder configuration, not a source choice), and the
 // other two are set by the system. Those render as a plain badge, as before.
 function ModePicker({
-  cycleId,
   section,
   effectiveMode,
+  pendingMode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   effectiveMode: string
+  pendingMode?: SectionMode
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
-  const setSourceMode = useSetSourceMode(cycleId)
+  // Stages the choice rather than saving it, so this and the "Upload document later"
+  // tick below write to ONE place. Two controls posting the same field straight to the
+  // server is how they end up disagreeing — the tick batches, so this must too.
   const badge = SECTION_MODES[effectiveMode as keyof typeof SECTION_MODES]
   const pickable = (PICKABLE_SECTION_MODES as readonly string[]).includes(effectiveMode)
-  const undecided = !section.mode_confirmed
+  // A staged choice counts as decided, matching what the plan screen's "needs a mode"
+  // counter reads — otherwise picking one left the card still flagged until Start Building.
+  const undecided = !section.mode_confirmed && !pendingMode
 
   const pill = (extra?: string) =>
     cn(
@@ -282,13 +309,12 @@ function ModePicker({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={setSourceMode.isPending}>
+      <DropdownMenuTrigger asChild>
         <button
           type="button"
           className={pill(
             cn(
               "border transition-colors",
-              setSourceMode.isPending && "opacity-50",
               undecided
                 ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
                 : cn(badge?.color, "hover:brightness-95"),
@@ -315,7 +341,12 @@ function ModePicker({
               key={m}
               className="flex items-start gap-2"
               onSelect={() =>
-                setSourceMode.mutate({ sectionCode: section.section_code, mode: m })
+                onPendingChange(section.section_code, {
+                  mode: m,
+                  // Switching to extract clears feeders server-side, so clear them
+                  // locally too and the card shows exactly what the save will produce.
+                  ...(m === "generate" ? {} : { feeders: [] }),
+                })
               }
             >
               <Check
@@ -336,7 +367,6 @@ function ModePicker({
 }
 
 function FeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -344,9 +374,9 @@ function FeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -354,6 +384,7 @@ function FeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
   // Manual sections (PM writes/uploads directly) — no sources to assign.
@@ -382,7 +413,6 @@ function FeederArea({
   // analyze and generate are department-based.
   return (
     <SourcesFeederArea
-      cycleId={cycleId}
       section={section}
       feederCodes={feederCodes}
       documentUploaded={documentUploaded}
@@ -390,16 +420,16 @@ function FeederArea({
       isAnalyze={isAnalyze}
       departments={departments}
       deptByCode={deptByCode}
+      onPendingChange={onPendingChange}
       readOnly={readOnly}
     />
   )
 }
 
-// One dropdown holds all three sources: department feeders (checkboxes), an
-// "Upload document later" toggle (→ extract mode), and an "Analyze mode" toggle
-// (→ analyze mode, keeps department feeders). Modes are mutually exclusive.
+// One dropdown holds the sources: department feeders (checkboxes) and an
+// "Upload document later" toggle (→ extract mode). Neither is written here —
+// both are reported upward and saved together when the PM continues.
 function SourcesFeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -407,9 +437,9 @@ function SourcesFeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -417,11 +447,9 @@ function SourcesFeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
-  const setSourceMode = useSetSourceMode(cycleId)
-  const saving =
-    useIsSettingFeeders(cycleId, section.section_code) || setSourceMode.isPending
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
@@ -487,22 +515,50 @@ function SourcesFeederArea({
 
   return (
     <FeederPicker
-      cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
-      // Extract is sourced by document, and the backend only accepts feeders on
-      // generate and analyze — so ticking a department here would just 409. This
-      // used to be reachable because the old binary tick flipped the section back
-      // to generate on the way; mode is chosen in ModePicker now, so the only
-      // honest thing left is to grey the checkboxes out.
-      departmentsApply={!isExtract}
+      onFeedersChange={(sectionCode, departmentCodes) =>
+        onPendingChange(sectionCode, { feeders: departmentCodes })
+      }
+      // An AI-written section keeps its departments live even in extract mode:
+      // the two sources are a reversible choice, and clicking a department flips
+      // the section back to generate (the picker sequences that). Only a section
+      // AI may never draft is document-only, and it has no unticked state.
+      departmentsApply={!isExtract || section.ai_allowed}
       selected={feederCodes}
+      // Analyze sections: departments only — no source-mode switcher.
+      // Generate sections: show "Upload document later" to switch to extract.
+      // Extract sections: "Upload document later" is checked (toggle back to generate).
+      // The toggle is binary: ticked means extract, unticked means generate. A
+      // section AI may never draft has no valid unticked state, so offering it
+      // let a PM set mode='generate' on one the backend will always refuse to
+      // generate — the plan card then read the mode and said "AI-written" while
+      // the builder read ai_allowed and showed an upload box. It was one-way
+      // too: once flipped the section rendered as manual and the toggle
+      // vanished, so it could not be flipped back.
+      //
+      // Department feeders and the analyze toggle stay available — analyze is
+      // the standing configuration for several ai_allowed=false sections.
+      documentOption={
+        isAnalyze || !section.ai_allowed
+          ? undefined
+          : {
+              checked: isExtract,
+              // Switching to extract clears feeders server-side, so the local
+              // edit clears them too — what the card shows is then exactly what
+              // the save will produce.
+              onChange: (next) =>
+                onPendingChange(section.section_code, {
+                  mode: next ? "extract" : "generate",
+                  ...(next ? { feeders: [] } : {}),
+                }),
+            }
+      }
     >
       <button
         type="button"
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
-          saving && "opacity-50",
           showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",
