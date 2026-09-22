@@ -131,7 +131,6 @@ spark-ar-studio/
 │   ├── pm/
 │   │   └── kickoff-loader.tsx
 │   ├── report/                           Report Builder primitives (see §13)
-│   │   ├── HeadlineBlock.tsx
 │   │   ├── ThemeEditor.tsx
 │   │   ├── RegeneratePlanButton.tsx
 │   │   ├── PlanSectionGrid.tsx           Tile-grid section editor (new plan UI)
