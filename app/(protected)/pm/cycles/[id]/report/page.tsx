@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
+  Blocks,
   ChevronDown,
   FileDown,
   FileCheck,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { PageLoader } from "@/components/ui/spinner"
 import { DesignDialog } from "@/components/report/design/DesignDialog"
+import { Design2Dialog } from "@/components/report/design2/Design2Dialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
@@ -87,6 +89,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
   const [reassembleOpen, setReassembleOpen] = useState(false)
   const [designOpen, setDesignOpen] = useState(false)
+  const [design2Open, setDesign2Open] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
 
   // Match the builder shell's chrome-collapse for full document width.
@@ -184,6 +187,18 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 >
                   <Palette className="h-3.5 w-3.5 mr-1.5" />
                   Design
+                </Button>
+                {/* Dev testing only: run one assembled section through
+                    GPT-4.1 and show the structured blocks it returns.
+                    Nothing is saved. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDesign2Open(true)}
+                  className="h-8"
+                >
+                  <Blocks className="h-3.5 w-3.5 mr-1.5" />
+                  Design2
                 </Button>
               </>
             )}
@@ -347,6 +362,13 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
             queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId),
           })
         }
+      />
+
+      <Design2Dialog
+        cycleId={cycleId}
+        sections={report?.sections ?? []}
+        open={design2Open}
+        onOpenChange={setDesign2Open}
       />
 
       <ConfirmDialog
