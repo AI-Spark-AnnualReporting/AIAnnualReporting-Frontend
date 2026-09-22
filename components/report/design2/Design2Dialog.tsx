@@ -21,6 +21,7 @@ import {
   ChevronRight,
   CircleAlert,
   Copy,
+  Image as ImageIcon,
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  renderSectionPage,
   streamSectionDesignBlocks,
   type DesignBlockNote,
   type DesignBlockStep,
@@ -67,6 +69,11 @@ export function Design2Dialog({
   const [result, setResult] = useState<DesignBlocksResult | null>(null)
   const [error, setError] = useState<DesignBlocksError | null>(null)
   const [copied, setCopied] = useState(false)
+  // The rendered page, as an object URL. Owned here, so it is revoked on
+  // every reset and on unmount rather than leaking a blob per click.
+  const [pageUrl, setPageUrl] = useState<string | null>(null)
+  const [rendering, setRendering] = useState(false)
+  const [renderError, setRenderError] = useState<string | null>(null)
   // Bumping this re-runs the effect for the same section, which is what the
   // retry button needs — setActive to the same object would change nothing.
   const [attempt, setAttempt] = useState(0)
@@ -81,6 +88,34 @@ export function Design2Dialog({
     setResult(null)
     setError(null)
     setCopied(false)
+    setRenderError(null)
+    setPageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+  }
+
+  const renderPage = async () => {
+    if (!result || !active) return
+    setRendering(true)
+    setRenderError(null)
+    try {
+      const url = await renderSectionPage(cycleId, {
+        blocks: result,
+        title: active.title,
+        running_label: "Annual Report",
+      })
+      setPageUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return url
+      })
+    } catch (e) {
+      setRenderError(
+        (e as { message?: string })?.message || "The page could not be rendered.",
+      )
+    } finally {
+      setRendering(false)
+    }
   }
 
   const openSection = (section: FinalReportSection) => {
@@ -117,6 +152,10 @@ export function Design2Dialog({
     // completes (and bills) regardless. Fine for a dev probe.
     return () => ac.abort()
   }, [open, active, cycleId, attempt])
+
+  useEffect(() => () => {
+    if (pageUrl) URL.revokeObjectURL(pageUrl)
+  }, [pageUrl])
 
   const handleOpenChange = (next: boolean) => {
     if (!next) {
@@ -292,21 +331,56 @@ export function Design2Dialog({
                 </div>
               )}
 
+              {renderError && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                  {renderError}
+                </p>
+              )}
+
+              {pageUrl && (
+                <div className="overflow-hidden rounded-lg border bg-slate-100 p-3">
+                  {/* The engine returns a PNG of page one. A plain img keeps
+                      this a preview rather than a viewer. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={pageUrl}
+                    alt={`${active.title} rendered as a designed page`}
+                    className="mx-auto w-full max-w-[420px] shadow-sm"
+                  />
+                </div>
+              )}
+
               {result && (
                 <div className="rounded-lg border bg-slate-50">
                   <div className="flex items-center justify-between border-b px-3 py-1.5">
                     <span className="text-[11px] font-medium text-slate-500">
                       Raw JSON
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[11px]"
-                      onClick={copyJson}
-                    >
-                      <Copy className="mr-1 h-3 w-3" />
-                      {copied ? "Copied" : "Copy"}
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[11px]"
+                        onClick={renderPage}
+                        disabled={rendering}
+                      >
+                        {rendering ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <ImageIcon className="mr-1 h-3 w-3" />
+                        )}
+                        {rendering ? "Rendering" : "Render page"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[11px]"
+                        onClick={copyJson}
+                      >
+                        <Copy className="mr-1 h-3 w-3" />
+                        {copied ? "Copied" : "Copy"}
+                      </Button>
+                    </div>
                   </div>
                   <pre
                     className="max-h-[45vh] overflow-auto whitespace-pre-wrap break-words p-3 text-[12px] leading-relaxed text-slate-800"

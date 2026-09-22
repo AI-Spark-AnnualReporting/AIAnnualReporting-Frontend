@@ -193,3 +193,32 @@ export async function streamSectionDesignBlocks(
     })
   }
 }
+
+/**
+ * Typeset one already-extracted section as a designed page.
+ *
+ * Hands the blocks straight back to the server, which picks a page template,
+ * fills its slots and prints the sheet. Returns an object URL for an <img>;
+ * the caller owns it and must revoke it.
+ *
+ * Plain axios, unlike the streaming call above — this one is a single request
+ * with a single answer, and the engine launches a browser per render, so the
+ * timeout is the long one.
+ */
+export async function renderSectionPage(
+  cycleId: string,
+  body: {
+    blocks: DesignBlocksResult
+    title?: string
+    eyebrow?: string
+    running_label?: string
+    template_key?: string
+  },
+): Promise<string> {
+  const res = await apiClient.post(
+    `/pm/cycles/${encodeURIComponent(cycleId)}/design2-page`,
+    body,
+    { responseType: "blob", timeout: 180000 },
+  )
+  return URL.createObjectURL(res.data as Blob)
+}
