@@ -205,6 +205,31 @@ export async function streamSectionDesignBlocks(
  * with a single answer, and the engine launches a browser per render, so the
  * timeout is the long one.
  */
+/**
+ * The same render, returning the Blob rather than an object URL.
+ *
+ * The page designer caches renders across navigation, so it has to own the
+ * URL's lifetime itself — handing it one already created here would make two
+ * places responsible for revoking it.
+ */
+export async function renderSectionPageBlob(
+  cycleId: string,
+  body: {
+    blocks: DesignBlocksResult
+    title?: string
+    eyebrow?: string
+    running_label?: string
+    template_key?: string
+  },
+): Promise<Blob> {
+  const res = await apiClient.post(
+    `/pm/cycles/${encodeURIComponent(cycleId)}/design2-page`,
+    body,
+    { responseType: "blob", timeout: 180000 },
+  )
+  return res.data as Blob
+}
+
 export async function renderSectionPage(
   cycleId: string,
   body: {
