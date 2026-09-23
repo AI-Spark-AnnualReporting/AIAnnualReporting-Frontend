@@ -14,7 +14,13 @@ export interface DesignOption {
   key: string
   recommended: boolean
   reason: string | null
-  counts: { stat?: number; para?: number; table?: number; lede?: number }
+  counts: {
+    stat?: number
+    para?: number
+    table?: number
+    lede?: number
+    quote?: number
+  }
   dropped: {
     narrative_blocks?: number
     numeric_data?: number
@@ -35,6 +41,34 @@ export interface DesignUnit {
   options_error?: string
   template_key: string | null
   chosen_at: string | null
+  /** True when the art director chose this template and nobody has overridden it. */
+  template_auto?: boolean
+  /** block id -> the emphasis the art director gave it. */
+  roles?: Record<string, string>
+  /**
+   * Positions, per source array, of blocks that should open a fresh sheet.
+   *
+   * Positions and not block ids: the renderer has never heard of an id, and
+   * the art director's reorder has already moved things by the time a page is
+   * drawn — so a hint stored as an id would land on whatever took the old
+   * slot. e.g. { "tables": [0], "narrative_blocks": [7] }.
+   */
+  breaks?: Record<string, number[]>
+}
+
+/**
+ * The art director's decision for one section.
+ *
+ * `why` is written for the person reviewing the page, not for a log — it is
+ * shown under the recommended template in place of the old count-based
+ * reason ("16 figures, only 412 chars of prose"), which explained the rule
+ * rather than the judgement.
+ */
+export interface DesignPlan {
+  template_key: string
+  why: string
+  blocks: number
+  ranked: number
 }
 
 export interface DesignEnvelope {
@@ -46,6 +80,7 @@ export interface DesignEnvelope {
     model: string
     language: string
   }
+  plan: DesignPlan | null
   units: DesignUnit[]
 }
 
@@ -57,6 +92,7 @@ export interface DesignSection {
   ineligible_reason: string | null
   extracted: boolean
   stale: boolean
+  plan: DesignPlan | null
   design: DesignEnvelope | null
 }
 
@@ -64,7 +100,10 @@ export interface CycleDesign {
   cycle_id: string
   sections: DesignSection[]
   units_total: number
+  /** Pages with a template at all — after art direction, normally every one. */
   units_chosen: number
+  /** Pages a PERSON has signed off. The only number that measures progress. */
+  units_reviewed: number
 }
 
 export const design2Api = {

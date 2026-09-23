@@ -20,7 +20,7 @@ import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import type { DesignOption, DesignUnit } from "@/lib/api/design2"
 import { renderSectionPages } from "@/lib/api/designBlocks"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/design2Cache"
-import { losesContent, lossText, placedText } from "@/lib/design2Loss"
+import { losesContent, lossText, placementText } from "@/lib/design2Loss"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
 
@@ -86,6 +86,7 @@ export function PageRenderPanel({
         eyebrow: sectionTitle,
         running_label: "Annual Report",
         template_key: templateKey ?? undefined,
+        breaks: unit.breaks,
       }).then((r) => r.pages),
     )
       .then((next) => {
@@ -134,11 +135,14 @@ export function PageRenderPanel({
             )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">
-            {placedText(option?.counts) || "Nothing placed"}
+            {placementText(option?.counts)}
           </p>
+          {/* Loss is no longer a layout trade-off a person chooses between —
+              every template holds everything — so this is a defect notice,
+              not a caption, and it is styled like one. */}
           {option && losesContent(option.dropped) && (
-            <p className="mt-0.5 truncate text-[11px] text-amber-700">
-              {lossText(option.dropped, option.counts)}
+            <p className="mt-0.5 text-[11px] font-semibold text-red-700">
+              Content missing: {lossText(option.dropped, option.counts)}
             </p>
           )}
         </div>

@@ -180,7 +180,8 @@ export function Design2Rail({
                 </button>
               ) : multi ? (
                 <span className="shrink-0 text-[11px] text-slate-400">
-                  {units.filter((u) => u.template_key).length} of {units.length} chosen
+                  {units.filter((u) => u.template_key && !u.template_auto).length} of{" "}
+                  {units.length} reviewed
                 </span>
               ) : only?.template_key ? (
                 <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
@@ -205,7 +206,14 @@ export function Design2Rail({
                     <span
                       className={cn(
                         "h-1.5 w-1.5 shrink-0 rounded-full",
-                        unit.template_key ? "bg-emerald-500" : "bg-slate-300",
+                        // Solid = a person picked it. Hollow = the art
+                        // director picked it and nobody has looked yet. Both
+                        // are "chosen"; only one has been reviewed.
+                        !unit.template_key
+                          ? "bg-slate-300"
+                          : unit.template_auto
+                            ? "border border-emerald-500 bg-white"
+                            : "bg-emerald-500",
                       )}
                       aria-hidden
                     />

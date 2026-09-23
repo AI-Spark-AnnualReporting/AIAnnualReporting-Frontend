@@ -1,9 +1,13 @@
 /**
- * Turn a template's "dropped" report into one line a person can act on.
+ * What a template placed, and — if it ever comes to it — what it lost.
  *
- * The engine tells us exactly how many items each template would leave out.
- * Saying "47 figures → 8 shown" is the difference between a PM choosing a
- * layout knowingly and discovering the loss in the printed report.
+ * Loss used to be a NORMAL state here: each template had slots for only some
+ * content types, so choosing narrative_text_heavy silently discarded every
+ * figure and table in the section and this file's job was to phrase the
+ * damage. Every template now holds every content type, so `dropped` is zero
+ * by construction and a non-zero value is a BUG rather than a layout
+ * trade-off. lossText survives to make that regression loud; placedText is
+ * what a person should normally be reading.
  *
  * Pure — self-checked with `node lib/design2Loss.test.ts`.
  */
@@ -20,6 +24,7 @@ export interface PlacedCounts {
   para?: number
   table?: number
   lede?: number
+  quote?: number
 }
 
 const n = (v: unknown): number => (typeof v === "number" && v > 0 ? v : 0)
@@ -69,7 +74,21 @@ export function placedText(placed: PlacedCounts | null | undefined): string {
   const parts: string[] = []
   if (n(p.stat)) parts.push(plural(n(p.stat), "figure", "figures"))
   if (n(p.table)) parts.push(plural(n(p.table), "table", "tables"))
-  if (n(p.para)) parts.push(plural(n(p.para), "paragraph", "paragraphs"))
-  if (n(p.lede)) parts.push(plural(n(p.lede), "intro line", "intro lines"))
+  if (n(p.para) || n(p.lede))
+    parts.push(plural(n(p.para) + n(p.lede), "paragraph", "paragraphs"))
+  if (n(p.quote)) parts.push(plural(n(p.quote), "quote", "quotes"))
   return parts.join(" · ")
+}
+
+/**
+ * The line a person normally sees: a positive confirmation that the page
+ * carries everything the section supplied.
+ *
+ * Deliberately says "All", because the one question this screen has to answer
+ * at a glance is "is anything missing?" and the honest answer is now always
+ * no. An empty section says so plainly rather than reading as a failure.
+ */
+export function placementText(placed: PlacedCounts | null | undefined): string {
+  const text = placedText(placed)
+  return text ? `All ${text} placed` : "Nothing to place in this section"
 }

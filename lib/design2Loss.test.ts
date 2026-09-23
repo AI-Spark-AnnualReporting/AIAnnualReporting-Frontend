@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict"
-import { lossText, losesContent, placedText } from "./design2Loss.ts"
+import { lossText, losesContent, placedText, placementText } from "./design2Loss.ts"
 
 // Nothing dropped is silence, not "0 figures not shown".
 assert.equal(lossText({}), "")
@@ -45,3 +45,12 @@ assert.equal(placedText({}), "")
 assert.equal(placedText(null), "")
 
 console.log("design2Loss: all checks passed")
+
+// --- placement: the normal state is now a positive confirmation ------------
+assert.equal(placedText({ stat: 17, table: 2, para: 40, quote: 4 }),
+  "17 figures · 2 tables · 40 paragraphs · 4 quotes")
+// para and lede are the same thing to a reader; kpi_stat_grid uses lede.
+assert.equal(placedText({ para: 3, lede: 2 }), "5 paragraphs")
+assert.equal(placementText({ stat: 1, para: 2 }), "All 1 figure · 2 paragraphs placed")
+assert.equal(placementText({}), "Nothing to place in this section")
+assert.equal(placementText(null), "Nothing to place in this section")

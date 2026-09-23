@@ -16,7 +16,7 @@
 import { Check, Star, TriangleAlert } from "lucide-react"
 
 import type { DesignOption } from "@/lib/api/design2"
-import { losesContent, lossText } from "@/lib/design2Loss"
+import { losesContent, lossText, placedText } from "@/lib/design2Loss"
 
 import { TEMPLATE_NAMES, TemplateMini } from "./TemplateMini"
 
@@ -88,13 +88,17 @@ export function TemplateCardGrid({
               {option.recommended && (
                 <Star className="h-3 w-3 shrink-0 fill-indigo-500 text-indigo-500" />
               )}
-              {loses && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-500" />}
+              {/* Red, not amber: every template holds every content type
+                  now, so this is a defect notice rather than a trade-off. */}
+              {loses && <TriangleAlert className="h-3 w-3 shrink-0 text-red-500" />}
             </div>
 
             <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-snug text-[#64748B]">
-              {option.recommended && option.reason
-                ? option.reason
-                : lossText(option.dropped, option.counts) || " "}
+              {loses
+                ? lossText(option.dropped, option.counts)
+                : option.recommended && option.reason
+                  ? option.reason
+                  : placedText(option.counts) || " "}
             </div>
           </button>
         )

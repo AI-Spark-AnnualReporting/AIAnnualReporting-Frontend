@@ -36,6 +36,19 @@ export interface DesignBlockNote {
   text: string
 }
 
+/**
+ * One prose block, carrying the author's own structure.
+ *
+ * Was `string[]`. The report's `###` subheadings survive every upstream
+ * transform and were then flattened here into ordinary paragraphs — 50 of 63
+ * headings on one real cycle simply disappeared. `kind` is what lets a page
+ * set a subheading AS a subheading instead of guessing from its length.
+ */
+export interface DesignBlocksNarrative {
+  kind: "heading" | "paragraph"
+  text: string
+}
+
 export interface DesignBlocksNumeric {
   label: string
   /** Copied verbatim from the report, e.g. "$104.7 billion" — never a number. */
@@ -59,7 +72,7 @@ export interface DesignBlocksQuote {
 
 export interface DesignBlocksResult {
   section_code: string
-  narrative_blocks: string[]
+  narrative_blocks: DesignBlocksNarrative[]
   numeric_data: DesignBlocksNumeric[]
   tables: DesignBlocksTable[]
   pull_quotes: DesignBlocksQuote[]
@@ -232,6 +245,8 @@ export async function renderSectionPages(
     eyebrow?: string
     running_label?: string
     template_key?: string
+    /** Positions, per source array, of blocks that should open a fresh sheet. */
+    breaks?: Record<string, number[]>
   },
 ): Promise<RenderedPages> {
   const { data } = await apiClient.post<RenderedPages>(

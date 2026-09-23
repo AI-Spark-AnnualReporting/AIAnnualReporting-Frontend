@@ -160,7 +160,9 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
             Design2{cycleName ? ` — ${cycleName}` : ""}
           </h1>
           <p className="text-xs text-muted-foreground">
-            {data.units_chosen} of {data.units_total} pages have a template
+            {data.units_chosen === data.units_total && data.units_total > 0
+              ? `All ${data.units_total} pages laid out · ${data.units_reviewed} reviewed`
+              : `${data.units_chosen} of ${data.units_total} pages have a template`}
           </p>
         </div>
         <Button
@@ -198,7 +200,7 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
                 className="h-full rounded-full bg-indigo-500 transition-all"
                 style={{
                   width: `${
-                    data.units_total ? (data.units_chosen / data.units_total) * 100 : 0
+                    data.units_total ? (data.units_reviewed / data.units_total) * 100 : 0
                   }%`,
                 }}
               />
@@ -237,6 +239,16 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
                     {unit.total > 1 ? `Page ${unit.index} of ${unit.total} · ` : ""}
                     {unit.title}
                   </p>
+                  {/* The art director's own sentence, written for whoever is
+                      reviewing the page. It replaces the rules classifier's
+                      "16 figures, only 412 chars of prose", which explained
+                      the rule rather than the judgement. */}
+                  {section.plan?.why && (
+                    <p className="mt-1 text-[11px] italic text-indigo-700">
+                      {section.plan.why}
+                      {unit.template_auto && " — laid out for you; pick another below to change it."}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Button
