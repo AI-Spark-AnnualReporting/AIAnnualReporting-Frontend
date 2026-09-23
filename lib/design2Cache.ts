@@ -5,40 +5,28 @@
  * templates and going back to the first should not cost a second one. That is
  * the whole reason this module exists.
  *
- * It deliberately does NOT revoke on unmount, which is the opposite of the
- * discipline the old Design2 dialog used — correct there, because nothing was
- * cached. Here the URLs must outlive the component or the cache is pointless.
- * What bounds it instead: an LRU cap that revokes what it evicts, a
- * revokeSection() for when a section's blocks change underneath us, and a
- * revokeAll() on page unload.
+ * Entries deliberately outlive the components that fill them — that is the
+ * whole point, and it is safe because the images are data URIs rather than
+ * object URLs, so there is nothing to revoke. What bounds the map is an LRU
+ * cap, a revokeSection() for when a section's blocks change underneath us,
+ * and a clear on page unload.
+ *
+ * It also remembers failures. Without that, a render that failed is retried
+ * on every unrelated cache write, and each retry is a cold browser launch.
  */
 
 const MAX_ENTRIES = 40
 
-// Injectable so the self-check can run under Node, where URL.createObjectURL
-// does not exist.
-let create: (blob: Blob) => string =
-  typeof URL !== "undefined" && URL.createObjectURL
-    ? (blob) => URL.createObjectURL(blob)
-    : () => {
-        throw new Error("createObjectURL unavailable")
-      }
-let revoke: (url: string) => void =
-  typeof URL !== "undefined" && URL.revokeObjectURL ? (url) => URL.revokeObjectURL(url) : () => {}
-
-/** Test seam. Not used by the app. */
-export function __setObjectUrlImpl(
-  c: (blob: Blob) => string,
-  r: (url: string) => void,
-): void {
-  create = c
-  revoke = r
-}
+// Nothing to revoke: renders come back as data URIs, so a cached entry is a
+// plain string and the only reason to bound the map is memory.
 
 // Map preserves insertion order, which is what makes it an LRU: re-reading an
 // entry deletes and re-sets it, moving it to the end.
-const cache = new Map<string, string>()
-const inflight = new Map<string, Promise<string>>()
+const cache = new Map<string, string[]>()
+const inflight = new Map<string, Promise<string[]>>()
+// A key that failed. Without this a failed render is retried on every
+// unrelated cache write, and each retry is a cold browser launch.
+const failed = new Map<string, string>()
 
 export function cacheKey(
   cycleId: string,
@@ -49,7 +37,7 @@ export function cacheKey(
   return `${cycleId}|${sectionCode}|${unitIndex}|${templateKey}`
 }
 
-export function peek(key: string): string | undefined {
+export function peek(key: string): string[] | undefined {
   const url = cache.get(key)
   if (url === undefined) return undefined
   cache.delete(key)
@@ -57,19 +45,28 @@ export function peek(key: string): string | undefined {
   return url
 }
 
-function put(key: string, url: string): string {
-  const existing = cache.get(key)
-  if (existing && existing !== url) revoke(existing)
+function put(key: string, pages: string[]): string[] {
   cache.delete(key)
-  cache.set(key, url)
+  cache.set(key, pages)
+  // Data URIs need no revoking, but they are large, so the cap still earns
+  // its place.
   while (cache.size > MAX_ENTRIES) {
     const oldest = cache.keys().next().value as string | undefined
     if (oldest === undefined) break
-    const stale = cache.get(oldest)
     cache.delete(oldest)
-    if (stale) revoke(stale)
   }
-  return url
+  return pages
+}
+
+/** Why this key last failed, if it did. */
+export function lastFailure(key: string): string | undefined {
+  return failed.get(key)
+}
+
+/** Forget a key so the next request really re-renders it. */
+export function evict(key: string): void {
+  cache.delete(key)
+  failed.delete(key)
 }
 
 /**
@@ -80,16 +77,23 @@ function put(key: string, url: string): string {
  */
 export async function getOrRender(
   key: string,
-  render: () => Promise<Blob>,
-): Promise<string> {
+  render: () => Promise<string[]>,
+): Promise<string[]> {
   const hit = peek(key)
   if (hit) return hit
+
+  const why = failed.get(key)
+  if (why) throw new Error(why)
 
   const pending = inflight.get(key)
   if (pending) return pending
 
   const promise = render()
-    .then((blob) => put(key, create(blob)))
+    .then((pages) => put(key, pages))
+    .catch((e) => {
+      failed.set(key, (e as Error)?.message || "The page could not be rendered.")
+      throw e
+    })
     .finally(() => inflight.delete(key))
   inflight.set(key, promise)
   return promise
@@ -105,16 +109,15 @@ export function revokeSection(cycleId: string, sectionCode: string): void {
   const prefix = `${cycleId}|${sectionCode}|`
   for (const key of [...cache.keys()]) {
     if (key.startsWith(prefix)) {
-      const url = cache.get(key)
       cache.delete(key)
-      if (url) revoke(url)
+      failed.delete(key)
     }
   }
 }
 
 export function revokeAll(): void {
-  for (const url of cache.values()) revoke(url)
   cache.clear()
+  failed.clear()
 }
 
 export function size(): number {

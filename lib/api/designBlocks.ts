@@ -205,32 +205,26 @@ export async function streamSectionDesignBlocks(
  * with a single answer, and the engine launches a browser per render, so the
  * timeout is the long one.
  */
+
 /**
- * The same render, returning the Blob rather than an object URL.
+ * Typeset one page unit and get back EVERY sheet it produces.
  *
- * The page designer caches renders across navigation, so it has to own the
- * URL's lifetime itself — handing it one already created here would make two
- * places responsible for revoking it.
+ * Templates no longer cap their content, so a section with seventeen figures
+ * legitimately runs to several sheets. Returning only the first would hide
+ * exactly the content that change exists to stop losing.
+ *
+ * Data URIs rather than object URLs: there is nothing to revoke, so the
+ * render cache can outlive the components that fill it without leaking.
  */
-export async function renderSectionPageBlob(
-  cycleId: string,
-  body: {
-    blocks: DesignBlocksResult
-    title?: string
-    eyebrow?: string
-    running_label?: string
-    template_key?: string
-  },
-): Promise<Blob> {
-  const res = await apiClient.post(
-    `/pm/cycles/${encodeURIComponent(cycleId)}/design2-page`,
-    body,
-    { responseType: "blob", timeout: 180000 },
-  )
-  return res.data as Blob
+export interface RenderedPages {
+  template_key: string
+  page_count: number
+  counts: Record<string, number>
+  dropped: Record<string, number>
+  pages: string[]
 }
 
-export async function renderSectionPage(
+export async function renderSectionPages(
   cycleId: string,
   body: {
     blocks: DesignBlocksResult
@@ -239,11 +233,11 @@ export async function renderSectionPage(
     running_label?: string
     template_key?: string
   },
-): Promise<string> {
-  const res = await apiClient.post(
+): Promise<RenderedPages> {
+  const { data } = await apiClient.post<RenderedPages>(
     `/pm/cycles/${encodeURIComponent(cycleId)}/design2-page`,
     body,
-    { responseType: "blob", timeout: 180000 },
+    { timeout: 180000 },
   )
-  return URL.createObjectURL(res.data as Blob)
+  return data
 }

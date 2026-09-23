@@ -69,6 +69,12 @@ export function Design2Rail({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const ordered = [...sections].sort((a, b) => a.order - b.order)
+  // The section holding the selection is always open. Derived rather than
+  // stored, so it cannot drift out of sync with the selection.
+  const isOpen = (code: string) => expanded.has(code) || selected?.code === code
+
+  const open_ = (code: string) =>
+    setExpanded((prev) => (prev.has(code) ? prev : new Set(prev).add(code)))
 
   const toggle = (code: string) =>
     setExpanded((prev) => {
@@ -83,7 +89,7 @@ export function Design2Rail({
       {ordered.map((section) => {
         const units = section.design?.units ?? []
         const multi = units.length > 1
-        const open = expanded.has(section.section_code)
+        const open = isOpen(section.section_code)
         const state = failed?.[section.section_code]
           ? "failed"
           : sectionState(section)
@@ -96,7 +102,7 @@ export function Design2Rail({
             <div
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 transition-colors",
-                active && !multi ? "bg-slate-100" : "hover:bg-slate-50",
+                active ? "bg-slate-100" : "hover:bg-slate-50",
                 !section.eligible && "opacity-60",
               )}
             >
@@ -124,8 +130,20 @@ export function Design2Rail({
                 onClick={() => {
                   if (!section.eligible) return
                   if (multi) {
-                    toggle(section.section_code)
-                    onSelect({ code: section.section_code, unit: units[0]?.index ?? 1 })
+                    // OPEN, never toggle. The title is the row's primary hit
+                    // target and the chevron is the only control meant to
+                    // close; making the title flip meant clicking the section
+                    // you were already working in collapsed its pages and
+                    // threw the selection back to page 1.
+                    open_(section.section_code)
+                    // Keep the page you are already on within this section.
+                    onSelect({
+                      code: section.section_code,
+                      unit:
+                        selected?.code === section.section_code
+                          ? selected.unit
+                          : units[0]?.index ?? 1,
+                    })
                   } else {
                     onSelect({ code: section.section_code, unit: only?.index ?? 1 })
                   }
@@ -161,7 +179,9 @@ export function Design2Rail({
                   Retry
                 </button>
               ) : multi ? (
-                <span className="shrink-0 text-[11px] text-slate-400">{units.length} pages</span>
+                <span className="shrink-0 text-[11px] text-slate-400">
+                  {units.filter((u) => u.template_key).length} of {units.length} chosen
+                </span>
               ) : only?.template_key ? (
                 <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
                   {TEMPLATE_NAMES[only.template_key] ?? only.template_key}

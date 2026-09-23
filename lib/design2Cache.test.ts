@@ -9,18 +9,15 @@
 
 import assert from "node:assert/strict"
 import {
-  __setObjectUrlImpl, cacheKey, getOrRender, peek, revokeAll, revokeSection, size,
+  cacheKey, evict, getOrRender, lastFailure, peek, revokeAll, revokeSection, size,
 } from "./design2Cache.ts"
 
 let made = 0
-const revoked: string[] = []
-__setObjectUrlImpl(() => `blob:${++made}`, (u) => { revoked.push(u) })
-
-const blob = () => Promise.resolve({} as Blob)
+// Renders return every sheet of a unit, as data URIs — nothing to revoke.
+const blob = () => Promise.resolve([`data:image/png;base64,p${++made}`])
 
 async function main() {
   revokeAll()
-  revoked.length = 0
 
   // Keys are per section, page AND template.
   assert.equal(cacheKey("c", "ceo_review", 2, "kpi_stat_grid"), "c|ceo_review|2|kpi_stat_grid")
@@ -32,8 +29,8 @@ async function main() {
   const first = await getOrRender(k, async () => { renders += 1; return blob() })
   const second = await getOrRender(k, async () => { renders += 1; return blob() })
   assert.equal(renders, 1)
-  assert.equal(first, second)
-  assert.equal(peek(k), first)
+  assert.deepEqual(first, second)
+  assert.deepEqual(peek(k), first)
 
   // Two simultaneous callers share one request — a double-click must not
   // launch two browsers.
@@ -45,26 +42,22 @@ async function main() {
     getOrRender(k2, async () => { renders += 1; return blob() }),
   ])
   assert.equal(renders, 1)
-  assert.equal(both[0], both[1])
+  assert.deepEqual(both[0], both[1])
 
   // The LRU cap revokes what it evicts.
   revokeAll()
-  revoked.length = 0
   for (let i = 0; i < 45; i += 1) {
     await getOrRender(cacheKey("c", "s", i, "t"), blob)
   }
   assert.ok(size() <= 40, `cache grew to ${size()}`)
-  assert.ok(revoked.length >= 5, `evictions were not revoked (${revoked.length})`)
 
   // Re-extracting a section drops every picture of it, and nothing else.
   revokeAll()
-  revoked.length = 0
   await getOrRender(cacheKey("c", "alpha", 1, "t"), blob)
   await getOrRender(cacheKey("c", "alpha", 2, "t"), blob)
   await getOrRender(cacheKey("c", "beta", 1, "t"), blob)
   revokeSection("c", "alpha")
   assert.equal(size(), 1)
-  assert.equal(revoked.length, 2)
   assert.ok(peek(cacheKey("c", "beta", 1, "t")))
 
   // A section whose name prefixes another is not caught by mistake.
@@ -74,6 +67,22 @@ async function main() {
   revokeSection("c", "risk")
   assert.equal(size(), 1)
   assert.ok(peek(cacheKey("c", "risk_management", 1, "t")))
+
+  // A failure is remembered, so an unrelated re-render does not relaunch a
+  // browser for a key that just failed — and evict() is what clears it.
+  revokeAll()
+  const bad = cacheKey("c", "s", 9, "t")
+  let attempts = 0
+  for (const _ of [1, 2]) {
+    try {
+      await getOrRender(bad, async () => { attempts += 1; throw new Error("engine down") })
+    } catch { /* expected */ }
+  }
+  assert.equal(attempts, 1, "a failed key was retried without an evict")
+  assert.equal(lastFailure(bad), "engine down")
+  evict(bad)
+  await getOrRender(bad, async () => { attempts += 1; return blob() })
+  assert.equal(attempts, 2, "evict did not clear the failure")
 
   console.log("design2Cache: all checks passed")
 }

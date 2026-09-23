@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageLoader } from "@/components/ui/spinner"
 import { useCycleDesign, useExtractSection, useSetTemplate } from "@/hooks/useDesign2"
+import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { revokeSection } from "@/lib/design2Cache"
 
@@ -29,9 +30,25 @@ import { PreviewAllDialog } from "./PreviewAllDialog"
 import { TemplateCardGrid } from "./TemplateCardGrid"
 import { UnitJsonPanel } from "./UnitJsonPanel"
 
+// Mirrors the engine's template list. Used only when the per-page
+// recommendation lookup failed, so the column still offers every choice.
+const FALLBACK_OPTIONS = [
+  "narrative_text_heavy",
+  "narrative_with_stats",
+  "kpi_stat_grid",
+  "financial_table",
+  "statement_letter",
+].map((key) => ({
+  key,
+  recommended: false,
+  reason: null,
+  counts: {},
+  dropped: {},
+}))
+
 export function Design2Shell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
-  const { data, isLoading, refetch } = useCycleDesign(cycleId)
+  const { data, isLoading, error, refetch } = useCycleDesign(cycleId)
   const setTemplate = useSetTemplate(cycleId)
   const extract = useExtractSection(cycleId)
 
@@ -73,7 +90,34 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
   const run =
     manualRun ?? (!isLoading && needsRun && !autoRunSettled ? { force: false } : null)
 
-  if (isLoading || !data) return <PageLoader />
+  if (isLoading && !data) return <PageLoader />
+
+  // React Query keeps serving the last good payload after a failure, which
+  // made a session that had lost access look like a working screen with an
+  // unexplained red toast. Say so instead.
+  if (error) {
+    return (
+      <div className="flex h-[calc(100vh-8.5rem)] flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="max-w-md text-sm text-red-700">
+          {readError(error as MutationError, "This cycle could not be loaded.")}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            Try again
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push(`/pm/cycles/${cycleId}/report`)}
+          >
+            Back to the report
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!data) return <PageLoader />
 
   // Derived during render, not in an effect, so the first selection never
   // costs a second pass.
@@ -87,7 +131,11 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
     ? data.sections.find((s) => s.section_code === active.code) ?? null
     : null
   const unit = section?.design?.units.find((u) => u.index === active?.unit) ?? null
-  const effectivePreview = previewKey ?? unit?.template_key ?? unit?.options.find((o) => o.recommended)?.key ?? null
+  const effectivePreview =
+    previewKey ??
+    unit?.template_key ??
+    unit?.options.find((o) => o.recommended)?.key ??
+    (unit ? FALLBACK_OPTIONS[0].key : null)
   const option = unit?.options.find((o) => o.key === effectivePreview) ?? null
 
   const reExtract = (sectionCode: string) => {
@@ -215,20 +263,32 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
 
               <div className="flex min-h-0 flex-1">
                 <div className="w-[420px] shrink-0 overflow-y-auto border-r p-4">
-                  {unit.options.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      Recommendation unavailable for this page — every template is
-                      still selectable.
-                    </p>
-                  ) : (
-                    <TemplateCardGrid
-                      options={unit.options}
-                      previewKey={effectivePreview}
-                      chosenKey={unit.template_key}
-                      onPreview={setPreviewKey}
-                      disabled={setTemplate.isPending}
-                    />
+                  {unit.options.length === 0 && (
+                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                      <p className="text-[11px] text-amber-900">
+                        Couldn&apos;t work out which template suits this page, so
+                        none is recommended — every one is still selectable below.
+                      </p>
+                      {unit.options_error && (
+                        <p className="mt-1 font-mono text-[10.5px] text-amber-700">
+                          {unit.options_error}
+                        </p>
+                      )}
+                    </div>
                   )}
+                  {/* Never an empty column: when the recommendation lookup
+                      failed, offer every template as a plain card rather than
+                      a sentence saying they are selectable and nothing to
+                      click. */}
+                  <TemplateCardGrid
+                    options={
+                      unit.options.length > 0 ? unit.options : FALLBACK_OPTIONS
+                    }
+                    previewKey={effectivePreview}
+                    chosenKey={unit.template_key}
+                    onPreview={setPreviewKey}
+                    disabled={setTemplate.isPending}
+                  />
                 </div>
                 <div className="min-h-0 flex-1">
                   <PageRenderPanel

@@ -20,7 +20,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import type { CycleDesign } from "@/lib/api/design2"
-import { renderSectionPageBlob } from "@/lib/api/designBlocks"
+import { renderSectionPages } from "@/lib/api/designBlocks"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { cacheKey, getOrRender } from "@/lib/design2Cache"
 
@@ -32,7 +32,7 @@ interface Page {
   sectionCode: string
   unitIndex: number
   templateKey: string | null
-  render: () => Promise<Blob>
+  render: () => Promise<string[]>
 }
 
 export function PreviewAllDialog({
@@ -46,7 +46,8 @@ export function PreviewAllDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [urls, setUrls] = useState<Record<string, string>>({})
+  // One entry per page unit, each holding every sheet that unit produced.
+  const [urls, setUrls] = useState<Record<string, string[]>>({})
   const [done, setDone] = useState(0)
   const [running, setRunning] = useState(false)
   const abort = useRef<AbortController | null>(null)
@@ -64,13 +65,13 @@ export function PreviewAllDialog({
         unitIndex: unit.index,
         templateKey: unit.template_key,
         render: () =>
-          renderSectionPageBlob(cycleId, {
+          renderSectionPages(cycleId, {
             blocks: unit.blocks,
             title: unit.title,
             eyebrow: section.title,
             running_label: "Annual Report",
             template_key: unit.template_key ?? undefined,
-          }),
+          }).then((r) => r.pages),
       })
     }
   }
@@ -87,8 +88,8 @@ export function PreviewAllDialog({
       chosen,
       CONCURRENCY,
       async (page) => {
-        const url = await getOrRender(page.key, page.render)
-        setUrls((prev) => ({ ...prev, [page.key]: url }))
+        const sheets = await getOrRender(page.key, page.render)
+        setUrls((prev) => ({ ...prev, [page.key]: sheets }))
       },
       { signal: ac.signal, onSettled: (n) => setDone(n) },
     ).then(() => setRunning(false))
@@ -142,12 +143,17 @@ export function PreviewAllDialog({
                   No template chosen
                 </div>
               ) : urls[page.key] ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={urls[page.key]}
-                  alt={page.caption}
-                  className="block w-full rounded-lg border border-slate-200 bg-white shadow-sm"
-                />
+                <div className="space-y-3">
+                  {urls[page.key].map((sheet, i) => (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      key={i}
+                      src={sheet}
+                      alt={`${page.caption}, sheet ${i + 1}`}
+                      className="block w-full rounded-lg border border-slate-200 bg-white shadow-sm"
+                    />
+                  ))}
+                </div>
               ) : (
                 <div className="flex h-[360px] items-center justify-center rounded-lg border border-slate-200 bg-white">
                   <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
