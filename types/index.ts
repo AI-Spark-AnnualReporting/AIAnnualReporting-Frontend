@@ -469,9 +469,11 @@ export interface Notification {
   title?: string
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
-  /** What `related_id` points at — "session", "cycle", "report". Returned by the
-   *  backend (NotificationResponse.related_type) and needed to tell a
-   *  report-readiness row apart from any other "alert". */
+  /** What `related_id` points at — "session", "cycle", "report". Returned by
+   *  the backend (NotificationResponse.related_type) but was never declared
+   *  here. Needed to tell a report-readiness row and Centriton's board-index
+   *  warning (identified by ("report", <report id>)) apart from any other
+   *  "alert". */
   related_type?: string | null
   related_id?: string
   action_url?: string
