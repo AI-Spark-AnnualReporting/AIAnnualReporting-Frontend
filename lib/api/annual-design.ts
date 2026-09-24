@@ -23,6 +23,8 @@ import type {
   ColorPalette,
   CoverTemplate,
   DesignSelection,
+  TocDesign,
+  TocPreview,
 } from "@/types/report-design"
 
 /** The document, exactly as the export engine will print it. */
@@ -113,6 +115,37 @@ export const annualDesignApi = {
       cover_templates: data?.cover_templates ?? [],
       color_palettes: data?.color_palettes ?? [],
     }
+  },
+
+  /**
+   * The five contents-page designs.
+   *
+   * Proxied from the render engine, which owns them — there is no second list
+   * of names and descriptions on this side to fall out of date.
+   */
+  tocDesigns: async (): Promise<{ templates: TocDesign[]; default: string }> => {
+    const { data } = await apiClient.get(`/pm/toc-designs`)
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "classic",
+    }
+  },
+
+  /**
+   * Draw this cycle's contents page in one design.
+   *
+   * Uses the report's real sections, so a PM compares this document's own
+   * hierarchy rather than a mockup of someone else's. The long timeout is
+   * load-bearing: the engine launches a browser per render and the axios
+   * default would kill it.
+   */
+  previewToc: async (cycleId: string, design: string): Promise<TocPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/toc-preview`,
+      { design },
+      { timeout: 120000 },
+    )
+    return data
   },
 }
 

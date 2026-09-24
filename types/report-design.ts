@@ -90,6 +90,8 @@ export interface CompanyDesignDefault {
 export interface AnnualDesign {
   cycle_id: string
   cover_template_key: string | null
+  /** The cycle's OWN contents-design pick, null when it has never chosen. */
+  toc_template_key: string | null
   brand: BrandColors
   typography: Typography | null
   company_default: CompanyDesignDefault | null
@@ -111,6 +113,34 @@ export interface DesignSelection {
   cover_template_key?: string
   brand?: BrandColors
   typography?: Typography | null
+  /**
+   * Which of the five contents-page designs this report prints.
+   *
+   * Absent is not "the default" — it is the OPT-OUT. A report that has never
+   * chosen one renders the flat contents page every other report family still
+   * gets, so omitting this key is how the engine knows to leave the page
+   * alone. Set from the Create Design screen, not from the cover modal.
+   */
+  toc_template_key?: string
+}
+
+/** One contents-page design, as the engine that owns them describes it. */
+export interface TocDesign {
+  key: string
+  purpose: string
+  full_bleed: boolean
+  sub_page_numbers: boolean
+}
+
+/** A rendered preview of one design — one PNG data URI per sheet. */
+export interface TocPreview {
+  design: string
+  page_count: number
+  entries: number
+  depth: number
+  /** True when the folios drawn are illustrative rather than resolved. */
+  estimated_pages: boolean
+  pages: string[]
 }
 
 // Per-role size limits, matching the backend's report_typography._SIZE_RANGES.
