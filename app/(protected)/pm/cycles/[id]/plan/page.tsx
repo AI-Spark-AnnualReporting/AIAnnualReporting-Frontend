@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useState } from "react"
+import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -36,6 +36,7 @@ import { ConceptMessagesSummary } from "@/components/report/ConceptMessagesSumma
 import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
 import {
   useBuildPlan,
+  useDraftFindings,
   useLockPlan,
   usePMCycleSections,
   usePlan,
@@ -89,7 +90,23 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as PMDashboardData | undefined
 
-  if (planQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
+  // The builder is reached by consenting on the findings page, which locks the
+  // findings. Typing this address would otherwise walk straight past both the
+  // consent and any finding still unresolved, which is the whole point of the
+  // check — so an unconsented cycle is sent back.
+  const findingsQuery = useDraftFindings(cycleId)
+  const router = useRouter()
+  const consented = !!findingsQuery.data?.locked_at
+  useEffect(() => {
+    if (!findingsQuery.isLoading && !consented) {
+      router.replace(`/pm/cycles/${cycleId}/findings`)
+    }
+  }, [findingsQuery.isLoading, consented, router, cycleId])
+
+  if (planQuery.isLoading || sectionsQuery.isLoading || findingsQuery.isLoading) {
+    return <PageLoader />
+  }
+  if (!consented) return <PageLoader />
 
   const cycleName = pmData?.cycle?.cycle_name
   // Arabic cycles render section/theme titles right-to-left.

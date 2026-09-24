@@ -1,10 +1,19 @@
 "use client"
 
-import { use } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, ArrowRight, CheckCircle2, Loader2, ScanSearch } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useIsMutating, useQueryClient } from "@tanstack/react-query"
+import { ArrowLeft, ArrowRight, CheckCircle2, Loader2, Lock, ScanSearch } from "lucide-react"
 
-import { useBuildReadiness, useCheckDrafts, useDraftFindings } from "@/hooks/useReportBuilder"
+import {
+  useBuildReadiness,
+  useCheckDrafts,
+  useDraftFindings,
+  useLockDraftFindings,
+  FINDING_WRITE_KEY,
+} from "@/hooks/useReportBuilder"
+import { QUERY_KEYS } from "@/lib/constants"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader } from "@/components/ui/spinner"
@@ -12,6 +21,14 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { DraftFindingsPanel } from "@/components/report/DraftFindingsPanel"
 import { DraftCheckLoader } from "@/components/report/DraftCheckLoader"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { formatDateTime } from "@/lib/utils"
 
 /* What the analysis found, and the only route into the Report Builder.
@@ -25,15 +42,33 @@ export default function CycleFindingsPage({ params }: { params: Promise<{ id: st
   const { data: dash } = usePMCycleDashboard(id)
   const check = useCheckDrafts(id)
 
+  // Resolves are optimistic and queued, and deliberately do not write the
+  // server response back per call — a queued write returning mid-sequence
+  // would overwrite findings the PM has clicked since. Reconcile once, when
+  // the queue has drained.
+  const qc = useQueryClient()
+  const writing = useIsMutating({ mutationKey: FINDING_WRITE_KEY(id) })
+  const prevWriting = useRef(0)
+  useEffect(() => {
+    if (prevWriting.current > 0 && writing === 0) {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(id) })
+    }
+    prevWriting.current = writing
+  }, [writing, qc, id])
+
   if (isLoading) return <PageLoader />
 
   const findings = data?.findings ?? []
   const openCount = data?.open_count ?? 0
   const neverChecked = !data?.checked_at
+  // Past the consent the page is a record, not a workspace.
+  const locked = !!data?.locked_at
   const cycleName =
     (dash as { cycle?: { cycle_name?: string } } | undefined)?.cycle?.cycle_name ?? "This cycle"
 
-  const description = neverChecked
+  const description = locked
+    ? `${cycleName} — locked, and kept as a record of what was changed`
+    : neverChecked
     ? `${cycleName} — the drafts haven't been analyzed yet`
     : openCount > 0
       ? `${cycleName} — ${openCount} thing${openCount === 1 ? "" : "s"} to check before building`
@@ -57,32 +92,46 @@ export default function CycleFindingsPage({ params }: { params: Promise<{ id: st
           description={description}
           action={
             <>
-              <Button
-                variant="outline"
-                onClick={() => check.mutate()}
-                disabled={check.isPending}
-              >
-                {check.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ScanSearch className="mr-2 h-4 w-4" />
-                )}
-                {check.isPending ? "Analyzing…" : neverChecked ? "Analyze" : "Analyze again"}
-              </Button>
+              {!locked && (
+                <Button
+                  variant="outline"
+                  onClick={() => check.mutate()}
+                  disabled={check.isPending}
+                >
+                  {check.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ScanSearch className="mr-2 h-4 w-4" />
+                  )}
+                  {check.isPending ? "Analyzing…" : neverChecked ? "Analyze" : "Analyze again"}
+                </Button>
+              )}
               <OpenBuilderButton
                 cycleId={id}
                 canBuild={!!readiness?.can_build}
                 openCount={openCount}
+                locked={locked}
+                findingCount={findings.length}
               />
             </>
           }
         />
       </div>
 
-      {data?.checked_at && (
-        <p className="text-xs text-muted-foreground">
-          Last analyzed {formatDateTime(data.checked_at)}.
-        </p>
+      {locked ? (
+        <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+          <p className="text-xs text-slate-600">
+            Locked on {formatDateTime(data!.locked_at!)}. These findings are a
+            record — the report has been built from this text.
+          </p>
+        </div>
+      ) : (
+        data?.checked_at && (
+          <p className="text-xs text-muted-foreground">
+            Last analyzed {formatDateTime(data.checked_at)}.
+          </p>
+        )
       )}
 
       {findings.length === 0 ? (
@@ -96,33 +145,54 @@ export default function CycleFindingsPage({ params }: { params: Promise<{ id: st
           }
         />
       ) : (
-        <DraftFindingsPanel cycleId={id} findings={findings} />
+        <DraftFindingsPanel cycleId={id} findings={findings} locked={locked} />
       )}
     </div>
   )
 }
 
-/* Two gates. The cycle must be assemblable at all — sections resolved, every
-   department approved — and every finding must have been dealt with.
+/* Three states, in order of the PM's journey.
 
-   Nothing can deadlock here: "Looks right" clears a finding without touching
-   any text, so even a finding the PM disagrees with costs one click rather
-   than blocking the report. */
+   Blocked — findings still open, or the cycle is not assemblable. Nothing can
+   deadlock here: "Looks right" clears a finding without touching any text, so
+   even a finding the PM disagrees with costs one click rather than the report.
+
+   Ready — the consent. Confirming is the point of no return, so it is spelled
+   out rather than assumed.
+
+   Locked — straight through, no second consent. */
 function OpenBuilderButton({
   cycleId,
   canBuild,
   openCount,
+  locked,
+  findingCount,
 }: {
   cycleId: string
   canBuild: boolean
   openCount: number
+  locked: boolean
+  findingCount: number
 }) {
-  const blocked = !canBuild || openCount > 0
-  const reason = !canBuild
-    ? "Available once sections are resolved and every department is approved"
-    : `Handle all ${openCount} finding${openCount === 1 ? "" : "s"} first`
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const lock = useLockDraftFindings(cycleId)
 
-  if (blocked) {
+  if (locked) {
+    return (
+      <Link href={`/pm/cycles/${cycleId}/plan`}>
+        <Button>
+          Open Report Builder
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </Link>
+    )
+  }
+
+  if (!canBuild || openCount > 0) {
+    const reason = !canBuild
+      ? "Available once sections are resolved and every department is approved"
+      : `Handle all ${openCount} finding${openCount === 1 ? "" : "s"} first`
     return (
       <Button disabled title={reason}>
         Open Report Builder
@@ -130,12 +200,64 @@ function OpenBuilderButton({
       </Button>
     )
   }
+
+  const handled =
+    findingCount > 0
+      ? `You've handled all ${findingCount} finding${findingCount === 1 ? "" : "s"}. Opening the builder locks them.`
+      : "No problems were found in the drafts. Opening the builder locks this check."
+
   return (
-    <Link href={`/pm/cycles/${cycleId}/plan`}>
-      <Button>
+    <>
+      <Button onClick={() => setOpen(true)}>
         Open Report Builder
         <ArrowRight className="ml-2 h-4 w-4" />
       </Button>
-    </Link>
+
+      <Dialog open={open} onOpenChange={(next) => !lock.isPending && setOpen(next)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-4 w-4" />
+              Open the Report Builder?
+            </DialogTitle>
+            <DialogDescription className="space-y-3 pt-2 text-left">
+              <span className="block">{handled}</span>
+              <span className="block">
+                The builder writes each section from the departments&apos; text as
+                it stands right now. After this, changing a sentence here would no
+                longer reach the report — so the findings page becomes a read-only
+                record of what you changed.
+              </span>
+              <span className="block">
+                You won&apos;t be able to edit or remove sentences, undo a
+                decision, or run the analysis again for this cycle.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={lock.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                lock.mutate(undefined, {
+                  // Only on success: a failed lock must not land the PM in a
+                  // builder he never actually consented to.
+                  onSuccess: () => router.push(`/pm/cycles/${cycleId}/plan`),
+                })
+              }
+              disabled={lock.isPending}
+            >
+              {lock.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Open Report Builder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

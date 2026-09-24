@@ -107,6 +107,11 @@ export interface DraftFindingsResponse {
   // null means the check has never been run for this cycle — not the same as
   // "ran and found nothing".
   checked_at: string | null
+  // Set when the PM consented and opened the Report Builder. Non-null means the
+  // findings page is a read-only record: no more resolves, no re-running the
+  // check. One-way — there is no unlock.
+  locked_at: string | null
+  locked_by: string | null
 }
 
 export interface ResolveFindingPayload {
@@ -781,6 +786,15 @@ export const pmApi = {
   // distinguishes "nothing wrong" from "not looked yet".
   draftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/draft-findings`)
+    return data
+  },
+
+  // Record the PM's consent and close the findings. One-way, and the server
+  // refuses if any finding is still open.
+  lockDraftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/lock`,
+    )
     return data
   },
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Check, CheckCircle2, Loader2, Pencil, RotateCcw, Trash2, X } from "lucide-react"
+import { AlertTriangle, Check, CheckCircle2, Pencil, RotateCcw, Trash2, X } from "lucide-react"
 
 import { useResolveFinding } from "@/hooks/useReportBuilder"
 import type { DraftFinding, FindingSide } from "@/lib/api/pm"
@@ -31,6 +31,15 @@ const STATUS_NOTE: Record<DraftFinding["status"], string> = {
   corrected: "Corrected",
   removed: "Sentence removed",
   accepted: "Marked correct",
+}
+
+// A removal took text out of the report, so it reads as a deletion rather than
+// as a job done. The other two settled a finding without losing anything.
+const STATUS_TONE: Record<DraftFinding["status"], string> = {
+  open: "",
+  corrected: "text-emerald-700",
+  removed: "text-rose-600",
+  accepted: "text-emerald-700",
 }
 
 /* One sentence stating the disagreement in words, built from the values we now
@@ -67,20 +76,33 @@ function currentText(finding: DraftFinding, side: FindingSide): string {
   return side.sentence
 }
 
-/* Whether this side's text was actually changed, so the original is worth
-   showing underneath. "Accepted" changed nothing, so it is not. */
+/* Whether this side's sentence was replaced, so the original is worth showing
+   underneath. "Accepted" changed nothing, so it is not. */
 function wasRewritten(finding: DraftFinding, side: FindingSide): boolean {
   const res = finding.resolution
   if (!res || res.session_id !== side.session_id) return false
-  return res.action === "edited" || res.action === "removed"
+  return res.action === "edited"
+}
+
+/* Whether this side's sentence was taken out of the report entirely. */
+function wasRemoved(finding: DraftFinding, side: FindingSide): boolean {
+  const res = finding.resolution
+  if (!res || res.session_id !== side.session_id) return false
+  return res.action === "removed"
 }
 
 export function DraftFindingsPanel({
   cycleId,
   findings,
+  locked = false,
 }: {
   cycleId: string
   findings: DraftFinding[]
+  // Once the PM has consented and opened the builder this is a record, not a
+  // workspace: the findings and what he did to each still render in full, but
+  // nothing can be changed. The server refuses these writes too — hiding the
+  // buttons alone would leave the endpoints open.
+  locked?: boolean
 }) {
   const resolve = useResolveFinding(cycleId)
 
@@ -101,17 +123,17 @@ export function DraftFindingsPanel({
 
   const submitEdit = (finding: DraftFinding, side: FindingSide) => {
     if (!draftText.trim()) return
-    resolve.mutate(
-      {
-        findingId: finding.id,
-        payload: {
-          action: "edited",
-          session_id: side.session_id,
-          sentence: draftText.trim(),
-        },
+    resolve.mutate({
+      findingId: finding.id,
+      payload: {
+        action: "edited",
+        session_id: side.session_id,
+        sentence: draftText.trim(),
       },
-      { onSuccess: cancelEdit },
-    )
+    })
+    // Closed here rather than on the server's reply: the edit is already on
+    // screen, and the write is queued behind any earlier click.
+    cancelEdit()
   }
 
   const removeSentence = (finding: DraftFinding, side: FindingSide) =>
@@ -206,14 +228,10 @@ export function DraftFindingsPanel({
                               </button>
                               <button
                                 onClick={() => submitEdit(finding, side)}
-                                disabled={!draftText.trim() || resolve.isPending}
+                                disabled={!draftText.trim()}
                                 className="inline-flex items-center gap-1 rounded-lg bg-[#4040c8] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#3535a8] disabled:opacity-40"
                               >
-                                {resolve.isPending ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Check className="h-3 w-3" />
-                                )}
+                                <Check className="h-3 w-3" />
                                 Save
                               </button>
                             </div>
@@ -224,17 +242,26 @@ export function DraftFindingsPanel({
                                 sentence as it was when flagged — that is the
                                 audit record. What the PM wants to see is what
                                 the report says NOW, with the original kept
-                                underneath. */}
-                            <p className="mt-1.5 text-sm leading-relaxed text-slate-700">
-                              &ldquo;{currentText(finding, side)}&rdquo;
-                            </p>
-                            {wasRewritten(finding, side) && (
-                              <p className="mt-1 text-[11px] text-slate-400">
-                                {finding.resolution?.action === "removed"
-                                  ? "removed: "
-                                  : "was: "}
+                                underneath.
+
+                                A removed sentence is no longer in the report at
+                                all, so it gets no live line — only the struck
+                                record of what was taken out. */}
+                            {wasRemoved(finding, side) ? (
+                              <p className="mt-1.5 text-sm leading-relaxed text-slate-400 line-through">
                                 &ldquo;{side.sentence}&rdquo;
                               </p>
+                            ) : (
+                              <>
+                                <p className="mt-1.5 text-sm leading-relaxed text-slate-700">
+                                  &ldquo;{currentText(finding, side)}&rdquo;
+                                </p>
+                                {wasRewritten(finding, side) && (
+                                  <p className="mt-1 text-[11px] text-slate-400">
+                                    was: &ldquo;{side.sentence}&rdquo;
+                                  </p>
+                                )}
+                              </>
                             )}
                             {side.question && (
                               <p className="mt-1 text-[11px] text-slate-400">
@@ -244,11 +271,10 @@ export function DraftFindingsPanel({
                           </>
                         )}
 
-                        {isOpen && !isEditing && (
+                        {isOpen && !isEditing && !locked && (
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button
                               onClick={() => startEdit(finding, side)}
-                              disabled={resolve.isPending}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                             >
                               <Pencil className="h-3 w-3" /> Edit
@@ -259,8 +285,7 @@ export function DraftFindingsPanel({
                             {finding.kind === "invented_claim" && (
                               <button
                                 onClick={() => removeSentence(finding, side)}
-                                disabled={resolve.isPending}
-                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40"
+                                  className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40"
                               >
                                 <Trash2 className="h-3 w-3" /> Remove sentence
                               </button>
@@ -273,26 +298,28 @@ export function DraftFindingsPanel({
                 </div>
 
                 {isOpen ? (
+                  !locked && (
                   <button
                     onClick={() => accept(finding)}
-                    disabled={resolve.isPending}
                     className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                   >
                     <Check className="h-3 w-3" /> Looks right
                   </button>
+                  )
                 ) : (
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <p className="text-[11px] font-semibold text-emerald-700">
+                    <p className={cn("text-[11px] font-semibold", STATUS_TONE[finding.status])}>
                       {STATUS_NOTE[finding.status]}
                       {finding.resolution?.at ? ` · ${formatDateTime(finding.resolution.at)}` : ""}
                     </p>
-                    <button
-                      onClick={() => undo(finding)}
-                      disabled={resolve.isPending}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                    >
-                      <RotateCcw className="h-3 w-3" /> Undo
-                    </button>
+                    {!locked && (
+                      <button
+                        onClick={() => undo(finding)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <RotateCcw className="h-3 w-3" /> Undo
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
