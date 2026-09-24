@@ -15,12 +15,15 @@ import { ArrowLeft, Code2, Layers, RefreshCw } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageLoader } from "@/components/ui/spinner"
 import { useCycleDesign, useExtractSection, useSetTemplate } from "@/hooks/useCreateDesign"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { annualDesignApi } from "@/lib/api/annual-design"
 import { revokeSection } from "@/lib/createDesignCache"
 
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
@@ -28,6 +31,7 @@ import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
 import { PageRenderPanel } from "./PageRenderPanel"
 import { PreviewAllDialog } from "./PreviewAllDialog"
 import { TemplateCardGrid } from "./TemplateCardGrid"
+import { TocDesignPanel } from "./TocDesignPanel"
 import { UnitJsonPanel } from "./UnitJsonPanel"
 
 // Mirrors the engine's template list. Used only when the per-page
@@ -53,6 +57,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const extract = useExtractSection(cycleId)
 
   const [selected, setSelected] = useState<RailSelection | null>(null)
+  // The contents page is a REPORT-level choice, so it gets its own bit of
+  // state rather than a sentinel section code threaded through every lookup
+  // below — a fake code would have to be excluded from the rail, the counts,
+  // the extract run and the preview, and each of those is a place to forget.
+  const [tocOpen, setTocOpen] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [previewAllOpen, setPreviewAllOpen] = useState(false)
@@ -62,6 +71,22 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // Set once the automatic run has had its go. Without it a section that
   // failed would keep `needsRun` true and restart the overlay forever.
   const [autoRunSettled, setAutoRunSettled] = useState(false)
+
+  // The report-level design record, for the contents picker. Separate from
+  // useCycleDesign, which is the per-SECTION envelope — these are different
+  // records in different tables and conflating them is how the contents choice
+  // would end up stored per page.
+  const qc = useQueryClient()
+  const designKey = ["pm", "cycle", cycleId, "report-design"]
+  const reportDesign = useQuery({
+    queryKey: designKey,
+    queryFn: () => annualDesignApi.get(cycleId),
+  })
+  const saveToc = useMutation({
+    mutationFn: (key: string) =>
+      annualDesignApi.save(cycleId, { toc_template_key: key }),
+    onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
+  })
 
   const { data: pmData } = usePMCycleDashboard(cycleId)
   const cycleName = (pmData as { cycle?: { cycle_name?: string } } | undefined)?.cycle
@@ -160,9 +185,14 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
             Create Design{cycleName ? ` — ${cycleName}` : ""}
           </h1>
           <p className="text-xs text-muted-foreground">
+            {/* "sections", not "pages". A section is designed once and the
+                renderer flows it onto however many sheets it needs, so the
+                only count that means anything here is sections — calling them
+                pages invited a comparison with the sheet counter on the right,
+                which counts something else entirely. */}
             {data.units_chosen === data.units_total && data.units_total > 0
-              ? `All ${data.units_total} pages laid out · ${data.units_reviewed} reviewed`
-              : `${data.units_chosen} of ${data.units_total} pages have a template`}
+              ? `All ${data.units_total} sections laid out · ${data.units_reviewed} reviewed`
+              : `${data.units_chosen} of ${data.units_total} sections have a design`}
           </p>
         </div>
         <Button
@@ -209,20 +239,32 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
           <div className="flex-1 overflow-y-auto">
             <CreateDesignRail
               sections={data.sections}
-              selected={active}
+              selected={tocOpen ? null : active}
               onSelect={(next) => {
+                setTocOpen(false)
                 setSelected(next)
                 setPreviewKey(null)
               }}
               busyCode={extract.isPending ? extract.variables?.sectionCode : null}
               failed={failures}
               onReExtract={reExtract}
+              tocActive={tocOpen}
+              tocDesign={reportDesign.data?.toc_template_key ?? null}
+              onSelectToc={() => setTocOpen(true)}
             />
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-          {!section || !unit ? (
+          {tocOpen ? (
+            <TocDesignPanel
+              cycleId={cycleId}
+              chosen={reportDesign.data?.toc_template_key ?? null}
+              locked={reportDesign.data?.locked ?? false}
+              saving={saveToc.isPending}
+              onChoose={(key) => saveToc.mutate(key)}
+            />
+          ) : !section || !unit ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-slate-400">
               {eligible.length
                 ? "Pick a section on the left."

@@ -14,10 +14,9 @@
  */
 
 import {
-  Check, ChevronRight, Circle, CircleAlert, CircleDot, Loader2, TriangleAlert,
+  Check, Circle, CircleAlert, CircleDot, ListTree, Loader2,
+  TriangleAlert,
 } from "lucide-react"
-import { useState } from "react"
-
 import type { DesignSection } from "@/lib/api/createDesign"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +25,15 @@ import { TEMPLATE_NAMES } from "./TemplateMini"
 export interface RailSelection {
   code: string
   unit: number
+}
+
+/** Mirrors TocDesignPanel's NAMES — the rail only needs the noun. */
+const TOC_DESIGN_NAMES: Record<string, string> = {
+  classic: "Classic",
+  editorial: "Editorial",
+  modular: "Modular",
+  minimal: "Minimal",
+  brand_band: "Brand Band",
 }
 
 function sectionState(section: DesignSection) {
@@ -59,6 +67,9 @@ export function CreateDesignRail({
   busyCode,
   failed,
   onReExtract,
+  tocActive,
+  tocDesign,
+  onSelectToc,
 }: {
   sections: DesignSection[]
   selected: RailSelection | null
@@ -66,30 +77,56 @@ export function CreateDesignRail({
   busyCode?: string | null
   failed?: Record<string, string>
   onReExtract?: (sectionCode: string) => void
+  /**
+   * The contents page is a REPORT-level choice, so it sits above the section
+   * list and stays out of RailSelection — giving it a made-up section_code
+   * would put a section that does not exist into every lookup on this screen.
+   */
+  tocActive?: boolean
+  tocDesign?: string | null
+  onSelectToc?: () => void
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const ordered = [...sections].sort((a, b) => a.order - b.order)
-  // The section holding the selection is always open. Derived rather than
-  // stored, so it cannot drift out of sync with the selection.
-  const isOpen = (code: string) => expanded.has(code) || selected?.code === code
-
-  const open_ = (code: string) =>
-    setExpanded((prev) => (prev.has(code) ? prev : new Set(prev).add(code)))
-
-  const toggle = (code: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(code)) next.delete(code)
-      else next.add(code)
-      return next
-    })
-
+  // The blueprint carries a `table_of_contents` section whose content is a
+  // placeholder — the exporters draw the real contents page themselves. It has
+  // always been ineligible for the page designer and showed here greyed out as
+  // "Not laid out", which was harmless until the Contents picker appeared
+  // directly above it: two rows with the same name, one of them dead. Dropped
+  // from the list when the picker is present, since that is now its home.
+  const ordered = [...sections]
+    .filter((s) => !(onSelectToc && s.section_code === "table_of_contents"))
+    .sort((a, b) => a.order - b.order)
   return (
     <div className="space-y-0.5 p-3">
+      {onSelectToc && (
+        <>
+          <button
+            type="button"
+            onClick={onSelectToc}
+            className={cn(
+              "mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition",
+              tocActive ? "bg-indigo-50 text-indigo-900" : "hover:bg-slate-50",
+            )}
+          >
+            <ListTree
+              className={cn(
+                "h-4 w-4 shrink-0",
+                tocActive ? "text-indigo-500" : "text-slate-400",
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">
+                Contents page
+              </span>
+              <span className="block truncate text-[11px] text-slate-500">
+                {tocDesign ? TOC_DESIGN_NAMES[tocDesign] ?? tocDesign : "Not chosen"}
+              </span>
+            </span>
+          </button>
+          <div className="mb-2 border-b" />
+        </>
+      )}
       {ordered.map((section) => {
         const units = section.design?.units ?? []
-        const multi = units.length > 1
-        const open = isOpen(section.section_code)
         const state = failed?.[section.section_code]
           ? "failed"
           : sectionState(section)
@@ -106,21 +143,7 @@ export function CreateDesignRail({
                 !section.eligible && "opacity-60",
               )}
             >
-              {multi ? (
-                <button
-                  type="button"
-                  onClick={() => toggle(section.section_code)}
-                  aria-expanded={open}
-                  aria-label={open ? `Hide ${section.title} pages` : `Show ${section.title} pages`}
-                  className="-m-1 shrink-0 rounded p-1 text-slate-400 transition-colors hover:text-slate-700"
-                >
-                  <ChevronRight
-                    className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
-                  />
-                </button>
-              ) : (
-                <span className="w-3.5 shrink-0" aria-hidden />
-              )}
+              <span className="w-3.5 shrink-0" aria-hidden />
 
               <StatusIcon state={state} busy={busy} />
 
@@ -129,24 +152,7 @@ export function CreateDesignRail({
                 disabled={!section.eligible}
                 onClick={() => {
                   if (!section.eligible) return
-                  if (multi) {
-                    // OPEN, never toggle. The title is the row's primary hit
-                    // target and the chevron is the only control meant to
-                    // close; making the title flip meant clicking the section
-                    // you were already working in collapsed its pages and
-                    // threw the selection back to page 1.
-                    open_(section.section_code)
-                    // Keep the page you are already on within this section.
-                    onSelect({
-                      code: section.section_code,
-                      unit:
-                        selected?.code === section.section_code
-                          ? selected.unit
-                          : units[0]?.index ?? 1,
-                    })
-                  } else {
-                    onSelect({ code: section.section_code, unit: only?.index ?? 1 })
-                  }
+                  onSelect({ code: section.section_code, unit: only?.index ?? 1 })
                 }}
                 title={section.ineligible_reason ?? undefined}
                 className={cn(
@@ -178,11 +184,6 @@ export function CreateDesignRail({
                 >
                   Retry
                 </button>
-              ) : multi ? (
-                <span className="shrink-0 text-[11px] text-slate-400">
-                  {units.filter((u) => u.template_key && !u.template_auto).length} of{" "}
-                  {units.length} reviewed
-                </span>
               ) : only?.template_key ? (
                 <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
                   {TEMPLATE_NAMES[only.template_key] ?? only.template_key}
@@ -190,47 +191,10 @@ export function CreateDesignRail({
               ) : null}
             </div>
 
-            {multi && open &&
-              units.map((unit) => {
-                const unitActive = active && selected?.unit === unit.index
-                return (
-                  <button
-                    key={unit.index}
-                    type="button"
-                    onClick={() => onSelect({ code: section.section_code, unit: unit.index })}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-lg py-1.5 pe-3 ps-[2.65rem] text-start transition-colors",
-                      unitActive ? "bg-slate-100" : "hover:bg-slate-50",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 shrink-0 rounded-full",
-                        // Solid = a person picked it. Hollow = the art
-                        // director picked it and nobody has looked yet. Both
-                        // are "chosen"; only one has been reviewed.
-                        !unit.template_key
-                          ? "bg-slate-300"
-                          : unit.template_auto
-                            ? "border border-emerald-500 bg-white"
-                            : "bg-emerald-500",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-slate-700">
-                      {unit.title}
-                      <span className="ms-1.5 text-slate-400">
-                        · {unit.index}/{unit.total}
-                      </span>
-                    </span>
-                    {unit.template_key && (
-                      <span className="shrink-0 text-[11px] text-indigo-600">
-                        {TEMPLATE_NAMES[unit.template_key] ?? unit.template_key}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
+            {/* No child rows. A section is ONE design now, and the sheets it
+                runs to are shown in the panel on the right — the rail used to
+                list "parts" that looked like sheets but were not, which is the
+                confusion this removal exists to end. */}
           </div>
         )
       })}
