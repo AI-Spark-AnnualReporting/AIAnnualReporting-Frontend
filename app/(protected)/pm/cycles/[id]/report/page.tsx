@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ChevronDown,
@@ -66,6 +67,7 @@ interface DashboardData {
 }
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
+  const router = useRouter()
   const qc = useQueryClient()
   const reportQuery = useFinalReport(cycleId)
   // The document as the engine will print it. Only once there is something to
@@ -117,11 +119,23 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   return (
     <div className="-m-8 flex h-[calc(100vh-72px)] flex-col overflow-hidden bg-background print:m-0 print:block print:h-auto print:overflow-visible">
       <div className="flex items-center gap-3 px-5 py-3 border-b bg-card shrink-0 print:hidden">
-        <Link href={`/pm/cycles/${cycleId}/build`}>
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+        {/* A back arrow goes BACK. As a Link it pushed a new entry, so
+            builder → report → arrow → builder left the report sitting in
+            history, and the builder's own back arrow returned to it. Falls
+            back to the builder for a direct link or a reload, where there is
+            no in-app history to return to. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="Go back"
+          onClick={() => {
+            if (window.history.length > 1) router.back()
+            else router.push(`/pm/cycles/${cycleId}/build`)
+          }}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
         <div className="flex-1 min-w-0">
           <h1 className="font-semibold text-sm truncate">
             Final Report

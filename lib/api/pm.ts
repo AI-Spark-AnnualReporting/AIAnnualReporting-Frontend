@@ -819,7 +819,7 @@ export const pmApi = {
     const formData = new FormData()
     formData.append("file", file)
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/attachment`,
       formData,
       { headers: { "Content-Type": undefined }, timeout: 120000 },
     )
@@ -834,28 +834,8 @@ export const pmApi = {
     content: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/extract-content`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/extract-content`,
       { content },
-    )
-    return data.section
-  },
-
-  lockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/lock`,
-    )
-    return data.section
-  },
-
-  unlockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/unlock`,
     )
     return data.section
   },
@@ -865,7 +845,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.delete<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/attachment`,
     )
     return data.section
   },
@@ -878,7 +858,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/generate`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/generate`,
       undefined,
       { timeout: 120000 },
     )
@@ -893,7 +873,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/analyze`,
       undefined,
       { timeout: 120000 },
     )
@@ -908,7 +888,7 @@ export const pmApi = {
     content: string | null,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/analyze-content`,
       { content },
     )
     return data.section
@@ -925,7 +905,7 @@ export const pmApi = {
     content: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/content`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/content`,
       { content },
     )
     return data.section
@@ -941,7 +921,7 @@ export const pmApi = {
     instruction: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/refine`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/refine`,
       { instruction },
       { timeout: 120000 },
     )
@@ -956,7 +936,7 @@ export const pmApi = {
     content: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/manual-content`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/manual-content`,
       { content },
     )
     return data.section
@@ -971,10 +951,11 @@ export const pmApi = {
     return data.plan ?? data
   },
 
-  // refresh=true regenerates and overwrites manual edits.
-  buildPlan: async (cycleId: string, refresh = false): Promise<PlanResponse> => {
+  // Builds the plan once. Idempotent — a cycle that already has a plan gets the
+  // stored one back, untouched.
+  buildPlan: async (cycleId: string): Promise<PlanResponse> => {
     const { data } = await apiClient.post(
-      `/pm/cycles/${cycleId}/plan${refresh ? "?refresh=true" : ""}`,
+      `/pm/cycles/${cycleId}/plan`,
       undefined,
       { timeout: 180000 }, // two LLM passes — generous timeout
     )
@@ -1018,7 +999,7 @@ export const pmApi = {
     departmentCodes: string[],
   ): Promise<PlanResponse> => {
     const { data } = await apiClient.put(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/feeders`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/feeders`,
       { departments: departmentCodes },
     )
     return data.plan ?? data
@@ -1033,7 +1014,7 @@ export const pmApi = {
     mode: SectionMode,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/source-mode`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/source-mode`,
       { mode },
     )
     return data.section
@@ -1060,6 +1041,23 @@ export const pmApi = {
     return data.sections ?? data
   },
 
+  // A PM-authored section that isn't in the catalogue. `mode` picks the source:
+  // "generate" writes it from `feeders` (the departments; may be empty, the card
+  // then flags "Needs a source"), "extract" means a document gets uploaded later
+  // and feeders are ignored. Both are switchable afterwards from the card.
+  // `name` doubles as the section_code server-side, so it is capped at 50 chars
+  // and cannot contain / \ or %.
+  addCustomSection: async (
+    cycleId: string,
+    payload: { name: string; feeders: string[]; mode: "generate" | "extract" },
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/sections/custom`,
+      payload,
+    )
+    return data.sections ?? data
+  },
+
   // `force=true` lets the PM remove required sections after confirming the
   // warning dialog. Locked sections still 409 either way — caller must unlock
   // first.
@@ -1069,7 +1067,7 @@ export const pmApi = {
     force = false,
   ): Promise<CycleReportSection[]> => {
     const { data } = await apiClient.delete(
-      `/pm/cycles/${cycleId}/sections/optional/${sectionCode}${force ? "?force=true" : ""}`,
+      `/pm/cycles/${cycleId}/sections/optional/${encodeURIComponent(sectionCode)}${force ? "?force=true" : ""}`,
     )
     return data.sections ?? data
   },

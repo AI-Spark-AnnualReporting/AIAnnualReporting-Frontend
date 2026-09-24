@@ -1,14 +1,14 @@
-import {
-  useIsMutating,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
+import {
+  addSubsectionInstruction,
+  insertSubsection,
+  type Placement,
+} from "@/lib/sectionOutline"
 import type {
   ContentLanguage,
   CycleReportSection,
@@ -115,7 +115,7 @@ export function useDraftAvailability(
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash
 // if handed an object child.
-type MutationError = {
+export type MutationError = {
   message?: unknown
   // HTTP status, set by the apiClient error normalizer. Callers that treat a
   // specific code as a state (e.g. 409 = locked) read it from here.
@@ -164,7 +164,7 @@ function patchSectionInList(
   qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
 }
 
-function readError(err: MutationError, fallback: string): string {
+export function readError(err: MutationError, fallback: string): string {
   const candidate = err?.message ?? err?.response?.data?.detail
   if (typeof candidate === "string" && candidate.trim()) return candidate
   return fallback
@@ -204,32 +204,6 @@ export function useSetExtractContent(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save content")),
-  })
-}
-
-export function useLockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.lockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section locked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to lock section")),
-  })
-}
-
-export function useUnlockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.unlockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section unlocked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to unlock section")),
   })
 }
 
@@ -391,6 +365,75 @@ export function useRefineSection(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Refinement failed")),
+  })
+}
+
+// Add one subsection to a section.
+//
+// Two different operations behind one call, because a subsection is a heading
+// in the body and the two kinds of section own their bodies differently:
+//
+//   generate / analyze — refine rewrites the whole body, so the AI writes the
+//     new subsection's prose from the department material and places it where
+//     the instruction says. Rule 4 of the refiner prompt reproduces every other
+//     heading verbatim, so nothing else moves.
+//
+//   manual / extract — refine refuses these modes outright; the PM owns the
+//     text. The heading is spliced into the body and they write under it.
+//
+// The caller passes the section itself rather than a code, because the branch
+// and the splice both need its mode and its current content.
+export function useAddSubsection(cycleId: string) {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      section,
+      name,
+      placement,
+    }: {
+      section: CycleReportSection
+      name: string
+      placement: Placement
+    }) => {
+      const sectionCode = section.section_code
+
+      // pmApi directly rather than the useRefineSection / useSaveManualContent
+      // wrappers: each announces its own outcome ("Section saved", "Refinement
+      // failed"), which for one click of "Add" is either a second toast or the
+      // wrong description of what happened. Going under them lets this hook say
+      // one true thing, once, on both paths. The cache patch they do is the
+      // line below.
+      const saved =
+        section.mode === "generate" || section.mode === "analyze"
+          ? await pmApi.refineSection(
+              cycleId,
+              sectionCode,
+              addSubsectionInstruction(name, placement),
+            )
+          : section.mode === "extract"
+            ? await pmApi.setExtractContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
+            : await pmApi.saveManualContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
+
+      patchSectionInList(qc, cycleId, saved)
+      return saved
+    },
+    onSuccess: () => {
+      // The refetch is what makes the rail's new subsection row appear without
+      // a reload — the parse reads whatever content came back.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      toast.success("Subsection added")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not add the subsection")),
   })
 }
 
@@ -575,12 +618,12 @@ function setSectionsCache(
   )
 }
 
-// Generate or regenerate the plan. Backend runs two LLM passes.
+// Generate the plan. Backend runs two LLM passes. There is no regenerate —
+// the plan is built once, then edited by hand.
 export function useBuildPlan(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ refresh = false }: { refresh?: boolean } = {}) =>
-      pmApi.buildPlan(cycleId, refresh),
+    mutationFn: () => pmApi.buildPlan(cycleId),
     onSuccess: (plan) => {
       setPlanCache(qc, cycleId, plan)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
@@ -614,9 +657,12 @@ export function useLockPlan(cycleId: string) {
   return useMutation({
     mutationFn: () => pmApi.lockPlan(cycleId),
     onSuccess: (plan) => {
+      // No success toast: the only caller is Start Building, whose loader is
+      // already on screen ticking "Locking the report plan" as this resolves.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Sections locked")
     },
+    // The error toast stays — StartBuildingAction aborts the run on a failed
+    // lock and relies on this to say why.
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to lock sections")),
   })
@@ -682,20 +728,6 @@ export function useSetSourceMode(cycleId: string) {
 
 const SET_FEEDERS_KEY = (cycleId: string) => ["setFeeders", cycleId] as const
 
-// True while THIS section's feeder write is in flight, so the card can dim its
-// source badge. Keyed off the mutation's own variables — cheaper than threading
-// pending state down from the picker that owns the mutation.
-export function useIsSettingFeeders(cycleId: string, sectionCode: string) {
-  return (
-    useIsMutating({
-      mutationKey: SET_FEEDERS_KEY(cycleId),
-      predicate: (m) =>
-        (m.state.variables as { sectionCode?: string } | undefined)
-          ?.sectionCode === sectionCode,
-    }) > 0
-  )
-}
-
 export function useSetFeeders(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -752,8 +784,9 @@ export function useSetFeeders(cycleId: string) {
       // rename has shipped (was `department_codes` on the server, silently
       // dropping our `departments` key). Cache write is safe again; matches
       // the optimistic patch on the happy path.
+      // No toast: the only caller is the Sections step's batch save, which
+      // reports once for the whole set. Toasting here fired once per section.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Feeders updated")
     },
     onError: (err: MutationError, _vars, context) => {
       if (context?.previous) {
@@ -848,6 +881,28 @@ export function useAddOptional(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to add section")),
+  })
+}
+
+// A section the PM invents, rather than one picked from the catalogue. Same
+// cache handling as useAddOptional — the response is the full section list.
+export function useAddCustomSection(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      name: string
+      feeders: string[]
+      mode: "generate" | "extract"
+    }) => pmApi.addCustomSection(cycleId, payload),
+    onSuccess: (sections) => {
+      setSectionsCache(qc, cycleId, sections)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+      toast.success("Section added")
+    },
+    // No error toast: every failure here is about the name or the departments
+    // the PM just typed, and the dialog shows it inline beside that field. A
+    // toast in the far corner left them hunting for what to change.
   })
 }
 

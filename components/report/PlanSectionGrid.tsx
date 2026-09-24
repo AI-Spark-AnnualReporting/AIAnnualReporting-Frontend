@@ -21,15 +21,11 @@ import { useState } from "react"
 import { AlertCircle, CheckCircle2, GripVertical, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import {
-  useRemoveOptional,
-  useReorderSections,
-  useSetSourceMode,
-  useIsSettingFeeders,
-} from "@/hooks/useReportBuilder"
+import { useRemoveOptional, useReorderSections } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import type { CycleReportSection, FeederMapEntry } from "@/types"
+import type { PendingSourceChange } from "@/lib/pendingSectionSources"
 import { FeederPicker, type FeederDepartment } from "./FeederPicker"
 
 interface PlanSectionGridProps {
@@ -37,6 +33,8 @@ interface PlanSectionGridProps {
   sections: CycleReportSection[]
   feeders: FeederMapEntry[]
   departments: FeederDepartment[]
+  /** Report a source edit upward; the step saves them all on Continue. */
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
   /** Arabic cycles render section titles right-to-left. */
   isRtl?: boolean
@@ -47,6 +45,7 @@ export function PlanSectionGrid({
   sections,
   feeders,
   departments,
+  onPendingChange,
   readOnly,
   isRtl,
 }: PlanSectionGridProps) {
@@ -85,6 +84,8 @@ export function PlanSectionGrid({
       <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {sections.map((s, i) => {
+            // `feeders` already carries any unsaved edits (applyPending runs
+            // once at the top of the step), so this is what the PM sees.
             const entry = feederByCode.get(s.section_code)
             const effectiveMode = entry?.mode ?? s.mode
             const isExtract = effectiveMode === "extract"
@@ -101,6 +102,7 @@ export function PlanSectionGrid({
                 isAnalyze={isAnalyze}
                 departments={departments}
                 deptByCode={deptByCode}
+                onPendingChange={onPendingChange}
                 readOnly={readOnly}
                 isRtl={isRtl}
               />
@@ -122,6 +124,7 @@ function SectionTile({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
   isRtl,
 }: {
@@ -134,6 +137,7 @@ function SectionTile({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
   isRtl?: boolean
 }) {
@@ -223,7 +227,6 @@ function SectionTile({
             )}
           </div>
           <FeederArea
-            cycleId={cycleId}
             section={section}
             feederCodes={feederCodes}
             documentUploaded={documentUploaded}
@@ -231,6 +234,7 @@ function SectionTile({
             isAnalyze={isAnalyze}
             departments={departments}
             deptByCode={deptByCode}
+            onPendingChange={onPendingChange}
             readOnly={readOnly}
           />
         </div>
@@ -242,7 +246,6 @@ function SectionTile({
 }
 
 function FeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -250,9 +253,9 @@ function FeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -260,6 +263,7 @@ function FeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
   // Manual sections (PM writes/uploads directly) — no sources to assign.
@@ -284,7 +288,6 @@ function FeederArea({
   // analyze and generate are department-based.
   return (
     <SourcesFeederArea
-      cycleId={cycleId}
       section={section}
       feederCodes={feederCodes}
       documentUploaded={documentUploaded}
@@ -292,16 +295,16 @@ function FeederArea({
       isAnalyze={isAnalyze}
       departments={departments}
       deptByCode={deptByCode}
+      onPendingChange={onPendingChange}
       readOnly={readOnly}
     />
   )
 }
 
-// One dropdown holds all three sources: department feeders (checkboxes), an
-// "Upload document later" toggle (→ extract mode), and an "Analyze mode" toggle
-// (→ analyze mode, keeps department feeders). Modes are mutually exclusive.
+// One dropdown holds the sources: department feeders (checkboxes) and an
+// "Upload document later" toggle (→ extract mode). Neither is written here —
+// both are reported upward and saved together when the PM continues.
 function SourcesFeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -309,9 +312,9 @@ function SourcesFeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -319,11 +322,9 @@ function SourcesFeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
-  const setSourceMode = useSetSourceMode(cycleId)
-  const saving =
-    useIsSettingFeeders(cycleId, section.section_code) || setSourceMode.isPending
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
@@ -389,9 +390,11 @@ function SourcesFeederArea({
 
   return (
     <FeederPicker
-      cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
+      onFeedersChange={(sectionCode, departmentCodes) =>
+        onPendingChange(sectionCode, { feeders: departmentCodes })
+      }
       // An AI-written section keeps its departments live even in extract mode:
       // the two sources are a reversible choice, and clicking a department flips
       // the section back to generate (the picker sequences that). Only a section
@@ -416,13 +419,13 @@ function SourcesFeederArea({
           ? undefined
           : {
               checked: isExtract,
-              pending: setSourceMode.isPending,
-              // mutateAsync + return: the picker awaits this before writing
-              // feeders, since the switch clears them server-side.
+              // Switching to extract clears feeders server-side, so the local
+              // edit clears them too — what the card shows is then exactly what
+              // the save will produce.
               onChange: (next) =>
-                setSourceMode.mutateAsync({
-                  sectionCode: section.section_code,
+                onPendingChange(section.section_code, {
                   mode: next ? "extract" : "generate",
+                  ...(next ? { feeders: [] } : {}),
                 }),
             }
       }
@@ -431,7 +434,6 @@ function SourcesFeederArea({
         type="button"
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
-          saving && "opacity-50",
           showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",

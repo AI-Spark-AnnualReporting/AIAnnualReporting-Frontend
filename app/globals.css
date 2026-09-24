@@ -225,3 +225,37 @@ body {
 .btn:disabled:hover, .btn[disabled]:hover { transform: none; }
 .bp:disabled:hover, .bp[disabled]:hover { background: #4040C8; box-shadow: none; }
 .bs:disabled:hover, .bs[disabled]:hover { background: #fff; border-color: #E2E4F0; color: #5A6080; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   AI loading screen — ported from Centriton's AiLoadingScreen so the long
+   waits in both products look like the same product. Keyframe names are kept
+   identical to theirs so the two can be diffed.
+   ───────────────────────────────────────────────────────────────────────── */
+@keyframes onb-rise {
+  from { opacity: 0; transform: translateY(16px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes onb-float {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(26px, -22px); }
+}
+@keyframes onb-float2 {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-24px, 18px); }
+}
+@keyframes onb-sheen {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes onb-ring {
+  0%   { transform: scale(.6); opacity: .55; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes dpulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .3; }
+}
+@keyframes onb-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(365%); }
+}

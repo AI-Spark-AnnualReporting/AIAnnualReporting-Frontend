@@ -7,8 +7,6 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
-  Lock,
-  LockOpen,
   PenLine,
   Pencil,
   RefreshCw,
@@ -23,7 +21,6 @@ import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/LockedBanner"
 import {
   isAssistedStatement,
   StatementSourcePicker,
@@ -34,12 +31,10 @@ import {
   useAttachUpload,
   useDraftAvailability,
   useDraftStatement,
-  useLockSection,
   usePreviousManualSections,
   useRemoveAttachment,
   useSaveManualContent,
   useSetExtractContent,
-  useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { useAuth } from "@/contexts/AuthContext"
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils"
@@ -51,19 +46,22 @@ import type { ContentLanguage, CycleReportSection } from "@/types"
 // `extract` (financial statements, notes, auditor's report) — share this one
 // panel. Both accept EITHER input: drop a document and the backend returns its
 // extracted text in `section.content`, or write the body by hand. Either one
-// alone is enough to save and lock; an attachment is never required.
+// alone is enough to save; an attachment is never required.
 //
 // Either way the body is Markdown — the extractor emits it, and the PM edits it
 // through the same pencil-and-preview editor the AI-written sections use
 // (SectionBodyEditor), so there is one editing model across the report.
 //
 // PDF is excluded on purpose — these sections feed their text layer to the AI
-// agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS.
+// agent, and scanned PDFs extract poorly. Matches EXTRACT_TEXT_EXTENSIONS on
+// the backend, which is the list that actually decides: anything missing here
+// is simply unpickable, even though the server would have taken it.
 const ACCEPT = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
     ".docx",
   ],
   "application/msword": [".doc"],
+  "text/plain": [".txt"],
 }
 
 // What an assisted statement's panel is showing. "auto" means "whatever the
@@ -85,7 +83,6 @@ export function ContentSection({
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
-  const isLocked = section.status === "locked"
   const attachment = section.attachment
   const saved = section.content ?? ""
   // Both content routes behave identically now, but each mode keeps writing to
@@ -103,7 +100,6 @@ export function ContentSection({
   // previous-cycle pre-fill. Non-null exactly while that unconfirmed text is on
   // screen, which is what the pre-fill notice keys off too.
   const [seed, setSeed] = useState<string | null>(null)
-  const [unlockOpen, setUnlockOpen] = useState(false)
   // Wrong-language guard for uploads: verify the dropped file's language BEFORE
   // uploading, so a source in the wrong language is never sent.
   const [fileLangWarning, setFileLangWarning] = useState<string | null>(null)
@@ -134,7 +130,7 @@ export function ContentSection({
       : null
 
   // Close the editor whenever the server's content moves underneath it — an
-  // upload's extraction, a Remove, an unlock, or our own save's echo. Whatever
+  // upload's extraction, a Remove, or our own save's echo. Whatever
   // is in the textarea was written against text that no longer exists, and an
   // extraction in particular must never be overwritten by a draft that predates
   // it. React's "store previous value" pattern, not an effect.
@@ -164,8 +160,6 @@ export function ContentSection({
   const saveExtract = useSetExtractContent(cycleId)
   const saveManual = useSaveManualContent(cycleId)
   const save = isExtract ? saveExtract : saveManual
-  const lock = useLockSection(cycleId)
-  const unlock = useUnlockSection(cycleId)
   const remove = useRemoveAttachment(cycleId)
   const drafter = useDraftStatement(cycleId)
 
@@ -204,13 +198,12 @@ export function ContentSection({
 
   // Can this statement be drafted at all? Asked once the picker is actually on
   // screen, and only for the two assisted codes — never on a plain manual
-  // section, never on an extract one, never on a locked one, and never merely
-  // because this panel mounted. Cached per section, so moving between the
-  // picker and the editor doesn't re-ask.
+  // section, and never merely because this panel mounted. Cached per section,
+  // so moving between the picker and the editor doesn't re-ask.
   const availability = useDraftAvailability(
     cycleId,
     sectionCode,
-    assisted && !isLocked && pane === "picker",
+    assisted && pane === "picker",
   )
 
   // Unknown until it answers, and the picker holds its cards until then rather
@@ -317,7 +310,6 @@ export function ContentSection({
   const busy =
     uploading ||
     save.isPending ||
-    lock.isPending ||
     remove.isPending ||
     drafter.isPending
 
@@ -346,7 +338,7 @@ export function ContentSection({
 
   const onDrop = async (accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
-      toast.error("Unsupported file type. Use DOCX.")
+      toast.error("Unsupported file type. Use a Word document or a .txt file.")
       return
     }
     const file = accepted[0]
@@ -397,7 +389,7 @@ export function ContentSection({
     onDrop,
     accept: ACCEPT,
     multiple: false,
-    disabled: upload.isPending || isLocked || checkingLang,
+    disabled: upload.isPending || checkingLang,
     // The Upload button is the click target now, so the panel never steals a
     // click — it only accepts a dropped file.
     noClick: true,
@@ -450,7 +442,7 @@ export function ContentSection({
       <SectionHeader section={section} isRtl={isRtl} />
       <div className="flex-1 overflow-y-auto">
         <div
-          {...(isLocked ? {} : dz.getRootProps())}
+          {...dz.getRootProps()}
           className={cn(
             // Full width, matching GenerateSection. These panels sit side by
             // side in the same rail and a PM clicks between them, so the column
@@ -462,14 +454,7 @@ export function ContentSection({
               "rounded-2xl outline-dashed outline-2 outline-offset-4 outline-indigo-300",
           )}
         >
-          {isLocked ? (
-            <LockedView
-              section={section}
-              onUnlock={() => setUnlockOpen(true)}
-              unlocking={unlock.isPending}
-              isRtl={isRtl}
-            />
-          ) : assisted && pane === "picker" ? (
+          {assisted && pane === "picker" ? (
             // The front door for the two statements the app offers to draft.
             // It replaces the body rather than sitting above it: the question
             // is which source fills this section, and an empty box underneath
@@ -621,7 +606,7 @@ export function ContentSection({
               {upload.isPending && <ExtractingNotice />}
 
               {/* Writing lane. Always on screen too — a PM who never uploads
-                  can write the section here and lock it. */}
+                  can write the section here. */}
               <ContentBody
                 uploadSlot={
                   attachment ? null : (
@@ -675,7 +660,6 @@ export function ContentSection({
                 prefilling={prefilling}
                 uploading={uploading}
                 saving={save.isPending}
-                locking={lock.isPending}
                 contentLanguage={contentLanguage}
                 isRtl={isRtl}
                 onEdit={() => setEditing(true)}
@@ -684,14 +668,13 @@ export function ContentSection({
                   setSeed(null)
                   setEditing(false)
                 }}
-                onLock={() => lock.mutate({ sectionCode })}
               />
             </>
           )}
 
           {/* Replace flow reuses the dropzone hook — render an off-screen root
               so `dz.open()` has an input to trigger. */}
-          {attachment && !isLocked && (
+          {attachment && (
             <div className="sr-only">
               <div {...dz.getRootProps()}>
                 <input {...dz.getInputProps()} />
@@ -734,20 +717,6 @@ export function ContentSection({
           if (confirmSource) applySource(confirmSource)
         }}
       />
-
-      <ConfirmDialog
-        open={unlockOpen}
-        onOpenChange={setUnlockOpen}
-        title="Unlock this section?"
-        description="You can edit the content or replace the document, then re-lock."
-        confirmLabel="Unlock"
-        variant="destructive"
-        isLoading={unlock.isPending}
-        onConfirm={async () => {
-          await unlock.mutateAsync({ sectionCode })
-          setUnlockOpen(false)
-        }}
-      />
     </div>
   )
 }
@@ -760,11 +729,9 @@ function ContentBody({
   prefilling,
   uploading,
   saving,
-  locking,
   onEdit,
   onSave,
   onCancel,
-  onLock,
   contentLanguage,
   isRtl,
   uploadSlot,
@@ -777,11 +744,9 @@ function ContentBody({
   prefilling: boolean
   uploading: boolean
   saving: boolean
-  locking: boolean
   onEdit: () => void
   onSave: (content: string) => void
   onCancel: () => void
-  onLock: () => void
   contentLanguage: ContentLanguage
   isRtl?: boolean
   /** The Upload button, rendered in the toolbar beside Edit. */
@@ -789,14 +754,7 @@ function ContentBody({
   /** Draft / change-source controls — only the two assisted statements. */
   assistedSlot?: React.ReactNode
 }) {
-  const busy = saving || locking || uploading
-  // The stricter of the two old rules: locking needs saved, non-empty content.
-  // A document alone is no longer enough — and never was on the backend, which
-  // rejects a lock with empty content. `editing` stands in for the old
-  // long-lived `dirty`: with a pencil, the only unsaved text there can be is
-  // inside an open editor. Disabled rather than hidden, so Save-then-Lock stays
-  // visible as an order rather than as a button that appears out of nowhere.
-  const lockDisabled = busy || editing || !saved.trim()
+  const busy = saving || uploading
 
   return (
     <div className="space-y-2">
@@ -895,34 +853,13 @@ function ContentBody({
               Write this section
             </span>
             <span className="max-w-xs text-xs leading-relaxed text-slate-400">
-              Or upload a Word document and we&apos;ll pull its text in here for
+              Or upload a Word or text document and we&apos;ll pull its text in here for
               you to edit.
             </span>
           </button>
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-2 pt-2">
-        <Button
-          onClick={onLock}
-          disabled={lockDisabled}
-          className="bg-indigo-600 text-white hover:bg-indigo-700"
-          title={
-            editing
-              ? "Save your changes before locking"
-              : !saved.trim()
-                ? "Save some content first"
-                : undefined
-          }
-        >
-          {locking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Lock className="h-4 w-4 mr-2" />
-          )}
-          Lock section
-        </Button>
-      </div>
     </div>
   )
 }
@@ -964,6 +901,9 @@ function UploadButton({
         size="sm"
         onClick={dz.open}
         disabled={uploading}
+        // The accepted formats ride on the label rather than a tooltip: the
+        // picker filters to them anyway, so a PM holding a PDF should learn it
+        // will not be taken before opening a dialog that hides their file.
         className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
       >
         {uploading ? (
@@ -975,63 +915,11 @@ function UploadButton({
           <>
             <Upload className="h-3.5 w-3.5" />
             Upload a document
+            <span className="font-normal text-slate-400">· DOCX or TXT</span>
           </>
         )}
       </Button>
     </>
-  )
-}
-
-function LockedView({
-  section,
-  onUnlock,
-  unlocking,
-  isRtl,
-}: {
-  section: CycleReportSection
-  onUnlock: () => void
-  unlocking: boolean
-  isRtl?: boolean
-}) {
-  const attachment = section.attachment
-  const content = section.content ?? ""
-
-  return (
-    <div className="space-y-4">
-      {attachment && <FileCard attachment={attachment} />}
-
-      <div
-        dir={isRtl ? "rtl" : "ltr"}
-        className={cn(
-          "rounded-xl border border-slate-200 bg-white p-6",
-          isRtl && "text-right",
-        )}
-      >
-        {content.trim() ? (
-          <ProsePreview content={content} />
-        ) : (
-          <p className="text-sm text-slate-400 italic">No content saved.</p>
-        )}
-      </div>
-
-      <LockedBanner lockedAt={section.locked_at} />
-
-      <div className="flex items-center justify-end pt-1">
-        <Button
-          variant="outline"
-          onClick={onUnlock}
-          disabled={unlocking}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {unlocking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <LockOpen className="h-4 w-4 mr-2" />
-          )}
-          Unlock
-        </Button>
-      </div>
-    </div>
   )
 }
 

@@ -26,7 +26,9 @@ export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
 export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
-export type SectionLayer = "common" | "cma" | "sector" | "optional"
+// "custom" is not a catalogue layer — the backend reports it for a
+// PM-authored section, which has no catalogue row to take a layer from.
+export type SectionLayer = "common" | "cma" | "sector" | "optional" | "custom"
 export type SectionStatus = "pending" | "drafting" | "locked"
 // Analyze-mode only (null for other modes):
 //   "ready"   → findings present in `content`.
@@ -127,7 +129,8 @@ export interface CycleReportSection {
   section_code: string
   title: string
   layer: SectionLayer
-  content_source: "narrative" | "structured" | "financials" | "composite"
+  // "" for a PM-authored section: no catalogue row, so no content_source.
+  content_source: "narrative" | "structured" | "financials" | "composite" | ""
   mode: SectionMode
   status: SectionStatus
   display_order: number
@@ -226,13 +229,20 @@ export interface AvailableOptionalSection {
 export interface AssemblyReadiness {
   cycle_id: string
   total: number
-  locked: number
+  /** Sections that would appear in the report — i.e. have something in them. */
+  ready: number
+  /** False only when nothing has been written anywhere. Empty sections no
+   *  longer block: they are listed below and left out of the report. */
   can_assemble: boolean
-  unlocked_sections: Array<{
+  incomplete_sections: Array<{
     section_code: string
     title: string
     layer: SectionLayer
   }>
+  /** A report was assembled and a section has changed since — the assembled
+   *  report is a snapshot, so it no longer matches the cycle. Re-assembling
+   *  requires refresh=true; without it the server returns the stored one. */
+  stale?: boolean
   has_final_report: boolean
   final_report_generated_at: string | null
 }
