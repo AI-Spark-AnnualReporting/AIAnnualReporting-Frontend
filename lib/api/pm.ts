@@ -12,6 +12,109 @@ export interface ReviewPayload {
   review_notes?: string
 }
 
+// ---------------------------------------------------------------------------
+// Pre-build draft checks
+// The PM runs these from the Report Builder card once every department is
+// approved and before the builder opens — the last point at which a correction
+// still reaches the generated report.
+// ---------------------------------------------------------------------------
+
+// One department's side of a finding. `sentence` is verbatim from that
+// department's submission, which is what makes the inline edit safe: the
+// backend replaces this exact string.
+export interface FindingSide {
+  session_id: string
+  department: string
+  sentence: string
+  // Which copy of this sentence, when the draft repeats it verbatim. Sent back
+  // untouched on resolve so the backend edits the flagged one.
+  occurrence: number
+  // Populated on a figure_conflict, from the claim behind the sentence.
+  value?: string | null
+  period?: string | null
+  // company | department. Shown on the finding so a wrong call by the model is
+  // obvious to the PM, who can clear it in one click.
+  scope?: string | null
+  // What this department was asked. Often the reason two figures differ.
+  question?: string | null
+}
+
+// One fact a department stated, read out of its ANSWERS - never its draft,
+// which is model-written from those same answers.
+export interface DepartmentClaim {
+  id: string
+  text: string
+  metric?: string | null
+  // A numeric string, or null for a fact with no number. Non-numeric facts are
+  // kept: without them every ordinary draft sentence would look unsupported.
+  value?: string | null
+  unit?: string | null
+  period?: string | null
+  // Only company-scoped facts are compared across departments.
+  scope: string
+  question_id?: string | null
+}
+
+export interface DepartmentClaimsGroup {
+  session_id: string
+  department: string
+  claims: DepartmentClaim[]
+  // null means this department's claims were never read - extraction failed, or
+  // the cycle predates the feature. The page offers Extract claims.
+  extracted_at: string | null
+}
+
+export interface DepartmentClaimsResponse {
+  success: boolean
+  cycle_id: string
+  departments: DepartmentClaimsGroup[]
+  total_claims: number
+}
+
+// What the PM did about a finding. `from` is the pre-correction sentence — the
+// only record that an approved submission was edited, since the department and
+// its HOD are not notified.
+export interface FindingResolution {
+  session_id: string | null
+  action: "edited" | "removed" | "accepted"
+  // The submission exactly as it stood before this edit, so Undo can restore
+  // it verbatim. Absent on findings resolved before Undo existed.
+  before_text?: string | null
+  from: string | null
+  to: string | null
+  by: string
+  at: string
+}
+
+// invented_claim — a sentence the department's own answers do not support; one
+// entry in `sides`. figure_conflict — departments disagreeing on one measure;
+// two or more entries in `sides`.
+export interface DraftFinding {
+  id: string
+  kind: "invented_claim" | "figure_conflict"
+  label: string
+  detail: string
+  status: "open" | "corrected" | "removed" | "accepted"
+  sides: FindingSide[]
+  resolution?: FindingResolution | null
+}
+
+export interface DraftFindingsResponse {
+  success: boolean
+  cycle_id: string
+  findings: DraftFinding[]
+  open_count: number
+  // null means the check has never been run for this cycle — not the same as
+  // "ran and found nothing".
+  checked_at: string | null
+}
+
+export interface ResolveFindingPayload {
+  action: "edited" | "removed" | "accepted" | "undo"
+  session_id?: string
+  sentence?: string
+}
+
 export interface ReminderPayload {
   user_ids: string[]
   title: string
@@ -661,6 +764,54 @@ export const pmApi = {
   // Whether a cycle is ready to enter the Report Builder.
   buildReadiness: async (cycleId: string): Promise<BuildReadiness> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/build-readiness`)
+    return data
+  },
+
+  // Pre-build draft checks. Runs the AI checks across every approved department
+  // draft — one call per department for unsupported claims, plus one across all
+  // of them for figures that disagree. Slow by nature (it is N+1 model calls run
+  // concurrently server-side), so the caller shows a pending state.
+  checkDrafts: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/check-drafts`)
+    return data
+  },
+
+  // The stored findings from the last check — does NOT re-run it.
+  // checked_at is null when the PM has never run the check, which is what
+  // distinguishes "nothing wrong" from "not looked yet".
+  draftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/draft-findings`)
+    return data
+  },
+
+  // What each approved department stated, read from its answers. Read-only and
+  // cheap - it never triggers extraction.
+  departmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/department-claims`)
+    return data
+  },
+
+  // Fill in claims for any approved department missing them. The fallback when
+  // the background extraction at approval failed. One model call per missing
+  // department, so it is slow - callers show a pending state.
+  extractDepartmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/department-claims/extract`)
+    return data
+  },
+
+  // Resolve one finding. action "edited" rewrites the sentence inside that
+  // department's approved submission and requires `sentence`; "removed" deletes
+  // it; "accepted" changes no text. session_id picks which department's sentence
+  // to act on and is required for edited/removed on a figure_conflict.
+  resolveFinding: async (
+    cycleId: string,
+    findingId: string,
+    payload: ResolveFindingPayload,
+  ): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/${findingId}/resolve`,
+      payload,
+    )
     return data
   },
 

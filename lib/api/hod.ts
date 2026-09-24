@@ -1,4 +1,5 @@
 import apiClient from "./client"
+import type { DepartmentClaim } from "./pm"
 
 // ── HOD (Head of Department) curation API ──────────────────────────────────
 
@@ -38,6 +39,12 @@ export interface HODSession {
   final_submission?: string | null
   draft_content?: string | null
   ai_generated_draft?: string | null
+  // The facts read out of this department's answers, written when the HOD
+  // approves. Empty while the session is still under review — with extraction
+  // happening at approval, there is nothing to show until then. Already on the
+  // response: GET /hod/sessions/{id} selects the whole session row.
+  department_claims?: DepartmentClaim[] | null
+  department_claims_extracted_at?: string | null
   hod_user_id?: string | null
   user_id?: string | null
   departments?: { department_name?: string; department_code?: string } | null

@@ -8,6 +8,11 @@ import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
+import type {
+  DepartmentClaimsResponse,
+  DraftFindingsResponse,
+  ResolveFindingPayload,
+} from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import type {
   ContentLanguage,
@@ -26,6 +31,93 @@ export function useBuildReadiness(cycleId: string) {
     queryFn: () => pmApi.buildReadiness(cycleId),
     enabled: !!cycleId,
     staleTime: 0,
+  })
+}
+
+// The cycle's stored pre-build draft findings. Read-only — it never triggers
+// the check, so landing on the cycle page costs nothing. `checked_at: null`
+// means the PM has not run the check yet.
+export function useDraftFindings(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId),
+    queryFn: () => pmApi.draftFindings(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+// Run the checks. N+1 model calls server-side, so this is slow by design —
+// callers show a pending state rather than an optimistic one.
+export function useCheckDrafts(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.checkDrafts(cycleId),
+    onSuccess: (result: DraftFindingsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), result)
+      toast.success(
+        result.findings.length === 0
+          ? "No problems found in the department drafts"
+          : `${result.findings.length} thing${result.findings.length === 1 ? "" : "s"} to check`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't check the drafts")),
+  })
+}
+
+// What each approved department stated. Read-only — landing on the claims page
+// costs nothing. A department with an empty list and a null extracted_at never
+// had its claims read, which the page turns into its Extract-claims state.
+export function useDepartmentClaims(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId),
+    queryFn: () => pmApi.departmentClaims(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+// Fill in claims for departments missing them. One model call per missing
+// department, so it is slow by design — the caller shows a pending state.
+export function useExtractDepartmentClaims(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.extractDepartmentClaims(cycleId),
+    onSuccess: (result: DepartmentClaimsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId), result)
+      toast.success(
+        result.total_claims === 0
+          ? "Nothing could be read from the answers"
+          : `Read ${result.total_claims} facts`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't read the departments' answers")),
+  })
+}
+
+// Resolve one finding. "edited"/"removed" rewrite the department's approved
+// submission, so the session caches are invalidated too — the PM can open that
+// submission from the finding and would otherwise see the pre-correction text.
+export function useResolveFinding(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      findingId,
+      payload,
+    }: {
+      findingId: string
+      payload: ResolveFindingPayload
+    }) => pmApi.resolveFinding(cycleId, findingId, payload),
+    onSuccess: (result: DraftFindingsResponse, variables) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), result)
+      if (variables.payload.action !== "accepted") {
+        qc.invalidateQueries({ queryKey: ["pm", "session"] })
+        qc.invalidateQueries({ queryKey: ["session"] })
+      }
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't save that change")),
   })
 }
 
