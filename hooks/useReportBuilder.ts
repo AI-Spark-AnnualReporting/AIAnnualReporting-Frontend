@@ -61,6 +61,56 @@ export function usePreviousManualSections(
   })
 }
 
+// Draft a whole human-voice statement (Chairman's Statement, CEO's Review) on
+// demand.
+//
+// A mutation, not a query, and deliberately so: this is an LLM call that must
+// fire on the PM's press and on nothing else. A query would invite a refetch on
+// mount, on window focus, or as a side effect of an unrelated invalidation.
+//
+// It writes nothing server-side, so there is no section cache to patch — the
+// drafted text lands in the panel's editor, and the existing manual-content save
+// is what stores it once the PM accepts. Failures are rendered in the panel next
+// to the button that caused them (with a Try again) instead of toasted, because
+// "not enough material yet" needs a sentence, not a red flash.
+export function useDraftStatement(cycleId: string) {
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.draftStatement(cycleId, sectionCode),
+  })
+}
+
+// Whether a draft is possible for one of the assisted statements, asked before
+// the option is offered. A brand-new company has no previous statement and often
+// no submitted department material, so the draft would refuse — and we should
+// not offer something we cannot deliver.
+//
+// A query, unlike the draft itself, and safely so: it costs no model call and
+// writes nothing, so a refetch on mount or on an unrelated invalidation is
+// harmless. `enabled` is the caller's promise that this is one of the two
+// assisted codes AND that the picker is actually on screen; nothing else asks.
+//
+// One short retry and no more: the picker is held in front of the PM until this
+// answers, and the caller reads a failure as "available" anyway, so a long
+// backoff would only delay a fallback it is going to make regardless.
+export function useDraftAvailability(
+  cycleId: string,
+  sectionCode: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_DRAFT_AVAILABILITY(cycleId, sectionCode),
+    queryFn: () => pmApi.draftAvailability(cycleId, sectionCode),
+    enabled: enabled && !!cycleId && !!sectionCode,
+    // Material keeps arriving as departments submit, so don't hold the answer
+    // for long — but don't re-ask every time the PM flips back to the picker
+    // either.
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  })
+}
+
 // Shared error shape. apiClient normalizes errors to { message, status, ... } but
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash

@@ -132,6 +132,7 @@ export const QUERY_KEYS = {
   PM_ASSEMBLED_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "assembled"],
   PM_REPORT_APPROVAL: (cycleId: string) => ["pm", "cycle", cycleId, "approval"],
   PM_COMPANY_PREV_MANUAL: (companyId: string, contentLanguage?: string) => ["pm", "company", companyId, "manual-sections", "previous", contentLanguage ?? "any"],
+  PM_DRAFT_AVAILABILITY: (cycleId: string, sectionCode: string) => ["pm", "cycle", cycleId, "sections", sectionCode, "draft-availability"],
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],

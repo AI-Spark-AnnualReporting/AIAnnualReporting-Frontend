@@ -72,6 +72,99 @@ export interface PreviousManualSectionsResponse {
   sections: PreviousManualSection[]
 }
 
+// POST /pm/cycles/{id}/sections/{code}/draft — a whole first version of one of
+// the human-voice statements (Chairman's Statement, CEO's Review), written from
+// this cycle's material.
+//
+// The endpoint saves nothing. The text comes back for the PM to read, and the
+// existing manual-content save is what stores it if they accept it. It is an
+// LLM call, so it is only ever sent on an explicit press.
+//
+// "Not enough material yet" is a legitimate answer here, not a failure: the
+// reply carries no content and a plain-language `reason` to show in its place.
+export interface StatementDraft {
+  // The drafted statement, or null when there wasn't enough to draft from.
+  content: string | null
+  // Why nothing was drafted, in the server's own words. Null when text came back.
+  reason: string | null
+  // The subheadings carried over verbatim from the company's previous
+  // statement. Empty when they write in unbroken prose, or when there is no
+  // previous statement — in both cases the draft has no subheadings either.
+  mirroredHeadings: string[]
+  // Which of those this year's approved material did not support. The heading
+  // is still in `content`; naming it lets the PM chase the department that did
+  // not report, or delete it.
+  thinHeadings: string[]
+}
+
+// Read the draft reply tolerantly. This endpoint is new, so take the statement
+// from whichever of the usual keys carries it and the refusal from whichever
+// carries the sentence. Anything blank is read as "nothing was drafted", which
+// is an answer this endpoint is allowed to give — the caller renders the reason
+// rather than an error.
+function readStatementDraft(payload: unknown): StatementDraft {
+  const body = (payload ?? {}) as Record<string, unknown>
+  const section = (body.section ?? {}) as Record<string, unknown>
+  const content = firstSentence([
+    body.content,
+    body.draft,
+    body.text,
+    section.content,
+  ])
+  const reason = firstSentence([body.reason, body.message, body.detail])
+  return {
+    content,
+    reason: content ? null : reason,
+    mirroredHeadings: stringList(body.mirrored_headings),
+    thinHeadings: stringList(body.thin_headings),
+  }
+}
+
+// A list of non-empty strings, or nothing. Same tolerance as the readers above:
+// these two fields only ever ADD a note to the screen, so an unexpected shape
+// must read as "no note" rather than throw away the draft beside it.
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  )
+}
+
+function firstSentence(candidates: unknown[]): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+  }
+  return null
+}
+
+// GET /pm/cycles/{id}/sections/{code}/draft-availability — whether there is
+// anything to draft this statement FROM, asked before the option is offered.
+//
+// Cheap and model-free, unlike the draft itself, so it is safe to send when the
+// source picker renders. It answers in advance the same question the draft
+// endpoint answers by refusing — which is what lets the app stop offering a
+// statement it cannot write.
+export interface StatementDraftAvailability {
+  available: boolean
+  // Why not, in the server's own words. Not shown to the PM: the option is
+  // simply absent, and a company with nothing to draft from has no reason to be
+  // told about a feature that doesn't apply to it yet.
+  reason: string | null
+}
+
+// Read the availability reply tolerantly, and default to AVAILABLE. Only an
+// explicit `false` takes the option away; a reply in a shape we don't recognise
+// must never remove a feature, because the draft endpoint still refuses
+// gracefully and the cost of being wrong in this direction is one explained
+// refusal.
+function readDraftAvailability(payload: unknown): StatementDraftAvailability {
+  const body = (payload ?? {}) as Record<string, unknown>
+  return {
+    available: body.available !== false,
+    reason: firstSentence([body.reason, body.message, body.detail]),
+  }
+}
+
 // GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
 // Strategic Brief wizard. Order is stable per cycle (safe to index by
 // position for a stepper). `options: null` means a plain free-text question;
@@ -391,6 +484,35 @@ export const pmApi = {
         : undefined,
     )
     return data
+  },
+
+  // Draft a whole human-voice statement. Costs an LLM call server-side and
+  // stores nothing, so it is sent only when the PM presses the button — never
+  // on mount. Long timeout, same order as generateSection.
+  draftStatement: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraft> => {
+    const { data } = await apiClient.post<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return readStatementDraft(data)
+  },
+
+  // Ask whether a draft is possible before offering it. No model call and no
+  // write, so — unlike draftStatement — this may be sent on render. Read
+  // tolerantly: anything other than an explicit `available: false` leaves the
+  // option in place.
+  draftAvailability: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraftAvailability> => {
+    const { data } = await apiClient.get<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft-availability`,
+    )
+    return readDraftAvailability(data)
   },
 
   // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.

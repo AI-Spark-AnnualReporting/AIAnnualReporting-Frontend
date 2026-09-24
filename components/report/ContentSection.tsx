@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import {
+  AlertCircle,
   CheckCircle2,
   FileText,
   Loader2,
@@ -24,7 +25,15 @@ import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
 import { LockedBanner } from "@/components/report/LockedBanner"
 import {
+  isAssistedStatement,
+  StatementSourcePicker,
+  type DraftOptionState,
+  type StatementSource,
+} from "@/components/report/StatementSourcePicker"
+import {
   useAttachUpload,
+  useDraftAvailability,
+  useDraftStatement,
   useLockSection,
   usePreviousManualSections,
   useRemoveAttachment,
@@ -57,6 +66,13 @@ const ACCEPT = {
   "application/msword": [".doc"],
 }
 
+// What an assisted statement's panel is showing. "auto" means "whatever the
+// section's own state implies" — the choice of sources while it is empty, the
+// content once it has some. The other two are the PM overriding that for this
+// visit: they asked to see the choices again, or picked writing before there is
+// anything to write over.
+type PanelView = "auto" | "picker" | "editor"
+
 export function ContentSection({
   section,
   cycleId,
@@ -75,6 +91,10 @@ export function ContentSection({
   // Both content routes behave identically now, but each mode keeps writing to
   // its own existing endpoint — so pick by mode, not by what's on screen.
   const isExtract = section.mode === "extract"
+  // The chairman's statement and the CEO's review. Same `manual` mode and same
+  // panel as the other five, but they are the only two the app offers to draft,
+  // so they get a choice of source in front of the empty box.
+  const assisted = isAssistedStatement(sectionCode)
 
   // Same editing model as the AI-written sections: the body is read-only
   // Markdown until the pencil swaps a textarea over its source.
@@ -97,7 +117,11 @@ export function ContentSection({
   const { user } = useAuth()
   const { data: previous, isLoading: previousLoading } =
     usePreviousManualSections(
-      isExtract ? undefined : user?.company_id,
+      // Extract sections have no prior-cycle equivalent, and the assisted two
+      // put a choice of sources in front of the box instead — seeding the
+      // editor behind that choice would put words in the section nobody asked
+      // for. Passing no company id no-ops the query (`enabled: !!companyId`).
+      isExtract || assisted ? undefined : user?.company_id,
       contentLanguage,
     )
   const prevSection = previous?.sections.find(
@@ -105,7 +129,7 @@ export function ContentSection({
   )
   // Only suggest a pre-fill when there's prior content AND nothing is saved yet.
   const suggestion =
-    !saved.trim() && prevSection?.has_data && prevSection.content
+    !assisted && !saved.trim() && prevSection?.has_data && prevSection.content
       ? prevSection
       : null
 
@@ -143,8 +167,159 @@ export function ContentSection({
   const lock = useLockSection(cycleId)
   const unlock = useUnlockSection(cycleId)
   const remove = useRemoveAttachment(cycleId)
+  const drafter = useDraftStatement(cycleId)
+
+  // --- the assisted statements' choice of source -------------------------
+  // All of this is inert on the other five manual sections and on every extract
+  // section: `assisted` gates the query, the pane and the picker alike.
+
+  const [view, setView] = useState<PanelView>("auto")
+  // True while the text in the editor came from the drafting endpoint rather
+  // than from the person. Drives the "this is a draft" attribution, and is
+  // deliberately session-only: the backend stores no provenance, so claiming it
+  // after a reload would be an invention.
+  const [drafted, setDrafted] = useState(false)
+  // What the draft on screen took from the company's last statement: the
+  // subheadings it mirrored, and which of those had no material behind them.
+  // Session-only and cleared whenever the draft is — both describe THIS draft,
+  // and keeping either past one would caption the wrong text.
+  const [mirroredHeadings, setMirroredHeadings] = useState<string[]>([])
+  const [thinHeadings, setThinHeadings] = useState<string[]>([])
+  const [confirmSource, setConfirmSource] = useState<StatementSource | null>(null)
+
+  const hasDoc = !!attachment
+  // Anything a source switch would overwrite: what's saved, and any unconfirmed
+  // text sitting in an open editor.
+  const hasText = !!saved.trim() || seed !== null
+
+  // Which pane the body shows. Everything that is not an assisted statement has
+  // only ever had one.
+  const pane: "picker" | "editor" = !assisted
+    ? "editor"
+    : view === "auto"
+      ? hasDoc || saved.trim()
+        ? "editor"
+        : "picker"
+      : view
+
+  // Can this statement be drafted at all? Asked once the picker is actually on
+  // screen, and only for the two assisted codes — never on a plain manual
+  // section, never on an extract one, never on a locked one, and never merely
+  // because this panel mounted. Cached per section, so moving between the
+  // picker and the editor doesn't re-ask.
+  const availability = useDraftAvailability(
+    cycleId,
+    sectionCode,
+    assisted && !isLocked && pane === "picker",
+  )
+
+  // Unknown until it answers, and the picker holds its cards until then rather
+  // than show a suggestion it may have to take away.
+  //
+  // A FAILED check reads as available: a network blip must not silently remove
+  // a feature, and the draft endpoint refuses gracefully anyway, so the cost of
+  // being wrong in that direction is one explained refusal.
+  const draftOption: DraftOptionState = availability.isError
+    ? "available"
+    : availability.data
+      ? availability.data.available
+        ? "available"
+        : "unavailable"
+      : "checking"
+
+  // The editor offers the same suggestion from its own button. Withdraw it only
+  // on a definite "no" we already hold — if the check never ran (the PM landed
+  // in the editor because the section already had content), leave the button
+  // alone and let the refusal path cover it. Nothing here fetches.
+  const draftUnavailable = availability.data?.available === false
+
+  // The drafting endpoint saves nothing, so its answer is read straight off the
+  // mutation. "Not enough material yet" is a legitimate answer, so it gets an
+  // explanation rather than the failure treatment.
+  const draftError = drafter.error as
+    | { message?: string; status?: number }
+    | null
+  // If the backend states the refusal as a status rather than an empty 200, it
+  // will be a 409/422 — show its sentence, not a red failure.
+  const refusedForMaterial =
+    !!draftError && (draftError.status === 409 || draftError.status === 422)
+  const noMaterial =
+    (!!drafter.data && !drafter.data.content) || refusedForMaterial
+  const noMaterialReason = refusedForMaterial
+    ? draftError?.message
+    : drafter.data?.reason
+  const draftFailed = !!draftError && !refusedForMaterial
+
+  const runDraft = () => {
+    drafter.mutate(
+      { sectionCode },
+      {
+        onSuccess: (result) => {
+          // No content is the "not enough material" answer — leave the panel
+          // where it is and let the explanation render.
+          if (!result.content) return
+          // A draft is unconfirmed text, so it arrives the same way a pre-fill
+          // does: in an OPEN editor, as a seed measured against the server's
+          // own content. Nothing reaches the section until the PM saves.
+          setSeed(result.content)
+          setDrafted(true)
+          setMirroredHeadings(result.mirroredHeadings)
+          setThinHeadings(result.thinHeadings)
+          setEditing(true)
+          setView("editor")
+        },
+      },
+    )
+  }
+
+  // Which picks would destroy something that is already there.
+  const isDestructive = (source: StatementSource): boolean => {
+    // Saving typed text deletes the uploaded file (one source at a time).
+    if (source === "write") return hasDoc
+    // Uploading clears the section's text.
+    if (source === "upload") return hasText
+    // A fresh draft replaces whichever source is in place.
+    return hasText || hasDoc
+  }
+
+  const chooseSource = (source: StatementSource) => {
+    if (isDestructive(source)) {
+      setConfirmSource(source)
+      return
+    }
+    applySource(source)
+  }
+
+  const applySource = (source: StatementSource) => {
+    setConfirmSource(null)
+    if (source === "draft") {
+      runDraft()
+      return
+    }
+    // Anything else is a fresh start: clear a stale "not enough material" or
+    // failure notice so it doesn't hang over the lane the PM just picked.
+    drafter.reset()
+    if (source === "write") {
+      setDrafted(false)
+      setMirroredHeadings([])
+      setThinHeadings([])
+      setSeed(null)
+      setEditing(true)
+      setView("editor")
+      return
+    }
+    dz.open()
+  }
 
   const uploading = upload.isPending || checkingLang
+  // Anything in flight that the source picker's cards must not be pressed
+  // through. The editor has its own narrower guard inside ContentBody.
+  const busy =
+    uploading ||
+    save.isPending ||
+    lock.isPending ||
+    remove.isPending ||
+    drafter.isPending
 
   // While the previous-content query is in flight for an empty section, show an
   // interactive loader so the PM knows a pre-fill might be arriving (and
@@ -200,7 +375,20 @@ export function ContentSection({
     // which already committed anything the PM had typed.)
     setEditing(false)
     setSeed(null)
-    upload.mutate({ sectionCode, file })
+    upload.mutate(
+      { sectionCode, file },
+      {
+        onSuccess: () => {
+          // The upload replaces the section's text server-side, so the text is
+          // no longer a draft of ours and the panel goes back to showing
+          // whatever the section itself now says.
+          setDrafted(false)
+          setMirroredHeadings([])
+          setThinHeadings([])
+          setView("auto")
+        },
+      },
+    )
   }
 
   // One shared dropzone — `open()` powers the Replace button without a second
@@ -215,6 +403,47 @@ export function ContentSection({
     noClick: true,
     noKeyboard: true,
   })
+
+  // The drafting attempt's state. Rendered above whichever pane is showing,
+  // because a draft can be asked for from the picker AND from the editor's own
+  // button, and the answer belongs next to the thing that asked for it.
+  const draftNotices = assisted ? (
+    <>
+      {drafter.isPending && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          <span>Drafting from this year&apos;s approved material…</span>
+        </div>
+      )}
+      {/* Not an error: a cycle whose departments have not reported yet is where
+          every cycle starts. The server's own sentence says what is missing. */}
+      {!drafter.isPending && noMaterial && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            {noMaterialReason ??
+              "There isn't enough approved material to draft this yet."}
+          </span>
+        </div>
+      )}
+      {!drafter.isPending && draftFailed && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span className="flex-1">
+            {draftError?.message ?? "Couldn't draft this section."}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={runDraft}
+            className="h-7 px-2 text-xs"
+          >
+            Try again
+          </Button>
+        </div>
+      )}
+    </>
+  ) : null
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
@@ -240,9 +469,61 @@ export function ContentSection({
               unlocking={unlock.isPending}
               isRtl={isRtl}
             />
+          ) : assisted && pane === "picker" ? (
+            // The front door for the two statements the app offers to draft.
+            // It replaces the body rather than sitting above it: the question
+            // is which source fills this section, and an empty box underneath
+            // would answer it before the PM did.
+            <>
+              {draftNotices}
+              <StatementSourcePicker
+                hasExisting={hasText || hasDoc}
+                drafting={drafter.isPending}
+                busy={busy}
+                draftOption={draftOption}
+                onChoose={chooseSource}
+                onKeep={() => setView("auto")}
+              />
+            </>
           ) : (
             <>
-              {!isExtract && (
+              {draftNotices}
+
+              {/* Attribution. A drafted statement is a starting point for the
+                  person who signs it, and saying so is the difference between a
+                  suggestion and a claim about their own words. */}
+              {assisted && drafted && seed !== null && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    Drafted from this year&apos;s approved material
+                    {mirroredHeadings.length > 0
+                      ? ", following the structure of your last statement"
+                      : ""}
+                    . Read it, change it, and save it when it reads like you.
+                  </span>
+                </div>
+              )}
+
+              {/* Which carried-over subheadings had nothing behind them. Not an
+                  error and not a toast: the heading was still written, and what
+                  to do about it — chase the department, or cut the heading — is
+                  the PM's call, not ours. */}
+              {assisted && drafted && seed !== null && thinHeadings.length > 0 && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    No approved material covered{" "}
+                    <span className="font-medium">
+                      {thinHeadings.join(", ")}
+                    </span>
+                    . {thinHeadings.length > 1 ? "Those sections are" : "That section is"}{" "}
+                    thin — chase the department, or delete the heading.
+                  </span>
+                </div>
+              )}
+
+              {!isExtract && !assisted && (
                 <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                   <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>
@@ -347,6 +628,41 @@ export function ContentSection({
                     <UploadButton dz={dz} uploading={uploading} />
                   )
                 }
+                // The same two offers as the picker, for a PM who is already in
+                // the editor. The draft button is withdrawn on a definite "no"
+                // we already hold, so picking "write it myself" never lands
+                // them in front of a feature they were not offered.
+                assistedSlot={
+                  assisted ? (
+                    <>
+                      {!draftUnavailable && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => chooseSource("draft")}
+                          disabled={busy}
+                          className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        >
+                          {drafter.isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          )}
+                          {drafted ? "Draft again" : "Draft it for me"}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setView("picker")}
+                        disabled={busy}
+                        className="h-8 px-2.5 text-xs text-slate-500 hover:text-slate-900"
+                      >
+                        Change source
+                      </Button>
+                    </>
+                  ) : null
+                }
                 saved={saved}
                 seed={seed}
                 editing={editing}
@@ -385,6 +701,40 @@ export function ContentSection({
         </div>
       </div>
 
+      {/* A source switch is destructive — it replaces text or deletes the
+          uploaded document — so it is confirmed, and the confirmation names
+          what goes rather than asking in the abstract. */}
+      <ConfirmDialog
+        open={confirmSource !== null}
+        onOpenChange={(open) => !open && setConfirmSource(null)}
+        title={
+          confirmSource === "upload"
+            ? "Replace this section's text?"
+            : confirmSource === "write"
+              ? "Remove the uploaded document?"
+              : "Replace what's here with a new draft?"
+        }
+        description={
+          confirmSource === "upload"
+            ? "Uploading a document replaces the text currently in this section."
+            : confirmSource === "write"
+              ? "This section holds one source at a time, so writing it yourself removes the document you uploaded."
+              : "A fresh draft replaces the content this section currently has. You'll be able to edit it before saving."
+        }
+        confirmLabel={
+          confirmSource === "upload"
+            ? "Upload anyway"
+            : confirmSource === "write"
+              ? "Write it myself"
+              : "Draft it again"
+        }
+        variant="destructive"
+        isLoading={drafter.isPending}
+        onConfirm={() => {
+          if (confirmSource) applySource(confirmSource)
+        }}
+      />
+
       <ConfirmDialog
         open={unlockOpen}
         onOpenChange={setUnlockOpen}
@@ -418,6 +768,7 @@ function ContentBody({
   contentLanguage,
   isRtl,
   uploadSlot,
+  assistedSlot,
 }: {
   saved: string
   seed: string | null
@@ -435,6 +786,8 @@ function ContentBody({
   isRtl?: boolean
   /** The Upload button, rendered in the toolbar beside Edit. */
   uploadSlot?: React.ReactNode
+  /** Draft / change-source controls — only the two assisted statements. */
+  assistedSlot?: React.ReactNode
 }) {
   const busy = saving || locking || uploading
   // The stricter of the two old rules: locking needs saved, non-empty content.
@@ -463,6 +816,7 @@ function ContentBody({
                 Saved
               </span>
             ) : null}
+            {assistedSlot}
             {uploadSlot}
             <Button
               variant="outline"
