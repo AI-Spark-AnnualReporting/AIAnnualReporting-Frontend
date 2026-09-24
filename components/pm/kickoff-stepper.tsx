@@ -3,17 +3,19 @@
 import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+// Two, not three. The brief, the areas of focus and the concept messages were
+// split across two screens while the messages were written from the finished
+// areas. They are one card each now, written in the same run, so splitting them
+// only meant the client could not be shown the whole thing at once.
 const STEPS = [
   { n: 1, label: "Questionnaire" },
-  { n: 2, label: "Review brief" },
-  { n: 3, label: "Concept messages" },
+  { n: 2, label: "Strategic direction" },
 ] as const
 
 export type KickoffStep = (typeof STEPS)[number]["n"]
 
 /**
- * Progress indicator shared by the three cycle-setup screens. It was copy-pasted
- * in each page while there were two of them; the third made that untenable.
+ * Progress indicator shared by the cycle-setup screens.
  */
 export function KickoffStepper({ current }: { current: KickoffStep }) {
   return (

@@ -6,25 +6,42 @@ import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import {
-  pmApi, AreaOfFocus, AreaRole, CycleBriefFields, GenerateBriefAnswer,
+  pmApi, AreaOfFocus, ConceptMessage, CycleBriefFields, GenerateBriefAnswer,
   roleSelectionSaveable, MIN_SELECTED_AREAS, MAX_SELECTED_AREAS,
 } from "@/lib/api/pm"
+// Two different questions: "will this save" (used when persisting an edit) and
+// "has a choice been made" (used to gate kickoff). See lib/areasOfFocus.
+import { roleSelectionComplete, MAX_AREAS_ON_PAGE } from "@/lib/areasOfFocus"
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
+import { useApproveShare, useCycleShares, useSendBackShare } from "@/hooks/useShare"
 import {
-  KickoffBuildLoader, CONCEPT_MESSAGE_LOADER, AREAS_REFRESH_LOADER, BRIEF_LOADER,
+  KickoffBuildLoader, AREAS_REFRESH_LOADER, BRIEF_LOADER,
 } from "@/components/pm/kickoff-build-loader"
-import { ThemeChipCard } from "@/components/report/ThemeChipCard"
-import { cn } from "@/lib/utils"
+import { AreaConceptCard } from "@/components/report/AreaConceptCard"
+import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
+import { ClientDriftNotice } from "@/components/pm/ClientDriftNotice"
+import { useAuth } from "@/contexts/AuthContext"
+import { driftSinceResponse } from "@/lib/shareDrift"
+import { ApproveDeadlineDialog } from "@/components/pm/approve-deadline-dialog"
+import { cn, formatDate } from "@/lib/utils"
 import { toast } from "sonner"
 import {
-  ArrowLeft, Check, CheckCircle2, Eye, Loader2, Megaphone, Pencil, Plus, RefreshCw,
-  Send, ShieldAlert, Sparkles, Target,
+  ArrowLeft, Check, CheckCircle2, Clock, Eye, Loader2, Megaphone,
+  MessageSquareQuote, Pencil, Plus, RefreshCw, Send, ShieldAlert, Sparkles, Target,
+  Undo2,
 } from "lucide-react"
 
 // Quick-instruction chips — identical to typing the same text into the box.
@@ -55,6 +72,18 @@ const SAVE_BRIEF_CONSENT: ConsentCopy = {
     "them to match — that replaces their slogans, including any you've written " +
     "by hand. Your Primary and Secondary picks are kept.",
   confirmLabel: "Save & regenerate areas",
+  cancelLabel: "Cancel",
+  variant: "default",
+}
+
+// Same Save, once the bundle has gone to the client: the areas stay exactly as
+// they are, so promising a rewrite would be a lie.
+const SAVE_BRIEF_ONLY_CONSENT: ConsentCopy = {
+  title: "Save your changes to the brief?",
+  description:
+    "The areas of focus stay as they are. This has already gone to the client, so they " +
+    "can no longer be rewritten by AI — edit their slogans by hand if they need to match.",
+  confirmLabel: "Save brief",
   cancelLabel: "Cancel",
   variant: "default",
 }
@@ -111,6 +140,14 @@ interface ReviewResult {
 //   error   → hard failure (403/404/network/timeout)
 type Phase = "idle" | "loading" | "result" | "soft" | "error"
 
+/** Anything this screen can persist. Two endpoints behind it; the order they
+ *  are called in matters — see runSave. */
+type SavePayload = {
+  strategic_brief?: string
+  areas_of_focus?: AreaOfFocus[]
+  concept_messages?: ConceptMessage[]
+}
+
 type SaveState = "idle" | "saving" | "saved" | "error" | "blocked"
 
 export default function ReviewBriefPage({
@@ -122,8 +159,36 @@ export default function ReviewBriefPage({
   const router = useRouter()
   const qc = useQueryClient()
   const { data: pmData, isLoading: cycleLoading } = usePMCycleDashboard(id)
+  // No share button here — the brief and areas go out as part of the step-3
+  // bundle. But every save on this screen 409s while that bundle is with the
+  // client, so the screen has to say so rather than fail on click.
+  const { data: shares } = useCycleShares(id)
+  const approveShare = useApproveShare(id)
+  const sendBackShare = useSendBackShare(id)
+  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [sendBackNote, setSendBackNote] = useState("")
+  // The client sign-off belongs to spark_internal — the only role that can
+  // send a link, approve a response or chase one. For every other role the
+  // share does not exist on this screen: no button, none of the locks, and
+  // the primary/secondary choice goes back to being the PM's own, because
+  // there is no client coming to make it. The server skips the same gates.
+  const { user } = useAuth()
+  const sparkFlow = user?.role === "spark_internal"
+  const briefShare = sparkFlow ? shares?.brief : undefined
+
+  const awaitingClient = briefShare?.status === "pending"
+  // A bundle can't be shared without concept messages — the server refuses it.
+  // So once a share exists they exist, and going forward is "continue", not
+  // "write them".
+  const bundleShared = !!briefShare
+  // They've replied and nobody has signed it off yet.
+  const needsApproval = briefShare?.status === "responded"
+  const clientApproved = briefShare?.status === "approved"
 
   const [phase, setPhase] = useState<Phase>("idle")
+  // The concept messages moved here from their own screen: one per area, shown
+  // inside that area's card, written in the same run as the brief.
+  const [messages, setMessages] = useState<ConceptMessage[] | null>(null)
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [errorStatus, setErrorStatus] = useState<number | undefined>(undefined)
   // The answers last used to generate — kept so "Regenerate" can resend them.
@@ -154,6 +219,20 @@ export default function ReviewBriefPage({
       }
       setResult({ brief: data.strategic_brief, areas: data.areas_of_focus ?? [] })
       setBriefDirty(false) // whatever was typed is gone with the old brief
+
+      // The concept messages are written from the areas that just came back,
+      // in the same run. The client is shown all three at once, so producing
+      // them on a later screen only meant a second wait and a partial share.
+      try {
+        const concepts = await pmApi.generateConceptMessages(id)
+        if (seq !== runSeq.current) return
+        setMessages(concepts.concept_messages ?? [])
+      } catch (err) {
+        // A failure here is not a failed brief. Land on the page with the
+        // brief intact and a Generate button on the empty messages.
+        console.error("[concept-messages] generation failed", err)
+        setMessages([])
+      }
       setPhase("result")
     } catch (err) {
       if (seq !== runSeq.current) return
@@ -181,6 +260,13 @@ export default function ReviewBriefPage({
         brief: cycle.kickoff_brief,
         areas: cycle.areas_of_focus ?? [],
       })
+      pmApi
+        .getConceptMessages(id)
+        .then((d) => setMessages(d.concept_messages ?? []))
+        .catch((err) => {
+          console.error("[concept-messages] load failed", err)
+          setMessages([])
+        })
       setPhase("result")
       return
     }
@@ -189,10 +275,16 @@ export default function ReviewBriefPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleLoading])
 
+
   // Asked only from the result screen — in the error/soft states this button is
   // "Try again" and there is nothing on screen to lose.
   const handleRegenerate = async () => {
     if (!answersRef.current) return
+    // The one guard that covers every way in — the footer button and both
+    // "Try again" panels. Regenerating rewrites the brief, the areas AND every
+    // concept message, so it is gone from the first share onwards and the
+    // server refuses it too.
+    if (bundleShared) return
     if (phase === "result" && !(await askConsent(REGENERATE_ALL_CONSENT))) return
     runGenerate(answersRef.current)
   }
@@ -211,6 +303,7 @@ export default function ReviewBriefPage({
   const [briefRefining, setBriefRefining] = useState(false)
   const [themesRefining, setThemesRefining] = useState(false)
 
+
   // Manual-edit persistence state (used by the edit handlers + refine cancel).
   // "blocked" = edits are held locally because the areas-of-focus selection is
   // half-made and the server would 422 it.
@@ -221,7 +314,63 @@ export default function ReviewBriefPage({
       clearTimeout(saveTimer.current)
       saveTimer.current = null
     }
+    pendingSave.current = {}
   }
+
+  /* ── Re-seed when the cycle changes underneath us ──────────────────────────
+     The effect above runs ONCE. If its first render was served from a cached
+     cycle — which is exactly what happens when Spark opens this page, shares
+     it, and comes back after the client has submitted — the page keeps that
+     stale copy for the rest of the session. The client's new area never
+     appears, their trimmed brief still reads long, and the "you've changed
+     this" banner fires because it is comparing their response against OUR
+     stale copy rather than against the cycle.
+
+     So: whenever the stored brief or areas differ from what is on screen,
+     take the stored version. Skipped while anything is unsaved, or a refetch
+     landing mid-sentence would delete what is being typed. */
+  const seededRef = useRef("")
+  useEffect(() => {
+    if (!initRef.current || phase !== "result" || !cycle) return
+    if (briefDirty || saveTimer.current) return
+
+    const signature = JSON.stringify([cycle.kickoff_brief, cycle.areas_of_focus])
+    if (signature === seededRef.current) return
+    seededRef.current = signature
+
+    const brief = cycle.kickoff_brief ?? ""
+    const areas = cycle.areas_of_focus ?? []
+    const takeAreas = () =>
+      setResult((prev) => {
+        if (!prev) return prev
+        const unchanged =
+          prev.brief === brief && JSON.stringify(prev.areas) === JSON.stringify(areas)
+        return unchanged ? prev : { brief, areas }
+      })
+
+    // The messages come from their own call, so they go stale the same way —
+    // and both halves have to land in the SAME render. Refreshing the areas
+    // first leaves the page holding new areas beside old messages, and the
+    // "you've changed this" banner flashes against that half-updated state.
+    pmApi
+      .getConceptMessages(id)
+      .then((d) => {
+        takeAreas()
+        setMessages(d.concept_messages ?? [])
+      })
+      .catch(() => {
+        // A failed refresh is not a reason to blank anything; take the areas
+        // and leave the messages as they are.
+        takeAreas()
+      })
+
+    // The share is the OTHER half of the "have we changed this?" comparison,
+    // and it is its own query on a 60s poll. Left alone it holds the previous
+    // response while the cycle already carries the newest one, and the banner
+    // then reports a difference between two copies taken at different moments.
+    qc.invalidateQueries({ queryKey: ["pm", "cycle", id, "shares"] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cycle, phase, briefDirty])
 
   // Returns the refined brief so the caller can feed it straight into the areas
   // regeneration; null on failure.
@@ -319,7 +468,7 @@ export default function ReviewBriefPage({
     }
   }
 
-  // ── Persisting manual edits (PUT save-brief-and-areas-of-focus) ──────────
+  // ── Persisting manual edits ──────────────────────────────────────────────
   // Areas of focus autosave: debounced for continuous typing (slogans),
   // immediate for discrete actions (add/delete area, role).
   // The BRIEF deliberately does not — it saves on an explicit button, because
@@ -329,10 +478,22 @@ export default function ReviewBriefPage({
   // clobbering an in-progress edit.
   useEffect(() => () => cancelPendingSave(), [])
 
-  const runSave = async (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
+  // Edits waiting on the debounce timer, merged across fields.
+  const pendingSave = useRef<SavePayload>({})
+
+  const runSave = async (payload: SavePayload) => {
     setSaveState("saving")
     try {
-      await pmApi.saveBriefAndAreas(id, payload)
+      const { concept_messages, ...briefPayload } = payload
+      // Areas FIRST. Adding or removing one clears the messages server-side,
+      // so writing the messages before the areas would save them and then
+      // throw them away in the same breath.
+      if (Object.keys(briefPayload).length > 0) {
+        await pmApi.saveBriefAndAreas(id, briefPayload)
+      }
+      if (concept_messages) {
+        await pmApi.saveConceptMessages(id, concept_messages)
+      }
       setSaveState("saved")
       qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
     } catch (err) {
@@ -341,17 +502,26 @@ export default function ReviewBriefPage({
     }
   }
 
-  const saveNow = (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
+  const saveNow = (payload: SavePayload) => {
+    // Carry any debounced edit along rather than dropping it — an immediate
+    // save (add, delete, role) must not swallow the slogan typed a moment ago.
+    const merged = { ...pendingSave.current, ...payload }
     cancelPendingSave()
-    runSave(payload)
+    runSave(merged)
   }
 
-  const saveDebounced = (payload: { strategic_brief?: string; areas_of_focus?: AreaOfFocus[] }) => {
+  const saveDebounced = (payload: SavePayload) => {
     setSaveState("saving")
     if (saveTimer.current) clearTimeout(saveTimer.current)
+    // MERGE, never replace. Each field saves through its own call, so a second
+    // edit inside the 800ms window used to throw the first one away: rename an
+    // area, then touch its message, and the rename never left the browser.
+    pendingSave.current = { ...pendingSave.current, ...payload }
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null
-      runSave(payload)
+      const merged = pendingSave.current
+      pendingSave.current = {}
+      runSave(merged)
     }, 800)
   }
 
@@ -365,13 +535,19 @@ export default function ReviewBriefPage({
     if (!result || !briefDirty || saveState === "saving") return
     const brief = result.brief
     // Cancel backs out of the whole thing — the edit stays in the box, unsaved.
-    if (!(await askConsent(SAVE_BRIEF_CONSENT))) return
+    if (!(await askConsent(bundleShared ? SAVE_BRIEF_ONLY_CONSENT : SAVE_BRIEF_CONSENT)))
+      return
     setRewritingAreas(true)
     try {
       await runSave({ strategic_brief: brief })
       setBriefDirty(false)
       setBriefEditing(false)
-      await refineAreasWith(realignAreasInstruction(brief))
+      // Realigning the areas is an AI rewrite, and those are gone once the
+      // client has seen this — the server refuses it. Without this check the
+      // save succeeds and then throws a red toast on top of it.
+      if (!bundleShared) {
+        await refineAreasWith(realignAreasInstruction(brief))
+      }
     } finally {
       setRewritingAreas(false)
     }
@@ -381,98 +557,196 @@ export default function ReviewBriefPage({
   // once the list is persistable. While it isn't, edits stay local and the
   // indicator says so — the next valid change sends the WHOLE list, which
   // carries those earlier edits with it.
-  const commitAreas = (next: AreaOfFocus[], immediate: boolean) => {
+  /**
+   * Persist the areas, and the messages too when the pairing moved.
+   *
+   * `nextMessages` is not optional decoration: the server throws every concept
+   * message away whenever the NUMBER of areas changes, because position is the
+   * only link between the two lists and it cannot tell which message lost its
+   * area. Saving the areas alone on an add or a delete therefore wipes the set
+   * — silently, since the page still holds them in memory and looks fine until
+   * a reload. Sending both together hands the server the new pairing, and
+   * runSave already writes them in the order that survives.
+   */
+  const commitAreas = (
+    next: AreaOfFocus[],
+    immediate: boolean,
+    nextMessages?: ConceptMessage[],
+  ) => {
     setResult((prev) => (prev ? { ...prev, areas: next } : prev))
     if (!roleSelectionSaveable(next)) {
       cancelPendingSave()
       setSaveState("blocked")
       return
     }
-    if (immediate) saveNow({ areas_of_focus: next })
-    else saveDebounced({ areas_of_focus: next })
+    const payload: SavePayload = { areas_of_focus: next }
+    if (nextMessages) payload.concept_messages = nextMessages
+    if (immediate) saveNow(payload)
+    else saveDebounced(payload)
   }
 
   const areas = result?.areas ?? []
-  const selectedAreaCount = areas.filter((a) => a.role !== "none").length
+  // Kickoff refuses an incomplete selection, and the client is the one who
+  // makes it — so this is a check on THEIR answer, not a control here.
+  const areaChoiceValid = roleSelectionComplete(areas)
   // Approve needs a COMPLETE choice — "everything untouched" is persistable but
   // is not a decision, so it can't move the cycle forward.
-  const areaSelectionValid = selectedAreaCount > 0 && roleSelectionSaveable(areas)
+  // Enough areas to BE a choice — not the choice itself, which the client
+  // makes on their own link. Below the minimum they couldn't mark the required
+  // number however they picked.
+  const areaSelectionValid = areas.length >= MIN_SELECTED_AREAS
 
-  const setAreaRole = (idx: number, role: AreaRole) => {
-    if (!result) return
-    if (
-      role !== "none" &&
-      areas[idx]?.role === "none" &&
-      selectedAreaCount >= MAX_SELECTED_AREAS
-    ) {
-      toast.error(`Only ${MAX_SELECTED_AREAS} areas of focus can be carried forward — drop one first.`)
-      return
-    }
+  const addArea = () => {
+    if (!result || bundleShared || areas.length >= MAX_AREAS_ON_PAGE) return
+    // Areas and messages stay parallel, so a new card gets an empty message
+    // beside it rather than shifting every existing pairing along. Both go to
+    // the server in one save — see commitAreas.
+    const nextMessages: ConceptMessage[] = [
+      ...list,
+      { title: "", description: "", role: "secondary" },
+    ]
+    setMessages(nextMessages)
     commitAreas(
-      areas.map((a, i) =>
-        i === idx
-          ? { ...a, role }
-          : // Primary is exclusive: whoever held it becomes secondary.
-            role === "primary" && a.role === "primary"
-            ? { ...a, role: "secondary" }
-            : a,
-      ),
+      [...areas, { slogan: "", sub_slogans: [], role: "none" }],
       true,
+      nextMessages,
     )
   }
 
-  const updateSlogan = (idx: number, value: string) => {
-    if (!result) return
-    commitAreas(areas.map((a, i) => (i === idx ? { ...a, slogan: value } : a)), false)
-  }
-  const addArea = () => {
-    if (!result || areas.length >= MAX_SELECTED_AREAS) return
-    commitAreas([...areas, { slogan: "", sub_slogans: [], role: "none" }], true)
-  }
   const deleteArea = (idx: number) => {
-    if (!result) return
-    commitAreas(areas.filter((_, i) => i !== idx), true)
+    if (!result || bundleShared) return
+    const nextMessages = list.filter((_, i) => i !== idx)
+    setMessages(nextMessages)
+    commitAreas(
+      areas.filter((_, i) => i !== idx),
+      true,
+      nextMessages,
+    )
   }
 
-  // "Approve & use" no longer ends the wizard — it writes the concept messages
-  // for the areas just approved, then advances to Step 3 (which owns the
-  // deadline modal and the kickoff pipeline).
-  //
-  // Generating HERE rather than on arrival means the PM waits behind a loader
-  // that explains itself instead of landing on an empty screen with a button.
-  const [buildingConcepts, setBuildingConcepts] = useState(false)
+  // ── Approve & kickoff ────────────────────────────────────────────────────
+  // Moved here with the concept messages: this is the last screen of the
+  // wizard now, so it owns the deadline modal and the kickoff pipeline.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const [approveOpen, setApproveOpen] = useState(false)
+  const [deadlineInput, setDeadlineInput] = useState("")
+  const [numQuestions, setNumQuestions] = useState(12)
+  const [approving, setApproving] = useState(false)
 
-  const goToConceptMessages = async () => {
-    if (!areaSelectionValid || buildingConcepts) return
-    // The brief no longer autosaves, so leaving with unsent text would drop it.
-    if (briefDirty) {
-      toast.error("Save your brief changes before continuing.")
-      return
-    }
-    setBuildingConcepts(true)
-    const next = `/pm/cycles/${id}/kickoff/concept`
+  const deadlineValid = !!deadlineInput && deadlineInput >= todayIso
+  const approveValid = deadlineValid && numQuestions >= 5 && numQuestions <= 20
+
+  const openApprove = () => {
+    setDeadlineInput(cycle?.questions_deadline?.slice(0, 10) ?? "")
+    setApproveOpen(true)
+  }
+
+  const confirmApprove = async () => {
+    if (!approveValid || !result?.brief || approving) return
+    setApproving(true)
     try {
-      // Coming back through Step 2 must not overwrite messages the PM has
-      // already edited — only generate when there's nothing stored.
-      const existing = await pmApi.getConceptMessages(id)
-      if (existing.concept_messages?.length) {
-        router.push(next)
+      // Sign the client's version off first — kickoff 409s without it, and
+      // doing it here keeps it to one button.
+      if (needsApproval) await approveShare.mutateAsync("brief")
+
+      // The long call (~up to 3 min): every department's questions.
+      await pmApi.submitKickoff({
+        cycle_id: id,
+        strategic_brief: result.brief,
+        num_questions: numQuestions,
+      })
+
+      // Non-blocking: kickoff already succeeded, so a deadline failure warns
+      // rather than rolls anything back.
+      try {
+        await pmApi.setQuestionsDeadline(id, deadlineInput)
+      } catch {
+        toast.error("Questions generated, but the deadline couldn't be saved — set it from the cycle page.")
+      }
+
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
+      toast.success(`Kickoff complete — departments must answer by ${formatDate(deadlineInput)}.`)
+      setApproveOpen(false)
+      router.push(`/pm/cycles/${id}`)
+    } catch (err) {
+      // A timeout aborts here while the backend is very likely still going.
+      // Resubmitting would fire a DUPLICATE kickoff, so don't re-enable.
+      const msg = (err as { message?: string })?.message ?? ""
+      if (/timeout|ECONNABORTED/i.test(msg)) {
+        toast.message("Questions may still be generating — check the cycle dashboard in a moment.")
+        setApproveOpen(false)
+        router.push(`/pm/cycles/${id}`)
         return
       }
-      // Soft failure is a 200 with an empty list, so check the length. Step 3
-      // has its own Generate button, so it's still a fine place to land.
-      const data = await pmApi.generateConceptMessages(id)
-      if (!data.concept_messages?.length) {
-        toast.error("Couldn't write the concept messages — you can retry on the next screen.")
-      }
-      qc.invalidateQueries({ queryKey: ["pm", "cycle", id] })
-      router.push(next)
-    } catch (err) {
-      // Nothing was created, so stay put and let them press Approve again.
-      toast.error((err as { message?: string })?.message || "Couldn't write the concept messages.")
-      setBuildingConcepts(false)
+      toast.error(msg || "Couldn't kick off the cycle.")
+      setApproving(false)
     }
   }
+
+  // ── Concept messages ─────────────────────────────────────────────────────
+  // One per area, saved together with the areas. Areas go first: adding or
+  // removing one clears the messages server-side, so writing them the other
+  // way round would throw the edit away.
+  const list = messages ?? []
+
+  const editMessages = (next: ConceptMessage[]) => {
+    setMessages(next)
+    saveDebounced({ concept_messages: next })
+  }
+
+  const refineMessage = async (instruction: string, index: number) => {
+    if (bundleShared) return false
+    try {
+      // The endpoint rewrites the WHOLE set, so the instruction has to say
+      // which one to touch — same scoping the concept screen used.
+      const scoped =
+        `Only modify concept message ${index + 1}` +
+        (list[index]?.title ? ` ("${list[index].title}")` : "") +
+        `: ${instruction}. Leave every other message exactly as it is, in the same order.`
+      const data = await pmApi.refineConceptMessages(id, {
+        concept_messages: list,
+        instruction: scoped,
+      })
+      setMessages(data.concept_messages ?? list)
+      return true
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't refine that message.")
+      return false
+    }
+  }
+
+  // One Refine button on the card drives both halves of it. The area names the
+  // idea and the message tells it at length, so "make it punchier" applied to
+  // only one of them leaves a slogan that no longer matches its message.
+  //
+  // Area FIRST, and not for cosmetic reasons: the concept-message refiner
+  // re-reads the cycle's areas to stamp each message's area_slogan, so running
+  // it second is what makes the message pick up the new name. Reversed, the
+  // message would be stamped with the slogan it is replacing.
+  const refineCard = async (instruction: string, index: number) => {
+    if (bundleShared) return false
+    const areaRefined = await refineAreasWith(instruction, index)
+    // A freshly added area has no message yet — asking the refiner to rewrite
+    // message N when there are N-1 of them invites it to invent one.
+    const messageRefined = list[index]
+      ? await refineMessage(instruction, index)
+      : false
+    // Either half landing is a result worth keeping on screen. Both failing
+    // has already raised its own toast.
+    return areaRefined || messageRefined
+  }
+
+  // What Spark has changed since the client sent this back. Empty until they
+  // respond, and empty again once it is signed off — after that the cycle IS
+  // the approved version.
+  const changedSinceResponse =
+    briefShare?.status === "responded" || briefShare?.status === "approved"
+      ? driftSinceResponse(briefShare.response, {
+          strategic_brief: result?.brief,
+          areas_of_focus: areas,
+          concept_messages: list,
+        }).length > 0
+      : false
 
   // Prefer the cycle's actual name; fall back to a fiscal-year label only if
   // the name is missing.
@@ -490,27 +764,80 @@ export default function ReviewBriefPage({
     <div>
       <div className="space-y-6">
         {/* ── Header ── */}
-        <div className="flex items-start gap-3">
-          <Link href={`/pm/cycles/${id}/kickoff`}>
-            <Button variant="outline" size="icon" className="mt-0.5 h-9 w-9 shrink-0">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Cycle Setup
-            </p>
-            <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
-              Strategic Brief &amp; Areas of Focus
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {fiscalLabel} · Set the strategic direction before departments begin.
-            </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Link href={`/pm/cycles/${id}/kickoff`}>
+              <Button variant="outline" size="icon" className="mt-0.5 h-9 w-9 shrink-0">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            </Link>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cycle Setup
+              </p>
+              <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
+                Strategic Direction
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {fiscalLabel} · The brief, the areas of focus and the message behind each.
+              </p>
+            </div>
           </div>
+
+          {/* All three go to the client together — this is where it's sent. */}
+          {sparkFlow && phase === "result" && (
+            <ShareWithClientButton
+              cycleId={id}
+              stage="brief"
+              share={briefShare}
+              // So the dialog can warn when a refine or an edit has moved the
+              // text away from the version the client actually signed.
+              current={{
+                strategic_brief: result?.brief,
+                areas_of_focus: areas,
+                concept_messages: list,
+              }}
+            />
+          )}
         </div>
+
+        {/* On the page as well as in the approve dialog: this is where the
+            editing happens, so this is where it should first be said. */}
+        <ClientDriftNotice
+          changed={changedSinceResponse}
+          canSendBack={briefShare?.status !== "approved"}
+        />
+
+        {briefShare?.client_note && (
+          <div className="flex items-start gap-3 rounded-2xl border border-border bg-muted/40 p-4">
+            <MessageSquareQuote className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">A note from the client</p>
+              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
+                {briefShare.client_note}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Stepper ── */}
         <KickoffStepper current={2} />
+
+        {awaitingClient && (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+            <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                This is with the client right now
+              </p>
+              <p className="mt-0.5 text-sm text-amber-800">
+                The brief and areas of focus are locked until their response is
+                approved — otherwise your edits and theirs would overwrite each
+                other. Approve it on the concept messages step.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Hard error (403 / 404 / network) ── */}
         {phase === "error" && (
@@ -529,7 +856,7 @@ export default function ReviewBriefPage({
                   ? "This cycle belongs to a different project manager, or the link is incorrect."
                   : "Something went wrong contacting the server. Try again."}
               </p>
-              {answersRef.current && hardError !== 403 && hardError !== 404 && (
+              {answersRef.current && !bundleShared && hardError !== 403 && hardError !== 404 && (
                 <Button
                   size="sm"
                   onClick={handleRegenerate}
@@ -551,7 +878,7 @@ export default function ReviewBriefPage({
               <p className="mt-0.5 text-sm text-amber-700">
                 This can happen occasionally — try again.
               </p>
-              {answersRef.current && (
+              {answersRef.current && !bundleShared && (
                 <Button
                   size="sm"
                   onClick={handleRegenerate}
@@ -600,7 +927,7 @@ export default function ReviewBriefPage({
                     <Button
                       size="sm"
                       onClick={saveBriefEdit}
-                      disabled={saveState === "saving"}
+                      disabled={saveState === "saving" || awaitingClient}
                       className="bg-indigo-600 text-white hover:bg-indigo-700"
                     >
                       {saveState === "saving" ? (
@@ -614,6 +941,7 @@ export default function ReviewBriefPage({
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={awaitingClient}
                     onClick={() => setBriefEditing((e) => !e)}
                   >
                     {briefEditing ? (
@@ -622,22 +950,28 @@ export default function ReviewBriefPage({
                       <><Pencil className="h-3.5 w-3.5" /> Edit</>
                     )}
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => setBriefRefineOpen((o) => !o)}
-                    className={cn(
-                      "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
-                      briefRefineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
-                    )}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" /> Refine with AI
-                  </Button>
+                  {/* Gone from the first share, like Regenerate and the
+                      per-card Refine — it never comes back, so a permanently
+                      dead button would just be furniture. Typing stays open. */}
+                  {!bundleShared && (
+                    <Button
+                      size="sm"
+                      onClick={() => setBriefRefineOpen((o) => !o)}
+                      className={cn(
+                        "bg-indigo-50 text-indigo-600 hover:bg-indigo-100",
+                        briefRefineOpen && "bg-indigo-100 ring-1 ring-indigo-300",
+                      )}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Refine with AI
+                    </Button>
+                  )}
                   <span className="shrink-0 text-xs text-muted-foreground">{wordCount} words</span>
                 </div>
               </div>
               {briefEditing ? (
                 <Textarea
                   value={result.brief}
+                  readOnly={awaitingClient}
                   onChange={(e) => updateBrief(e.target.value)}
                   rows={10}
                   className="mt-4 text-sm leading-relaxed"
@@ -667,8 +1001,8 @@ export default function ReviewBriefPage({
                   <div>
                     <p className="font-semibold text-foreground">Areas of Focus</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      Mark {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} slogans to carry forward —
-                      exactly one Primary, the rest Secondary. Anything left unmarked is dropped.
+                      Add, edit or remove areas. The client marks which ones are used
+                      and which one leads when you share this with them.
                     </p>
                   </div>
                 </div>
@@ -679,21 +1013,22 @@ export default function ReviewBriefPage({
                       areaSelectionValid ? "text-muted-foreground" : "text-amber-600",
                     )}
                   >
-                    {selectedAreaCount === 0
-                      ? "nothing marked yet"
-                      : `${areas.filter((a) => a.role === "primary").length} primary · ${
-                          areas.filter((a) => a.role === "secondary").length
-                        } secondary`}
+                    {areas.length} area{areas.length === 1 ? "" : "s"}
                   </span>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={addArea}
-                    disabled={areas.length >= MAX_SELECTED_AREAS}
+                    // How many areas there are is settled at the first
+                    // share: they add to the set once, then both sides work
+                    // on the same list. The server draws the same line.
+                    disabled={bundleShared || areas.length >= MAX_AREAS_ON_PAGE}
                     title={
-                      areas.length >= MAX_SELECTED_AREAS
-                        ? `At most ${MAX_SELECTED_AREAS} areas of focus`
-                        : undefined
+                      bundleShared
+                        ? "This has already gone to the client — the number of areas is settled"
+                        : areas.length >= MAX_AREAS_ON_PAGE
+                          ? `At most ${MAX_AREAS_ON_PAGE} areas of focus on the page`
+                          : undefined
                     }
                   >
                     <Plus className="h-3.5 w-3.5" /> Add area of focus
@@ -703,13 +1038,8 @@ export default function ReviewBriefPage({
 
               {!areaSelectionValid && areas.length > 0 && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-                  {selectedAreaCount === 0
-                    ? `Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} areas of focus — exactly one Primary — to continue.`
-                    : areas.filter((a) => a.role === "primary").length !== 1
-                      ? "Pick exactly one Primary slogan to continue."
-                      : selectedAreaCount < MIN_SELECTED_AREAS
-                        ? `Mark at least ${MIN_SELECTED_AREAS} areas of focus to continue.`
-                        : `Mark no more than ${MAX_SELECTED_AREAS} areas of focus to continue.`}
+                  Keep at least {MIN_SELECTED_AREAS} areas of focus — the client has to be
+                  able to mark that many.
                 </p>
               )}
 
@@ -718,20 +1048,49 @@ export default function ReviewBriefPage({
                   <p className="text-sm text-muted-foreground">No areas of focus were proposed.</p>
                 )}
                 {areas.map((area, i) => (
-                  <ThemeChipCard
+                  <AreaConceptCard
                     key={i}
                     index={i}
-                    // The card speaks title/keywords for both this screen and the
-                    // suggested-themes one; areas of focus map onto it here.
-                    // Sub-slogans stay on the record but are never shown — no
-                    // keywords, no keyword handlers.
-                    theme={{ title: area.slogan, keywords: [], summary: area.summary }}
-                    role={area.role}
-                    onRoleChange={(r) => setAreaRole(i, r)}
+                    area={area}
+                    // Position is the link: message i belongs to area i.
+                    message={list[i]}
                     roleGroup="area-of-focus-primary"
-                    onTitleChange={(v) => updateSlogan(i, v)}
-                    onRemove={() => deleteArea(i)}
-                    onRefine={(ins) => refineAreasWith(ins, i)}
+                    readOnly={awaitingClient}
+                    // Primary/secondary is the client's call, made on their own
+                    // link. Shown here, never set here.
+                    lockRole={sparkFlow}
+                    onAreaChange={(next) =>
+                      commitAreas(
+                        areas.map((a, k) => (k === i ? { ...a, ...next } : a)),
+                        false,
+                      )
+                    }
+                    onMessageChange={(next) =>
+                      editMessages(list.map((m, k) => (k === i ? { ...m, ...next } : m)))
+                    }
+                    // Live only when there is no client coming to choose —
+                    // lockRole hides the control for Spark, and a no-op here
+                    // would leave a PM clicking a toggle wired to nothing.
+                    // One primary across the whole list: marking a new one
+                    // demotes the old rather than leaving two.
+                    onRoleChange={(role) =>
+                      commitAreas(
+                        areas.map((a, k) =>
+                          k === i
+                            ? { ...a, role }
+                            : role === "primary" && (a.role ?? "none") === "primary"
+                              ? { ...a, role: "secondary" }
+                              : a,
+                        ),
+                        true,
+                      )
+                    }
+                    // Same line as Add: the set is fixed from the first
+                    // share, and a delete would clear every concept message
+                    // with no regenerate left to rebuild them.
+                    onRemove={bundleShared ? undefined : () => deleteArea(i)}
+                    // Gone for good once the client has seen this.
+                    onRefine={bundleShared ? undefined : (ins) => refineCard(ins, i)}
                   />
                 ))}
               </div>
@@ -750,36 +1109,145 @@ export default function ReviewBriefPage({
             </Button>
           </Link>
           <div className="flex items-center gap-3">
-            {(phase === "result" || phase === "soft" || phase === "error") && (
+            {/* Gone once it has been shared, rather than greyed out: from the
+                first share it never comes back, so leaving a dead button in the
+                bar is furniture that reads as "broken" every visit. */}
+            {(phase === "result" || phase === "soft" || phase === "error") &&
+              !bundleShared && (
+                <Button
+                  variant="outline"
+                  onClick={handleRegenerate}
+                  disabled={!answersRef.current}
+                  title={
+                    !answersRef.current
+                      ? "Answer the questionnaire again to regenerate"
+                      : undefined
+                  }
+                >
+                  <RefreshCw className="h-4 w-4" /> Regenerate
+                </Button>
+              )}
+
+            {/* Send back lives on the page, not only inside the share popup —
+                it is one of the two things you do with a response. */}
+            {needsApproval && (
               <Button
                 variant="outline"
-                onClick={handleRegenerate}
-                disabled={!answersRef.current}
-                title={!answersRef.current ? "Answer the questionnaire again to regenerate" : undefined}
+                onClick={() => setSendBackOpen(true)}
+                className="border-amber-300 text-amber-800 hover:bg-amber-50"
               >
-                <RefreshCw className="h-4 w-4" /> Regenerate
+                <Undo2 className="h-4 w-4" /> Send back
               </Button>
             )}
             <Button
-              disabled={phase !== "result" || !areaSelectionValid || buildingConcepts}
-              onClick={goToConceptMessages}
+              disabled={
+                phase !== "result" ||
+                list.length === 0 ||
+                !areaChoiceValid ||
+                (sparkFlow && !(clientApproved || needsApproval))
+              }
+              onClick={openApprove}
               title={
-                phase === "result" && !areaSelectionValid
-                  ? `Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} areas of focus, with one Primary, first`
-                  : undefined
+                !briefShare
+                  ? "Share this with the client first"
+                  : briefShare.status === "pending"
+                    ? "Waiting on the client's response"
+                    : list.length === 0
+                      ? "Generate the concept messages first"
+                      : !areaChoiceValid
+                        ? `The client needs to mark ${MIN_SELECTED_AREAS}-${MAX_SELECTED_AREAS} areas, one leading`
+                        : undefined
               }
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {buildingConcepts ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" />
-              )}
-              Approve &amp; use
+              <CheckCircle2 className="h-4 w-4" />
+              {needsApproval ? "Approve & kickoff" : "Approve & use"}
             </Button>
           </div>
         </div>
       </div>
+
+      {/* Send back — the note that goes with it. Same shape as step 1's, so a
+          response is handled the same way wherever you are looking at it. */}
+      <Dialog open={sendBackOpen} onOpenChange={setSendBackOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send this back to the client</DialogTitle>
+            <DialogDescription>
+              They&apos;ll get an email with your note. Their version stays on the
+              page so they can edit rather than start again.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">
+              What should they look at?
+            </label>
+            <Textarea
+              value={sendBackNote}
+              onChange={(e) => setSendBackNote(e.target.value)}
+              rows={4}
+              autoFocus
+              placeholder="e.g. We tightened area 2 — check you're happy with the new wording."
+              className="text-sm"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              disabled={sendBackShare.isPending}
+              onClick={() => {
+                setSendBackOpen(false)
+                setSendBackNote("")
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={sendBackShare.isPending || !sendBackNote.trim()}
+              onClick={() =>
+                sendBackShare.mutate(
+                  { stage: "brief", comment: sendBackNote.trim() },
+                  {
+                    onSuccess: () => {
+                      setSendBackOpen(false)
+                      setSendBackNote("")
+                    },
+                  },
+                )
+              }
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              {sendBackShare.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Undo2 className="h-4 w-4" />
+              )}
+              Send back with this note
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ApproveDeadlineDialog
+        open={approveOpen}
+        onOpenChange={(o) => {
+          if (approving) return // don't dismiss mid-request
+          setApproveOpen(o)
+        }}
+        value={deadlineInput}
+        onChange={setDeadlineInput}
+        min={todayIso}
+        valid={deadlineValid}
+        canApprove={approveValid}
+        numQuestions={numQuestions}
+        onNumQuestionsChange={setNumQuestions}
+        submitting={approving}
+        onConfirm={confirmApprove}
+        cycleLabel={fiscalLabel}
+        changedSinceResponse={changedSinceResponse}
+      />
 
       {/* One dialog for all three destructive paths — refine, manual edit, and
           full regeneration — with the copy carried by whoever asked. */}
@@ -804,9 +1272,6 @@ export default function ReviewBriefPage({
           brief — same treatment as the other multi-call AI passes. */}
       {rewritingAreas && <KickoffBuildLoader {...AREAS_REFRESH_LOADER} />}
 
-      {/* Full-screen loader while the concept messages are written. Stays up
-          through the navigation so Step 3 doesn't flash an empty state. */}
-      {buildingConcepts && <KickoffBuildLoader {...CONCEPT_MESSAGE_LOADER} />}
     </div>
   )
 }

@@ -1,24 +1,41 @@
 "use client"
 
-import { use, useMemo, useRef, useState } from "react"
+import { use, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { usePMCycleDashboard, useSurveyQuestions } from "@/hooks/useSessions"
-import { pmApi, SurveyQuestion, CycleBriefFields, GenerateBriefAnswer } from "@/lib/api/pm"
-import { documentsApi } from "@/lib/api/documents"
+import { pmApi, CycleBriefFields, SurveyQuestion } from "@/lib/api/pm"
 import { storeKickoffAnswers } from "@/lib/kickoffBriefStorage"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
-import { cn } from "@/lib/utils"
+import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
+import { useAuth } from "@/contexts/AuthContext"
 import {
-  AlertTriangle, ArrowLeft, Ban, Check, CheckCircle2, Clock, FileText, Loader2,
-  RotateCcw, ShieldAlert, Sparkles, Upload, X,
+  QuestionnaireForm,
+  QuestionnaireValue,
+  buildAnswersPayload as buildPayload,
+  emptyQuestionnaireValue,
+  answeredCount as countAnswered,
+  requiredCount as countRequired,
+  isComplete,
+  valueFromAnswers,
+} from "@/components/pm/QuestionnaireForm"
+import { useApproveShare, useCycleShares, useSendBackShare } from "@/hooks/useShare"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  ArrowLeft, ArrowRight, CheckCircle2, Clock, Loader2, Plus, ShieldAlert,
+  Sparkles, Undo2,
 } from "lucide-react"
-
-const ALLOWED_BRIEF_EXTS = [".pdf", ".docx", ".doc", ".txt"]
-const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 1: Questionnaire
@@ -39,35 +56,6 @@ const MAX_BRIEF_BYTES = 20 * 1024 * 1024 // 20 MB
    (kickoff/review) via sessionStorage — see lib/kickoffBriefStorage.
 ──────────────────────────────────────────────────────────────────────────── */
 
-/** Per-question answer. `selected` holds every preset chip the PM has toggled
- *  on (multi-select — any number of chips at once). `custom` holds their own
- *  written-in answers, committed one pill at a time from the "Other…" box.
- *  `text` is the plain answer (no-options mode) or the uncommitted draft still
- *  sitting in the "Other…" box — it counts either way, so a PM who types and
- *  hits Generate without pressing Enter doesn't lose it. */
-interface Answer {
-  selected: string[]
-  custom: string[]
-  text: string
-}
-
-const emptyAnswer: Answer = { selected: [], custom: [], text: "" }
-
-/** Sentence-length options shred an inline pill row once they wrap, so they get
- *  stacked full-width checkbox rows instead. Driven off the option text, so any
- *  question — template or generated — picks the layout that fits its content. */
-const isLongForm = (q: SurveyQuestion) => (q.options ?? []).some((o) => o.length > 40)
-
-/** Every string in `options` is a real answer — the API never appends an "Other"
- *  entry (the generator prompt explicitly forbids it). The "Other…" box below the
- *  options is ours, a UI affordance, so nothing here may be sliced off. */
-const hasOptions = (q: SurveyQuestion) => !!q.options && q.options.length > 0
-
-function isAnswered(a: Answer | undefined) {
-  if (!a) return false
-  return a.selected.length > 0 || a.custom.length > 0 || a.text.trim().length > 0
-}
-
 export default function KickoffQuestionnairePage({
   params,
 }: {
@@ -75,6 +63,7 @@ export default function KickoffQuestionnairePage({
 }) {
   const { id } = use(params)
   const router = useRouter()
+  const qc = useQueryClient()
   const { data: pmData, isLoading: cycleLoading } = usePMCycleDashboard(id)
   const {
     data: surveyData,
@@ -82,87 +71,36 @@ export default function KickoffQuestionnairePage({
     error: questionsError,
   } = useSurveyQuestions(id)
 
-  // Keyed by array position, NOT q.id — the backend doesn't guarantee `id` is
-  // unique across questions in a cycle, only that ORDER is stable. Keying by
-  // id let two questions that happen to share an id share one answer slot,
-  // which showed up as "picking a chip in one question also selects it in
-  // another." Position is the one thing the API contract actually promises.
-  const [answers, setAnswers] = useState<Record<number, Answer>>({})
+  // Answers and rejections, both keyed by array position — see
+  // QuestionnaireForm for why id is not safe to key on.
+  const [qValue, setQValue] = useState<QuestionnaireValue>(emptyQuestionnaireValue)
 
-  // Questions the PM has rejected — same positional keying as `answers`. A
-  // rejected question drops out of the required count AND out of the payload,
-  // so it never reaches the brief generator or anything downstream of it.
-  const [rejected, setRejected] = useState<Record<number, boolean>>({})
-
-  // Optional strategic-brief document. Uploaded immediately on pick to
-  // POST /pm/cycles/{id}/brief-document (replaces any prior doc on the cycle).
-  // generate-brief later reads whatever doc is on the cycle, so we must wait
-  // for a successful upload before allowing "Generate brief".
-  const [briefFile, setBriefFile] = useState<File | null>(null)
-  const [uploadState, setUploadState] = useState<"idle" | "uploading" | "done" | "error">("idle")
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  // Id of the currently-attached doc — needed to DELETE it on remove.
-  const [briefDocId, setBriefDocId] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-  // Guards against a slow upload landing after the file was replaced/removed.
-  const uploadSeq = useRef(0)
-
-  const uploadBrief = async (file: File) => {
-    const seq = ++uploadSeq.current
-    setUploadState("uploading")
-    setUploadError(null)
-    try {
-      const res = await pmApi.uploadBriefDocument(id, file)
-      if (seq !== uploadSeq.current) return // superseded by a newer pick/remove
-      setBriefDocId(res.documents?.[0]?.document_id ?? null)
-      setUploadState("done")
-    } catch (err) {
-      if (seq !== uploadSeq.current) return
-      // The apiClient interceptor surfaces the backend `detail` as `message`.
-      setUploadError((err as { message?: string })?.message || "Upload failed. Please try again.")
-      setUploadState("error")
-    }
-  }
-
-  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    // Clear the input so the same filename can be re-picked after a remove.
-    if (fileRef.current) fileRef.current.value = ""
-    if (!file) return
-
-    const nameLower = file.name.toLowerCase()
-    if (!ALLOWED_BRIEF_EXTS.some((ext) => nameLower.endsWith(ext))) {
-      setBriefFile(file)
-      uploadSeq.current++ // cancel any in-flight upload
-      setUploadState("error")
-      setUploadError("Unsupported file type — please upload a PDF, DOCX, DOC, or TXT.")
-      return
-    }
-    if (file.size > MAX_BRIEF_BYTES) {
-      setBriefFile(file)
-      uploadSeq.current++
-      setUploadState("error")
-      setUploadError("File is too large — the maximum size is 20 MB.")
-      return
-    }
-    setBriefFile(file)
-    uploadBrief(file)
-  }
-
-  const removeBrief = () => {
-    uploadSeq.current++ // ignore any in-flight upload result
-    // Detach the doc from the cycle so generate-brief won't keep using it.
-    // Fire-and-forget: the UI clears immediately; a failed delete is logged.
-    if (briefDocId) {
-      documentsApi.remove(briefDocId).catch((err) => {
-        console.error("[brief-document] delete failed", err)
-      })
-    }
-    setBriefFile(null)
-    setBriefDocId(null)
-    setUploadState("idle")
-    setUploadError(null)
-  }
+  // Both gates' state. The client answers this questionnaire, so nothing here
+  // is editable or submittable until Spark has approved what they sent.
+  const { data: shares } = useCycleShares(id)
+  const approveShare = useApproveShare(id)
+  // Send back lives on this page, next to Approve: this is where their answers
+  // are actually read, so it is where the decision about them is made.
+  const sendBackShare = useSendBackShare(id)
+  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [sendBackNote, setSendBackNote] = useState("")
+  // The client sign-off belongs to spark_internal: they are the only role
+  // that can send a link, approve a response or chase one. For everyone else
+  // the share simply does not exist here — no button, and none of the locks
+  // it brings — because gating a cycle on a sign-off they cannot obtain would
+  // strand them on a screen with a dead Continue and no way forward. The
+  // server skips the same gates for the same reason.
+  const { user } = useAuth()
+  const sparkFlow = user?.role === "spark_internal"
+  const share = sparkFlow ? shares?.questionnaire : undefined
+  // Only while the client still holds the link. Once they submit they're
+  // locked out, so their answers become Spark's to correct before sign-off.
+  const awaitingClient = share?.status === "pending"
+  const clientApproved = share?.status === "approved"
+  // The client has answered but nobody has signed it off yet. Their answers are
+  // shown below so there is something to actually review — approving what you
+  // cannot see is not a review.
+  const needsApproval = share?.status === "responded"
 
   const cycle = (pmData as { cycle?: CycleBriefFields } | undefined)?.cycle
   // Prefer the cycle's actual name; fall back to a fiscal-year label only if
@@ -176,116 +114,136 @@ export default function KickoffQuestionnairePage({
   // instead, or clicking it would look like a no-op.
   const backHref = cycle?.kickoff_brief ? `/pm/cycles/${id}` : "/pm/cycles"
 
-  const questions = surveyData?.questions ?? []
+  // A brief already exists, so going forward is "continue", not "generate".
+  // Regenerating would throw away the brief, the areas of focus and every
+  // concept message written for them — Step 2 owns that as a deliberate button.
+  const briefExists = !!cycle?.kickoff_brief?.trim()
+
+  // Two reasons this screen goes read-only, and they are different:
+  //   - the client currently holds the link, so editing would collide;
+  //   - the brief has already been drafted from these answers, so editing them
+  //     changes nothing. Continue no longer regenerates, and letting someone
+  //     retype an answer that can't reach anything is worse than locking it.
+  const answersLocked = awaitingClient || briefExists
+
+  // Spark's own questions. Added before the questionnaire goes out and not
+  // after: from the first share the list is what the client is answering, and
+  // an answer is stored against a question id, so a set that keeps moving
+  // leaves answers pointing at questions that changed. The server refuses it
+  // too. Deliberately NOT tied to answersLocked — that reopens between rounds.
+  const [newQuestion, setNewQuestion] = useState("")
+  const [savingQuestions, setSavingQuestions] = useState(false)
+  const canEditQuestions = !share && !briefExists
+
+  const saveQuestions = async (next: SurveyQuestion[]) => {
+    setSavingQuestions(true)
+    try {
+      await pmApi.saveSurveyQuestions(id, next)
+      qc.invalidateQueries({ queryKey: ["pm", "survey-questions", id] })
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't save the question.")
+    } finally {
+      setSavingQuestions(false)
+    }
+  }
+
+  const addQuestion = async () => {
+    const text = newQuestion.trim()
+    if (!text || savingQuestions) return
+    // Ids only have to be unique within the cycle; "m" keeps them clear of the
+    // template's t* and the AI's g*, and unknown ids sort before the catch-all.
+    const taken = new Set(questions.map((q) => q.id))
+    let n = 1
+    while (taken.has(`m${n}`)) n += 1
+    setNewQuestion("")
+    await saveQuestions([
+      ...questions,
+      { id: `m${n}`, text, source: "manual", options: null },
+    ])
+  }
+
+  const removeQuestion = async (questionId: string) => {
+    if (savingQuestions) return
+    await saveQuestions(questions.filter((q) => q.id !== questionId))
+  }
+
+  const editQuestion = async (questionId: string, text: string) => {
+    if (savingQuestions) return
+    await saveQuestions(
+      questions.map((q) => (q.id === questionId ? { ...q, text } : q)),
+    )
+  }
+
+  // Memoised because it feeds the seeding check below. `?? []` builds a fresh
+  // array every render, which would make that check fire on every render and
+  // overwrite whatever the PM had just typed.
+  const questions = useMemo(() => surveyData?.questions ?? [], [surveyData])
   const total = surveyData?.total ?? 0
 
-  const answeredCount = useMemo(
-    () => questions.reduce((n, _q, i) => n + (!rejected[i] && isAnswered(answers[i]) ? 1 : 0), 0),
-    [questions, answers, rejected],
-  )
-  // Rejected questions don't need answering, so they leave the denominator too.
-  const required = useMemo(
-    () => questions.reduce((n, _q, i) => n + (rejected[i] ? 0 : 1), 0),
-    [questions, rejected],
-  )
+  const answeredCount = useMemo(() => countAnswered(questions, qValue), [questions, qValue])
+  const required = useMemo(() => countRequired(questions, qValue), [questions, qValue])
+
+  // Fill the form with the client's answers the moment they SUBMIT, not when
+  // they are approved — the PM has to read them to decide whether to approve.
+  // Adjusted during render rather than in an effect: this is the "reset state
+  // when something changes" case, and an effect here costs an extra render
+  // with an empty form painted first.
+  //
+  // Keyed on responded_at, which does not change when the share is later
+  // approved — so this seeds exactly once and the PM's own edits afterwards
+  // are theirs to keep, even across a background refetch.
+  const [seededFrom, setSeededFrom] = useState<string | null>(null)
+  const submittedAnswers = share?.response?.answers
+  const seedKey = share?.responded_at ?? null
+  if (seedKey && seedKey !== seededFrom && questions.length && submittedAnswers?.length) {
+    setSeededFrom(seedKey)
+    setQValue(valueFromAnswers(questions, submittedAnswers))
+  }
+
   const progressPct = required > 0 ? Math.round((answeredCount / required) * 100) : 0
-
-  // Multi-select — toggles one chip on/off without touching any others or the
-  // free-text field.
-  const toggleChip = (index: number, value: string) =>
-    setAnswers((prev) => {
-      const current = prev[index] ?? emptyAnswer
-      const selected = current.selected.includes(value)
-        ? current.selected.filter((v) => v !== value)
-        : [...current.selected, value]
-      return { ...prev, [index]: { ...current, selected } }
-    })
-
-  // Free text is fully independent of chip selection — used for plain
-  // free-text questions AND as the "Other…" draft box.
-  const setText = (index: number, value: string) =>
-    setAnswers((prev) => ({ ...prev, [index]: { ...(prev[index] ?? emptyAnswer), text: value } }))
-
-  // Commit the "Other…" draft as its own pill (Enter or blur). Duplicates of an
-  // existing pill or preset chip are dropped rather than added twice.
-  const commitCustom = (index: number, presets: string[]) =>
-    setAnswers((prev) => {
-      const current = prev[index] ?? emptyAnswer
-      const value = current.text.trim()
-      if (!value) return prev
-      const dupe =
-        current.custom.includes(value) || presets.includes(value) || current.selected.includes(value)
-      return {
-        ...prev,
-        [index]: {
-          ...current,
-          custom: dupe ? current.custom : [...current.custom, value],
-          text: "",
-        },
-      }
-    })
-
-  // By position, not by value — editing can make two pills identical, and
-  // filtering on value would take both out.
-  const removeCustom = (index: number, customIdx: number) =>
-    setAnswers((prev) => {
-      const current = prev[index] ?? emptyAnswer
-      return { ...prev, [index]: { ...current, custom: current.custom.filter((_, k) => k !== customIdx) } }
-    })
-
-  // A committed pill stays editable — click into it and retype.
-  const editCustom = (index: number, customIdx: number, value: string) =>
-    setAnswers((prev) => {
-      const current = prev[index] ?? emptyAnswer
-      return {
-        ...prev,
-        [index]: { ...current, custom: current.custom.map((v, k) => (k === customIdx ? value : v)) },
-      }
-    })
-
-  // Leaving a pill empty deletes it; otherwise trim what was typed.
-  const commitCustomEdit = (index: number, customIdx: number) =>
-    setAnswers((prev) => {
-      const current = prev[index] ?? emptyAnswer
-      const value = (current.custom[customIdx] ?? "").trim()
-      return {
-        ...prev,
-        [index]: {
-          ...current,
-          custom: value
-            ? current.custom.map((v, k) => (k === customIdx ? value : v))
-            : current.custom.filter((_, k) => k !== customIdx),
-        },
-      }
-    })
-
-  const toggleRejected = (index: number) =>
-    setRejected((prev) => ({ ...prev, [index]: !prev[index] }))
 
   // `required > 0` also blocks the everything-rejected case, which would
   // otherwise generate a brief from an empty answer set.
-  const allAnswered = required > 0 && answeredCount === required
-  // Block generation while an attached doc is still uploading — generate-brief
-  // reads the cycle's doc, so it must land first. (An upload error doesn't
-  // block: the doc simply isn't attached and generation proceeds without it.)
-  const canGenerate = allAnswered && uploadState !== "uploading"
+  const allAnswered = isComplete(questions, qValue)
+  // Three things gate generation now:
+  //   - every question answered;
+  //   - any attached doc finished uploading (generate-brief reads the cycle's
+  //     doc, so it must land first — an upload ERROR doesn't block, the doc is
+  //     simply not attached);
+  //   - the client has answered and Spark has approved. The server enforces
+  //     this one too; the disabled button is only the courteous half.
+  //   - the client has answered and Spark has approved. The server enforces
+  //     this one too; the disabled button is only the courteous half.
+  //
+  // `allAnswered` works for a client submission too: the questions they skipped
+  // come back marked rejected, which takes them out of the denominator — so a
+  // 10-of-12 submission reads as complete rather than permanently short.
+  // Without the sign-off in play this is the rule the wizard always had:
+  // answer everything, then continue.
+  const canGenerate = allAnswered && (!sparkFlow || clientApproved || needsApproval)
 
-  // One entry per ANSWERED question — unanswered and rejected ones are omitted
-  // (no server-side required-count check). Multi-select chips + every custom
-  // pill are joined into a single comma-separated string per the API contract.
-  const buildAnswersPayload = (): GenerateBriefAnswer[] =>
-    questions.reduce<GenerateBriefAnswer[]>((acc, q, i) => {
-      const a = answers[i]
-      if (!a || rejected[i]) return acc
-      const parts = [...a.selected, ...a.custom, a.text.trim()].filter(Boolean)
-      if (parts.length === 0) return acc
-      acc.push({ question_id: q.id, answer: parts.join(", ") })
-      return acc
-    }, [])
+  const [approveOpen, setApproveOpen] = useState(false)
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!canGenerate) return
-    storeKickoffAnswers(id, buildAnswersPayload())
+    // Approving is the signature the rest of the wizard is gated on, so it is
+    // never a side effect of clicking Continue — ask first.
+    if (needsApproval && !approveOpen) {
+      setApproveOpen(true)
+      return
+    }
+    setApproveOpen(false)
+    // One button, two steps: sign the client's answers off, then carry on with
+    // them. Splitting these made the PM approve in a dialog and then hunt for
+    // the button that was disabled a second ago.
+    if (needsApproval) {
+      try {
+        await approveShare.mutateAsync("questionnaire")
+      } catch {
+        return // the hook has already toasted; stay put rather than half-proceed
+      }
+    }
+    storeKickoffAnswers(id, buildPayload(questions, qValue), { generate: !briefExists })
     router.push(`/pm/cycles/${id}/kickoff/review`)
   }
 
@@ -297,23 +255,31 @@ export default function KickoffQuestionnairePage({
     <div>
       <div className="space-y-6">
         {/* ── Header ── */}
-        <div className="flex items-start gap-3">
-          <Link href={backHref}>
-            <Button variant="outline" size="icon" className="mt-0.5 h-9 w-9 shrink-0">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Cycle Setup
-            </p>
-            <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
-              Strategic Brief &amp; Areas of Focus
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {fiscalLabel} · Set the strategic direction before departments begin.
-            </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Link href={backHref}>
+              <Button variant="outline" size="icon" className="mt-0.5 h-9 w-9 shrink-0">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            </Link>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cycle Setup
+              </p>
+              <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">
+                Strategic Brief &amp; Areas of Focus
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {fiscalLabel} · Set the strategic direction before departments begin.
+              </p>
+            </div>
           </div>
+
+          {/* Client sign-off. The client answers these questions, so this gate
+              comes before anything else on the page can be finished. */}
+          {sparkFlow && !questionsError && total > 0 && (
+            <ShareWithClientButton cycleId={id} stage="questionnaire" share={share} />
+          )}
         </div>
 
         {/* ── Stepper ── */}
@@ -359,12 +325,44 @@ export default function KickoffQuestionnairePage({
         {/* ── Questionnaire ── */}
         {!questionsError && total > 0 && (
           <>
+            {/* The client's answers are waiting to be signed off. Say so above
+                them — otherwise a read-only form full of text nobody typed
+                here reads as a bug. */}
+            {needsApproval && (
+              // Louder than the other banners on purpose: this one says a
+              // person did something and it is now your turn. The amber
+              // "with the client" state is a status; this is a prompt.
+              <div className="flex items-start gap-3 rounded-2xl border-2 border-green-400 bg-green-50 p-5 shadow-sm">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100">
+                  <CheckCircle2 className="h-5 w-5 text-green-700" />
+                </span>
+                <div>
+                  <p className="text-base font-bold text-green-900">
+                    Answered by client
+                  </p>
+                  <p className="mt-0.5 text-sm text-green-800">
+                    Their answers are below. Edit anything that needs correcting, then
+                    &ldquo;Approve &amp; generate brief&rdquo; signs them off and drafts
+                    the brief from them.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Intro + progress */}
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-foreground">A few quick questions</h2>
+                <h2 className="text-lg font-semibold text-foreground">
+                  {briefExists || needsApproval
+                    ? "The client's answers"
+                    : "A few quick questions"}
+                </h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Pick the closest option for each — or write your own. Your answers shape the AI-drafted brief.
+                  {briefExists
+                    ? "The brief has already been drafted from these. To change them, use Regenerate on the next step."
+                    : needsApproval
+                      ? "Sent back by the client. Edit them if anything needs correcting — these are what the brief is drafted from."
+                      : "Pick the closest option for each — or write your own. Your answers shape the AI-drafted brief."}
                 </p>
               </div>
               <div className="shrink-0 text-right">
@@ -380,293 +378,82 @@ export default function KickoffQuestionnairePage({
               </div>
             </div>
 
-            {/* Question cards */}
-            <div className="space-y-4">
-              {questions.map((q, i) => {
-                const a = answers[i] ?? emptyAnswer
-                const isRejected = !!rejected[i]
-                const answered = !isRejected && isAnswered(a)
-                const presets = q.options ?? []
-                const longForm = isLongForm(q)
+            {/* Question cards — shared with the client's own page, so the
+                two never drift in how an answer is shaped. */}
+            <QuestionnaireForm
+              questions={questions}
+              value={qValue}
+              onChange={setQValue}
+              readOnly={answersLocked}
+              // Spark's own questions only. The client's adopted ones are
+              // stored as "manual" too, so ownership is stated rather than
+              // inferred from the source.
+              editableQuestionIds={questions
+                .filter((q) => q.source === "manual")
+                .map((q) => q.id)}
+              onRemoveQuestion={canEditQuestions ? removeQuestion : undefined}
+              onEditQuestion={canEditQuestions ? editQuestion : undefined}
+            />
 
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      "rounded-2xl border bg-card p-5 shadow-sm transition-colors",
-                      isRejected
-                        ? "border-dashed border-border bg-muted/30"
-                        : answered
-                          ? "border-indigo-200"
-                          : "border-border",
-                    )}
-                  >
-                    {/* Question header */}
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={cn(
-                          "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                          answered
-                            ? "bg-indigo-100 text-indigo-700"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {i + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={cn(
-                            "font-semibold leading-snug",
-                            isRejected ? "text-muted-foreground line-through" : "text-foreground",
-                          )}
-                        >
-                          {q.text}
-                        </p>
-                        {isRejected && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Skipped — this question won&apos;t be used in the brief.
-                          </p>
-                        )}
-                      </div>
-                      {answered && (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-                          <Check className="h-3 w-3" /> Answered
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => toggleRejected(i)}
-                        title={isRejected ? "Include this question again" : "Reject this question"}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
-                      >
-                        {isRejected ? (
-                          <>
-                            <RotateCcw className="h-3 w-3" /> Undo
-                          </>
-                        ) : (
-                          <>
-                            <Ban className="h-3 w-3" /> Reject
-                          </>
-                        )}
-                      </button>
-                    </div>
+            {/* Says WHY the add box is gone. Without this the box simply
+                vanishes once the questionnaire is shared, which reads as a bug
+                rather than a rule — and the rule is invisible everywhere else
+                on the page. */}
+            {!canEditQuestions && share && (
+              <p className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                The question set is settled — it has gone to the client and an
+                answer is stored against each question, so the list can&apos;t
+                change now. Re-share if something important is missing; that
+                sends a fresh link.
+              </p>
+            )}
 
-                    {/* Chip-select (with inline "Other…" box) or plain free-text.
-                        Hidden entirely once rejected — nothing left to answer. */}
-                    {isRejected ? null : hasOptions(q) ? (
-                      <div
-                        className={cn(
-                          "mt-4 flex gap-2 pl-9",
-                          longForm ? "flex-col items-stretch" : "flex-wrap",
-                        )}
-                      >
-                        {presets.map((opt, optIdx) => {
-                          const selected = a.selected.includes(opt)
-                          return (
-                            <button
-                              key={optIdx}
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => toggleChip(i, opt)}
-                              className={cn(
-                                "border text-sm font-medium transition-colors",
-                                longForm
-                                  ? "flex w-full items-start gap-2.5 rounded-xl px-3.5 py-2.5 text-left"
-                                  : "rounded-full px-3.5 py-2",
-                                selected
-                                  ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                                  : "border-border bg-background text-foreground hover:border-indigo-300 hover:bg-accent",
-                              )}
-                            >
-                              {longForm && (
-                                <span
-                                  aria-hidden
-                                  className={cn(
-                                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                                    selected
-                                      ? "border-indigo-500 bg-indigo-600 text-white"
-                                      : "border-muted-foreground/40 bg-background",
-                                  )}
-                                >
-                                  {selected && <Check className="h-3 w-3" />}
-                                </span>
-                              )}
-                              {opt}
-                            </button>
-                          )
-                        })}
-                        {/* The PM's own answers — as many as they like, each its
-                            own pill, and each still editable after committing.
-                            Keyed by position: keying by value would remount the
-                            input on every keystroke and drop focus. */}
-                        {a.custom.map((value, customIdx) => (
-                          <span
-                            key={customIdx}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-indigo-400 bg-indigo-50 px-3.5 py-2 text-sm font-medium text-indigo-700"
-                          >
-                            <input
-                              type="text"
-                              value={value}
-                              onChange={(e) => editCustom(i, customIdx, e.target.value)}
-                              onBlur={() => commitCustomEdit(i, customIdx)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault()
-                                  e.currentTarget.blur()
-                                }
-                              }}
-                              size={Math.max(value.length, 3)}
-                              aria-label={`Edit answer "${value}"`}
-                              className="border-0 bg-transparent p-0 text-sm font-medium text-indigo-700 outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeCustom(i, customIdx)}
-                              title={`Remove "${value}"`}
-                              className="text-indigo-400 transition-colors hover:text-indigo-700"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </span>
-                        ))}
-                        {/* Independent of chip selection — Enter (or blur) turns the
-                            draft into a pill so the next one can be typed. */}
-                        <input
-                          type="text"
-                          value={a.text}
-                          onChange={(e) => setText(i, e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === ",") {
-                              e.preventDefault()
-                              commitCustom(i, presets)
-                            } else if (e.key === "Backspace" && !a.text && a.custom.length > 0) {
-                              removeCustom(i, a.custom.length - 1)
-                            }
-                          }}
-                          onBlur={() => commitCustom(i, presets)}
-                          placeholder={a.custom.length > 0 ? "Add another…" : "Other…"}
-                          className={cn(
-                            "min-w-[7rem] max-w-full rounded-full border px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70",
-                            a.text.trim()
-                              ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                              : "border-dashed border-muted-foreground/40 bg-background focus:border-indigo-400",
-                          )}
-                        />
-                      </div>
-                    ) : (
-                      <div className="mt-4 pl-9">
-                        <Textarea
-                          value={a.text}
-                          onChange={(e) => setText(i, e.target.value)}
-                          placeholder="Type your answer…"
-                          rows={2}
-                          className="text-sm"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Optional strategic-brief upload */}
-            <div
-              className={cn(
-                "rounded-2xl border border-dashed p-4",
-                uploadState === "error"
-                  ? "border-destructive/40 bg-destructive/5"
-                  : "border-indigo-200 bg-indigo-50/30",
-              )}
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt"
-                className="hidden"
-                onChange={handleFilePick}
-              />
-              {briefFile ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <span
-                    className={cn(
-                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-                      uploadState === "error"
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-indigo-100 text-indigo-600",
-                    )}
-                  >
-                    {uploadState === "uploading" ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : uploadState === "error" ? (
-                      <AlertTriangle className="h-5 w-5" />
-                    ) : uploadState === "done" ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    ) : (
-                      <FileText className="h-5 w-5" />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">{briefFile.name}</p>
-                    <p
-                      className={cn(
-                        "text-xs",
-                        uploadState === "error" ? "text-destructive" : "text-muted-foreground",
-                      )}
-                    >
-                      {uploadState === "uploading"
-                        ? "Uploading…"
-                        : uploadState === "error"
-                          ? uploadError
-                          : uploadState === "done"
-                            ? "Attached — will guide the AI-drafted brief"
-                            : "Optional supporting brief"}
-                    </p>
-                  </div>
+            {/* Spark's own questions. Only before it goes out — once the client
+                has the list, changing it would leave their answers pointing at
+                questions that no longer exist. */}
+            {canEditQuestions && (
+              <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  Add your own question
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Goes to the client with the rest. They&apos;ll answer it in their own
+                  words — no options to pick from.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={newQuestion}
+                    onChange={(e) => setNewQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addQuestion()
+                      }
+                    }}
+                    placeholder="e.g. Which three achievements should lead this year's report?"
+                    className="h-9 min-w-[18rem] flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-indigo-400"
+                  />
                   <Button
                     type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={uploadState === "uploading"}
-                    onClick={() => fileRef.current?.click()}
+                    disabled={!newQuestion.trim() || savingQuestions}
+                    onClick={addQuestion}
+                    className="h-9 bg-indigo-600 text-white hover:bg-indigo-700"
                   >
-                    Replace
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={removeBrief}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="h-4 w-4" /> Remove
+                    {savingQuestions ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    Add question
                   </Button>
                 </div>
-              ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
-                      <FileText className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        Attach a strategic brief{" "}
-                        <span className="font-normal text-muted-foreground">(optional)</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Already have one? Upload it to guide the draft — PDF, DOCX, DOC, or TXT.
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    className="bg-indigo-600 text-white hover:bg-indigo-700"
-                  >
-                    <Upload className="h-4 w-4" /> Upload file
-                  </Button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* The strategic brief document is the CLIENT's to attach now —
+                it's their document, and they upload it on their own link
+                alongside the answers. Nothing to do here. */}
           </>
         )}
       </div>
@@ -688,28 +475,150 @@ export default function KickoffQuestionnairePage({
                 {answeredCount}/{required} answered
               </span>
             )}
+            {needsApproval && (
+              <Button
+                variant="outline"
+                onClick={() => setSendBackOpen(true)}
+                title="Return these answers to the client with a note"
+              >
+                <Undo2 className="h-4 w-4" /> Send back
+              </Button>
+            )}
             <Button
               onClick={handleGenerate}
               disabled={!canGenerate}
               title={
-                !allAnswered
-                  ? "Answer every question to continue"
-                  : uploadState === "uploading"
-                    ? "Wait for the document to finish uploading"
-                    : undefined
+                // Without the sign-off in play there is only one reason this
+                // can be off, and it is not the client.
+                !sparkFlow
+                  ? (!allAnswered ? "Answer every question to continue" : undefined)
+                  : share?.status === "pending"
+                    ? "Waiting on the client's answers"
+                    : !share
+                      ? "Share the questionnaire with the client first"
+                      : !needsApproval && !allAnswered
+                        ? "Answer every question to continue"
+                        : undefined
               }
               className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {uploadState === "uploading" ? (
+              {approveShare.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
+              ) : briefExists ? (
+                <ArrowRight className="h-4 w-4" />
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              Generate brief
+              {needsApproval
+                ? briefExists
+                  ? "Approve & continue"
+                  : "Approve & generate brief"
+                : briefExists
+                  ? "Continue"
+                  : "Generate brief"}
             </Button>
           </div>
         </div>
       </div>
+
+      {/* Send back — the note that goes with it. A dialog rather than an inline
+          box because the footer is sticky and has no room for a textarea. */}
+      <Dialog open={sendBackOpen} onOpenChange={setSendBackOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send these answers back</DialogTitle>
+            <DialogDescription>
+              They&apos;ll get an email with your note. Their answers stay on the page
+              so they can edit rather than start again.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">
+              What should they change?
+            </label>
+            <Textarea
+              value={sendBackNote}
+              onChange={(e) => setSendBackNote(e.target.value)}
+              rows={4}
+              autoFocus
+              placeholder="e.g. Answer 3 is too vague — we need specific numbers."
+              className="text-sm"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              disabled={sendBackShare.isPending}
+              onClick={() => {
+                setSendBackOpen(false)
+                setSendBackNote("")
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={sendBackShare.isPending || !sendBackNote.trim()}
+              onClick={() =>
+                sendBackShare.mutate(
+                  { stage: "questionnaire", comment: sendBackNote.trim() },
+                  {
+                    onSuccess: () => {
+                      setSendBackOpen(false)
+                      setSendBackNote("")
+                    },
+                  },
+                )
+              }
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              {sendBackShare.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Undo2 className="h-4 w-4" />
+              )}
+              Send back with this note
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approving the client's answers — the signature the brief is drafted
+          from, and the thing every later step is gated on. */}
+      <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Approve the client&apos;s answers?</DialogTitle>
+            <DialogDescription>
+              This signs off what they sent and drafts the strategic brief from it.
+              It can&apos;t be undone — send it back instead if anything still needs
+              their eyes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              disabled={approveShare.isPending}
+              onClick={() => setApproveOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={approveShare.isPending}
+              onClick={handleGenerate}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              {approveShare.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Approve &amp; continue
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
