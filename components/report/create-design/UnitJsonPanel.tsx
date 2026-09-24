@@ -3,8 +3,8 @@
 /**
  * The raw extraction for one page.
  *
- * Salvaged from the Design2 dialog this screen replaced — it is how you check
- * what the model actually pulled out when a page looks wrong.
+ * Salvaged from the dialog this screen replaced — it is how you check what the
+ * model actually pulled out when a page looks wrong.
  */
 
 import { Copy } from "lucide-react"
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
-import type { DesignUnit } from "@/lib/api/design2"
+import type { DesignUnit } from "@/lib/api/createDesign"
 
 export function UnitJsonPanel({
   unit,

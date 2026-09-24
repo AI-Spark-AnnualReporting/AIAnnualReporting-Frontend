@@ -8,7 +8,7 @@
  * that page for real; choosing one saves it.
  *
  * The extraction run is mounted from here rather than from the button that
- * leads here, so the screen can heal itself — see Design2ExtractRun.
+ * leads here, so the screen can heal itself — see CreateDesignExtractRun.
  */
 
 import { ArrowLeft, Code2, Layers, RefreshCw } from "lucide-react"
@@ -18,13 +18,13 @@ import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageLoader } from "@/components/ui/spinner"
-import { useCycleDesign, useExtractSection, useSetTemplate } from "@/hooks/useDesign2"
+import { useCycleDesign, useExtractSection, useSetTemplate } from "@/hooks/useCreateDesign"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { revokeSection } from "@/lib/design2Cache"
+import { revokeSection } from "@/lib/createDesignCache"
 
-import { Design2ExtractRun } from "./Design2ExtractRun"
-import { Design2Rail, type RailSelection } from "./Design2Rail"
+import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
+import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
 import { PageRenderPanel } from "./PageRenderPanel"
 import { PreviewAllDialog } from "./PreviewAllDialog"
 import { TemplateCardGrid } from "./TemplateCardGrid"
@@ -46,7 +46,7 @@ const FALLBACK_OPTIONS = [
   dropped: {},
 }))
 
-export function Design2Shell({ cycleId }: { cycleId: string }) {
+export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
   const { data, isLoading, error, refetch } = useCycleDesign(cycleId)
   const setTemplate = useSetTemplate(cycleId)
@@ -157,7 +157,7 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
         </Button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">
-            Design2{cycleName ? ` — ${cycleName}` : ""}
+            Create Design{cycleName ? ` — ${cycleName}` : ""}
           </h1>
           <p className="text-xs text-muted-foreground">
             {data.units_chosen === data.units_total && data.units_total > 0
@@ -207,7 +207,7 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <Design2Rail
+            <CreateDesignRail
               sections={data.sections}
               selected={active}
               onSelect={(next) => {
@@ -346,7 +346,7 @@ export function Design2Shell({ cycleId }: { cycleId: string }) {
       />
 
       {run && (
-        <Design2ExtractRun
+        <CreateDesignExtractRun
           cycleId={cycleId}
           sections={data.sections}
           force={run.force}

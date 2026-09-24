@@ -1,6 +1,6 @@
 /**
  * Self-check for the render cache. No framework — run it with:
- *   node lib/design2Cache.test.ts
+ *   node lib/createDesignCache.test.ts
  *
  * The cache deliberately outlives the components that fill it, so the only
  * things standing between it and a leak are the LRU cap and the two explicit
@@ -10,7 +10,7 @@
 import assert from "node:assert/strict"
 import {
   cacheKey, evict, getOrRender, lastFailure, peek, revokeAll, revokeSection, size,
-} from "./design2Cache.ts"
+} from "./createDesignCache.ts"
 
 let made = 0
 // Renders return every sheet of a unit, as data URIs — nothing to revoke.
@@ -84,7 +84,7 @@ async function main() {
   await getOrRender(bad, async () => { attempts += 1; return blob() })
   assert.equal(attempts, 2, "evict did not clear the failure")
 
-  console.log("design2Cache: all checks passed")
+  console.log("createDesignCache: all checks passed")
 }
 
 await main()

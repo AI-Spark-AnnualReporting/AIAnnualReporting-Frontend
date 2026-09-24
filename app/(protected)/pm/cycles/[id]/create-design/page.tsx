@@ -3,9 +3,9 @@
 import { use } from "react"
 
 import { RouteGuard } from "@/components/auth/RouteGuard"
-import { Design2Shell } from "@/components/report/design2/Design2Shell"
+import { CreateDesignShell } from "@/components/report/create-design/CreateDesignShell"
 
-export default function Design2Page({
+export default function CreateDesignPage({
   params,
 }: {
   params: Promise<{ id: string }>
@@ -13,7 +13,7 @@ export default function Design2Page({
   const { id } = use(params)
   return (
     <RouteGuard allowedRoles={["project_manager", "admin"]}>
-      <Design2Shell cycleId={id} />
+      <CreateDesignShell cycleId={id} />
     </RouteGuard>
   )
 }

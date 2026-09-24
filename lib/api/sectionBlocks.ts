@@ -1,8 +1,14 @@
 /**
- * Design2 (dev testing): stream one assembled section's structured blocks.
+ * One section's blocks: the shape, the stream that produces them, and the
+ * render that turns them into sheets.
  *
- * This is the one call in the app that bypasses axios, and two hard
- * constraints force it:
+ * `blocks` keeps its name deliberately. It is a wire-format word shared with
+ * the render engine — Centriton's /reports/render-page and /reports/page-options
+ * both take a `blocks` body, and the stored envelope's per-unit field is
+ * `unit.blocks`. The Create Design feature owns the envelope around these; it
+ * does not own the payload's name.
+ *
+ * streamSectionBlocks bypasses axios, and two hard constraints force it:
  *   • axios cannot stream a response body in the browser — it resolves once,
  *     with the whole body, which is exactly what this endpoint must not do;
  *   • the native EventSource cannot send an Authorization header, and auth
@@ -21,7 +27,7 @@ import { parseSseFrames } from "@/lib/sseFrames"
 import { apiClient } from "./client"
 
 /** A stage of the extraction, announced as it starts. */
-export interface DesignBlockStep {
+export interface CreateDesignStep {
   index: number
   total: number
   key: string
@@ -31,7 +37,7 @@ export interface DesignBlockStep {
 }
 
 /** A measured detail about the stage that just ran. */
-export interface DesignBlockNote {
+export interface CreateDesignNote {
   index: number
   text: string
 }
@@ -44,12 +50,12 @@ export interface DesignBlockNote {
  * headings on one real cycle simply disappeared. `kind` is what lets a page
  * set a subheading AS a subheading instead of guessing from its length.
  */
-export interface DesignBlocksNarrative {
+export interface SectionNarrativeBlock {
   kind: "heading" | "paragraph"
   text: string
 }
 
-export interface DesignBlocksNumeric {
+export interface SectionNumericBlock {
   label: string
   /** Copied verbatim from the report, e.g. "$104.7 billion" — never a number. */
   value_current: string
@@ -59,37 +65,37 @@ export interface DesignBlocksNumeric {
   period_prior: string | null
 }
 
-export interface DesignBlocksTable {
+export interface SectionTableBlock {
   title: string | null
   columns: string[]
   rows: string[][]
 }
 
-export interface DesignBlocksQuote {
+export interface SectionQuoteBlock {
   text: string
   attribution: string | null
 }
 
-export interface DesignBlocksResult {
+export interface SectionBlocks {
   section_code: string
-  narrative_blocks: DesignBlocksNarrative[]
-  numeric_data: DesignBlocksNumeric[]
-  tables: DesignBlocksTable[]
-  pull_quotes: DesignBlocksQuote[]
+  narrative_blocks: SectionNarrativeBlock[]
+  numeric_data: SectionNumericBlock[]
+  tables: SectionTableBlock[]
+  pull_quotes: SectionQuoteBlock[]
 }
 
-export interface DesignBlocksError {
+export interface CreateDesignStreamError {
   status: number
   code: string
   message: string
   index?: number
 }
 
-export interface DesignBlocksHandlers {
-  onStep(step: DesignBlockStep): void
-  onNote(note: DesignBlockNote): void
-  onResult(result: DesignBlocksResult): void
-  onError(error: DesignBlocksError): void
+export interface CreateDesignStreamHandlers {
+  onStep(step: CreateDesignStep): void
+  onNote(note: CreateDesignNote): void
+  onResult(result: SectionBlocks): void
+  onError(error: CreateDesignStreamError): void
 }
 
 /**
@@ -103,10 +109,10 @@ export interface DesignBlocksHandlers {
  *
  * Resolves when the stream ends or is aborted; never rejects.
  */
-export async function streamSectionDesignBlocks(
+export async function streamSectionBlocks(
   cycleId: string,
   sectionCode: string,
-  handlers: DesignBlocksHandlers,
+  handlers: CreateDesignStreamHandlers,
   signal: AbortSignal,
 ): Promise<void> {
   // Reuse the resolved axios base rather than re-reading the env var: the
@@ -115,7 +121,7 @@ export async function streamSectionDesignBlocks(
   const base = (apiClient.defaults.baseURL ?? "").trim().replace(/\/+$/, "")
   const url =
     `${base}/pm/cycles/${encodeURIComponent(cycleId)}` +
-    `/sections/${encodeURIComponent(sectionCode)}/design2-blocks`
+    `/sections/${encodeURIComponent(sectionCode)}/create-design-blocks`
 
   const headers: Record<string, string> = { Accept: "text/event-stream" }
   if (typeof window !== "undefined") {
@@ -180,13 +186,13 @@ export async function streamSectionDesignBlocks(
         }
 
         if (frame.event === "step") {
-          handlers.onStep(payload as DesignBlockStep)
+          handlers.onStep(payload as CreateDesignStep)
         } else if (frame.event === "note") {
-          handlers.onNote(payload as DesignBlockNote)
+          handlers.onNote(payload as CreateDesignNote)
         } else if (frame.event === "result") {
-          handlers.onResult(payload as DesignBlocksResult)
+          handlers.onResult(payload as SectionBlocks)
         } else if (frame.event === "error") {
-          handlers.onError(payload as DesignBlocksError)
+          handlers.onError(payload as CreateDesignStreamError)
         } else if (frame.event === "done") {
           // The one termination signal. Cancel rather than fall out of the
           // loop so the connection closes immediately.
@@ -240,7 +246,7 @@ export interface RenderedPages {
 export async function renderSectionPages(
   cycleId: string,
   body: {
-    blocks: DesignBlocksResult
+    blocks: SectionBlocks
     title?: string
     eyebrow?: string
     running_label?: string
@@ -250,7 +256,7 @@ export async function renderSectionPages(
   },
 ): Promise<RenderedPages> {
   const { data } = await apiClient.post<RenderedPages>(
-    `/pm/cycles/${encodeURIComponent(cycleId)}/design2-page`,
+    `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-page`,
     body,
     { timeout: 180000 },
   )

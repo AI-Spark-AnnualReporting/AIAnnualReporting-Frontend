@@ -19,10 +19,10 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
-import type { CycleDesign } from "@/lib/api/design2"
-import { renderSectionPages } from "@/lib/api/designBlocks"
+import type { CycleDesign } from "@/lib/api/createDesign"
+import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { mapWithConcurrency } from "@/lib/concurrency"
-import { cacheKey, getOrRender } from "@/lib/design2Cache"
+import { cacheKey, getOrRender } from "@/lib/createDesignCache"
 
 const CONCURRENCY = 2
 

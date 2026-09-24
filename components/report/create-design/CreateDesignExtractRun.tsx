@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
-import { design2Api, type DesignSection } from "@/lib/api/design2"
+import { createDesignApi, type DesignSection } from "@/lib/api/createDesign"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 
@@ -52,7 +52,7 @@ const PHASE_MILESTONE: Record<Phase, number> = {
 // starving the render container that also serves real exports.
 const CONCURRENCY = 4
 
-export function Design2ExtractRun({
+export function CreateDesignExtractRun({
   cycleId,
   sections,
   force,
@@ -96,7 +96,7 @@ export function Design2ExtractRun({
       CONCURRENCY,
       async (section) => {
         try {
-          await design2Api.extract(cycleId, section.section_code, force)
+          await createDesignApi.extract(cycleId, section.section_code, force)
           setCompleted((c) => c + 1)
         } catch (err) {
           failures.current[section.section_code] = readError(

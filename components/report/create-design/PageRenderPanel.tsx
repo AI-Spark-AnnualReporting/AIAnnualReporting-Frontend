@@ -17,10 +17,10 @@ import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
-import type { DesignOption, DesignUnit } from "@/lib/api/design2"
-import { renderSectionPages } from "@/lib/api/designBlocks"
-import { cacheKey, evict, getOrRender, peek } from "@/lib/design2Cache"
-import { losesContent, lossText, placementText } from "@/lib/design2Loss"
+import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
+import { renderSectionPages } from "@/lib/api/sectionBlocks"
+import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
+import { losesContent, lossText, placementText } from "@/lib/createDesignLoss"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
 

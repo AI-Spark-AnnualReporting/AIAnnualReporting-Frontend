@@ -6,7 +6,7 @@
  * can fan out and count completions — the progress on the loading screen is
  * real for that reason.
  */
-import type { DesignBlocksResult } from "./designBlocks"
+import type { SectionBlocks } from "./sectionBlocks"
 import { apiClient } from "./client"
 
 /** What one template would do with a unit's blocks. */
@@ -36,7 +36,7 @@ export interface DesignUnit {
   title: string
   chars: number
   body_sha256: string
-  blocks: DesignBlocksResult
+  blocks: SectionBlocks
   options: DesignOption[]
   options_error?: string
   template_key: string | null
@@ -106,11 +106,11 @@ export interface CycleDesign {
   units_reviewed: number
 }
 
-export const design2Api = {
+export const createDesignApi = {
   /** Everything the screen needs, in one call. Writes nothing. */
   get: async (cycleId: string): Promise<CycleDesign> => {
     const { data } = await apiClient.get(
-      `/pm/cycles/${encodeURIComponent(cycleId)}/design2`,
+      `/pm/cycles/${encodeURIComponent(cycleId)}/create-design`,
     )
     return data
   },
@@ -132,7 +132,7 @@ export const design2Api = {
     const { data } = await apiClient.post(
       `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
         sectionCode,
-      )}/design2-extract${force ? "?force=true" : ""}`,
+      )}/create-design-extract${force ? "?force=true" : ""}`,
       undefined,
       { timeout: 180000 },
     )
@@ -149,7 +149,7 @@ export const design2Api = {
     const { data } = await apiClient.put(
       `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
         sectionCode,
-      )}/design2-template`,
+      )}/create-design-template`,
       { unit_index: unitIndex, template_key: templateKey },
     )
     return data

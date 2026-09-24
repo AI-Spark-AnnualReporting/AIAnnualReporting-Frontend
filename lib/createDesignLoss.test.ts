@@ -1,13 +1,13 @@
 /**
  * Self-check for the loss-badge formatter. No framework — run it with:
- *   node lib/design2Loss.test.ts
+ *   node lib/createDesignLoss.test.ts
  *
  * It exists because this string is the only warning a PM gets before picking
  * a layout that silently drops half their figures.
  */
 
 import assert from "node:assert/strict"
-import { lossText, losesContent, placedText, placementText } from "./design2Loss.ts"
+import { lossText, losesContent, placedText, placementText } from "./createDesignLoss.ts"
 
 // Nothing dropped is silence, not "0 figures not shown".
 assert.equal(lossText({}), "")
@@ -44,7 +44,7 @@ assert.equal(placedText({ para: 1 }), "1 paragraph")
 assert.equal(placedText({}), "")
 assert.equal(placedText(null), "")
 
-console.log("design2Loss: all checks passed")
+console.log("createDesignLoss: all checks passed")
 
 // --- placement: the normal state is now a positive confirmation ------------
 assert.equal(placedText({ stat: 17, table: 2, para: 40, quote: 4 }),

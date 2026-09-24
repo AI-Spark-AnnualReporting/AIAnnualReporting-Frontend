@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
-import type { DesignSection } from "@/lib/api/design2"
+import type { DesignSection } from "@/lib/api/createDesign"
 import { cn } from "@/lib/utils"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
@@ -52,7 +52,7 @@ function StatusIcon({ state, busy }: { state: string; busy: boolean }) {
   return <Circle className="h-4 w-4 shrink-0 text-slate-300" />
 }
 
-export function Design2Rail({
+export function CreateDesignRail({
   sections,
   selected,
   onSelect,

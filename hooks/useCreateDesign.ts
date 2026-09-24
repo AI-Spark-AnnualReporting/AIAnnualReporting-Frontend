@@ -10,14 +10,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { design2Api, type CycleDesign, type DesignEnvelope } from "@/lib/api/design2"
+import { createDesignApi, type CycleDesign, type DesignEnvelope } from "@/lib/api/createDesign"
 import { QUERY_KEYS } from "@/lib/constants"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 
 export function useCycleDesign(cycleId: string) {
   return useQuery({
-    queryKey: QUERY_KEYS.PM_CYCLE_DESIGN2(cycleId),
-    queryFn: () => design2Api.get(cycleId),
+    queryKey: QUERY_KEYS.PM_CYCLE_CREATE_DESIGN(cycleId),
+    queryFn: () => createDesignApi.get(cycleId),
     enabled: !!cycleId,
     staleTime: 0,
   })
@@ -29,7 +29,7 @@ function patchSection(
   sectionCode: string,
   design: DesignEnvelope,
 ) {
-  qc.setQueryData<CycleDesign>(QUERY_KEYS.PM_CYCLE_DESIGN2(cycleId), (old) => {
+  qc.setQueryData<CycleDesign>(QUERY_KEYS.PM_CYCLE_CREATE_DESIGN(cycleId), (old) => {
     if (!old) return old
     const sections = old.sections.map((s) =>
       s.section_code === sectionCode
@@ -61,7 +61,7 @@ export function useSetTemplate(cycleId: string) {
       sectionCode: string
       unitIndex: number
       templateKey: string | null
-    }) => design2Api.setTemplate(cycleId, sectionCode, unitIndex, templateKey),
+    }) => createDesignApi.setTemplate(cycleId, sectionCode, unitIndex, templateKey),
     onSuccess: (res) => patchSection(qc, cycleId, res.section_code, res.design),
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not save that template choice")),
@@ -72,7 +72,7 @@ export function useExtractSection(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ sectionCode, force }: { sectionCode: string; force?: boolean }) =>
-      design2Api.extract(cycleId, sectionCode, force ?? false),
+      createDesignApi.extract(cycleId, sectionCode, force ?? false),
     onSuccess: (res) => patchSection(qc, cycleId, res.section_code, res.design),
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not structure that section")),

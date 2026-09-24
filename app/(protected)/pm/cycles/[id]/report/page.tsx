@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
-  Blocks,
   ChevronDown,
   FileDown,
   FileCheck,
@@ -16,7 +15,9 @@ import {
   Sparkles,
   Palette,
 } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
+// Hidden 2026-09-24 with the Design button — the dialog's onSaved was the only
+// thing in this file that invalidated a query.
+// import { useQueryClient } from "@tanstack/react-query"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -27,7 +28,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { PageLoader } from "@/components/ui/spinner"
-import { DesignDialog } from "@/components/report/design/DesignDialog"
+// Hidden 2026-09-24 with the Design button — see the comment beside it below.
+// import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
@@ -40,7 +42,8 @@ import {
   useReportApproval,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { QUERY_KEYS } from "@/lib/constants"
+// Hidden 2026-09-24 with the Design button — see the note on useQueryClient above.
+// import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -69,7 +72,8 @@ interface DashboardData {
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
-  const qc = useQueryClient()
+  // Hidden 2026-09-24 with the Design button — see the note on its import above.
+  // const qc = useQueryClient()
   const reportQuery = useFinalReport(cycleId)
   // The document as the engine will print it. Only once there is something to
   // assemble — asking before that is a guaranteed 422.
@@ -87,7 +91,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const approve = useApproveReport(cycleId)
 
   const [reassembleOpen, setReassembleOpen] = useState(false)
-  const [designOpen, setDesignOpen] = useState(false)
+  // Hidden 2026-09-24 with the Design button — see the comment beside it below.
+  // const [designOpen, setDesignOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
 
   // Match the builder shell's chrome-collapse for full document width.
@@ -177,6 +182,11 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                   )}
                   Re-assemble
                 </Button>
+                {/* Hidden 2026-09-24 — superseded by Create Design, which took
+                    this button's Palette icon. The cover/typography/palette modal
+                    itself is untouched in components/report/design/DesignDialog.tsx;
+                    to bring it back, uncomment this block, the `designOpen` state
+                    above, the <DesignDialog> mount below, and its import.
                 <Button
                   variant="ghost"
                   size="sm"
@@ -186,12 +196,13 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                   <Palette className="h-3.5 w-3.5 mr-1.5" />
                   Design
                 </Button>
+                */}
                 {/* The page designer. Structuring every section happens on
                     that screen, not here, so a refresh mid-run still resumes. */}
-                <Link href={`/pm/cycles/${cycleId}/design2`} className="shrink-0">
+                <Link href={`/pm/cycles/${cycleId}/create-design`} className="shrink-0">
                   <Button variant="ghost" size="sm" className="h-8">
-                    <Blocks className="h-3.5 w-3.5 mr-1.5" />
-                    Design2
+                    <Palette className="h-3.5 w-3.5 mr-1.5" />
+                    Create Design
                   </Button>
                 </Link>
               </>
@@ -330,6 +341,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         }}
       />
 
+      {/* Hidden 2026-09-24 with the Design button that opened it.
       <DesignDialog
         cycleId={cycleId}
         open={designOpen}
@@ -357,6 +369,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           })
         }
       />
+      */}
 
       <ConfirmDialog
         open={approveOpen}

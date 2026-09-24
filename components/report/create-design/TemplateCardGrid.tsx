@@ -15,8 +15,8 @@
 
 import { Check, Star, TriangleAlert } from "lucide-react"
 
-import type { DesignOption } from "@/lib/api/design2"
-import { losesContent, lossText, placedText } from "@/lib/design2Loss"
+import type { DesignOption } from "@/lib/api/createDesign"
+import { losesContent, lossText, placedText } from "@/lib/createDesignLoss"
 
 import { TEMPLATE_NAMES, TemplateMini } from "./TemplateMini"
 

@@ -3,7 +3,7 @@
  *   node lib/sseFrames.test.ts
  *
  * It exists because this parser sits between the network and every piece of
- * Design2's progress UI, and its failure mode is silent: a frame lost on a
+ * Create Design's progress UI, and its failure mode is silent: a frame lost on a
  * chunk boundary does not throw, it just never arrives. The usual symptom is
  * a run that shows four steps and then hangs forever, which looks like a
  * backend problem and is not.

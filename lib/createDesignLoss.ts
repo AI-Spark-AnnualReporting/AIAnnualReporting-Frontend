@@ -9,7 +9,7 @@
  * trade-off. lossText survives to make that regression loud; placedText is
  * what a person should normally be reading.
  *
- * Pure — self-checked with `node lib/design2Loss.test.ts`.
+ * Pure — self-checked with `node lib/createDesignLoss.test.ts`.
  */
 
 export interface DroppedCounts {
