@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageLoader } from "@/components/ui/spinner"
 import { useCycleDesign, useExtractSection, useSetTemplate } from "@/hooks/useCreateDesign"
+import { useDesignPrewarm } from "@/hooks/useDesignPrewarm"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
@@ -114,6 +115,17 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // the run has done it.
   const run =
     manualRun ?? (!isLoading && needsRun && !autoRunSettled ? { force: false } : null)
+
+  // Draw every section's page in the background, so clicking one is instant.
+  // Mounted here, above the early returns, because hooks cannot sit after a
+  // conditional return — and fed `selected` rather than the derived `active`
+  // for the same reason. That is no loss: `selected` is the section a person
+  // actually clicked, which is exactly what should jump the queue.
+  //
+  // Held off while the extract overlay is up. Pre-warming underneath it would
+  // put render requests in front of the model calls that overlay is waiting
+  // on, making the wait people already see longer.
+  useDesignPrewarm(cycleId, data?.sections, selected?.code ?? null, !run)
 
   if (isLoading && !data) return <PageLoader />
 

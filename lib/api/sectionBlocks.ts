@@ -262,3 +262,37 @@ export async function renderSectionPages(
   )
   return data
 }
+
+
+/** One item of a batch render: its pages, or why it has none. */
+export interface RenderedBatchItem {
+  template_key: string
+  page_count: number
+  pages: string[]
+  error?: string
+}
+
+/**
+ * Typeset MANY pages in one request.
+ *
+ * The engine draws a whole batch in a single browser, and most of a render is
+ * browser startup — so this is several times faster than the same pages one
+ * at a time. Used by the pre-warm, never by the panel: the panel renders one
+ * page that someone is waiting for, and should not queue behind a batch.
+ *
+ * Partial results are normal. An item that could not be drawn comes back with
+ * `pages: []` and an `error`, in its own slot, so one bad section cannot cost
+ * its siblings their renders.
+ */
+export async function renderSectionPagesBatch(
+  cycleId: string,
+  items: Array<Record<string, unknown>>,
+): Promise<{ items: RenderedBatchItem[] }> {
+  const { data } = await apiClient.post(
+    `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-pages`,
+    { items },
+    // A batch is many renders; it needs many renders' worth of time.
+    { timeout: 600000 },
+  )
+  return { items: data?.items ?? [] }
+}

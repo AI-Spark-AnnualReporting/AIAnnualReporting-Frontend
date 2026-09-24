@@ -15,7 +15,11 @@
  * on every unrelated cache write, and each retry is a cold browser launch.
  */
 
-const MAX_ENTRIES = 40
+// Big enough to hold a whole pre-drawn report. A cache that evicts what the
+// pre-warm just put in it is worse than no pre-warm at all: the section you
+// click would be the one that fell out. Nineteen sections plus five contents
+// designs plus the alternatives for whatever is open already passes 40.
+const MAX_ENTRIES = 240
 
 // Nothing to revoke: renders come back as data URIs, so a cached entry is a
 // plain string and the only reason to bound the map is memory.
@@ -126,4 +130,32 @@ export function size(): number {
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", revokeAll)
+}
+
+
+/**
+ * Put pages in without rendering them.
+ *
+ * The pre-warm draws many pages in one batch request, so it arrives holding
+ * results the cache has never seen — `getOrRender` cannot express that,
+ * because it owns the fetch. Priming is the same write `getOrRender` performs
+ * on success, exposed.
+ *
+ * A key already present or already in flight is left alone: the pre-warm must
+ * never overwrite a render the user is actively waiting on.
+ */
+export function prime(key: string, pages: string[]): void {
+  if (!pages.length || cache.has(key) || inflight.has(key)) return
+  failed.delete(key)
+  cache.set(key, pages)
+  while (cache.size > MAX_ENTRIES) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined) break
+    cache.delete(oldest)
+  }
+}
+
+/** Is this page already drawn? Drives the rail's readiness dot. */
+export function has(key: string): boolean {
+  return cache.has(key)
 }
