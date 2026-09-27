@@ -256,6 +256,16 @@ export async function renderSectionPages(
     template_key?: string
     /** Positions, per source array, of blocks that should open a fresh sheet. */
     breaks?: Record<string, number[]>
+    /**
+     * How finely to rasterise, in multiples of the PDF's own 72dpi.
+     *
+     * The engine defaults to 2, which is 1191px across an A4 page — enough for
+     * the thumbnail column and slightly short of a Retina screen showing the
+     * page full width. Ask for more only for a page someone is actually
+     * looking at: the pixmap grows with the square, so 4 is four times the
+     * bytes of 2. Clamped to 1..4 server-side.
+     */
+    scale?: number
   },
 ): Promise<RenderedPages> {
   const { data } = await apiClient.post<RenderedPages>(

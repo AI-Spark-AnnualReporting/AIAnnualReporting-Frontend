@@ -160,6 +160,21 @@ export async function getOrRender(
   return promise
 }
 
+/** Drop every entry, cached or failed, whose key starts with this prefix. */
+function revokePrefix(prefix: string): number {
+  let dropped = 0
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key)
+      dropped += 1
+    }
+  }
+  for (const key of [...failed.keys()]) {
+    if (key.startsWith(prefix)) failed.delete(key)
+  }
+  return dropped
+}
+
 /**
  * Drop every render of one section.
  *
@@ -167,13 +182,31 @@ export async function getOrRender(
  * now a picture of something that no longer exists.
  */
 export function revokeSection(cycleId: string, sectionCode: string): void {
-  const prefix = `${cycleId}|${sectionCode}|`
-  for (const key of [...cache.keys()]) {
-    if (key.startsWith(prefix)) {
-      cache.delete(key)
-      failed.delete(key)
-    }
-  }
+  revokePrefix(`${cycleId}|${sectionCode}|`)
+}
+
+/**
+ * Drop every render of one cycle. Returns how many were dropped.
+ *
+ * FOR THE CHOICES THAT ARE NOT PART OF A KEY. A key names the section, the
+ * page and the template, which is everything the page designer picks per
+ * page — and nothing the report picks for ALL of them. Choosing a cover picks
+ * the section opener that goes in front of every section, which changes both
+ * what each first body page draws and how many sheets it runs to. Nothing in
+ * any key moves, so every section kept its old opener until the tab was
+ * reloaded, and useDesignPrewarm has already filled this map by the time
+ * anyone reaches the cover picker.
+ *
+ * Deliberately the whole cycle rather than a guess at which sections a cover
+ * touches: the opener rides on every one of them, and a picture that is redrawn
+ * needlessly costs a render, while one that is not redrawn is simply wrong.
+ *
+ * The epoch cannot do this job. It says which BUILD of the drawing code an
+ * image came from — the same for every cycle in the process — so it cannot
+ * tell two cycles apart, let alone one cycle before and after a choice.
+ */
+export function revokeCycle(cycleId: string): void {
+  revokePrefix(`${cycleId}|`)
 }
 
 export function revokeAll(): void {
@@ -183,6 +216,11 @@ export function revokeAll(): void {
 
 export function size(): number {
   return cache.size
+}
+
+/** The LRU cap, so a test measures it rather than restating it. */
+export function maxEntries(): number {
+  return MAX_ENTRIES
 }
 
 if (typeof window !== "undefined") {

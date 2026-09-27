@@ -148,10 +148,12 @@ export const annualDesignApi = {
   },
 
   /** Draw this cycle's cover in one design, with its real title and brand. */
-  previewCover: async (cycleId: string, design: string): Promise<CoverPreview> => {
+  previewCover: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<CoverPreview> => {
     const { data } = await apiClient.post(
       `/pm/cycles/${encodeURIComponent(cycleId)}/cover-preview`,
-      { design },
+      { design, scale },
       { timeout: 120000 },
     )
     return data
@@ -174,10 +176,12 @@ export const annualDesignApi = {
    * load-bearing: the engine launches a browser per render and the axios
    * default would kill it.
    */
-  previewToc: async (cycleId: string, design: string): Promise<TocPreview> => {
+  previewToc: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<TocPreview> => {
     const { data } = await apiClient.post(
       `/pm/cycles/${encodeURIComponent(cycleId)}/toc-preview`,
-      { design },
+      { design, scale },
       { timeout: 120000 },
     )
     return data

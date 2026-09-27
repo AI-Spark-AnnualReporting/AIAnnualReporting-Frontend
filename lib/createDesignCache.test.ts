@@ -9,7 +9,8 @@
 
 import assert from "node:assert/strict"
 import {
-  cacheKey, evict, getOrRender, lastFailure, peek, revokeAll, revokeSection, size,
+  cacheKey, evict, getOrRender, lastFailure, maxEntries, peek, revokeAll,
+  revokeCycle, revokeSection, size,
 } from "./createDesignCache.ts"
 
 let made = 0
@@ -44,12 +45,18 @@ async function main() {
   assert.equal(renders, 1)
   assert.deepEqual(both[0], both[1])
 
-  // The LRU cap revokes what it evicts.
+  // The LRU cap revokes what it evicts. Counted against the cap the MODULE
+  // declares, not a number copied beside it: this assertion was written when
+  // the cap was 40 and went on failing quietly after it was raised to hold a
+  // whole pre-drawn report, which left every check below it unreached.
   revokeAll()
-  for (let i = 0; i < 45; i += 1) {
+  const cap = maxEntries()
+  for (let i = 0; i < cap + 5; i += 1) {
     await getOrRender(cacheKey("c", "s", i, "t"), blob)
   }
-  assert.ok(size() <= 40, `cache grew to ${size()}`)
+  assert.equal(size(), cap, `cache grew to ${size()}`)
+  assert.equal(peek(cacheKey("c", "s", 0, "t")), undefined,
+    "the oldest entry survived the cap")
 
   // Re-extracting a section drops every picture of it, and nothing else.
   revokeAll()
@@ -67,6 +74,39 @@ async function main() {
   revokeSection("c", "risk")
   assert.equal(size(), 1)
   assert.ok(peek(cacheKey("c", "risk_management", 1, "t")))
+
+  // Choosing a cover picks the opener EVERY section prints, and no key
+  // carries it — so the whole cycle has to go, and only that cycle.
+  revokeAll()
+  await getOrRender(cacheKey("cyc", "alpha", 1, "t"), blob)
+  await getOrRender(cacheKey("cyc", "beta", 1, "t"), blob)
+  await getOrRender(cacheKey("cyc", "beta", 1, "other"), blob)
+  await getOrRender(cacheKey("other-cycle", "alpha", 1, "t"), blob)
+  revokeCycle("cyc")
+  assert.equal(size(), 1, "revokeCycle did not drop every render of its cycle")
+  assert.ok(peek(cacheKey("other-cycle", "alpha", 1, "t")),
+    "revokeCycle reached into another cycle")
+
+  // A cycle id that prefixes another is not caught by mistake.
+  revokeAll()
+  await getOrRender(cacheKey("cyc", "a", 1, "t"), blob)
+  await getOrRender(cacheKey("cyc-2", "a", 1, "t"), blob)
+  revokeCycle("cyc")
+  assert.equal(size(), 1)
+  assert.ok(peek(cacheKey("cyc-2", "a", 1, "t")))
+
+  // A remembered FAILURE is a cached answer too: leaving it behind means the
+  // section that failed under the old cover keeps replaying that error under
+  // the new one.
+  revokeAll()
+  const stale = cacheKey("cyc", "gamma", 1, "t")
+  try {
+    await getOrRender(stale, async () => { throw new Error("engine down") })
+  } catch { /* expected */ }
+  assert.equal(lastFailure(stale), "engine down")
+  revokeCycle("cyc")
+  assert.equal(lastFailure(stale), undefined,
+    "revokeCycle left a remembered failure behind")
 
   // A failure is remembered, so an unrelated re-render does not relaunch a
   // browser for a key that just failed — and evict() is what clears it.

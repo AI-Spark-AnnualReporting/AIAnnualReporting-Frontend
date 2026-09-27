@@ -83,11 +83,25 @@ export function useDesignPrewarm(
     activeRef.current = active
   }, [active])
 
-  const startedRef = useRef(false)
-
+  // NO "ONLY ONCE" LATCH HERE, ON PURPOSE.
+  //
+  // There used to be one — a ref set true on the first run and never reset,
+  // while the cleanup below only stopped the loop. So the first time this
+  // effect re-ran for any reason (the `enabled` flag drops on every background
+  // refetch, and useCycleDesign is staleTime 0 with react-query's default
+  // refetchOnWindowFocus), the old loop was killed and the new one refused to
+  // start. One alt-tab and the pre-warm was dead for the rest of the session:
+  // every click paid full render time again, which is the exact experience this
+  // hook exists to remove.
+  //
+  // The cache is the latch instead. `has(key)` below skips anything already
+  // drawn, so a restart picks up where the last one stopped rather than redoing
+  // it, and the effect is free to run as often as React wants to run it. What
+  // stops it churning is react-query's structural sharing: a refetch that
+  // returns the same payload hands back the same `sections` array, so this
+  // dependency does not change.
   useEffect(() => {
-    if (!enabled || !sections?.length || startedRef.current) return
-    startedRef.current = true
+    if (!enabled || !sections?.length) return
 
     const jobs: Job[] = []
     for (const section of sections) {
@@ -137,11 +151,17 @@ export function useDesignPrewarm(
             cycleId,
             chunk.map((j) => j.body),
           )
-          if (!alive) return
+          // Banked before the liveness check, not after. A chunk that landed
+          // after this loop was superseded still holds correct pictures of
+          // pages nobody has drawn — and the cache is module-level, so the
+          // write is safe from a dead effect. Throwing them away meant the
+          // replacement loop asked the engine to draw the very pages that had
+          // just been drawn, at the moment the screen was busiest.
           res.items.forEach((item, i) => {
             const job = chunk[i]
             if (job && item?.pages?.length) prime(job.key, item.pages)
           })
+          if (!alive) return
           failures = 0
         } catch {
           // Pre-warming is an optimisation. If it fails the screen still works

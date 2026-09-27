@@ -27,6 +27,7 @@ import { useDesignPrewarm } from "@/hooks/useDesignPrewarm"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
+import { isAuthError } from "@/lib/api/client"
 import { revokeSection } from "@/lib/createDesignCache"
 
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
@@ -155,12 +156,21 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // made a session that had lost access look like a working screen with an
   // unexplained red toast. Say so instead.
   //
-  // Only when there is nothing to say it over, though. A background refresh
-  // that times out — the designer refetches after every extract run, while
-  // pages are being drawn — used to throw away a screen that was working and
-  // replace it with a full-page error, which is a far worse answer than the
-  // slightly stale payload already in hand. That case gets the strip below.
-  if (error && !data) {
+  // Not for every failure, though. A background refresh that times out — the
+  // designer refetches after every extract run, while pages are being drawn —
+  // should not throw away a screen that was working and replace it with a
+  // full-page error, when the slightly stale payload already in hand is a far
+  // better answer. That case gets the amber strip below.
+  //
+  // WHICH SPLITS THE TWO ON KIND, NOT ON WHETHER THERE IS STALE DATA TO HIDE
+  // BEHIND. Keying it off `!data` alone quietly gave 401 and 403 the soft
+  // treatment as well, which is precisely the case this check was written to
+  // catch: a revoked session got a working-looking designer with an amber
+  // strip, and every card click failed. Nothing here retries a lost session
+  // either (see providers.tsx), so the strip's "Refresh" could not have fixed
+  // it — it is a dead end dressed as a hiccup.
+  const lostAccess = isAuthError(error)
+  if (error && (!data || lostAccess)) {
     return (
       <div className="flex h-[calc(100vh-8.5rem)] flex-col items-center justify-center gap-3 p-8 text-center">
         <p className="max-w-md text-sm text-red-700">
@@ -268,7 +278,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
         </Button>
       </div>
 
-      {error && (
+      {error && !lostAccess && (
         <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-2">
           <p className="min-w-0 flex-1 text-[11px] text-amber-900">
             {readError(error as MutationError, "Could not refresh this cycle.")}{" "}
