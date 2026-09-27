@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
-import { Check, Info, LayoutGrid } from "lucide-react"
+import { Check, Info } from "lucide-react"
 
 /* Full-screen loader for the draft analysis.
  *
@@ -126,9 +126,18 @@ function BrandMark() {
         <span className="absolute inset-0 rounded-full border border-slate-100" />
         <span className="absolute inset-3 rounded-full border border-slate-100" />
         <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#4040c8] [animation-duration:1.6s]" />
-        <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#4040c8]">
-          <LayoutGrid className="h-6 w-6 text-white" />
-        </span>
+        {/* The Centriyon mark itself, not a lookalike: four squares with two
+            at reduced opacity. A grid icon from the icon set has four equal
+            squares and reads as a different logo. */}
+        <svg viewBox="0 0 32 32" className="h-12 w-12" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="#4040C8" />
+          <g transform="translate(6.7 6.7) scale(1.4286)">
+            <rect x=".5" y=".5" width="5.5" height="5.5" rx="1" fill="#fff" />
+            <rect x="8" y=".5" width="5.5" height="5.5" rx="1" fill="#fff" opacity=".4" />
+            <rect x=".5" y="8" width="5.5" height="5.5" rx="1" fill="#fff" opacity=".4" />
+            <rect x="8" y="8" width="5.5" height="5.5" rx="1" fill="#fff" />
+          </g>
+        </svg>
       </div>
       <p className="mt-3 text-[11px] font-semibold tracking-[0.25em] text-slate-400">
         CENTRIYON
