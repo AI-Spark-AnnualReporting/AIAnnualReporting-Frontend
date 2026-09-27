@@ -149,7 +149,14 @@ export function DraftFindingsPanel({
     resolve.mutate({ findingId: finding.id, payload: { action: "undo" } })
 
   return (
-    <div className="space-y-3">
+    // The list scrolls inside the page rather than growing it. A cycle can
+    // produce dozens of findings, and with the whole page scrolling the PM
+    // loses the header — including Open Report Builder and the count of what
+    // is left — exactly while working through them.
+    //
+    // pr-1 keeps the scrollbar off the cards' right border; the viewport-based
+    // height is what is left below the header and the green banner.
+    <div className="max-h-[calc(100vh-18rem)] space-y-3 overflow-y-auto pr-1">
       {findings.map((finding) => {
         const isOpen = finding.status === "open"
         const summary = conflictSummary(finding)
