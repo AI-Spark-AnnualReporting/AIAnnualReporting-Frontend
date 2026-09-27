@@ -212,6 +212,14 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // not in an effect watching previewMode. An effect would fire again on every
   // render while preview is open, so reopening the rail would shut it again
   // the instant you let go of the chevron.
+  // The preview opens on the cover and the contents page, so having chosen
+  // either is reason enough to look — the old guard counted section templates
+  // only, and locked out a report whose cover was the thing just picked.
+  const canPreview =
+    data.units_chosen > 0 ||
+    Boolean(reportDesign.data?.cover2_template_key) ||
+    Boolean(reportDesign.data?.toc_template_key)
+
   const enterPreview = () => {
     setPreviewMode(true)
     setRailCollapsed(true)
@@ -222,15 +230,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   }
 
   return (
-    <div
-      className="-m-8 flex h-[calc(100vh-72px)] flex-col"
-      // Escape still leaves the preview, as it did when this was a dialog —
-      // the one habit worth keeping from the modal.
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && previewMode) exitPreview()
-      }}
-      tabIndex={-1}
-    >
+    <div className="-m-8 flex h-[calc(100vh-72px)] flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b bg-card px-5 py-3">
         <Button
           variant="ghost"
@@ -288,16 +288,32 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
 
       <div className="flex min-h-0 flex-1">
         {railCollapsed ? (
-          <button
-            type="button"
-            onClick={() => setRailCollapsed(false)}
-            className="group flex h-full w-6 shrink-0 flex-col items-center justify-center border-r bg-white transition-colors hover:bg-slate-50"
-            title="Show the section list"
-          >
-            <PanelLeftOpen className="h-4 w-4 text-slate-400 group-hover:text-slate-600" />
-          </button>
+          // Wide enough to keep Preview reachable. The button lives in the
+          // rail, so a rail collapsed on purpose — not by entering preview —
+          // would otherwise take the only way to start one with it.
+          <div className="flex h-full w-10 shrink-0 flex-col items-center gap-2 border-r bg-white py-3">
+            <button
+              type="button"
+              onClick={() => setRailCollapsed(false)}
+              className="group rounded-md p-1.5 transition-colors hover:bg-slate-100"
+              title="Show the section list"
+            >
+              <PanelLeftOpen className="h-4 w-4 text-slate-400 group-hover:text-slate-600" />
+            </button>
+            {!previewMode && (
+              <button
+                type="button"
+                onClick={enterPreview}
+                disabled={!canPreview}
+                className="rounded-md bg-[#492244] p-1.5 text-white transition-colors hover:bg-[#3C1C39] disabled:opacity-40"
+                title="Preview the report"
+              >
+                <Layers className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         ) : (
-          <div className="flex w-[360px] shrink-0 flex-col overflow-hidden border-r bg-white transition-all duration-200">
+          <div className="flex w-[360px] shrink-0 flex-col overflow-hidden border-r bg-white">
             <div className="shrink-0 border-b px-5 py-3">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
@@ -341,8 +357,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
             <div className="flex-1 overflow-y-auto">
               <CreateDesignRail
                 sections={data.sections}
-                selected={tocOpen || coverOpen ? null : active}
+                selected={previewMode || tocOpen || coverOpen ? null : active}
                 onSelect={(next) => {
+                  exitPreview()
                   setTocOpen(false)
                   setCoverOpen(false)
                   setSelected(next)
@@ -353,10 +370,10 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                 onReExtract={reExtract}
                 coverActive={coverOpen}
                 coverDesign={reportDesign.data?.cover2_template_key ?? null}
-                onSelectCover={() => { setCoverOpen(true); setTocOpen(false) }}
+                onSelectCover={() => { exitPreview(); setCoverOpen(true); setTocOpen(false) }}
                 tocActive={tocOpen}
                 tocDesign={reportDesign.data?.toc_template_key ?? null}
-                onSelectToc={() => { setTocOpen(true); setCoverOpen(false) }}
+                onSelectToc={() => { exitPreview(); setTocOpen(true); setCoverOpen(false) }}
               />
             </div>
           </div>
@@ -369,7 +386,6 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
               design={data}
               coverKey={reportDesign.data?.cover2_template_key ?? null}
               tocKey={reportDesign.data?.toc_template_key ?? null}
-              active={previewMode}
               onExit={exitPreview}
             />
           ) : coverOpen ? (

@@ -31,6 +31,7 @@ import {
   isDocumentLanguageError,
 } from "@/lib/lang"
 import { documentsApi } from "@/lib/api/documents"
+import { isTimeoutError } from "@/lib/api/client"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { pmApi } from "@/lib/api/pm"
 import { Input } from "@/components/ui/input"
@@ -350,8 +351,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       // (very likely) still generating questions. Resubmitting would create a
       // DUPLICATE kickoff — so on timeout we lock the form and show a warning
       // panel instead. Non-timeout errors already surface via the hook's onError.
-      const msg = (err as { message?: string })?.message ?? ""
-      if (/timeout|ECONNABORTED/i.test(msg)) {
+      //
+      // Asked of the error's CODE, not its wording. This used to regex the
+      // message, and the day the client started replacing axios's
+      // "timeout of 180000ms exceeded" with a friendly sentence, the test
+      // stopped matching, the panel stopped appearing and the submit button
+      // came back — while the questions were still being generated.
+      if (isTimeoutError(err)) {
         setKickoffTimedOut(true)
       } else if (isDocumentLanguageError(err)) {
         // Wrong-language document: show the prominent inline banner (the hook

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi, ConceptMessage, CycleBriefFields } from "@/lib/api/pm"
+import { isTimeoutError } from "@/lib/api/client"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
@@ -275,8 +276,14 @@ export default function ConceptMessagesPage({
       // A timeout aborts client-side while the backend is (very likely) still
       // generating. Resubmitting would fire a DUPLICATE kickoff, so don't
       // re-enable — send the PM to the dashboard to check instead.
+      //
+      // Asked of the error's CODE, not its wording. This used to regex the
+      // message, and the day the client started replacing axios's
+      // "timeout of 180000ms exceeded" with a friendly sentence, the test
+      // stopped matching and the Approve button came back to life while the
+      // questions were still being generated.
       const msg = (err as { message?: string })?.message ?? ""
-      if (/timeout|ECONNABORTED/i.test(msg)) {
+      if (isTimeoutError(err)) {
         toast.message("Questions may still be generating — check the cycle dashboard in a moment.")
         setApproveOpen(false)
         router.push(`/pm/cycles/${id}`)
