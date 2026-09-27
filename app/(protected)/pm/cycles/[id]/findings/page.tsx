@@ -37,6 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeletons";
 import { formatDateTime } from "@/lib/utils";
 
 /* What the analysis found, and the only route into the Report Builder.
@@ -75,19 +76,30 @@ export default function CycleFindingsPage({
   const neverChecked = !data?.checked_at;
   // Past the consent the page is a record, not a workspace.
   const locked = !!data?.locked_at;
-  const cycleName =
-    (dash as { cycle?: { cycle_name?: string } } | undefined)?.cycle
-      ?.cycle_name ?? "This cycle";
+  const cycleName = (dash as { cycle?: { cycle_name?: string } } | undefined)
+    ?.cycle?.cycle_name;
 
-  const description = locked
-    ? `${cycleName} — locked, and kept as a record of what was changed`
+  // A skeleton until the name arrives. "This cycle" is a real-looking sentence
+  // built from a value we do not have yet, and it settles a beat later into
+  // different words — which reads as the page correcting itself.
+  const suffix = locked
+    ? "locked, and kept as a record of what was changed"
     : neverChecked
-      ? `${cycleName} — the drafts haven't been analyzed yet`
+      ? "the drafts haven't been analyzed yet"
       : openCount > 0
-        ? `${cycleName} — ${openCount} thing${openCount === 1 ? "" : "s"} to check before building`
+        ? `${openCount} thing${openCount === 1 ? "" : "s"} to check before building`
         : findings.length > 0
-          ? `${cycleName} — everything has been handled`
-          : `${cycleName} — no problems found`;
+          ? "everything has been handled"
+          : "no problems found";
+
+  const description = cycleName ? (
+    `${cycleName} — ${suffix}`
+  ) : (
+    <span className="flex items-center gap-2">
+      <Skeleton className="h-3.5 w-28" />
+      <span>— {suffix}</span>
+    </span>
+  );
 
   return (
     <div className="space-y-6">

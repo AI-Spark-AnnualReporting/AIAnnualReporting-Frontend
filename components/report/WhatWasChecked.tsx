@@ -5,6 +5,7 @@ import { AlertTriangle, Check } from "lucide-react"
 
 import type { DepartmentClaim } from "@/lib/api/pm"
 import { useDepartmentClaims } from "@/hooks/useReportBuilder"
+import { Skeleton } from "@/components/ui/skeletons"
 
 /* What the analysis actually checked, and how each statement came out.
  *
@@ -23,12 +24,16 @@ import { useDepartmentClaims } from "@/hooks/useReportBuilder"
 const SHOWN = 12
 
 export function WhatWasChecked({ cycleId }: { cycleId: string }) {
-  const { data } = useDepartmentClaims(cycleId)
+  const { data, isLoading } = useDepartmentClaims(cycleId)
 
   const departments = (data?.departments ?? [])
     .map((dept) => ({ name: dept.department, claims: distinct(dept.claims) }))
     .filter((d) => d.claims.length > 0)
 
+  // A skeleton rather than nothing. Returning null while the claims load left
+  // a tall blank gap under the green banner, which reads as "that is all there
+  // is" — the opposite of what this panel is for.
+  if (isLoading) return <WhatWasCheckedSkeleton />
   if (departments.length === 0) return null
 
   return (
@@ -128,4 +133,47 @@ function distinct(claims: DepartmentClaim[]): DepartmentClaim[] {
     out.push(claim)
   }
   return out
+}
+
+
+/* Shaped like the real panel — a header strip and two department cards — so
+   the page does not jump when the data lands. */
+function WhatWasCheckedSkeleton() {
+  return (
+    <div className="w-full">
+      <div className="mb-3 flex items-center gap-3">
+        <Skeleton className="h-3 w-28" />
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+
+      <div className="space-y-3">
+        {[0, 1].map((card) => (
+          <div
+            key={card}
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+            <div className="divide-y divide-slate-50">
+              {[0, 1, 2, 3].map((row) => (
+                <div
+                  key={row}
+                  className="flex items-center justify-between gap-6 px-5 py-3"
+                >
+                  {/* Staggered widths so it reads as sentences, not a bar chart. */}
+                  <Skeleton
+                    className="h-3.5"
+                    style={{ width: `${[62, 48, 71, 55][row]}%` }}
+                  />
+                  <Skeleton className="h-3 w-24 shrink-0" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
