@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import {
+  isAlreadyLocked,
   useBuildReadiness,
   useCheckDrafts,
   useDraftFindings,
@@ -295,6 +296,13 @@ function OpenBuilderButton({
                   // Only on success: a failed lock must not land the PM in a
                   // builder he never actually consented to.
                   onSuccess: () => router.push(`/pm/cycles/${cycleId}/plan`),
+                  // Except when it was already locked — the consent has
+                  // happened, this page was just showing an older view of it.
+                  onError: (err) => {
+                    if (isAlreadyLocked(err)) {
+                      router.push(`/pm/cycles/${cycleId}/plan`)
+                    }
+                  },
                 })
               }
               disabled={lock.isPending}

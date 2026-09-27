@@ -56,9 +56,23 @@ export function useLockDraftFindings(cycleId: string) {
     onSuccess: (data) => {
       qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), data)
     },
-    onError: (err: MutationError) =>
-      toast.error(readError(err, "Could not open the Report Builder")),
+    onError: (err: MutationError) => {
+      // Already locked is not a failure — it is the state the PM was asking
+      // for. It happens when the page was rendered before an earlier lock
+      // (another tab, or a back-navigation to stale data). Refresh instead of
+      // blocking them, and let the caller carry on to the builder.
+      if (isAlreadyLocked(err)) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId) })
+        return
+      }
+      toast.error(readError(err, "Could not open the Report Builder"))
+    },
   })
+}
+
+/** A lock refused because the cycle is already locked, rather than a real error. */
+export function isAlreadyLocked(err: unknown): boolean {
+  return (err as { response?: { status?: number } })?.response?.status === 409
 }
 
 // Run the checks. N+1 model calls server-side, so this is slow by design —
