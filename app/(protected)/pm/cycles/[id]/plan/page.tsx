@@ -235,12 +235,19 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         if (change.mode) {
           await setSourceMode.mutateAsync({ sectionCode, mode: change.mode })
         }
-        // Extract reads its document and nothing else; the mode switch above
-        // already cleared its feeders, so writing them would be refused.
+        // Only narrative and analyze sections take feeders — set_section_feeders
+        // refuses every other mode outright. Testing for "not extract" let a
+        // manual/attach/auto section through, that write 409'd, and the whole Start
+        // Building run stopped on it: the PM could neither save nor proceed, with
+        // nothing on screen saying which section was at fault. Allow-list the two
+        // modes the backend accepts, so a mode that cannot hold feeders is skipped
+        // rather than fatal.
         const finalMode =
           change.mode ??
-          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode
-        if (change.feeders && finalMode !== "extract") {
+          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode ??
+          sections.find((s) => s.section_code === sectionCode)?.mode
+        const takesFeeders = finalMode === "generate" || finalMode === "analyze"
+        if (change.feeders && takesFeeders) {
           await setFeeders.mutateAsync({
             sectionCode,
             departmentCodes: change.feeders,
