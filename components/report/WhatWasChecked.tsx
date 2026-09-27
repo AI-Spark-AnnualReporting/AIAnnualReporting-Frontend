@@ -1,39 +1,33 @@
 "use client"
 
 import { useState } from "react"
-import { Check } from "lucide-react"
+import { AlertTriangle, Check } from "lucide-react"
 
+import type { DepartmentClaim } from "@/lib/api/pm"
 import { useDepartmentClaims } from "@/hooks/useReportBuilder"
 
-/* Which figures the analysis actually looked at, and how each one came out.
+/* What the analysis actually checked, and how each statement came out.
  *
  * "No problems found" on its own is unverifiable — it could equally mean the
  * drafts were clean or that there was nothing to compare. On a real cycle one
- * department contributed 133 company-wide figures and another contributed 4,
- * so a conflict was never likely; the PM could not tell that from the verdict.
+ * department recorded 155 facts and another recorded 30, so the PM could not
+ * tell from the verdict alone how much had really been examined.
  *
- * Every figure carries its own tick rather than the panel carrying one verdict
+ * Every statement carries its own verdict rather than the panel carrying one
  * for all of them. A single "no problems found" asks to be taken on trust; a
  * list the PM can run their eye down does not.
  *
  * Reads the stored claims, which is a plain database read — no model call, and
  * nothing recalculated. This reports what was checked, never re-checks it. */
 
-const SHOWN = 24
+const SHOWN = 12
 
 export function WhatWasChecked({ cycleId }: { cycleId: string }) {
   const { data } = useDepartmentClaims(cycleId)
 
   const departments = (data?.departments ?? [])
-    .map((dept) => ({
-      name: dept.department,
-      // Only company-wide figures are ever compared between departments, so
-      // those are the only ones this can honestly claim were compared.
-      metrics: distinctMetrics(
-        dept.claims.filter((c) => c.scope === "company" && c.metric),
-      ),
-    }))
-    .filter((d) => d.metrics.length > 0)
+    .map((dept) => ({ name: dept.department, claims: distinct(dept.claims) }))
+    .filter((d) => d.claims.length > 0)
 
   if (departments.length === 0) return null
 
@@ -41,81 +35,97 @@ export function WhatWasChecked({ cycleId }: { cycleId: string }) {
     <div className="w-full">
       <div className="mb-3 flex items-center gap-3">
         <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-          Figures we checked
+          What we checked
         </p>
         <span className="h-px flex-1 bg-slate-200" />
       </div>
 
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="space-y-3">
         {departments.map((dept) => (
-          <DepartmentMetrics key={dept.name} name={dept.name} metrics={dept.metrics} />
+          <DepartmentFacts key={dept.name} name={dept.name} claims={dept.claims} />
         ))}
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-slate-400">
-        Only company-wide figures are compared between departments. Each
-        department&apos;s draft was also checked, sentence by sentence, against
-        its own recorded facts.
+        Each department&apos;s draft was checked sentence by sentence against
+        these statements. Only the company-wide ones are also compared against
+        other departments&apos; figures.
       </p>
     </div>
   )
 }
 
-function DepartmentMetrics({ name, metrics }: { name: string; metrics: string[] }) {
+function DepartmentFacts({ name, claims }: { name: string; claims: DepartmentClaim[] }) {
   const [all, setAll] = useState(false)
-  const shown = all ? metrics : metrics.slice(0, SHOWN)
-  const hidden = metrics.length - shown.length
+  const shown = all ? claims : claims.slice(0, SHOWN)
+  const hidden = claims.length - shown.length
+  const disputed = claims.filter((c) => c.dispute).length
 
   return (
-    <div className="px-5 py-4">
-      <div className="flex items-baseline justify-between gap-3">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 px-5 py-3">
         <p className="text-sm font-bold text-[#1A1D2E]">{name}</p>
         <p className="shrink-0 text-xs text-slate-400">
-          {metrics.length} figure{metrics.length === 1 ? "" : "s"} · no issues found
+          {claims.length} statement{claims.length === 1 ? "" : "s"}
+          {disputed > 0 ? ` · ${disputed} disputed` : " · no issues found"}
         </p>
       </div>
 
-      {/* Chips rather than rows: these are short labels, and a wrapped row fits
-          far more of them on screen than one line each — which matters at 133.
-          The tick rides inside the chip so the verdict travels with the label
-          however the row wraps. */}
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {shown.map((m) => (
-          <span
-            key={m}
-            title="No issue found"
-            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-100 bg-emerald-50/60 px-2 py-1 text-xs text-slate-600"
+      <ul className="divide-y divide-slate-50">
+        {shown.map((claim) => (
+          <li
+            key={claim.id}
+            className="flex items-start justify-between gap-6 px-5 py-2.5"
           >
-            <Check className="h-3 w-3 shrink-0 text-emerald-600" strokeWidth={3} />
-            {m}
-          </span>
+            <p className="text-sm leading-relaxed text-slate-700">{claim.text}</p>
+            <Verdict dispute={claim.dispute} />
+          </li>
         ))}
-        {hidden > 0 && (
-          <button
-            onClick={() => setAll(true)}
-            className="rounded-md px-2 py-1 text-xs font-semibold text-[#4040c8] hover:bg-indigo-50"
-          >
-            +{hidden} more
-          </button>
-        )}
-      </div>
+      </ul>
+
+      {hidden > 0 && (
+        <button
+          onClick={() => setAll(true)}
+          className="w-full border-t border-slate-100 px-5 py-2.5 text-xs font-semibold text-[#4040c8] hover:bg-indigo-50/50"
+        >
+          Show {hidden} more
+        </button>
+      )}
     </div>
   )
 }
 
-/* One entry per measure, not per fact. A department that reported headcount for
-   three years states three facts about one measure, and listing it three times
-   would pad the list without telling the reader anything. */
-function distinctMetrics(claims: { metric?: string | null }[]): string[] {
+/* Kept on one line and never wrapped, so the eye can run straight down the
+   right-hand edge instead of hunting for each verdict. */
+function Verdict({ dispute }: { dispute?: string | null }) {
+  if (dispute) {
+    return (
+      <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-amber-700">
+        <AlertTriangle className="h-3 w-3 shrink-0" />
+        {dispute}
+      </span>
+    )
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-xs text-emerald-600">
+      <Check className="h-3 w-3 shrink-0" strokeWidth={3} />
+      No issue found
+    </span>
+  )
+}
+
+/* Guards against the same sentence being recorded twice — two answers can
+   restate one fact, and listing it twice reads as a checking error. */
+function distinct(claims: DepartmentClaim[]): DepartmentClaim[] {
   const seen = new Set<string>()
-  const out: string[] = []
+  const out: DepartmentClaim[] = []
   for (const claim of claims) {
-    const metric = (claim.metric ?? "").trim()
-    if (!metric) continue
-    const key = metric.toLowerCase()
+    const text = (claim.text ?? "").trim()
+    if (!text) continue
+    const key = text.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    out.push(metric)
+    out.push(claim)
   }
   return out
 }
