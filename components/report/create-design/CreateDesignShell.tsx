@@ -11,7 +11,9 @@
  * leads here, so the screen can heal itself — see CreateDesignExtractRun.
  */
 
-import { ArrowLeft, Code2, Layers, RefreshCw } from "lucide-react"
+import {
+  ArrowLeft, Code2, Layers, PanelLeftClose, PanelLeftOpen, RefreshCw,
+} from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
@@ -30,7 +32,7 @@ import { revokeSection } from "@/lib/createDesignCache"
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
 import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
 import { PageRenderPanel } from "./PageRenderPanel"
-import { PreviewAllDialog } from "./PreviewAllDialog"
+import { PreviewAllPanel } from "./PreviewAllPanel"
 import { TemplateCardGrid } from "./TemplateCardGrid"
 import { CoverDesignPanel } from "./CoverDesignPanel"
 import { TocDesignPanel } from "./TocDesignPanel"
@@ -69,7 +71,12 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const [coverOpen, setCoverOpen] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [jsonOpen, setJsonOpen] = useState(false)
-  const [previewAllOpen, setPreviewAllOpen] = useState(false)
+  const [previewMode, setPreviewMode] = useState(false)
+  // Collapsed to a sliver so the preview gets the screen. Driven from the
+  // handlers below rather than from an effect on previewMode: an effect would
+  // re-collapse the rail on every render while preview is open, so the chevron
+  // would appear to do nothing.
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const [confirmAll, setConfirmAll] = useState(false)
   const [manualRun, setManualRun] = useState<{ force: boolean } | null>(null)
   const [failures, setFailures] = useState<Record<string, string>>({})
@@ -201,8 +208,29 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     extract.mutate({ sectionCode, force: true })
   }
 
+  // Both bits of state move together HERE, in the handler, and deliberately
+  // not in an effect watching previewMode. An effect would fire again on every
+  // render while preview is open, so reopening the rail would shut it again
+  // the instant you let go of the chevron.
+  const enterPreview = () => {
+    setPreviewMode(true)
+    setRailCollapsed(true)
+  }
+  const exitPreview = () => {
+    setPreviewMode(false)
+    setRailCollapsed(false)
+  }
+
   return (
-    <div className="-m-8 flex h-[calc(100vh-72px)] flex-col">
+    <div
+      className="-m-8 flex h-[calc(100vh-72px)] flex-col"
+      // Escape still leaves the preview, as it did when this was a dialog —
+      // the one habit worth keeping from the modal.
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && previewMode) exitPreview()
+      }}
+      tabIndex={-1}
+    >
       <div className="flex shrink-0 items-center gap-3 border-b bg-card px-5 py-3">
         <Button
           variant="ghost"
@@ -238,21 +266,6 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           Re-extract all
         </Button>
-        <Button
-          size="sm"
-          variant="brand"
-          className="h-8"
-          onClick={() => setPreviewAllOpen(true)}
-          disabled={data.units_chosen === 0}
-          title={
-            data.units_chosen === 0
-              ? "Choose a template for at least one page first"
-              : "Renders every chosen page — about a second each"
-          }
-        >
-          <Layers className="mr-1.5 h-3.5 w-3.5" />
-          Preview all pages
-        </Button>
       </div>
 
       {error && (
@@ -274,44 +287,92 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-[360px] shrink-0 flex-col overflow-hidden border-r bg-white">
-          <div className="shrink-0 border-b px-5 py-3">
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-indigo-500 transition-all"
-                style={{
-                  width: `${
-                    data.units_total ? (data.units_reviewed / data.units_total) * 100 : 0
-                  }%`,
+        {railCollapsed ? (
+          <button
+            type="button"
+            onClick={() => setRailCollapsed(false)}
+            className="group flex h-full w-6 shrink-0 flex-col items-center justify-center border-r bg-white transition-colors hover:bg-slate-50"
+            title="Show the section list"
+          >
+            <PanelLeftOpen className="h-4 w-4 text-slate-400 group-hover:text-slate-600" />
+          </button>
+        ) : (
+          <div className="flex w-[360px] shrink-0 flex-col overflow-hidden border-r bg-white transition-all duration-200">
+            <div className="shrink-0 border-b px-5 py-3">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-indigo-500 transition-all"
+                  style={{
+                    width: `${
+                      data.units_total ? (data.units_reviewed / data.units_total) * 100 : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+            {/* Above Cover and outside the scroller, so it is always reachable.
+                Deep plum is the palette the REPORTS are drawn in, not the
+                product's — this button looks at the document rather than
+                editing it, and promoting the colour to a token would imply the
+                app had adopted it. */}
+            <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
+              <Button
+                className="h-9 flex-1 justify-start bg-[#492244] text-white hover:bg-[#3C1C39] focus-visible:ring-[#492244]"
+                onClick={previewMode ? exitPreview : enterPreview}
+                disabled={data.units_chosen === 0}
+                title={
+                  data.units_chosen === 0
+                    ? "Choose a template for at least one page first"
+                    : "Renders every chosen page — about a second each"
+                }
+              >
+                <Layers className="mr-2 h-4 w-4" />
+                {previewMode ? "Back to designing" : "Preview"}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setRailCollapsed(true)}
+                className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                title="Hide the section list"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <CreateDesignRail
+                sections={data.sections}
+                selected={tocOpen || coverOpen ? null : active}
+                onSelect={(next) => {
+                  setTocOpen(false)
+                  setCoverOpen(false)
+                  setSelected(next)
+                  setPreviewKey(null)
                 }}
+                busyCode={extract.isPending ? extract.variables?.sectionCode : null}
+                failed={failures}
+                onReExtract={reExtract}
+                coverActive={coverOpen}
+                coverDesign={reportDesign.data?.cover2_template_key ?? null}
+                onSelectCover={() => { setCoverOpen(true); setTocOpen(false) }}
+                tocActive={tocOpen}
+                tocDesign={reportDesign.data?.toc_template_key ?? null}
+                onSelectToc={() => { setTocOpen(true); setCoverOpen(false) }}
               />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            <CreateDesignRail
-              sections={data.sections}
-              selected={tocOpen || coverOpen ? null : active}
-              onSelect={(next) => {
-                setTocOpen(false)
-                setCoverOpen(false)
-                setSelected(next)
-                setPreviewKey(null)
-              }}
-              busyCode={extract.isPending ? extract.variables?.sectionCode : null}
-              failed={failures}
-              onReExtract={reExtract}
-              coverActive={coverOpen}
-              coverDesign={reportDesign.data?.cover2_template_key ?? null}
-              onSelectCover={() => { setCoverOpen(true); setTocOpen(false) }}
-              tocActive={tocOpen}
-              tocDesign={reportDesign.data?.toc_template_key ?? null}
-              onSelectToc={() => { setTocOpen(true); setCoverOpen(false) }}
-            />
-          </div>
-        </div>
+        )}
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-          {coverOpen ? (
+          {previewMode ? (
+            <PreviewAllPanel
+              cycleId={cycleId}
+              design={data}
+              coverKey={reportDesign.data?.cover2_template_key ?? null}
+              tocKey={reportDesign.data?.toc_template_key ?? null}
+              active={previewMode}
+              onExit={exitPreview}
+            />
+          ) : coverOpen ? (
             <CoverDesignPanel
               cycleId={cycleId}
               chosen={reportDesign.data?.cover2_template_key ?? null}
@@ -432,12 +493,6 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
       </div>
 
       <UnitJsonPanel unit={unit} open={jsonOpen} onOpenChange={setJsonOpen} />
-      <PreviewAllDialog
-        cycleId={cycleId}
-        design={data}
-        open={previewAllOpen}
-        onOpenChange={setPreviewAllOpen}
-      />
       <ConfirmDialog
         open={confirmAll}
         onOpenChange={setConfirmAll}
