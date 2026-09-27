@@ -245,13 +245,13 @@ export function KickoffLoader({
             <div
               key={i}
               className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2 transition-colors duration-500",
+                "flex items-center gap-3 rounded-xl px-3 py-2",
                 active && "bg-indigo-50"
               )}
             >
               <div
                 className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-500",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
                   done
                     ? "border-emerald-500 bg-emerald-500 text-white"
                     : active
@@ -269,7 +269,7 @@ export function KickoffLoader({
               </div>
               <span
                 className={cn(
-                  "text-sm transition-colors duration-500",
+                  "text-sm",
                   done
                     ? "font-medium text-slate-400 line-through decoration-slate-300"
                     : active

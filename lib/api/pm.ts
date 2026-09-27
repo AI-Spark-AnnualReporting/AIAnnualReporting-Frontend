@@ -53,6 +53,10 @@ export interface DepartmentClaim {
   // Only company-scoped facts are compared across departments.
   scope: string
   question_id?: string | null
+  // What another department said that disagrees with this fact. Null means
+  // nothing disagrees — which only reads as "no issue" once the drafts have
+  // actually been analyzed (see findings_checked_at on the response).
+  dispute?: string | null
 }
 
 export interface DepartmentClaimsGroup {
@@ -69,6 +73,9 @@ export interface DepartmentClaimsResponse {
   cycle_id: string
   departments: DepartmentClaimsGroup[]
   total_claims: number
+  // When the drafts were last analyzed. Null means never, which is what
+  // separates "no issue found" from "nothing has checked yet".
+  findings_checked_at?: string | null
 }
 
 // What the PM did about a finding. `from` is the pre-correction sentence — the
