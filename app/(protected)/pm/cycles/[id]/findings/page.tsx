@@ -277,8 +277,7 @@ function OpenBuilderButton({
             <DialogDescription className="space-y-3 pt-2 text-left">
               <span className="block">{handled}</span>
               <span className="block">
-                You won&apos;t be able to edit or remove sentences, undo a
-                decision, or run the analysis again for this cycle.
+                You won&apos;t be able to analyze this cycle again.
               </span>
             </DialogDescription>
           </DialogHeader>
