@@ -1,20 +1,25 @@
 "use client"
 
 import { useState } from "react"
+import { Check } from "lucide-react"
 
 import { useDepartmentClaims } from "@/hooks/useReportBuilder"
 
-/* Which figures the analysis actually looked at.
+/* Which figures the analysis actually looked at, and how each one came out.
  *
  * "No problems found" on its own is unverifiable — it could equally mean the
  * drafts were clean or that there was nothing to compare. On a real cycle one
- * department contributed 112 company-wide figures and another contributed 3,
+ * department contributed 133 company-wide figures and another contributed 4,
  * so a conflict was never likely; the PM could not tell that from the verdict.
+ *
+ * Every figure carries its own tick rather than the panel carrying one verdict
+ * for all of them. A single "no problems found" asks to be taken on trust; a
+ * list the PM can run their eye down does not.
  *
  * Reads the stored claims, which is a plain database read — no model call, and
  * nothing recalculated. This reports what was checked, never re-checks it. */
 
-const SHOWN = 8
+const SHOWN = 24
 
 export function WhatWasChecked({ cycleId }: { cycleId: string }) {
   const { data } = useDepartmentClaims(cycleId)
@@ -33,7 +38,7 @@ export function WhatWasChecked({ cycleId }: { cycleId: string }) {
   if (departments.length === 0) return null
 
   return (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="w-full">
       <div className="mb-3 flex items-center gap-3">
         <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
           Figures we checked
@@ -66,18 +71,22 @@ function DepartmentMetrics({ name, metrics }: { name: string; metrics: string[] 
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-sm font-bold text-[#1A1D2E]">{name}</p>
         <p className="shrink-0 text-xs text-slate-400">
-          {metrics.length} figure{metrics.length === 1 ? "" : "s"}
+          {metrics.length} figure{metrics.length === 1 ? "" : "s"} · no issues found
         </p>
       </div>
 
-      {/* Chips rather than a list: these are short labels, and a wrapped row
-          fits far more of them on screen than one line each. */}
+      {/* Chips rather than rows: these are short labels, and a wrapped row fits
+          far more of them on screen than one line each — which matters at 133.
+          The tick rides inside the chip so the verdict travels with the label
+          however the row wraps. */}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {shown.map((m) => (
           <span
             key={m}
-            className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600"
+            title="No issue found"
+            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-100 bg-emerald-50/60 px-2 py-1 text-xs text-slate-600"
           >
+            <Check className="h-3 w-3 shrink-0 text-emerald-600" strokeWidth={3} />
             {m}
           </span>
         ))}
