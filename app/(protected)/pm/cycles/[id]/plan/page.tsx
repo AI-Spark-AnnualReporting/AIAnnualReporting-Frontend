@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -29,6 +29,7 @@ import {
 import { PageLoader } from "@/components/ui/spinner"
 import { Progress } from "@/components/ui/progress"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
+import { PlanBuildLoader } from "@/components/report/PlanBuildLoader"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { RegeneratePlanButton } from "@/components/report/RegeneratePlanButton"
 import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
@@ -716,6 +717,27 @@ function StartBuildingAction({
 
 function EmptyPlan({ cycleId }: { cycleId: string }) {
   const build = useBuildPlan(cycleId)
+
+  // Fire once, on arrival. The PM has just consented to open the builder, so
+  // asking them to press Generate is a second confirmation of a decision they
+  // already made — and the page behind the button is empty either way.
+  //
+  // The ref, not `build.isPending`, is what makes it once: pending is false on
+  // the render that schedules the call, and React runs effects twice in dev.
+  // Without it this bills two AI runs on every arrival.
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    build.mutate({})
+    // build is a stable mutation object; re-running on its identity would
+    // defeat the guard's purpose anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (build.isPending) return <PlanBuildLoader />
+
+  // Only reached if the automatic run failed — the card becomes the retry.
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-10 shadow-sm">
       <div className="mx-auto max-w-md text-center">
@@ -723,12 +745,12 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           <Sparkles className="h-7 w-7 text-indigo-600" />
         </div>
         <h2 className="mb-1.5 text-lg font-bold text-slate-900">
-          Report theme and outline
+          {build.isError ? "Couldn't build the plan" : "Report theme and outline"}
         </h2>
         <p className="mb-5 text-sm text-slate-500">
-          We&apos;ll run two AI passes over your approved department content to
-          propose a headline, themes, and per-section feeders. This usually
-          takes 30–60 seconds.
+          {build.isError
+            ? "The run didn't finish. Make sure at least one department session is approved, then try again."
+            : "We'll run two AI passes over your approved department content to propose a headline, themes, and per-section feeders. This usually takes 30–60 seconds."}
         </p>
         <Button
           onClick={() => build.mutate({})}
@@ -744,16 +766,10 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           ) : (
             <>
               <Sparkles className="mr-2 h-4 w-4" />
-              Generate
+              {build.isError ? "Try again" : "Generate"}
             </>
           )}
         </Button>
-        {build.isError && (
-          <p className="mt-3 text-xs text-red-600">
-            Couldn&apos;t generate the plan. Make sure at least one department
-            session is approved.
-          </p>
-        )}
       </div>
     </div>
   )
