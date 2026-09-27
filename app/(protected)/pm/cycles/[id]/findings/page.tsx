@@ -152,23 +152,36 @@ export default function CycleFindingsPage({
       )}
 
       {findings.length === 0 ? (
-        <div className="pb-10">
-          {/* Tighter than the default: the panel below is part of the same
-              answer, so a full-height empty state would strand it past a void. */}
-          <EmptyState
-            className={neverChecked ? undefined : "py-10"}
-            icon={neverChecked ? ScanSearch : CheckCircle2}
-            title={neverChecked ? "Not analyzed yet" : "No problems found"}
-            description={
-              neverChecked
-                ? "Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
-                : "Every draft matches what its department stated, and no figures disagree between departments."
-            }
-          />
-          {/* "No problems found" is unverifiable on its own — this says which
-              figures were actually looked at. Hidden before the first run,
-              when nothing has been checked. */}
-          {!neverChecked && <WhatWasChecked cycleId={id} />}
+        <div className="space-y-6 pb-10">
+          {neverChecked ? (
+            // Nothing has run, so this is a genuine empty state and keeps the
+            // tall centred treatment.
+            <EmptyState
+              icon={ScanSearch}
+              title="Not analyzed yet"
+              description="Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
+            />
+          ) : (
+            <>
+              {/* A result, not an empty state — so it reads as a green row
+                  rather than a tall grey void, and hands straight over to the
+                  evidence below it. */}
+              <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-5 py-4">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-emerald-900">No problems found</p>
+                  <p className="mt-0.5 text-sm text-emerald-800">
+                    Every draft matches what its department stated, and no figures
+                    disagree between departments.
+                  </p>
+                </div>
+              </div>
+
+              {/* "No problems found" is unverifiable on its own — this says
+                  what was actually looked at. */}
+              <WhatWasChecked cycleId={id} />
+            </>
+          )}
         </div>
       ) : (
         <DraftFindingsPanel cycleId={id} findings={findings} locked={locked} />
