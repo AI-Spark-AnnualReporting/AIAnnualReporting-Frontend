@@ -1,10 +1,17 @@
-"use client"
+"use client";
 
-import { use, useEffect, useRef, useState } from "react"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { useIsMutating, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ArrowRight, CheckCircle2, Loader2, Lock, ScanSearch } from "lucide-react"
+import { use, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useIsMutating, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  ScanSearch,
+} from "lucide-react";
 
 import {
   useBuildReadiness,
@@ -12,15 +19,16 @@ import {
   useDraftFindings,
   useLockDraftFindings,
   FINDING_WRITE_KEY,
-} from "@/hooks/useReportBuilder"
-import { QUERY_KEYS } from "@/lib/constants"
-import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { PageHeader } from "@/components/ui/page-header"
-import { PageLoader } from "@/components/ui/spinner"
-import { EmptyState } from "@/components/ui/empty-state"
-import { Button } from "@/components/ui/button"
-import { DraftFindingsPanel } from "@/components/report/DraftFindingsPanel"
-import { DraftCheckLoader } from "@/components/report/DraftCheckLoader"
+} from "@/hooks/useReportBuilder";
+import { QUERY_KEYS } from "@/lib/constants";
+import { usePMCycleDashboard } from "@/hooks/useSessions";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageLoader } from "@/components/ui/spinner";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import { DraftFindingsPanel } from "@/components/report/DraftFindingsPanel";
+import { DraftCheckLoader } from "@/components/report/DraftCheckLoader";
+import { WhatWasChecked } from "@/components/report/WhatWasChecked";
 import {
   Dialog,
   DialogContent,
@@ -28,53 +36,58 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { formatDateTime } from "@/lib/utils"
+} from "@/components/ui/dialog";
+import { formatDateTime } from "@/lib/utils";
 
 /* What the analysis found, and the only route into the Report Builder.
    Putting Open Report Builder here rather than on the cycle page means the PM
    cannot reach the builder without passing the findings — which is the whole
    point of checking before the report is assembled. */
-export default function CycleFindingsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
-  const { data, isLoading } = useDraftFindings(id)
-  const { data: readiness } = useBuildReadiness(id)
-  const { data: dash } = usePMCycleDashboard(id)
-  const check = useCheckDrafts(id)
+export default function CycleFindingsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
+  const { data, isLoading } = useDraftFindings(id);
+  const { data: readiness } = useBuildReadiness(id);
+  const { data: dash } = usePMCycleDashboard(id);
+  const check = useCheckDrafts(id);
 
   // Resolves are optimistic and queued, and deliberately do not write the
   // server response back per call — a queued write returning mid-sequence
   // would overwrite findings the PM has clicked since. Reconcile once, when
   // the queue has drained.
-  const qc = useQueryClient()
-  const writing = useIsMutating({ mutationKey: FINDING_WRITE_KEY(id) })
-  const prevWriting = useRef(0)
+  const qc = useQueryClient();
+  const writing = useIsMutating({ mutationKey: FINDING_WRITE_KEY(id) });
+  const prevWriting = useRef(0);
   useEffect(() => {
     if (prevWriting.current > 0 && writing === 0) {
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(id) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(id) });
     }
-    prevWriting.current = writing
-  }, [writing, qc, id])
+    prevWriting.current = writing;
+  }, [writing, qc, id]);
 
-  if (isLoading) return <PageLoader />
+  if (isLoading) return <PageLoader />;
 
-  const findings = data?.findings ?? []
-  const openCount = data?.open_count ?? 0
-  const neverChecked = !data?.checked_at
+  const findings = data?.findings ?? [];
+  const openCount = data?.open_count ?? 0;
+  const neverChecked = !data?.checked_at;
   // Past the consent the page is a record, not a workspace.
-  const locked = !!data?.locked_at
+  const locked = !!data?.locked_at;
   const cycleName =
-    (dash as { cycle?: { cycle_name?: string } } | undefined)?.cycle?.cycle_name ?? "This cycle"
+    (dash as { cycle?: { cycle_name?: string } } | undefined)?.cycle
+      ?.cycle_name ?? "This cycle";
 
   const description = locked
     ? `${cycleName} — locked, and kept as a record of what was changed`
     : neverChecked
-    ? `${cycleName} — the drafts haven't been analyzed yet`
-    : openCount > 0
-      ? `${cycleName} — ${openCount} thing${openCount === 1 ? "" : "s"} to check before building`
-      : findings.length > 0
-        ? `${cycleName} — everything has been handled`
-        : `${cycleName} — no problems found`
+      ? `${cycleName} — the drafts haven't been analyzed yet`
+      : openCount > 0
+        ? `${cycleName} — ${openCount} thing${openCount === 1 ? "" : "s"} to check before building`
+        : findings.length > 0
+          ? `${cycleName} — everything has been handled`
+          : `${cycleName} — no problems found`;
 
   return (
     <div className="space-y-6">
@@ -103,7 +116,11 @@ export default function CycleFindingsPage({ params }: { params: Promise<{ id: st
                   ) : (
                     <ScanSearch className="mr-2 h-4 w-4" />
                   )}
-                  {check.isPending ? "Analyzing…" : neverChecked ? "Analyze" : "Analyze again"}
+                  {check.isPending
+                    ? "Analyzing…"
+                    : neverChecked
+                      ? "Analyze"
+                      : "Analyze again"}
                 </Button>
               )}
               <OpenBuilderButton
@@ -135,20 +152,26 @@ export default function CycleFindingsPage({ params }: { params: Promise<{ id: st
       )}
 
       {findings.length === 0 ? (
-        <EmptyState
-          icon={neverChecked ? ScanSearch : CheckCircle2}
-          title={neverChecked ? "Not analyzed yet" : "No problems found"}
-          description={
-            neverChecked
-              ? "Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
-              : "Every draft matches what its department stated, and no figures disagree between departments."
-          }
-        />
+        <div>
+          <EmptyState
+            icon={neverChecked ? ScanSearch : CheckCircle2}
+            title={neverChecked ? "Not analyzed yet" : "No problems found"}
+            description={
+              neverChecked
+                ? "Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
+                : "Every draft matches what its department stated, and no figures disagree between departments."
+            }
+          />
+          {/* "No problems found" is unverifiable on its own — this says which
+              figures were actually looked at. Hidden before the first run,
+              when nothing has been checked. */}
+          {!neverChecked && <WhatWasChecked cycleId={id} />}
+        </div>
       ) : (
         <DraftFindingsPanel cycleId={id} findings={findings} locked={locked} />
       )}
     </div>
-  )
+  );
 }
 
 /* Three states, in order of the PM's journey.
@@ -168,15 +191,15 @@ function OpenBuilderButton({
   locked,
   findingCount,
 }: {
-  cycleId: string
-  canBuild: boolean
-  openCount: number
-  locked: boolean
-  findingCount: number
+  cycleId: string;
+  canBuild: boolean;
+  openCount: number;
+  locked: boolean;
+  findingCount: number;
 }) {
-  const router = useRouter()
-  const [open, setOpen] = useState(false)
-  const lock = useLockDraftFindings(cycleId)
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const lock = useLockDraftFindings(cycleId);
 
   if (locked) {
     return (
@@ -186,25 +209,25 @@ function OpenBuilderButton({
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </Link>
-    )
+    );
   }
 
   if (!canBuild || openCount > 0) {
     const reason = !canBuild
       ? "Available once sections are resolved and every department is approved"
-      : `Handle all ${openCount} finding${openCount === 1 ? "" : "s"} first`
+      : `Handle all ${openCount} finding${openCount === 1 ? "" : "s"} first`;
     return (
       <Button disabled title={reason}>
         Open Report Builder
         <ArrowRight className="ml-2 h-4 w-4" />
       </Button>
-    )
+    );
   }
 
   const handled =
     findingCount > 0
       ? `You've handled all ${findingCount} finding${findingCount === 1 ? "" : "s"}. Opening the builder locks them.`
-      : "No problems were found in the drafts. Opening the builder locks this check."
+      : "No problems were found in the drafts. Opening the builder locks this check.";
 
   return (
     <>
@@ -213,7 +236,10 @@ function OpenBuilderButton({
         <ArrowRight className="ml-2 h-4 w-4" />
       </Button>
 
-      <Dialog open={open} onOpenChange={(next) => !lock.isPending && setOpen(next)}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => !lock.isPending && setOpen(next)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -223,10 +249,10 @@ function OpenBuilderButton({
             <DialogDescription className="space-y-3 pt-2 text-left">
               <span className="block">{handled}</span>
               <span className="block">
-                The builder writes each section from the departments&apos; text as
-                it stands right now. After this, changing a sentence here would no
-                longer reach the report — so the findings page becomes a read-only
-                record of what you changed.
+                The builder writes each section from the departments&apos; text
+                as it stands right now. After this, changing a sentence here
+                would no longer reach the report — so the findings page becomes
+                a read-only record of what you changed.
               </span>
               <span className="block">
                 You won&apos;t be able to edit or remove sentences, undo a
@@ -252,12 +278,14 @@ function OpenBuilderButton({
               }
               disabled={lock.isPending}
             >
-              {lock.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {lock.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Open Report Builder
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
-  )
+  );
 }
