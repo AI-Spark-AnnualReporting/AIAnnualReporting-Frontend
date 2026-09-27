@@ -152,8 +152,11 @@ export default function CycleFindingsPage({
       )}
 
       {findings.length === 0 ? (
-        <div>
+        <div className="pb-10">
+          {/* Tighter than the default: the panel below is part of the same
+              answer, so a full-height empty state would strand it past a void. */}
           <EmptyState
+            className={neverChecked ? undefined : "py-10"}
             icon={neverChecked ? ScanSearch : CheckCircle2}
             title={neverChecked ? "Not analyzed yet" : "No problems found"}
             description={
