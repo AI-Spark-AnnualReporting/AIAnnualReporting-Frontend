@@ -38,9 +38,35 @@ export function useRetryClaimExtraction() {
       toast.success("Facts read successfully")
       qc.invalidateQueries({ queryKey: NOTIFICATIONS_KEY })
     },
-    onError: () =>
-      toast.error("Still couldn't read the facts. Try again shortly."),
+    // Say what the server said. A fixed message here hid a 401, a 403 and a
+    // 502 behind one sentence, which made a failure impossible to act on
+    // without opening devtools.
+    onError: (err: unknown) => toast.error(retryError(err)),
   })
+}
+
+/* Turn an axios failure into something the PM can act on.
+
+   The status matters more than the text: 401 means the session lapsed and the
+   fix is to sign in again, 403 means this cycle is not theirs, 502 means the
+   read genuinely failed again and retrying later is the right move. */
+function retryError(err: unknown): string {
+  const e = err as {
+    response?: { status?: number; data?: { detail?: string } }
+    code?: string
+  }
+  const detail = e?.response?.data?.detail
+  const status = e?.response?.status
+
+  if (e?.code === "ECONNABORTED") {
+    return "The read took too long and was cut off. Try again."
+  }
+  if (status === 401) return "Your session expired — sign in again to retry."
+  if (status === 403) return "You don't have access to this cycle."
+  if (status === 404) return "That department's session no longer exists."
+  if (typeof detail === "string" && detail.trim()) return detail
+  if (status) return `Couldn't read the facts (error ${status}). Try again shortly.`
+  return "Couldn't reach the server. Check your connection and try again."
 }
 
 /** Lazy load — only fetches when `enabled` is true (e.g. dropdown open). Reuses live cache. */
