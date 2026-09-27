@@ -23,6 +23,8 @@ import type {
   ColorPalette,
   CoverTemplate,
   DesignSelection,
+  CoverDesign,
+  CoverPreview,
   TocDesign,
   TocPreview,
 } from "@/types/report-design"
@@ -67,10 +69,18 @@ export interface AssembledReport {
 }
 
 export const annualDesignApi = {
-  /** The cycle's current cover/brand/type choice, for pre-selecting the controls. */
+  /**
+   * The cycle's current cover/brand/type choice, for pre-selecting the controls.
+   *
+   * Cheap, but it runs on the Create Design screen alongside a pre-warm that
+   * is drawing pages, so it is queueing behind render work rather than doing
+   * any of its own. The client default cut it off at 30s and left the cover
+   * and contents pickers with nothing selected.
+   */
   get: async (cycleId: string): Promise<AnnualDesign> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
+      { timeout: 60000 },
     )
     return data
   },
@@ -85,6 +95,9 @@ export const annualDesignApi = {
     const { data } = await apiClient.patch(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
       selection,
+      // Same queue as get, above, and this one is a person's choice — losing it
+      // to a timeout means they pick the cover again and wonder why.
+      { timeout: 60000 },
     )
     return data
   },
@@ -123,8 +136,30 @@ export const annualDesignApi = {
    * Proxied from the render engine, which owns them — there is no second list
    * of names and descriptions on this side to fall out of date.
    */
+  /**
+   * The four annual covers. Proxied from the engine that owns them.
+   *
+   * Proxied, so it waits on the render engine — the same engine the pre-warm
+   * is keeping busy — and then on this backend. Two queues, one list of names.
+   */
+  coverDesigns: async (): Promise<{ templates: CoverDesign[]; default: string }> => {
+    const { data } = await apiClient.get(`/pm/cover-designs`, { timeout: 60000 })
+    return { templates: data?.templates ?? [], default: data?.default ?? "statement" }
+  },
+
+  /** Draw this cycle's cover in one design, with its real title and brand. */
+  previewCover: async (cycleId: string, design: string): Promise<CoverPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/cover-preview`,
+      { design },
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  /** The five contents designs. Proxied too — see coverDesigns for the timeout. */
   tocDesigns: async (): Promise<{ templates: TocDesign[]; default: string }> => {
-    const { data } = await apiClient.get(`/pm/toc-designs`)
+    const { data } = await apiClient.get(`/pm/toc-designs`, { timeout: 60000 })
     return {
       templates: data?.templates ?? [],
       default: data?.default ?? "classic",

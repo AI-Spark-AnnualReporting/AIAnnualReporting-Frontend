@@ -92,6 +92,7 @@ export interface AnnualDesign {
   cover_template_key: string | null
   /** The cycle's OWN contents-design pick, null when it has never chosen. */
   toc_template_key: string | null
+  cover2_template_key: string | null
   brand: BrandColors
   typography: Typography | null
   company_default: CompanyDesignDefault | null
@@ -122,9 +123,26 @@ export interface DesignSelection {
    * alone. Set from the Create Design screen, not from the cover modal.
    */
   toc_template_key?: string
+  /** Which of the four annual covers this report prints. Absent = the original. */
+  cover2_template_key?: string
 }
 
 /** One contents-page design, as the engine that owns them describes it. */
+export interface CoverDesign {
+  key: string
+  purpose: string
+  full_bleed: boolean
+  /** The divider treatment this cover brings with it. */
+  divider: string
+}
+
+export interface CoverPreview {
+  design: string
+  page_count: number
+  divider: string
+  pages: string[]
+}
+
 export interface TocDesign {
   key: string
   purpose: string

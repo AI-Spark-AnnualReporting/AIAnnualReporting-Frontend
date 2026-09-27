@@ -14,7 +14,7 @@
  */
 
 import {
-  Check, Circle, CircleAlert, CircleDot, ListTree, Loader2,
+  BookImage, Check, Circle, CircleAlert, CircleDot, ListTree, Loader2,
   TriangleAlert,
 } from "lucide-react"
 import type { DesignSection } from "@/lib/api/createDesign"
@@ -28,6 +28,14 @@ export interface RailSelection {
 }
 
 /** Mirrors TocDesignPanel's NAMES — the rail only needs the noun. */
+/** Mirrors CoverDesignPanel's NAMES — the rail only needs the noun. */
+const COVER_DESIGN_NAMES: Record<string, string> = {
+  statement: "Statement",
+  band: "Band",
+  panel: "Panel",
+  monolith: "Monolith",
+}
+
 const TOC_DESIGN_NAMES: Record<string, string> = {
   classic: "Classic",
   editorial: "Editorial",
@@ -67,6 +75,9 @@ export function CreateDesignRail({
   busyCode,
   failed,
   onReExtract,
+  coverActive,
+  coverDesign,
+  onSelectCover,
   tocActive,
   tocDesign,
   onSelectToc,
@@ -85,6 +96,9 @@ export function CreateDesignRail({
   tocActive?: boolean
   tocDesign?: string | null
   onSelectToc?: () => void
+  coverActive?: boolean
+  coverDesign?: string | null
+  onSelectCover?: () => void
 }) {
   // The blueprint carries a `table_of_contents` section whose content is a
   // placeholder — the exporters draw the real contents page themselves. It has
@@ -97,6 +111,27 @@ export function CreateDesignRail({
     .sort((a, b) => a.order - b.order)
   return (
     <div className="space-y-0.5 p-3">
+      {onSelectCover && (
+        <button
+          type="button"
+          onClick={onSelectCover}
+          className={cn(
+            "mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition",
+            coverActive ? "bg-indigo-50 text-indigo-900" : "hover:bg-slate-50",
+          )}
+        >
+          <BookImage
+            className={cn("h-4 w-4 shrink-0",
+              coverActive ? "text-indigo-500" : "text-slate-400")}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">Cover</span>
+            <span className="block truncate text-[11px] text-slate-500">
+              {coverDesign ? COVER_DESIGN_NAMES[coverDesign] ?? coverDesign : "Not chosen"}
+            </span>
+          </span>
+        </button>
+      )}
       {onSelectToc && (
         <>
           <button

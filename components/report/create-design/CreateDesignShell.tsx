@@ -32,6 +32,7 @@ import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
 import { PageRenderPanel } from "./PageRenderPanel"
 import { PreviewAllDialog } from "./PreviewAllDialog"
 import { TemplateCardGrid } from "./TemplateCardGrid"
+import { CoverDesignPanel } from "./CoverDesignPanel"
 import { TocDesignPanel } from "./TocDesignPanel"
 import { UnitJsonPanel } from "./UnitJsonPanel"
 
@@ -53,7 +54,7 @@ const FALLBACK_OPTIONS = [
 
 export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
-  const { data, isLoading, error, refetch } = useCycleDesign(cycleId)
+  const { data, isLoading, isFetching, error, refetch } = useCycleDesign(cycleId)
   const setTemplate = useSetTemplate(cycleId)
   const extract = useExtractSection(cycleId)
 
@@ -63,6 +64,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // below — a fake code would have to be excluded from the rail, the counts,
   // the extract run and the preview, and each of those is a place to forget.
   const [tocOpen, setTocOpen] = useState(false)
+  // The cover is a report-level choice too, and it also settles how every
+  // section's opening page looks — so it sits above Contents in the rail.
+  const [coverOpen, setCoverOpen] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [previewAllOpen, setPreviewAllOpen] = useState(false)
@@ -82,6 +86,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const reportDesign = useQuery({
     queryKey: designKey,
     queryFn: () => annualDesignApi.get(cycleId),
+  })
+  const saveCover = useMutation({
+    mutationFn: (key: string) =>
+      annualDesignApi.save(cycleId, { cover2_template_key: key }),
+    onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
   })
   const saveToc = useMutation({
     mutationFn: (key: string) =>
@@ -125,14 +134,26 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // Held off while the extract overlay is up. Pre-warming underneath it would
   // put render requests in front of the model calls that overlay is waiting
   // on, making the wait people already see longer.
-  useDesignPrewarm(cycleId, data?.sections, selected?.code ?? null, !run)
+  //
+  // And held off while this screen is still reading its own payload. The run
+  // ends by refetching, and the pre-warm used to start in the same instant —
+  // so the one request whose failure empties the screen was competing with a
+  // five-page render batch for the same backend. Whoever is waiting on the
+  // screen goes first.
+  useDesignPrewarm(cycleId, data?.sections, selected?.code ?? null, !run && !isFetching)
 
   if (isLoading && !data) return <PageLoader />
 
   // React Query keeps serving the last good payload after a failure, which
   // made a session that had lost access look like a working screen with an
   // unexplained red toast. Say so instead.
-  if (error) {
+  //
+  // Only when there is nothing to say it over, though. A background refresh
+  // that times out — the designer refetches after every extract run, while
+  // pages are being drawn — used to throw away a screen that was working and
+  // replace it with a full-page error, which is a far worse answer than the
+  // slightly stale payload already in hand. That case gets the strip below.
+  if (error && !data) {
     return (
       <div className="flex h-[calc(100vh-8.5rem)] flex-col items-center justify-center gap-3 p-8 text-center">
         <p className="max-w-md text-sm text-red-700">
@@ -234,6 +255,24 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
         </Button>
       </div>
 
+      {error && (
+        <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-2">
+          <p className="min-w-0 flex-1 text-[11px] text-amber-900">
+            {readError(error as MutationError, "Could not refresh this cycle.")}{" "}
+            Showing what was last loaded.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 text-[11px]"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            {isFetching ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <div className="flex w-[360px] shrink-0 flex-col overflow-hidden border-r bg-white">
           <div className="shrink-0 border-b px-5 py-3">
@@ -251,24 +290,36 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
           <div className="flex-1 overflow-y-auto">
             <CreateDesignRail
               sections={data.sections}
-              selected={tocOpen ? null : active}
+              selected={tocOpen || coverOpen ? null : active}
               onSelect={(next) => {
                 setTocOpen(false)
+                setCoverOpen(false)
                 setSelected(next)
                 setPreviewKey(null)
               }}
               busyCode={extract.isPending ? extract.variables?.sectionCode : null}
               failed={failures}
               onReExtract={reExtract}
+              coverActive={coverOpen}
+              coverDesign={reportDesign.data?.cover2_template_key ?? null}
+              onSelectCover={() => { setCoverOpen(true); setTocOpen(false) }}
               tocActive={tocOpen}
               tocDesign={reportDesign.data?.toc_template_key ?? null}
-              onSelectToc={() => setTocOpen(true)}
+              onSelectToc={() => { setTocOpen(true); setCoverOpen(false) }}
             />
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-          {tocOpen ? (
+          {coverOpen ? (
+            <CoverDesignPanel
+              cycleId={cycleId}
+              chosen={reportDesign.data?.cover2_template_key ?? null}
+              locked={reportDesign.data?.locked ?? false}
+              saving={saveCover.isPending}
+              onChoose={(key) => saveCover.mutate(key)}
+            />
+          ) : tocOpen ? (
             <TocDesignPanel
               cycleId={cycleId}
               chosen={reportDesign.data?.toc_template_key ?? null}
