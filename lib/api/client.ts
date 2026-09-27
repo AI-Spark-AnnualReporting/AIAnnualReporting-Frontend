@@ -11,12 +11,24 @@ const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1"
 
+/**
+ * The ceiling for a call that has not thought about its own.
+ *
+ * Short on purpose: most of this API is a handful of database reads, and a
+ * request still running after half a minute is a request in trouble. Anything
+ * that legitimately takes longer — a render, a model call, a screen that reads
+ * a whole assembled report — sets its own and says why. A call that inherits
+ * this one has not made a decision, and "timeout of 30000ms exceeded" in front
+ * of a user is what that looks like.
+ */
+export const DEFAULT_TIMEOUT_MS = 30000
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 30000,
+  timeout: DEFAULT_TIMEOUT_MS,
 })
 
 // Request interceptor: attach the Centriyon-issued JWT, and — for Spark staff —
@@ -110,9 +122,30 @@ apiClient.interceptors.response.use(
       responseData,
     })
 
+    // Axios describes a timeout as "timeout of 30000ms exceeded" and a dropped
+    // connection as "Network Error". Both end up rendered verbatim wherever a
+    // screen shows err.message, which is a stack trace pointed at a person who
+    // can only wait or retry. Say the thing they can act on instead; the raw
+    // code and message are still in the console line above.
+    const isTimeout =
+      error.code === "ECONNABORTED" || error.code === "ETIMEDOUT"
+    const isOffline = error.code === "ERR_NETWORK"
+    const transportMessage = isTimeout
+      ? "The server took too long to answer. It may still be busy finishing earlier work — try again in a moment."
+      : isOffline
+        ? "Could not reach the server. Check your connection and try again."
+        : null
+
     const normalizedError = {
-      error: responseData?.error || responseData?.detail || "UNKNOWN_ERROR",
-      message: backendMessage || error.message || "An unexpected error occurred",
+      error:
+        responseData?.error ||
+        responseData?.detail ||
+        (isTimeout ? "TIMEOUT" : isOffline ? "NETWORK" : "UNKNOWN_ERROR"),
+      message:
+        backendMessage ||
+        transportMessage ||
+        error.message ||
+        "An unexpected error occurred",
       status: error.response?.status,
       details: responseData?.details || responseData,
     }

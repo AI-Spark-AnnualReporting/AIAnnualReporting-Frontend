@@ -107,10 +107,21 @@ export interface CycleDesign {
 }
 
 export const createDesignApi = {
-  /** Everything the screen needs, in one call. Writes nothing. */
+  /**
+   * Everything the screen needs, in one call. Writes nothing.
+   *
+   * The long timeout is the whole screen's. This reads the assembled report
+   * and every section's stored envelope — measured at 1.7s warm and 9.5s on a
+   * cold connection for a twelve-section cycle, before anything else the
+   * backend is doing gets in the way. At the client default it was the first
+   * call to die under load, and its failure is the one that replaces the
+   * designer with an error page, so it is the one that must not be cut off
+   * while the answer is still coming.
+   */
   get: async (cycleId: string): Promise<CycleDesign> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${encodeURIComponent(cycleId)}/create-design`,
+      { timeout: 120000 },
     )
     return data
   },
@@ -139,7 +150,13 @@ export const createDesignApi = {
     return data
   },
 
-  /** Record the template chosen for one page. `null` clears it. */
+  /**
+   * Record the template chosen for one page. `null` clears it.
+   *
+   * Small, but it is a read-modify-write of the section's whole envelope and
+   * it is fired by a card click while the pre-warm is drawing pages. Giving it
+   * room is the difference between a slow save and a lost choice.
+   */
   setTemplate: async (
     cycleId: string,
     sectionCode: string,
@@ -151,6 +168,7 @@ export const createDesignApi = {
         sectionCode,
       )}/create-design-template`,
       { unit_index: unitIndex, template_key: templateKey },
+      { timeout: 60000 },
     )
     return data
   },
