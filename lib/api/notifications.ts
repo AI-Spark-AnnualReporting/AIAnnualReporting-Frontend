@@ -30,6 +30,24 @@ export const notificationsApi = {
     return data
   },
 
+  // Read a department's facts again after a failure. Both roles have their
+  // own route, each guarded by that role's own ownership check.
+  //
+  // The 120s timeout is not decoration: this awaits a model call, and the
+  // client's 30s default would abort a read that was about to succeed and
+  // leave the notice standing.
+  retryClaimExtraction: async (
+    role: "hod" | "pm",
+    sessionId: string,
+  ): Promise<{ success: boolean }> => {
+    const { data } = await apiClient.post(
+      `/${role}/sessions/${sessionId}/claims/extract`,
+      undefined,
+      { timeout: 120_000 },
+    )
+    return data
+  },
+
   markAllRead: async (): Promise<NotificationMarkReadResponse> => {
     const { data } = await apiClient.post("/notifications/read-all")
     return data

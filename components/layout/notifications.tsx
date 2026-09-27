@@ -7,6 +7,7 @@ import { AlertTriangle, X } from "lucide-react"
 import {
   useMarkNotificationRead,
   useMarkAllNotificationsRead,
+  useRetryClaimExtraction,
 } from "@/hooks/useNotifications"
 import { useAuth } from "@/contexts/AuthContext"
 import { communicationsApi, type ThreadSummary } from "@/lib/api/communications"
@@ -62,7 +63,7 @@ function relativeTime(iso: string): string {
 }
 
 // ── Notification model ─────────────────────────────────────────────────────
-type NotificationKind = "escalation" | "thread_message" | "regular"
+type NotificationKind = "escalation" | "thread_message" | "claims_retry" | "regular"
 
 interface KindMeta {
   accent: string // icon tint + unread dot
@@ -92,6 +93,21 @@ const KIND_META: Record<NotificationKind, KindMeta> = {
           strokeWidth="1.3"
           strokeLinejoin="round"
         />
+      </svg>
+    ),
+  },
+  claims_retry: {
+    accent: "#B45309",
+    bg: "#FEF3C7",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+        <path d="M13.4 2.6v2.9h-2.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -133,7 +149,8 @@ function commsBasePath(role?: string): string | null {
 
 // Unread escalations first, then any other unread (newest first), then read.
 function sortUnified(items: UnifiedNotif[]): UnifiedNotif[] {
-  const rank = (u: UnifiedNotif) => (u.kind === "escalation" ? 0 : 1)
+  const rank = (u: UnifiedNotif) =>
+    u.kind === "escalation" || u.kind === "claims_retry" ? 0 : 1
   const byDate = (a: UnifiedNotif, b: UnifiedNotif) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   return [...items].sort((a, b) => {
@@ -182,6 +199,12 @@ export function NotificationBell({
   // tracks optimistic reads so the badge/list update instantly on click.
   const [threads, setThreads] = useState<ThreadSummary[]>([])
   const [readThreads, setReadThreads] = useState<Set<string>>(new Set())
+
+  // Which retries are in flight, by notification id. Tracked per row rather
+  // than off the mutation: one mutation object serves every row, so
+  // `isPending` would spin all of them at once.
+  const [retrying, setRetrying] = useState<Set<string>>(new Set())
+  const retryClaims = useRetryClaimExtraction()
 
   // Ad-hoc refresh (used by the open-panel handler). setState lands after the
   // await, i.e. in a microtask callback — not synchronously in render/effect.
@@ -242,6 +265,37 @@ export function NotificationBell({
   const backendItems: UnifiedNotif[] = notifications
     .filter((n) => !(n.action_url ?? "").startsWith("/communications/threads"))
     .map((n) => {
+    // A failed fact read. Unlike every other row this one does work in place:
+    // no navigation, and the panel stays open so the user watches it resolve.
+    if (n.related_type === "session_claims" && n.related_id) {
+      const sessionId = n.related_id
+      const pending = retrying.has(n.id)
+      return {
+        id: n.id,
+        kind: "claims_retry" as const,
+        title: n.title || "Couldn't read a department's facts",
+        body: n.message,
+        meta: pending ? "Reading answers…" : "Click to try again",
+        timestamp: n.created_at,
+        // Never marked read. The row is the only signal that something is
+        // broken, so it stays bold and keeps its place in the badge count
+        // until a successful read deletes it server-side.
+        unread: true,
+        onClick: () => {
+          if (pending) return
+          setRetrying((prev) => new Set(prev).add(n.id))
+          retryClaims.mutate(sessionId, {
+            onSettled: () =>
+              setRetrying((prev) => {
+                const next = new Set(prev)
+                next.delete(n.id)
+                return next
+              }),
+          })
+        },
+      }
+    }
+
     const isEsc = n.notification_type === "escalation"
     if (isEsc) {
       const { dept, reason } = escalationParts(n)
@@ -504,6 +558,7 @@ export function NotificationBell({
                     role="menuitem"
                     className="notif-row"
                     onClick={n.onClick}
+                    disabled={retrying.has(n.id)}
                     style={{
                       display: "flex",
                       alignItems: "flex-start",

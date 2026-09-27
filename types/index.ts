@@ -470,6 +470,9 @@ export interface Notification {
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
   related_id?: string
+  // What the notification is about. "session_claims" marks a failed fact read,
+  // which the bell turns into a click-to-retry row instead of a link.
+  related_type?: string
   action_url?: string
   created_at: string
   is_read: boolean

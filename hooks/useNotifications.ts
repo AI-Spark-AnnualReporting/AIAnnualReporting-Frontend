@@ -19,6 +19,30 @@ export function useNotificationsLive() {
   })
 }
 
+/**
+ * Retry a failed fact read from the notification itself.
+ *
+ * The role is read here rather than passed in, so the bell needs no new props
+ * and none of the three top navs change. On success the backend deletes the
+ * notice for every recipient, so invalidating the list is what makes the row
+ * disappear — for the other person too, on their next poll.
+ */
+export function useRetryClaimExtraction() {
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  const role = user?.role === "hod" ? "hod" : "pm"
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      notificationsApi.retryClaimExtraction(role, sessionId),
+    onSuccess: () => {
+      toast.success("Facts read successfully")
+      qc.invalidateQueries({ queryKey: NOTIFICATIONS_KEY })
+    },
+    onError: () =>
+      toast.error("Still couldn't read the facts. Try again shortly."),
+  })
+}
+
 /** Lazy load — only fetches when `enabled` is true (e.g. dropdown open). Reuses live cache. */
 export function useNotifications(filters: NotificationsFilters & { enabled?: boolean } = {}) {
   const { isAuthenticated } = useAuth()
