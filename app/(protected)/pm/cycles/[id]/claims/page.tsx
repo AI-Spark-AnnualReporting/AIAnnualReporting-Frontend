@@ -99,7 +99,6 @@ export default function CycleClaimsPage({ params }: { params: Promise<{ id: stri
             <DepartmentClaims
               key={dept.session_id}
               dept={dept}
-              checked={!!data?.findings_checked_at}
               open={openId === dept.session_id}
               onToggle={() =>
                 setOpenId((prev) => (prev === dept.session_id ? null : dept.session_id))
@@ -116,13 +115,10 @@ function DepartmentClaims({
   dept,
   open,
   onToggle,
-  checked,
 }: {
   dept: DepartmentClaimsGroup
   open: boolean
   onToggle: () => void
-  /** Whether the drafts have been analyzed, so a clean fact can be called clean. */
-  checked: boolean
 }) {
   const count = dept.claims.length
   // extracted_at is stamped whenever the read runs, including when it finds
@@ -165,7 +161,7 @@ function DepartmentClaims({
           ) : (
             <div className="space-y-4">
               {dept.claims.map((claim) => (
-                <ClaimLine key={claim.id} claim={claim} checked={checked} />
+                <ClaimLine key={claim.id} claim={claim} />
               ))}
             </div>
           )}
