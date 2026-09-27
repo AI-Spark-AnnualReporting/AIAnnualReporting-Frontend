@@ -23,6 +23,7 @@
  * keeps them.
  */
 import { getActingCompany } from "@/lib/actingCompany"
+import { noteEpoch } from "@/lib/createDesignCache"
 import { parseSseFrames } from "@/lib/sseFrames"
 import { apiClient } from "./client"
 
@@ -237,6 +238,8 @@ export async function streamSectionBlocks(
  */
 export interface RenderedPages {
   template_key: string
+  /** Which build of the drawing code produced these images. */
+  epoch?: string
   page_count: number
   counts: Record<string, number>
   dropped: Record<string, number>
@@ -260,6 +263,7 @@ export async function renderSectionPages(
     body,
     { timeout: 180000 },
   )
+  noteEpoch(data?.epoch)
   return data
 }
 
@@ -294,5 +298,6 @@ export async function renderSectionPagesBatch(
     // A batch is many renders; it needs many renders' worth of time.
     { timeout: 600000 },
   )
+  noteEpoch(data?.epoch)
   return { items: data?.items ?? [] }
 }

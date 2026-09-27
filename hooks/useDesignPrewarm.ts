@@ -36,6 +36,20 @@ import type { DesignSection } from "@/lib/api/createDesign"
 // container for a minute while a real export waits behind it.
 const CHUNK = 5
 
+// A gap between chunks, so the backend is not permanently occupied by work
+// nobody asked for. Every request this screen makes — reading the cycle,
+// saving a template, drawing the page on screen — is queued behind whatever
+// the server is already doing, and back-to-back batches leave no gap for them
+// to land in. Long enough to matter, short enough that the pre-warm still
+// finishes well before a person has clicked through the report.
+const BREATHE_MS = 400
+
+// How many batches in a row may fail before the pre-warm stops trying.
+// One failure is a batch that happened to time out; the panel will draw that
+// page on demand when someone opens it. Two in a row means the engine is
+// having a bad time and the remaining chunks would only make it worse.
+const MAX_CONSECUTIVE_FAILURES = 2
+
 interface Job {
   key: string
   sectionCode: string
@@ -61,8 +75,13 @@ export function useDesignPrewarm(
   // The section on screen, readable from inside the loop without making it a
   // dependency — re-running the whole pre-warm on every click would restart
   // the work it is trying to finish.
+  //
+  // Written in an effect rather than during render: a render can be thrown
+  // away or replayed, and this ref is read by work already in flight.
   const activeRef = useRef(active)
-  activeRef.current = active
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
 
   const startedRef = useRef(false)
 
@@ -101,6 +120,7 @@ export function useDesignPrewarm(
 
     void (async () => {
       const remaining = [...jobs]
+      let failures = 0
       while (alive && remaining.length) {
         // Re-sorted every chunk, not once: the section on screen may have
         // changed while the previous chunk was in flight, and the whole point
@@ -122,12 +142,21 @@ export function useDesignPrewarm(
             const job = chunk[i]
             if (job && item?.pages?.length) prime(job.key, item.pages)
           })
+          failures = 0
         } catch {
           // Pre-warming is an optimisation. If it fails the screen still works
           // — the panel renders on demand exactly as it did before — so this
           // must stay silent rather than put an error in front of someone who
           // did not ask for anything.
-          return
+          //
+          // Not silent AND fatal, though: one bad chunk used to abandon every
+          // chunk after it, so a single hiccup early on cost the whole report
+          // its pre-warm and every later click paid full render time again.
+          failures += 1
+          if (failures >= MAX_CONSECUTIVE_FAILURES) return
+        }
+        if (remaining.length) {
+          await new Promise((resolve) => setTimeout(resolve, BREATHE_MS))
         }
       }
     })()

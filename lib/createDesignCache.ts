@@ -28,9 +28,63 @@ const MAX_ENTRIES = 240
 // entry deletes and re-sets it, moving it to the end.
 const cache = new Map<string, string[]>()
 const inflight = new Map<string, Promise<string[]>>()
-// A key that failed. Without this a failed render is retried on every
-// unrelated cache write, and each retry is a cold browser launch.
-const failed = new Map<string, string>()
+// A key that failed, and when. Without this a failed render is retried on
+// every unrelated cache write, and each retry is a cold browser launch.
+//
+// REMEMBERED, NOT WRITTEN OFF. The failures this actually sees are the engine
+// having a bad minute — a browser that could not start because the machine
+// was busy — and those clear themselves. Keeping them forever meant the
+// outage outlived itself: the page stayed broken until someone reloaded the
+// tab, and Preview all pages, which has no re-render button, had no way back
+// at all. So the entry expires, and the next look tries again.
+const failed = new Map<string, { why: string; at: number }>()
+
+// Long enough that a burst of cache writes cannot turn one failure into a
+// retry storm, short enough that a person who waits a moment and looks again
+// gets a real attempt rather than the old error played back.
+const FAILURE_TTL_MS = 20_000
+
+/** The remembered failure for this key, if it has not aged out. */
+function liveFailure(key: string): string | undefined {
+  const hit = failed.get(key)
+  if (!hit) return undefined
+  if (Date.now() - hit.at > FAILURE_TTL_MS) {
+    failed.delete(key)
+    return undefined
+  }
+  return hit.why
+}
+
+/**
+ * Which build of the drawing code the cached images came from.
+ *
+ * Empty until the first render of the session answers it. Every render
+ * response carries the engine's own epoch, derived from the template files
+ * themselves, so this cannot be forgotten the way a hand-bumped constant is.
+ */
+let epoch = ""
+
+/**
+ * Note the epoch a render came back with, dropping everything drawn by older
+ * code.
+ *
+ * Called on every render response rather than once at startup, because the
+ * case this exists for is the templates changing WHILE a tab is open — a dev
+ * server reloading, or a deploy under a PM who never refreshed. Twice during
+ * this feature's development that showed up as the designs themselves looking
+ * broken, which is a much more expensive thing to debug than a cleared cache.
+ */
+export function noteEpoch(next: string | undefined | null): void {
+  if (!next || next === epoch) return
+  const first = epoch === ""
+  epoch = next
+  // Nothing to drop on the first render of a session: the cache is empty, or
+  // holds entries this same epoch just drew.
+  if (!first) {
+    cache.clear()
+    failed.clear()
+  }
+}
 
 export function cacheKey(
   cycleId: string,
@@ -62,9 +116,9 @@ function put(key: string, pages: string[]): string[] {
   return pages
 }
 
-/** Why this key last failed, if it did. */
+/** Why this key last failed, if it did and the failure is still current. */
 export function lastFailure(key: string): string | undefined {
-  return failed.get(key)
+  return liveFailure(key)
 }
 
 /** Forget a key so the next request really re-renders it. */
@@ -86,7 +140,7 @@ export async function getOrRender(
   const hit = peek(key)
   if (hit) return hit
 
-  const why = failed.get(key)
+  const why = liveFailure(key)
   if (why) throw new Error(why)
 
   const pending = inflight.get(key)
@@ -95,7 +149,10 @@ export async function getOrRender(
   const promise = render()
     .then((pages) => put(key, pages))
     .catch((e) => {
-      failed.set(key, (e as Error)?.message || "The page could not be rendered.")
+      failed.set(key, {
+        why: (e as Error)?.message || "The page could not be rendered.",
+        at: Date.now(),
+      })
       throw e
     })
     .finally(() => inflight.delete(key))
