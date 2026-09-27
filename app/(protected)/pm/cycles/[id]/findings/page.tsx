@@ -277,12 +277,6 @@ function OpenBuilderButton({
             <DialogDescription className="space-y-3 pt-2 text-left">
               <span className="block">{handled}</span>
               <span className="block">
-                The builder writes each section from the departments&apos; text
-                as it stands right now. After this, changing a sentence here
-                would no longer reach the report — so the findings page becomes
-                a read-only record of what you changed.
-              </span>
-              <span className="block">
                 You won&apos;t be able to edit or remove sentences, undo a
                 decision, or run the analysis again for this cycle.
               </span>
