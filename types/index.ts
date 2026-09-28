@@ -25,7 +25,11 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
-export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
+export type SectionMode = "generate" | "attach" | "auto" | "manual" | "extract" | "analyze"
+// The subset a PM actually picks on the plan screen. "attach" is embed-a-file-as-filed
+// (no catalogue row uses it) and "auto" is drawn by the renderer, so neither is offered.
+export const PICKABLE_SECTION_MODES = ["generate", "extract", "manual"] as const
+export type PickableSectionMode = (typeof PICKABLE_SECTION_MODES)[number]
 // "custom" is not a catalogue layer — the backend reports it for a
 // PM-authored section, which has no catalogue row to take a layer from.
 export type SectionLayer = "common" | "cma" | "sector" | "optional" | "custom"
@@ -132,6 +136,11 @@ export interface CycleReportSection {
   // "" for a PM-authored section: no catalogue row, so no content_source.
   content_source: "narrative" | "structured" | "financials" | "composite" | ""
   mode: SectionMode
+  // false = nobody has chosen this section's mode yet, so `mode` is only a
+  // placeholder. The plan screen renders the picker EMPTY and blocks Continue
+  // until the PM decides. Sections the extraction-time classifier was at least
+  // 95% sure about arrive true and preselected.
+  mode_confirmed: boolean
   status: SectionStatus
   display_order: number
   ai_allowed: boolean
@@ -220,7 +229,15 @@ export interface AvailableOptionalSection {
   section_code: string
   title: string
   layer: SectionLayer
+  // "optional" = always optional; "required" = a required section that was removed
+  // from this cycle and can be re-added.
+  tag: "optional" | "required"
+  // True for the company's OWN sections (read from their report, or typed by a PM).
+  // Only these can be permanently deleted — a shared catalogue section belongs to
+  // every company on the platform.
+  is_company_section: boolean
 }
+
 
 // ──────────────────────────────────────────────────────────────────────
 // Stage 8 — Assemble & Final Report

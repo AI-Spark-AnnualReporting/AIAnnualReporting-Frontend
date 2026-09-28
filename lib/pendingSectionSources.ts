@@ -76,7 +76,15 @@ export function mergePending(
 
   const feedersChanged =
     merged.feeders !== undefined && !sameCodes(merged.feeders, savedDepartments)
-  const modeChanged = merged.mode !== undefined && merged.mode !== savedMode
+  // Picking the mode a section already holds IS a change when nobody had chosen it.
+  // An undecided section carries 'generate' as a PLACEHOLDER, not as a decision, so
+  // comparing values alone made "AI-written" the one choice that could never be
+  // made: it matched the placeholder, dropped out of pending, and left the card on
+  // "Choose a mode" with the plan unable to advance. Confirming is the change here,
+  // even when the value is identical.
+  const modeChanged =
+    merged.mode !== undefined &&
+    (merged.mode !== savedMode || !section.mode_confirmed)
 
   if (!feedersChanged && !modeChanged) {
     delete next[section.section_code]
@@ -98,7 +106,13 @@ function sameCodes(a: string[], b: string[]): boolean {
 }
 
 export function demo() {
-  const section = { section_code: "s1", mode: "generate" } as CycleReportSection
+  // mode_confirmed matters to mergePending: on a section nobody has decided, the
+  // stored mode is a placeholder and re-picking it still counts as a change.
+  const section = {
+    section_code: "s1",
+    mode: "generate",
+    mode_confirmed: true,
+  } as CycleReportSection
   const entry = {
     section_code: "s1",
     title: "S1",
@@ -124,6 +138,20 @@ export function demo() {
   console.assert(
     Object.keys(backAgain).length === 0,
     "switching back to the saved mode should clear the pending entry",
+  )
+
+  // ...but on a section nobody has decided, picking the placeholder mode IS the
+  // decision. Comparing values alone made 'AI-written' unpickable: it matched the
+  // placeholder, so the click staged nothing and the card stayed on "Choose a mode".
+  const undecided = {
+    section_code: "s2",
+    mode: "generate",
+    mode_confirmed: false,
+  } as CycleReportSection
+  const confirmed = mergePending({}, undecided, undefined, { mode: "generate" })
+  console.assert(
+    confirmed.s2?.mode === "generate",
+    "choosing the placeholder mode on an undecided section is a real change",
   )
 
   // Unsaved edits win over saved values when rendering.

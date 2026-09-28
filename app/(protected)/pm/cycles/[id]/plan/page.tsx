@@ -185,7 +185,15 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   // coverage strip alike, so an unsaved tick shows everywhere at once.
   const feeders = applyPending(plan.feeders ?? [], sections, pending)
   const needsSource = countSectionsNeedingFeeders(feeders, sections)
-  const canLockSections = needsSource === 0 && sections.length > 0
+  // A different question from needsSource. That one asks which departments feed a
+  // section; this asks how it is produced at all. A section the extraction-time
+  // classifier was not confident about arrives with nothing chosen, and the PM has to
+  // decide before the plan can advance. Counted against the MERGED view for the same
+  // reason the sources are: a mode picked a moment ago but not yet written is chosen.
+  const needsMode = sections.filter(
+    (s) => !s.mode_confirmed && !pending[s.section_code]?.mode,
+  ).length
+  const canLockSections = needsSource === 0 && needsMode === 0 && sections.length > 0
   const hasUnsaved = Object.keys(pending).length > 0
 
   const onPendingChange = (
@@ -227,12 +235,19 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         if (change.mode) {
           await setSourceMode.mutateAsync({ sectionCode, mode: change.mode })
         }
-        // Extract reads its document and nothing else; the mode switch above
-        // already cleared its feeders, so writing them would be refused.
+        // Only narrative and analyze sections take feeders — set_section_feeders
+        // refuses every other mode outright. Testing for "not extract" let a
+        // manual/attach/auto section through, that write 409'd, and the whole Start
+        // Building run stopped on it: the PM could neither save nor proceed, with
+        // nothing on screen saying which section was at fault. Allow-list the two
+        // modes the backend accepts, so a mode that cannot hold feeders is skipped
+        // rather than fatal.
         const finalMode =
           change.mode ??
-          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode
-        if (change.feeders && finalMode !== "extract") {
+          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode ??
+          sections.find((s) => s.section_code === sectionCode)?.mode
+        const takesFeeders = finalMode === "generate" || finalMode === "analyze"
+        if (change.feeders && takesFeeders) {
           await setFeeders.mutateAsync({
             sectionCode,
             departmentCodes: change.feeders,
@@ -282,11 +297,13 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           feeders={feeders}
           departments={departments}
           needsSource={needsSource}
+          needsMode={needsMode}
           locked={sectionsLocked}
           lockedAt={plan.sections_locked_at}
           isRtl={isRtl}
           onPendingChange={onPendingChange}
           onContinue={() => setStep(2)}
+          pending={pending}
         />
       ) : (
         <ThemesStep
@@ -301,6 +318,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           locked={sectionsLocked}
           isRtl={isRtl}
           onBack={() => setStep(1)}
+          pending={pending}
         />
       )}
     </div>
@@ -491,10 +509,12 @@ function SectionsStep({
   feeders,
   departments,
   needsSource,
+  needsMode,
   locked,
   lockedAt,
   isRtl,
   onPendingChange,
+  pending,
   onContinue,
 }: {
   cycleId: string
@@ -502,13 +522,15 @@ function SectionsStep({
   feeders: FeederMapEntry[]
   departments: Array<{ department_code: string; department_name: string }>
   needsSource: number
+  needsMode: number
   locked: boolean
   lockedAt: string | null
   isRtl: boolean
   onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  pending: PendingSources
   onContinue: () => void
 }) {
-  const canLock = needsSource === 0 && sections.length > 0
+  const canLock = needsSource === 0 && needsMode === 0 && sections.length > 0
 
   return (
     <section className="space-y-5">
@@ -518,11 +540,16 @@ function SectionsStep({
           <p className="mt-0.5 text-sm text-slate-500">
             {locked
               ? "Sections are locked — reordering, sources, and removal are disabled."
-              : "Drag to reorder, assign a department source to each generated section, and add optional sections."}
+              : "Choose how each section is produced, assign a department source to the AI-written ones, drag to reorder, and add optional sections."}
           </p>
         </div>
         <div className="shrink-0 text-sm tabular-nums text-slate-400">
           {sections.length} total
+          {!locked && needsMode > 0 && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+              {needsMode} need a mode
+            </span>
+          )}
           {!locked && needsSource > 0 && (
             <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
               {needsSource} need a source
@@ -543,6 +570,7 @@ function SectionsStep({
         feeders={feeders}
         departments={departments}
         onPendingChange={onPendingChange}
+        pending={pending}
         readOnly={locked}
         isRtl={isRtl}
       />
@@ -569,9 +597,11 @@ function SectionsStep({
             </Button>
           ) : (
             <>
-              {!canLock && needsSource > 0 && (
+              {!canLock && (needsSource > 0 || needsMode > 0) && (
                 <span className="hidden text-xs text-amber-700 sm:block">
-                  Assign a source to every flagged section to continue.
+                  {needsMode > 0
+                    ? "Choose how every flagged section is produced to continue."
+                    : "Assign a source to every flagged section to continue."}
                 </span>
               )}
               {/* Advancing no longer locks — the plan is locked at "Start Building". */}
@@ -600,6 +630,7 @@ function ThemesStep({
   saveSources,
   hasUnsaved,
   sections,
+  pending,
   areasOfFocus,
   suggestedThemes,
   locked,
@@ -613,6 +644,7 @@ function ThemesStep({
   saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
   hasUnsaved: boolean
   sections: CycleReportSection[]
+  pending: PendingSources
   areasOfFocus: AreaOfFocus[]
   suggestedThemes: SuggestedTheme[]
   locked: boolean
@@ -663,6 +695,7 @@ function ThemesStep({
           saveSources={saveSources}
           hasUnsaved={hasUnsaved}
           sections={sections}
+          pending={pending}
         />
       </div>
     </section>
@@ -678,6 +711,7 @@ function StartBuildingAction({
   saveSources,
   hasUnsaved,
   sections,
+  pending,
 }: {
   cycleId: string
   plan: PlanResponse
@@ -685,6 +719,7 @@ function StartBuildingAction({
   saveSources: (onProgress?: (done: number, total: number) => void) => Promise<boolean>
   hasUnsaved: boolean
   sections: CycleReportSection[]
+  pending: PendingSources
 }) {
   const router = useRouter()
   const qc = useQueryClient()
@@ -693,7 +728,8 @@ function StartBuildingAction({
   // Reads the merged sources, not the saved ones: a section whose department was
   // picked a moment ago but not yet written is still sourced.
   const needsSource = countSectionsNeedingFeeders(feeders, sections)
-  const disabled = needsSource > 0
+  const disabled =
+    needsSource > 0 || sections.some((s) => !s.mode_confirmed && !pending[s.section_code]?.mode)
 
   // One wait, three phases. Saving runs first because locking freezes the
   // blueprint — set_section_feeders asserts the plan is unlocked, so a source
