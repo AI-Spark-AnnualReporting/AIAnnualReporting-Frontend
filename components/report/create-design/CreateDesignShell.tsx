@@ -12,7 +12,7 @@
  */
 
 import {
-  ArrowLeft, Code2, Layers, PanelLeftClose, PanelLeftOpen, RefreshCw,
+  ArrowLeft, Code2, Layers, Palette, PanelLeftClose, PanelLeftOpen, RefreshCw,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
@@ -28,7 +28,9 @@ import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
-import { revokeSection } from "@/lib/createDesignCache"
+import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
+import { DesignDialog } from "@/components/report/design/DesignDialog"
+import type { DesignSelection } from "@/types/report-design"
 
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
 import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
@@ -70,6 +72,10 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // The cover is a report-level choice too, and it also settles how every
   // section's opening page looks — so it sits above Contents in the rail.
   const [coverOpen, setCoverOpen] = useState(false)
+  // The colours modal. Report-level like the cover and the contents page, but a
+  // dialog rather than a rail entry: it restyles pages that are already laid
+  // out instead of being one of the things laid out.
+  const [colorsOpen, setColorsOpen] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
@@ -104,6 +110,24 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     mutationFn: (key: string) =>
       annualDesignApi.save(cycleId, { toc_template_key: key }),
     onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
+  })
+  const saveBrand = useMutation({
+    // The modal sends `{ brand }` alone. Omitted fields are left alone
+    // server-side, so this cannot clobber the cover or contents keys picked in
+    // the rail.
+    mutationFn: (selection: DesignSelection) => annualDesignApi.save(cycleId, selection),
+    onSuccess: (fresh) => {
+      qc.setQueryData(designKey, fresh)
+      // The colours are not part of any render cache key — a key names the
+      // section, the page and the template, and none of those moved — so every
+      // drawn page in the map is now the wrong colour and would be served from
+      // memory until the tab was reloaded.
+      revokeCycle(cycleId)
+      // Both preview queries are staleTime: Infinity, so an invalidate would
+      // not refetch them; they have to go.
+      qc.removeQueries({ queryKey: ["pm", "cycle", cycleId, "cover-preview"] })
+      qc.removeQueries({ queryKey: ["pm", "cycle", cycleId, "toc-preview"] })
+    },
   })
 
   const { data: pmData } = usePMCycleDashboard(cycleId)
@@ -266,6 +290,15 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
               : `${data.units_chosen} of ${data.units_total} sections have a design`}
           </p>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8"
+          onClick={() => setColorsOpen(true)}
+        >
+          <Palette className="mr-1.5 h-3.5 w-3.5" />
+          Colors
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -519,6 +552,20 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
       </div>
 
       <UnitJsonPanel unit={unit} open={jsonOpen} onOpenChange={setJsonOpen} />
+      {/* The colours modal — the same one the other report kinds use, narrowed
+          to its palette half. It seeds itself from the design record (own
+          colours, else the company default), so nothing is passed in here but
+          the save. */}
+      <DesignDialog
+        cycleId={cycleId}
+        open={colorsOpen}
+        onOpenChange={setColorsOpen}
+        colorsOnly
+        cover={{ title: cycleName }}
+        onApply={async (selection) => {
+          await saveBrand.mutateAsync(selection)
+        }}
+      />
       <ConfirmDialog
         open={confirmAll}
         onOpenChange={setConfirmAll}

@@ -57,18 +57,40 @@ export interface Typography {
   body: TypographyRole
 }
 
+/**
+ * A brand as five inks, every one optional.
+ *
+ * Optional is load-bearing, not laziness. Cycles saved before the palette grew
+ * past two colours carry only `primary`/`secondary`, and the API still returns
+ * those two-key objects verbatim — so anything reading `accent`, `text` or
+ * `light` has to cope with the key being absent rather than assume a string.
+ */
 export interface BrandColors {
   primary?: string
   secondary?: string
+  /** The third colour, for highlights and callouts. */
+  accent?: string
+  /** The dark readable ink body copy is set in. */
+  text?: string
+  /** The pale tint for rules, dividers and table banding. */
+  light?: string
   /** A preset's key, or "custom" when someone typed their own hex. */
   palette_key?: string
 }
 
+/**
+ * One preset in the picker. `accent`/`text`/`light` are optional here for the
+ * same reason as above: a cached or older catalogue response carries only the
+ * two colours the presets used to have.
+ */
 export interface ColorPalette {
   key: string
   name: string
   primary: string
   secondary: string
+  accent?: string
+  text?: string
+  light?: string
 }
 
 export interface CoverTemplate {

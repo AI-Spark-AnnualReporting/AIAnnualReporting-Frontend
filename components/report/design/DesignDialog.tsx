@@ -8,7 +8,7 @@ import { annualDesignApi } from "@/lib/api/annual-design"
 import {
   DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY,
   type AnnualDesign, type BrandColors, type ColorPalette,
-  type CoverTemplate, type Typography,
+  type CoverTemplate, type DesignSelection, type Typography,
 } from "@/types/report-design"
 import { CoverPreview } from "./CoverPreview"
 import { MiniCover } from "./MiniCover"
@@ -71,13 +71,15 @@ function normalizeHex(v: string): string | null {
 }
 
 /**
- * Relative luminance, transcribed from Centrion's types/brand.ts:166-172 —
- * including its blue coefficient of 0.4152, where WCAG says 0.0722.
+ * Relative luminance per WCAG.
  *
- * Copied rather than corrected on purpose: this only decides whether the "may
- * be hard to read" warning appears, and the point of this file is that the two
- * modals warn on exactly the same colours. Fixing it here alone would make them
- * disagree. #FFD700 is the visible case — it warns today and will not now.
+ * This used to carry the reference modal's blue coefficient of 0.4152, kept on
+ * purpose so the two pickers warned on the same colours. It is corrected here
+ * because five roles now go through these numbers rather than one warning: the
+ * three weights have to sum to 1 to be a luminance at all, and at 1.343 every
+ * blue-ish ink read far lighter than it is. Centrion's types/brand.ts:218-231
+ * is the corrected copy this follows; the two quarterly files still carrying
+ * the wrong number are another team's screens and are left alone.
  */
 function luminance(hex: string): number {
   const h = normalizeHex(hex) ?? "#000000"
@@ -85,10 +87,67 @@ function luminance(hex: string): number {
     const c = parseInt(h.slice(i, i + 2), 16) / 255
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
   })
-  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.4152 * ch[2]
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
 }
 
 const isLight = (hex?: string) => (hex ? luminance(hex) > 0.7 : false)
+
+/** WCAG contrast ratio, 1 (identical) to 21 (black on white). */
+function contrastRatio(a: string, b: string): number {
+  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (l1 + 0.05) / (l2 + 0.05)
+}
+
+/**
+ * Ink to put ON a filled swatch — whichever of white / near-black actually
+ * reads, measured both ways rather than decided by a lightness threshold. A
+ * mid gold sits under `isLight`, so a threshold hands it white at about 2.4:1
+ * where measuring picks the dark ink at about 6.9:1.
+ */
+function onColor(hex: string): string {
+  const dark = "#1A1D2E"
+  return contrastRatio(hex, dark) >= contrastRatio(hex, "#FFFFFF") ? dark : "#FFFFFF"
+}
+
+/**
+ * The five inks, in the order they are shown — fields and legend both walk
+ * this, so a role cannot appear in one and not the other, or in a different
+ * order in each. The notes are the same sentences the other app shows for the
+ * same roles.
+ *
+ * Only `primary` and `secondary` have ever been stored for an older cycle, so
+ * every one of these is optional on BrandColors and an absent key stays absent:
+ * nothing here invents a colour for a role the report has not set.
+ */
+type BrandRole = "primary" | "secondary" | "accent" | "text" | "light"
+
+const BRAND_ROLES: readonly { key: BrandRole; label: string; note: string }[] = [
+  {
+    key: "primary",
+    label: "Primary",
+    note: "Used for main headings, section titles, cover page, and table headers.",
+  },
+  {
+    key: "secondary",
+    label: "Secondary",
+    note: "Used for highlights, KPI numbers, dividers, and accent borders.",
+  },
+  {
+    key: "accent",
+    label: "Accent",
+    note: "A third colour for emphasis marks and small display details.",
+  },
+  {
+    key: "text",
+    label: "Text",
+    note: "Body ink — a dark, readable colour for running text.",
+  },
+  {
+    key: "light",
+    label: "Light",
+    note: "A pale tone for rules, dividers and tinted panels.",
+  },
+]
 
 function templateName(templates: CoverTemplate[], key: string): string {
   return templates.find((t) => t.key === key)?.name || key || "Classic"
@@ -110,11 +169,25 @@ export interface DesignDialogProps {
     coverImage?: string | null
     isArabic?: boolean
   }
+  /**
+   * Colours only: the Layout tiles and the type controls are hidden, and Apply
+   * sends `brand` alone. The same modal, narrowed — the Create Design screen
+   * already owns the cover and the page templates in its own rail, so showing
+   * them here as well would give one report two places to choose each.
+   */
+  colorsOnly?: boolean
+  /**
+   * Who performs the save. Given, it replaces the internal call — so a screen
+   * holding this record in a query cache can write through its own mutation and
+   * invalidate what the change touched, rather than having the modal write
+   * behind its back. Must reject on failure; the error strip reads its message.
+   */
+  onApply?: (selection: DesignSelection) => Promise<void>
   onSaved?: () => void
 }
 
 export function DesignDialog({
-  cycleId, open, onOpenChange, cover, onSaved,
+  cycleId, open, onOpenChange, cover, colorsOnly, onApply, onSaved,
 }: DesignDialogProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -198,11 +271,26 @@ export function DesignDialog({
 
   const applyPalette = (p: ColorPalette) => {
     setCustomOpen(false)
-    setBrand({ primary: p.primary, secondary: p.secondary, palette_key: p.key })
+    // Built role by role from the shared table, and a role the preset does not
+    // carry is LEFT OUT rather than written as undefined — an older catalogue
+    // response has only the two colours, and a preset must not plant an empty
+    // `accent` key that then looks like a deliberate choice.
+    const next: BrandColors = { palette_key: p.key }
+    for (const role of BRAND_ROLES) {
+      const hex = p[role.key]
+      if (hex) next[role.key] = hex
+    }
+    setBrand(next)
   }
 
-  const setCustom = (patch: Partial<Pick<BrandColors, "primary" | "secondary">>) =>
-    setBrand((b) => ({ ...b, ...patch, palette_key: "custom" }))
+  /** Sets one role, or clears it when the field is emptied. */
+  const setRole = (role: BrandRole, hex?: string) =>
+    setBrand((b) => {
+      const next: BrandColors = { ...b, palette_key: "custom" }
+      if (hex) next[role] = hex
+      else delete next[role]
+      return next
+    })
 
   const pickLayout = (nextKey: string) => {
     if (nextKey === layoutKey) return
@@ -223,13 +311,17 @@ export function DesignDialog({
     setSaving(true)
     setError(null)
     try {
-      await annualDesignApi.save(cycleId, {
-        cover_template_key: layoutKey,
-        brand,
-        typography,
-      })
-      toast.success("Design saved", {
-        description: "Your next export will use it.",
+      // Omitted keys are left alone server-side, so the colours-only save
+      // cannot clobber the cover or contents choices this report already has.
+      const selection: DesignSelection = colorsOnly
+        ? { brand }
+        : { cover_template_key: layoutKey, brand, typography }
+      if (onApply) await onApply(selection)
+      else await annualDesignApi.save(cycleId, selection)
+      toast.success(colorsOnly ? "Colours saved" : "Design saved", {
+        description: colorsOnly
+          ? "The pages will redraw in them."
+          : "Your next export will use it.",
       })
       onSaved?.()
       onOpenChange(false)
@@ -241,8 +333,14 @@ export function DesignDialog({
   }
 
   const locked = design?.locked
-  const applyDisabled = saving || loading || !!locked || visible.length === 0
-  const accent = brand.primary || "#3C0866"
+  // No layout to choose in colours-only mode, so an empty template catalogue is
+  // no longer a reason to refuse the save.
+  const applyDisabled =
+    saving || loading || !!locked || (!colorsOnly && visible.length === 0)
+  // The ink the layout thumbnails are drawn in. Named for what it is used for,
+  // not for the `accent` role — they are different things and the role now
+  // exists, so sharing the word would read as a bug.
+  const thumbAccent = brand.primary || "#3C0866"
   const layoutName = templateName(visible, layoutKey)
 
   const coverNode = (
@@ -296,10 +394,12 @@ export function DesignDialog({
           <div className="flex items-center justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
             <div>
               <DialogPrimitive.Title className="text-[15px] font-extrabold text-[#0F172A]">
-                Report design
+                {colorsOnly ? "Colours" : "Report design"}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-0.5 text-[12px] text-[#64748B]">
-                Layout, colours and type. Changes preview live.
+                {colorsOnly
+                  ? "Five brand inks, or a preset. Changes preview live."
+                  : "Layout, colours and type. Changes preview live."}
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close
@@ -318,8 +418,8 @@ export function DesignDialog({
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,40%)]">
             {/* Left pane */}
             <div className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
-              {/* Layout */}
-              <section aria-label="Layout">
+              {/* Layout — hidden when this modal is opened just for colours. */}
+              <section aria-label="Layout" hidden={colorsOnly}>
                 <SectionHeader>Layout</SectionHeader>
                 {loading ? (
                   <div className="py-2 text-[12px] text-[#94A3B8]">Loading…</div>
@@ -348,7 +448,7 @@ export function DesignDialog({
                               <img src={t.preview_image_url} alt={t.name}
                                    className="block aspect-[1/1.3] w-full object-cover" />
                             ) : (
-                              <MiniCover templateKey={t.key} accent={accent} />
+                              <MiniCover templateKey={t.key} accent={thumbAccent} />
                             )}
                             {active && (
                               <span
@@ -418,12 +518,59 @@ export function DesignDialog({
                     Custom
                   </button>
                 </div>
+                {/* The legend. Same table as the fields below, so the two can
+                    never fall out of step. A role this report has not set shows
+                    a dashed empty tile and an em dash — never a plausible hex
+                    that would read as a choice someone made. */}
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {BRAND_ROLES.map((role) => {
+                    const hex = normalizeHex(brand[role.key] ?? "")
+                    return (
+                      <div
+                        key={role.key}
+                        className={`flex items-center gap-2 ${FIELD} border px-2 py-1.5 `
+                          + (hex ? "border-[#E2E8F0] bg-white" : "border-dashed border-[#CBD5E1] bg-[#F8FAFC]")}
+                      >
+                        <span
+                          aria-hidden
+                          className={`flex h-6 w-6 items-center justify-center ${THUMB} `
+                            + (hex ? "border border-[#E2E8F0]" : "border border-dashed border-[#CBD5E1]")}
+                          style={{
+                            background: hex ?? "transparent",
+                            // Measured both ways rather than thresholded, so the
+                            // initial sits legibly on a mid gold as well as on a
+                            // navy.
+                            color: hex ? onColor(hex) : "#94A3B8",
+                          }}
+                        >
+                          <span className="text-[9px] font-extrabold">{role.label[0]}</span>
+                        </span>
+                        <span>
+                          <span className="block text-[10.5px] font-bold text-[#334155]">
+                            {role.label}
+                          </span>
+                          <span
+                            className="block text-[10px] text-[#64748B]"
+                            style={{ fontFamily: "var(--font-dm-mono), monospace" }}
+                          >
+                            {hex ?? "—"}
+                          </span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
                 {customOpen && (
                   <div className={`flex flex-wrap gap-4 ${TILE} border border-[#E2E8F0] bg-[#F8FAFC] p-3`}>
-                    <HexField label="Primary" value={brand.primary}
-                              onChange={(v) => setCustom({ primary: v })} />
-                    <HexField label="Secondary" value={brand.secondary}
-                              onChange={(v) => setCustom({ secondary: v })} />
+                    {BRAND_ROLES.map((role) => (
+                      <HexField
+                        key={role.key}
+                        label={role.label}
+                        note={role.note}
+                        value={brand[role.key]}
+                        onChange={(v) => setRole(role.key, v)}
+                      />
+                    ))}
                   </div>
                 )}
                 {isLight(brand.primary) && (
@@ -432,10 +579,21 @@ export function DesignDialog({
                     This colour may be hard to read as an accent — it&apos;ll be darkened for text on white.
                   </div>
                 )}
+                {/* Body ink is the one role that is read rather than looked at,
+                    so it is measured against the page it is printed on instead
+                    of being judged on lightness. 4.5:1 is WCAG AA for text. */}
+                {brand.text && contrastRatio(brand.text, "#FFFFFF") < 4.5 && (
+                  <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[#B45309]">
+                    <span aria-hidden>⚠</span>
+                    Body text in this colour is only{" "}
+                    {contrastRatio(brand.text, "#FFFFFF").toFixed(1)}:1 against the
+                    page — under 4.5:1, so it will be hard to read at body size.
+                  </div>
+                )}
               </section>
 
               {/* Typography */}
-              {swapPrompt && (
+              {!colorsOnly && swapPrompt && (
                 <div
                   role="alert"
                   className={`flex flex-wrap items-center justify-between gap-2 ${TILE} border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#78350F]`}
@@ -459,12 +617,14 @@ export function DesignDialog({
                   </div>
                 </div>
               )}
-              <TypographyControls
-                value={typography}
-                onChange={setTypography}
-                recommended={recommended}
-                layoutName={layoutName}
-              />
+              {!colorsOnly && (
+                <TypographyControls
+                  value={typography}
+                  onChange={setTypography}
+                  recommended={recommended}
+                  layoutName={layoutName}
+                />
+              )}
             </div>
 
             {/* Right pane — preview */}
@@ -535,10 +695,13 @@ function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.Re
   )
 }
 
-function HexField({ label, value, onChange }: {
+function HexField({ label, note, value, onChange }: {
   label: string
+  /** What this ink is used for, from BRAND_ROLES. */
+  note?: string
   value?: string
-  onChange: (v: string) => void
+  /** `undefined` when the field is emptied — the role goes back to unset. */
+  onChange: (v: string | undefined) => void
 }) {
   // The field keeps its own text so a half-typed hex is not rewritten under the
   // cursor, but it has to follow `value` when the colour changes from outside
@@ -551,32 +714,58 @@ function HexField({ label, value, onChange }: {
     setLastValue(value)
     setText(value ?? "")
   }
+  const hex = normalizeHex(value ?? "")
   return (
-    <div className="max-w-[220px]">
+    <div className="w-[210px] max-w-full">
       <div className="mb-1 text-[11px] font-bold text-[#475569]">{label}</div>
       <div className="flex items-center gap-2">
-        <input
-          type="color"
-          // The preview falls back to #3C0866 when no colour is set, so the
-          // swatch has to claim the colour that is actually being drawn.
-          value={normalizeHex(value ?? "") ?? "#3c0866"}
-          onChange={(e) => onChange(e.target.value)}
-          className={`h-9 w-10 cursor-pointer ${FIELD} border border-[#E2E8F0] bg-white p-0`}
-          aria-label={`${label} color`}
-        />
+        {/* The native colour input cannot represent "no colour" — it always
+            paints a swatch, and any hex put in it would look like a choice. So
+            it is laid transparently over a tile that draws the state itself: a
+            dashed outline with a + while the role is unset, the colour once it
+            is set. Clicking anywhere on the tile still opens the picker. */}
+        <span
+          className={`relative flex h-9 w-10 shrink-0 items-center justify-center ${FIELD} border `
+            + (hex ? "border-[#E2E8F0]" : "border-dashed border-[#CBD5E1] bg-white")}
+          style={hex ? { background: hex } : undefined}
+        >
+          {!hex && (
+            <span aria-hidden className="text-[13px] font-bold leading-none text-[#94A3B8]">
+              +
+            </span>
+          )}
+          <input
+            type="color"
+            // Only ever the seed the picker opens on while the role is unset;
+            // nothing is written until the user actually picks.
+            value={hex ?? "#3c0866"}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label={`${label} colour`}
+          />
+        </span>
         <input
           type="text"
           value={text}
           onChange={(e) => {
             setText(e.target.value)
-            const hex = normalizeHex(e.target.value)
-            if (hex) onChange(hex)
+            // Emptying the field unsets the role. Junk that is not yet a hex is
+            // simply not written anywhere, so a half-typed "#1a" neither clears
+            // the colour nor sets a wrong one.
+            if (e.target.value.trim() === "") onChange(undefined)
+            else {
+              const next = normalizeHex(e.target.value)
+              if (next) onChange(next)
+            }
           }}
-          placeholder="#4040C8"
+          placeholder="Not set"
           className={`w-[110px] ${FIELD} border border-[#E2E8F0] bg-white px-2 py-2 text-[13px] text-[#1E293B] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#A5B4FC]`}
           style={{ fontFamily: "var(--font-dm-mono), monospace" }}
         />
       </div>
+      {note && (
+        <div className="mt-1 text-[10.5px] leading-snug text-[#64748B]">{note}</div>
+      )}
     </div>
   )
 }
