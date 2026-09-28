@@ -5,6 +5,8 @@ import type { CSSProperties } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { toast } from "sonner"
 
+import { useQueryClient } from "@tanstack/react-query"
+
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
   DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY,
@@ -49,6 +51,13 @@ const HIDDEN_TEMPLATES = new Set(["branded"])
 // slate-700 #334155 -> #314158. Close enough to miss by eye, far enough that a
 // pixel diff of the two modals lit up every label. Written as hex so they
 // cannot drift again.
+/** The shell holds this exact query; reading it back is what makes the modal
+ *  open instantly instead of refetching what is already on screen. */
+export const reportDesignKey = (cycleId: string) => ["pm", "cycle", cycleId, "report-design"]
+/** Cover templates and colour palettes: reference data, identical for every
+ *  cycle and every user, so it is fetched once per session and never again. */
+export const DESIGN_CATALOGUE_KEY = ["pm", "report-design", "catalogue"]
+
 const PANEL = "rounded-[16px]"
 const TILE = "rounded-[10px]"
 const FIELD = "rounded-[8px]"
@@ -227,19 +236,28 @@ export function DesignDialog({
        ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY],
     [design, layoutKey])
 
+  const qc = useQueryClient()
+
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setLoading(true)
     setError(null)
     setSwapPrompt(null)
 
-    Promise.all([
-      annualDesignApi.get(cycleId),
-      annualDesignApi.catalogue(),
-    ])
-      .then(([current, { cover_templates: tpls, color_palettes: pals }]) => {
-        if (cancelled) return
+    // Everything this modal needs is usually already in the cache: the design
+    // record is the same query the Create Design shell holds open, and the
+    // catalogue is reference data that never changes. Reading both back
+    // synchronously means the controls come up populated instead of showing
+    // five dashes and an empty pill row for as long as the round trip takes.
+    //
+    // Seeded ONCE per open, and only when it has not already been seeded from
+    // the cache. A later background refetch must not reach back in and
+    // overwrite colours the user is part-way through picking.
+    const seed = (
+      current: AnnualDesign,
+      tpls: CoverTemplate[],
+      pals: ColorPalette[],
+    ) => {
         setDesign(current)
         setTemplates(tpls)
         setPalettes(pals)
@@ -265,14 +283,46 @@ export function DesignDialog({
           ?? current.company_default?.typography
           ?? LAYOUT_TYPOGRAPHY[key]
           ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY])
+    }
+
+    const cachedDesign = qc.getQueryData<AnnualDesign>(reportDesignKey(cycleId))
+    const cachedCat = qc.getQueryData<{
+      cover_templates: CoverTemplate[]
+      color_palettes: ColorPalette[]
+    }>(DESIGN_CATALOGUE_KEY)
+
+    const warm = Boolean(cachedDesign && cachedCat)
+    if (warm) {
+      seed(cachedDesign!, cachedCat!.cover_templates, cachedCat!.color_palettes)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+
+    // ensureQueryData resolves from the cache when it is warm, so this is a
+    // no-op refresh in the common case and the only fetch in the cold one.
+    Promise.all([
+      qc.ensureQueryData({
+        queryKey: reportDesignKey(cycleId),
+        queryFn: () => annualDesignApi.get(cycleId),
+      }),
+      qc.ensureQueryData({
+        queryKey: DESIGN_CATALOGUE_KEY,
+        queryFn: () => annualDesignApi.catalogue(),
+        staleTime: Infinity,
+      }),
+    ])
+      .then(([current, cat]) => {
+        if (cancelled || warm) return
+        seed(current, cat.cover_templates, cat.color_palettes)
       })
       .catch((e: { message?: string }) => {
-        if (!cancelled) setError(e?.message || "Couldn't load the design options.")
+        if (!cancelled && !warm) setError(e?.message || "Couldn't load the design options.")
       })
       .finally(() => !cancelled && setLoading(false))
 
     return () => { cancelled = true }
-  }, [open, cycleId])
+  }, [open, cycleId, qc])
 
   const applyPalette = (p: ColorPalette) => {
     setCustomOpen(false)

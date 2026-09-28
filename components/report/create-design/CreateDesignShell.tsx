@@ -29,7 +29,9 @@ import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
 import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
-import { DesignDialog } from "@/components/report/design/DesignDialog"
+import {
+  DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey,
+} from "@/components/report/design/DesignDialog"
 import type { DesignSelection } from "@/types/report-design"
 
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
@@ -96,11 +98,26 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // records in different tables and conflating them is how the contents choice
   // would end up stored per page.
   const qc = useQueryClient()
-  const designKey = ["pm", "cycle", cycleId, "report-design"]
+  // The same helper the Colours modal reads back, so the two cannot drift
+  // apart into a cache miss that silently costs a round trip.
+  const designKey = reportDesignKey(cycleId)
   const reportDesign = useQuery({
     queryKey: designKey,
     queryFn: () => annualDesignApi.get(cycleId),
   })
+  // Cover templates and colour palettes are reference data — same for every
+  // cycle, never invalidated. Fetched once here, in the quiet after the screen
+  // has loaded, so opening Colours does not pay for it. Without this the modal
+  // came up with an empty pill row and five dashed swatches for as long as the
+  // round trip took, which read as broken rather than loading.
+  useEffect(() => {
+    void qc.prefetchQuery({
+      queryKey: DESIGN_CATALOGUE_KEY,
+      queryFn: () => annualDesignApi.catalogue(),
+      staleTime: Infinity,
+    })
+  }, [qc])
+
   const saveCover = useMutation({
     mutationFn: (key: string) =>
       annualDesignApi.save(cycleId, { cover2_template_key: key }),
@@ -294,6 +311,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
           variant="ghost"
           size="sm"
           className="h-8"
+          onMouseEnter={() => void qc.prefetchQuery({
+            queryKey: DESIGN_CATALOGUE_KEY,
+            queryFn: () => annualDesignApi.catalogue(),
+            staleTime: Infinity,
+          })}
           onClick={() => setColorsOpen(true)}
         >
           <Palette className="mr-1.5 h-3.5 w-3.5" />
