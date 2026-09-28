@@ -30,6 +30,18 @@ export interface PipelineStage {
 }
 
 const TIP_MS = 5000
+const FINALIZING_MS = 4500
+
+// Shown once the walkthrough reaches its last stage and the timer stops. The
+// stages are a guess at the pace; the request is the truth, and it routinely
+// outlasts them — 35 and 42 seconds against a 30-second walkthrough on real
+// reports. Without these the card simply goes quiet at the end, which reads as
+// frozen precisely when the PM has waited longest.
+const FINALIZING = [
+  "Almost there — putting the findings together.",
+  "This takes a little longer on a long report.",
+  "Still working — nearly done.",
+]
 
 export function PipelineLoader({
   title,
@@ -45,12 +57,24 @@ export function PipelineLoader({
 }) {
   const [stage, setStage] = useState(0)
   const [tip, setTip] = useState(0)
+  const [finalizing, setFinalizing] = useState(-1)
 
   useEffect(() => {
     if (stage >= stages.length - 1) return
     const t = setTimeout(() => setStage((s) => s + 1), stageMs)
     return () => clearTimeout(t)
   }, [stage, stages.length, stageMs])
+
+  // On the last stage the walkthrough has nothing left to say, so it starts
+  // reassuring instead of going silent.
+  useEffect(() => {
+    if (stage < stages.length - 1) return
+    const t = setInterval(
+      () => setFinalizing((i) => Math.min(i + 1, FINALIZING.length - 1)),
+      FINALIZING_MS,
+    )
+    return () => clearInterval(t)
+  }, [stage, stages.length])
 
   useEffect(() => {
     if (tips.length < 2) return
@@ -90,11 +114,11 @@ export function PipelineLoader({
 
         <h2 className="mt-4 text-xl font-bold text-[#1A1D2E]">{title}</h2>
         <p
-          key={`sub-${stage}`}
+          key={`sub-${stage}-${finalizing}`}
           className="mt-1 text-xs leading-relaxed text-slate-400"
           style={{ animation: "pl-fade 0.4s ease-out" }}
         >
-          {stages[stage].subtitle}
+          {finalizing >= 0 ? FINALIZING[finalizing] : stages[stage].subtitle}
         </p>
 
         <ul className="mt-6 space-y-3 rounded-xl bg-slate-50/80 px-4 py-4 text-left">
