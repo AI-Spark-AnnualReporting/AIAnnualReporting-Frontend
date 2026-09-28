@@ -169,10 +169,20 @@ export default function CycleFindingsPage({
           {neverChecked ? (
             // Nothing has run, so this is a genuine empty state and keeps the
             // tall centred treatment.
+            //
+            // Locked as well as never checked is a real combination, not a
+            // contradiction: cycles whose plan was already locked were
+            // backfilled when this feature shipped, so the check never ran and
+            // can no longer run. Inviting an Analyze the server will refuse is
+            // worse than saying so.
             <EmptyState
               icon={ScanSearch}
-              title="Not analyzed yet"
-              description="Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
+              title={locked ? "Never analyzed, and now locked" : "Not analyzed yet"}
+              description={
+                locked
+                  ? "The drafts were never checked before this report was built. They can no longer be analyzed, because the report has already been written from this text."
+                  : "Analyze the drafts to look for claims the answers don't support, and figures that disagree between departments."
+              }
             />
           ) : (
             <>

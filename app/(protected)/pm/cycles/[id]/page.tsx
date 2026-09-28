@@ -896,11 +896,17 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               // analysis found. Open Report Builder lives there, not here.
               const alreadyAnalyzed = !!draftFindings?.checked_at
               const stillOpen = draftFindings?.open_count ?? 0
+              // A locked cycle refuses analysis, so offering it here only
+              // produces a red error. Locked-but-never-analyzed is a real
+              // state: cycles whose plan was already locked were backfilled
+              // when this feature shipped, and they never ran the check.
+              const findingsLocked = !!draftFindings?.locked_at
+              const noAnalysisPossible = alreadyAnalyzed || findingsLocked
 
               // Everything handled: the findings are no longer in the way, so
               // go straight to the builder. The header keeps a link back to
               // them for the record of what was corrected.
-              if (alreadyAnalyzed && stillOpen === 0 && readiness?.can_build) {
+              if (noAnalysisPossible && stillOpen === 0 && readiness?.can_build) {
                 return (
                   <Link href={`/pm/cycles/${id}/plan`}>
                     <Button>
@@ -911,7 +917,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 )
               }
 
-              if (alreadyAnalyzed) {
+              if (noAnalysisPossible) {
                 return (
                   <Link href={`/pm/cycles/${id}/findings`}>
                     <Button>
