@@ -11,11 +11,14 @@ import {
   Loader2,
   Lock,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Palette,
 } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { RouteGuard } from "@/components/auth/RouteGuard"
+import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
+import { ValidationPanel } from "@/components/report/ValidationPanel"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
@@ -32,6 +35,7 @@ import { ReportStatusCard } from "@/components/communication/review/ReportStatus
 import {
   useApproveReport,
   useAssembleReport,
+  useValidateReport,
   useAssembledReport,
   useFinalReport,
   useRenderReport,
@@ -75,6 +79,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as DashboardData | undefined
   const assemble = useAssembleReport(cycleId)
+  const validate = useValidateReport(cycleId)
   const render = useRenderReport(cycleId)
 
   // Sign-off state. `refetch` is stable, so it's safe to hand to the hub panel
@@ -161,6 +166,20 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                   )}
                   Re-assemble
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => validate.mutate()}
+                  disabled={validate.isPending || assemble.isPending}
+                  className="h-8"
+                >
+                  {validate.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  Validate report
                 </Button>
                 <Button
                   variant="ghost"
@@ -252,14 +271,28 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         )}
       </div>
 
+      {validate.isPending && <ReportValidateLoader />}
+
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
           {reportMissing ? (
             <EmptyReport cycleId={cycleId} />
           ) : (
-            <FinalReportView report={report} cycle={pmData?.cycle}
-                             assembled={assembled}
-                             assembledPending={assembledQuery.isPending} />
+            <>
+              {/* Prefer the run just finished; fall back to what the server
+                  stored, so the findings survive a reload. The server has
+                  already dropped a validation that predates this assembly. */}
+              {(validate.data?.validation ?? report?.validation) && (
+                <div className="px-6 pt-5 print:hidden">
+                  <ValidationPanel
+                    validation={validate.data?.validation ?? report!.validation!}
+                  />
+                </div>
+              )}
+              <FinalReportView report={report} cycle={pmData?.cycle}
+                               assembled={assembled}
+                               assembledPending={assembledQuery.isPending} />
+            </>
           )}
         </div>
 

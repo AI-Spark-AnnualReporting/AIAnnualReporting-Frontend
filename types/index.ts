@@ -278,6 +278,9 @@ export interface FinalReport {
   // through the last sub-heading). Optional — absent on older backends, in
   // which case the preview falls back to the per-section `number` field.
   outline?: OutlineEntry[]
+  // The last Validate-report run, or null. The server drops it when it predates
+  // the current assembly, so what arrives here is always about this document.
+  validation?: import("@/lib/api/pm").ReportValidation | null
 }
 
 // Readiness of a cycle to enter the Report Builder.

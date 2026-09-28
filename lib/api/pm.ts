@@ -41,6 +41,32 @@ export interface FindingSide {
 
 // One fact a department stated, read out of its ANSWERS - never its draft,
 // which is model-written from those same answers.
+/** What a Validate-report run found. Only figures_traced/figures_total is ever
+ *  printed in the annual report; the rest are model judgements and stay on the
+ *  PM's screen. */
+export interface ReportValidation {
+  figures_total: number
+  figures_traced: number
+  untraced: { section_code: string; title: string; value: string }[]
+  instruction_text: { section_code: string; title: string; line: string; marker: string }[]
+  voice: { section_code: string; title: string; phrase: string }[]
+  preferred_words: Record<string, number>
+  conflicts: { measure: string; detail: string }[]
+  redundancy: { sections: string[]; detail: string }[]
+  brief_gaps: { ask: string; detail: string }[]
+  emphasis: { primary_leads?: boolean; detail?: string; missing?: string[] } | null
+  // Sections the model never returned a verdict for. NOT the same as clean —
+  // nobody looked at these.
+  sections_unchecked: string[]
+  sections: Record<string, {
+    title?: string
+    covers?: string
+    concept?: string
+    unsupported?: { label: string; detail: string }[]
+  }>
+  validated_at: string
+}
+
 export interface DepartmentClaim {
   id: string
   text: string
@@ -1127,6 +1153,19 @@ export const pmApi = {
   },
 
   // 120s — backend writes exec summary + assembles. refresh=true regenerates.
+  // Check the assembled report against what the departments submitted.
+  //
+  // ~16 model calls server-side, so the 30s client default would abort a run
+  // that was about to succeed — and the work is saved before the response is
+  // sent, so an aborted request loses the answer while the server carries on.
+  validateReport: async (cycleId: string): Promise<{ validation: ReportValidation }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/validate`,
+      undefined,
+      { timeout: 180_000 },
+    )
+    return data
+  },
   assembleReport: async (
     cycleId: string,
     refresh = false,

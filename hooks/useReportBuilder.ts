@@ -49,6 +49,37 @@ export function useDraftFindings(cycleId: string) {
 // The PM's consent, and the end of the findings stage. Not optimistic: the
 // caller navigates into the builder on success, so a failure must stay put
 // rather than land him on a page he never actually unlocked.
+/**
+ * Validate the assembled report.
+ *
+ * Not optimistic and deliberately slow: the run is ~16 model calls. The result
+ * is stored server-side before the response is sent, so a dropped connection
+ * costs the response and never the work — the panel reads the stored validation
+ * on the next load either way.
+ */
+export function useValidateReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.validateReport(cycleId),
+    onSuccess: (data) => {
+      const v = data.validation
+      const problems =
+        v.untraced.length + v.instruction_text.length + v.conflicts.length +
+        v.redundancy.length + v.brief_gaps.length + v.voice.length
+      toast.success(
+        problems === 0
+          ? "Report validated — nothing to fix"
+          : `Report validated — ${problems} thing${problems === 1 ? "" : "s"} to look at`,
+      )
+      // The assembled report now carries a validation, which changes what the
+      // document prints.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't validate the report")),
+  })
+}
+
 export function useLockDraftFindings(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
