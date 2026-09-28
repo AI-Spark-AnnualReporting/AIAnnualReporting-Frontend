@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import type { CSSProperties } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { toast } from "sonner"
 
@@ -10,10 +11,7 @@ import {
   type AnnualDesign, type BrandColors, type ColorPalette,
   type CoverTemplate, type DesignSelection, type Typography,
 } from "@/types/report-design"
-import { CoverPreview } from "./CoverPreview"
 import { MiniCover } from "./MiniCover"
-import { PagePreview } from "./PagePreview"
-import { PreviewFrame } from "./PreviewFrame"
 import { TypographyControls, hasCustomTypography } from "./TypographyControls"
 
 /**
@@ -205,6 +203,13 @@ export function DesignDialog({
   // `palette_key === "custom"`, so opening the panel to look at the numbers
   // does not itself mark the palette as custom.
   const [customOpen, setCustomOpen] = useState(false)
+  // Which ink the pointer/keyboard is on in the legend. The proof sheet dims
+  // every other one, so "what does Light even do?" is answered by looking.
+  // Refused for an unset role: lighting up a fallback would teach the wrong
+  // colour.
+  const [focusRole, setFocusRole] = useState<BrandRole | null>(null)
+  const focusIfSet = (r: BrandRole | null) =>
+    setFocusRole(r && normalizeHex(brand[r] ?? "") ? r : null)
   // Raised when someone picks a different layout while their type is
   // customised: the layout changes immediately, the type waits for an answer.
   const [swapPrompt, setSwapPrompt] = useState<
@@ -343,31 +348,8 @@ export function DesignDialog({
   const thumbAccent = brand.primary || "#3C0866"
   const layoutName = templateName(visible, layoutKey)
 
-  const coverNode = (
-    <CoverPreview
-      templateKey={layoutKey}
-      brand={brand}
-      typography={typography}
-      companyName={cover?.companyName}
-      title={cover?.title}
-      headline={cover?.headline}
-      periodLabel={cover?.periodLabel}
-      preparedOn={cover?.preparedOn}
-      footnote={cover?.footnote}
-      logoUrl={cover?.logoUrl}
-      coverImage={cover?.coverImage}
-      isArabic={cover?.isArabic}
-    />
-  )
-  const pageNode = (
-    <PagePreview
-      templateKey={layoutKey}
-      brand={brand}
-      typography={typography}
-      companyName={cover?.companyName}
-      periodLabel={cover?.periodLabel}
-      logoUrl={cover?.logoUrl}
-    />
+  const proofSheet = (
+    <InkProofSheet brand={brand} focusRole={focusRole} companyName={cover?.companyName} />
   )
 
   return (
@@ -526,10 +508,20 @@ export function DesignDialog({
                   {BRAND_ROLES.map((role) => {
                     const hex = normalizeHex(brand[role.key] ?? "")
                     return (
-                      <div
+                      <button
                         key={role.key}
-                        className={`flex items-center gap-2 ${FIELD} border px-2 py-1.5 `
-                          + (hex ? "border-[#E2E8F0] bg-white" : "border-dashed border-[#CBD5E1] bg-[#F8FAFC]")}
+                        type="button"
+                        onMouseEnter={() => focusIfSet(role.key)}
+                        onMouseLeave={() => focusIfSet(null)}
+                        onFocus={() => focusIfSet(role.key)}
+                        onBlur={() => focusIfSet(null)}
+                        onClick={() => focusIfSet(focusRole === role.key ? null : role.key)}
+                        aria-pressed={focusRole === role.key}
+                        aria-label={hex ? `Show where ${role.label} is used` : `${role.label} is not set`}
+                        title={role.note}
+                        className={`flex items-center gap-2 text-left ${FIELD} border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1] `
+                          + (hex ? "border-[#E2E8F0] bg-white" : "border-dashed border-[#CBD5E1] bg-[#F8FAFC]")
+                          + (focusRole === role.key ? " ring-2 ring-[#6366F1]" : "")}
                       >
                         <span
                           aria-hidden
@@ -556,7 +548,7 @@ export function DesignDialog({
                             {hex ?? "—"}
                           </span>
                         </span>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -630,12 +622,12 @@ export function DesignDialog({
             {/* Right pane — preview */}
             <div className="hidden overflow-y-auto border-l border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-5 lg:block">
               <div className="mx-auto max-w-[380px]">
-                <PreviewFrame cover={coverNode} page={pageNode} />
+                {proofSheet}
               </div>
             </div>
 
             {/* Compact preview at the foot on smaller widths — collapsible */}
-            <MobilePreview cover={coverNode} page={pageNode} />
+            <MobilePreview sheet={proofSheet} />
           </div>
 
           {error && (
@@ -675,7 +667,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   )
 }
 
-function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.ReactNode }) {
+function MobilePreview({ sheet }: { sheet: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="border-t border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-3 lg:hidden">
@@ -687,10 +679,141 @@ function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.Re
         {open ? "Hide preview" : "Show preview"}
       </button>
       {open && (
-        <div className="mx-auto max-w-[360px]">
-          <PreviewFrame cover={cover} page={page} />
-        </div>
+        <div className="mx-auto max-w-[360px]">{sheet}</div>
       )}
+    </div>
+  )
+}
+
+// A proof sheet: the cover and a data page from the report these inks are for.
+// Swatches say what a colour IS; this says where it LANDS, which is the only
+// question a person picking five of them has.
+//
+// This replaces the live CoverPreview/PagePreview pair in the colours modal.
+// Those render the real templates faithfully, which is exactly the problem
+// here: the cover is mostly white space and the body page spends `accent` and
+// `light` on a rule and a tint, so a five-ink palette read as two. Every role
+// gets real area below, and hovering a legend chip dims the rest.
+//
+// Ported from Centrion_Frontend's BrandColorPicker so the two screens teach the
+// same thing. Inline styles, matching this file's existing literal-hex idiom.
+const PAGE_SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif"
+const UNSET_INK = "#D7DAE4"
+
+function InkProofSheet({
+  brand,
+  focusRole,
+  companyName,
+}: {
+  brand: BrandColors
+  focusRole: BrandRole | null
+  companyName?: string
+}) {
+  const hex = (k: BrandRole, fallback: string) => normalizeHex(brand[k] ?? "") ?? fallback
+  const primary = hex("primary", "#3C0866")
+  const secondary = hex("secondary", "#5BC9E2")
+  // An unset role draws in a flat neutral, never in another role's colour: the
+  // legend shows a dashed tile for these and the page has to agree with it.
+  const accent = hex("accent", UNSET_INK)
+  const text = hex("text", "#1A1D2E")
+  const light = hex("light", "#F1F3F8")
+
+  // Dim the rest, halo the match. The halo is OUTSIDE the element: an inset
+  // stroke on a 3px rule covers the rule, so the one thing being asked about
+  // would render as a dark bar.
+  const ink = (role: BrandRole, halo = false): CSSProperties => {
+    const transition = "opacity .16s ease, box-shadow .16s ease"
+    if (!focusRole) return { opacity: 1, transition }
+    if (focusRole !== role) return { opacity: 0.4, transition }
+    return {
+      opacity: 1,
+      transition,
+      ...(halo ? { boxShadow: "0 0 0 2px #fff, 0 0 0 3.5px rgba(26,29,46,.5)" } : {}),
+    }
+  }
+
+  const page: CSSProperties = {
+    boxSizing: "border-box",
+    background: "#fff",
+    borderRadius: 1,
+    overflow: "hidden",
+    boxShadow: "0 1px 2px rgba(16,24,40,.10), 0 8px 18px -10px rgba(16,24,40,.28)",
+  }
+  const company = companyName?.trim() || "Your Company"
+  const mono = "var(--font-dm-mono), monospace"
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-[11.5px] font-bold text-[#334155]">How these look on the page</span>
+        <span className="text-[11px] text-[#64748B]">Point at a colour above, or tap it, to see where it lands.</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap", padding: 14, borderRadius: 12, background: "#EDEFF5" }}>
+        {/* Cover */}
+        <div style={{ ...page, width: 128, height: 181, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ background: primary, flex: "0 0 58%", padding: "12px 10px", display: "flex", flexDirection: "column", justifyContent: "space-between", ...ink("primary") }}>
+            <div style={{ fontSize: 6.5, letterSpacing: 1.3, textTransform: "uppercase", color: onColor(primary), opacity: 0.75 }}>Annual Report</div>
+            <div style={{ fontFamily: PAGE_SERIF, fontSize: 27, lineHeight: 1, color: onColor(primary) }}>2025</div>
+          </div>
+          <div style={{ background: secondary, padding: "4px 10px", ...ink("secondary") }}>
+            <span style={{ fontSize: 6.5, fontWeight: 700, letterSpacing: 0.7, textTransform: "uppercase", color: onColor(secondary) }}>Year in review</span>
+          </div>
+          <div style={{ position: "relative", flex: 1, padding: "8px 10px", display: "flex", alignItems: "flex-end" }}>
+            <span aria-hidden style={{ position: "absolute", inset: 0, background: light, ...ink("light") }} />
+            <div style={{ position: "relative", fontFamily: PAGE_SERIF, fontSize: 8.5, color: text, ...ink("text") }}>{company}</div>
+          </div>
+        </div>
+
+        {/* Data page */}
+        <div style={{ ...page, flex: "1 1 260px", minWidth: 240, height: 181, padding: "12px 13px", display: "flex", flexDirection: "column" }}>
+          <div style={{ fontFamily: PAGE_SERIF, fontSize: 13.5, color: primary, ...ink("primary") }}>Financial highlights</div>
+
+          <div style={{ display: "flex", marginTop: 8, background: primary, color: onColor(primary), fontSize: 7, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", padding: "4px 7px", ...ink("primary") }}>
+            <span style={{ flex: 1 }}>Metric</span>
+            <span style={{ width: 56, textAlign: "right" }}>2025</span>
+            <span style={{ width: 44, textAlign: "right" }}>Change</span>
+          </div>
+          {[["Revenue", "4.2bn", "+12.4%"], ["Net income", "0.9bn", "+6.1%"]].map((row, i) => (
+            <div key={row[0]} style={{ position: "relative", display: "flex", alignItems: "center", padding: "5px 7px" }}>
+              {/* The band is a layer, not the row's background: dimming the row
+                  would cap the accent chip inside it. */}
+              {i % 2 === 0 && (
+                <span aria-hidden style={{ position: "absolute", inset: 0, background: light, ...ink("light") }} />
+              )}
+              <span style={{ position: "relative", flex: 1, fontSize: 8.5, color: text, ...ink("text") }}>{row[0]}</span>
+              <span style={{ position: "relative", width: 56, textAlign: "right", fontFamily: mono, fontSize: 9, fontWeight: 600, color: text, ...ink("text") }}>SAR {row[1]}</span>
+              <span style={{ position: "relative", width: 44, textAlign: "right" }}>
+                <span style={{ display: "inline-block", padding: "1px 4px", borderRadius: 3, background: accent, color: onColor(accent), fontSize: 7.5, fontWeight: 700, ...ink("accent", true) }}>{row[2]}</span>
+              </span>
+            </div>
+          ))}
+
+          {/* The legend promises secondary carries highlights, so it has to
+              carry one somewhere with real area. */}
+          <div style={{ marginTop: 8, padding: "5px 8px", background: secondary, color: onColor(secondary), display: "flex", alignItems: "baseline", gap: 6, ...ink("secondary") }}>
+            <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600 }}>+12.4%</span>
+            <span style={{ fontSize: 7.5, letterSpacing: 0.2 }}>revenue growth year on year</span>
+          </div>
+
+          <p style={{ margin: "8px 0 0", fontFamily: PAGE_SERIF, fontSize: 8.5, lineHeight: 1.6, color: text, ...ink("text") }}>
+            Growth held across every segment, with margin steady against rising input costs.
+          </p>
+
+          <div style={{ marginTop: "auto", paddingTop: 6 }}>
+            <div style={{ height: 2, background: light, ...ink("light") }} />
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 6.5, color: text, opacity: 0.55, ...ink("text") }}>
+              <span>{company} · Annual Report 2025</span>
+              <span>24</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] leading-[1.5] text-[#64748B]">
+        Body text always prints in your Text colour. The other four tint headings,
+        table headers, highlights and rules.
+      </p>
     </div>
   )
 }
