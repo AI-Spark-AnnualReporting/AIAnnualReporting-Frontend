@@ -54,7 +54,16 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // forever. The same mutation fired from a click behaves correctly, so this is
   // something about the observer's lifecycle on mount that I could not pin
   // down. A flag this component owns is not subject to it.
-  const [running, setRunning] = useState(false)
+  //
+  // Seeded from the URL rather than flipped on in the effect. An effect runs
+  // after the first paint, so the PM saw the page — header, stored findings or
+  // the empty state — flash up before the loader replaced it. The tab is opened
+  // to run, so it should be loading from the first frame.
+  const [running, setRunning] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("run") === "1",
+  )
   const started = useRef(false)
 
   const run = () => {
@@ -94,12 +103,11 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // server has already discarded a validation that predates this assembly.
   const validation = validate.data?.validation ?? reportQuery.data?.validation ?? null
 
+  if (running) return <ReportValidateLoader />
   if (reportQuery.isLoading) return <PageLoader />
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
-      {running && <ReportValidateLoader />}
-
       <div className="flex items-start gap-3">
         <Link href={`/pm/cycles/${cycleId}/report`}>
           <Button variant="outline" size="icon" className="mt-0.5 shrink-0">
