@@ -1,8 +1,7 @@
 "use client"
 
-import { use, useEffect, useRef } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
 import { ArrowLeft, ShieldCheck } from "lucide-react"
 
 import { RouteGuard } from "@/components/auth/RouteGuard"
@@ -36,9 +35,6 @@ export default function ValidationPage({ params }: { params: Promise<{ id: strin
 }
 
 function ValidationView({ cycleId }: { cycleId: string }) {
-  const search = useSearchParams()
-  const shouldRun = search.get("run") === "1"
-
   const reportQuery = useFinalReport(cycleId)
   const validate = useValidateReport(cycleId)
   const { data: dash } = usePMCycleDashboard(cycleId)
@@ -46,13 +42,50 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // Fire once. The ref, not isPending: pending is still false on the render
   // that schedules the call, and React runs effects twice in dev — without it
   // this bills two runs every time the tab opens.
+  //
+  // `?run=1` is read from the URL directly rather than with useSearchParams.
+  // That hook needs a Suspense boundary in the App Router, and without one the
+  // component stopped re-rendering once the mutation settled: the run finished,
+  // onSuccess fired, and the loader stayed on screen forever.
+  //
+  // `running` is local state rather than validate.isPending. Fired from an
+  // effect on mount, the mutation completed — the request returned 200 and
+  // onSuccess ran — but isPending never flipped back and the loader stayed up
+  // forever. The same mutation fired from a click behaves correctly, so this is
+  // something about the observer's lifecycle on mount that I could not pin
+  // down. A flag this component owns is not subject to it.
+  const [running, setRunning] = useState(false)
   const started = useRef(false)
+
+  const run = () => {
+    setRunning(true)
+    validate.mutate(undefined, { onSettled: () => setRunning(false) })
+  }
+
+  // A loader must never be able to outlive its request. Runs take 20-45s; if
+  // nothing has cleared this after three minutes then the settle never reached
+  // us — a dev-server restart killing the connection will do it — and the PM is
+  // left staring at a spinner for work that has already finished.
+  //
+  // The server stores the result before it answers, so refetching shows it
+  // whatever happened to the response.
   useEffect(() => {
-    if (!shouldRun || started.current) return
-    started.current = true
-    validate.mutate()
+    if (!running) return
+    const t = setTimeout(() => {
+      setRunning(false)
+      reportQuery.refetch()
+    }, 180_000)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldRun])
+  }, [running])
+
+  useEffect(() => {
+    if (started.current) return
+    if (new URLSearchParams(window.location.search).get("run") !== "1") return
+    started.current = true
+    run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const cycleName =
     (dash as { cycle?: { cycle_name?: string } } | undefined)?.cycle?.cycle_name
@@ -65,7 +98,7 @@ function ValidationView({ cycleId }: { cycleId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
-      {validate.isPending && <ReportValidateLoader />}
+      {running && <ReportValidateLoader />}
 
       <div className="flex items-start gap-3">
         <Link href={`/pm/cycles/${cycleId}/report`}>
@@ -84,8 +117,8 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           action={
             <Button
               variant="outline"
-              onClick={() => validate.mutate()}
-              disabled={validate.isPending}
+              onClick={run}
+              disabled={running}
             >
               <ShieldCheck className="mr-2 h-4 w-4" />
               {validation ? "Validate again" : "Validate report"}
