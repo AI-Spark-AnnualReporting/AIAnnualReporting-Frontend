@@ -439,20 +439,10 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                 onReExtract={reExtract}
                 coverActive={coverOpen}
                 coverDesign={reportDesign.data?.cover2_template_key ?? null}
-                // Cover and Contents now open the Customize dialog on its Pages
-                // tab, so every report-level appearance setting is reachable
-                // from one place instead of two. The in-pane panels they used
-                // to open are the same components, embedded there.
-                onSelectCover={() => {
-                  exitPreview(); setCoverOpen(false); setTocOpen(false)
-                  setCustomizeTab("pages"); setColorsOpen(true)
-                }}
+                onSelectCover={() => { exitPreview(); setCoverOpen(true); setTocOpen(false) }}
                 tocActive={tocOpen}
                 tocDesign={reportDesign.data?.toc_template_key ?? null}
-                onSelectToc={() => {
-                  exitPreview(); setCoverOpen(false); setTocOpen(false)
-                  setCustomizeTab("pages"); setColorsOpen(true)
-                }}
+                onSelectToc={() => { exitPreview(); setTocOpen(true); setCoverOpen(false) }}
               />
             </div>
           </div>
