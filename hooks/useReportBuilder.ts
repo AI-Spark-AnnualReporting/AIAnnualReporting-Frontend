@@ -543,7 +543,13 @@ export function useRenderReport(cycleId: string) {
     // file. The document that comes back is the one the preview showed.
     mutationFn: ({ format }: { format: "docx" | "pdf" }) =>
       downloadAnnualReport(cycleId, format),
-    onSuccess: ({ blob, filename }) => {
+    onSuccess: ({ blob: rendered, filename }) => {
+      // An IDML is a zip inside. Left typed as such, the browser sniffs it and
+      // saves "Annual_Report.idml.zip", which then gets unpacked into a folder
+      // InDesign cannot open. A generic binary type keeps the name as given.
+      const blob = filename.toLowerCase().endsWith(".idml")
+        ? new Blob([rendered], { type: "application/octet-stream" })
+        : rendered
       const url = URL.createObjectURL(blob)
       const a = window.document.createElement("a")
       a.href = url
