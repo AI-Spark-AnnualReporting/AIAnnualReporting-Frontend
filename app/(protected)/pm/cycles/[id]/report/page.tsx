@@ -248,7 +248,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                           ? "Generating PDF…"
                           : render.variables?.format === "docx"
                             ? "Generating Word document…"
-                            : "Generating document…"}
+                            : render.variables?.format === "idml"
+                              ? "Generating InDesign file…"
+                              : "Generating document…"}
                       </>
                     ) : (
                       <>
@@ -277,6 +279,17 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     <span className="flex-1">PDF</span>
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                       Financials merged
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => render.mutate({ format: "idml" })}
+                    disabled={render.isPending}
+                    className="flex items-center gap-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span className="flex-1">InDesign (.idml)</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      For designers
                     </span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>

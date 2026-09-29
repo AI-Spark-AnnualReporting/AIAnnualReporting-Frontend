@@ -196,7 +196,7 @@ export const annualDesignApi = {
  * failed every real report while looking like a network fault.
  */
 export async function downloadAnnualReport(
-  cycleId: string, format: "pdf" | "docx",
+  cycleId: string, format: "pdf" | "docx" | "idml",
 ): Promise<{ blob: Blob; filename: string }> {
   const res = await apiClient.post(
     `/pm/cycles/${encodeURIComponent(cycleId)}/render`,
