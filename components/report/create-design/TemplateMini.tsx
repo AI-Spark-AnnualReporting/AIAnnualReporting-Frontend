@@ -15,6 +15,8 @@
  * MiniCover.tsx about Tailwind v3/v4 palette and radius drift.
  */
 
+import { memo } from "react"
+
 const shell: React.CSSProperties = {
   width: "100%",
   aspectRatio: "1 / 1.3",
@@ -53,7 +55,7 @@ const col = (n: number, w = "100%") => (
   </div>
 )
 
-export function TemplateMini({
+function TemplateMiniInner({
   templateKey,
   accent = "#3C0866",
 }: {
@@ -177,6 +179,13 @@ export function TemplateMini({
     </div>
   )
 }
+
+/**
+ * Both props are primitives, so the five minis on the card grid stop rebuilding
+ * their few dozen inline-style objects every time the selected card changes.
+ * Cheap either way — this is tidiness, not a fix for anything measured.
+ */
+export const TemplateMini = memo(TemplateMiniInner)
 
 /** Human names, used on the cards and in the rail chips. */
 export const TEMPLATE_NAMES: Record<string, string> = {

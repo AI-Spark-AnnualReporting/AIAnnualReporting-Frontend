@@ -8,7 +8,7 @@
  */
 
 import { Copy } from "lucide-react"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -27,10 +27,16 @@ export function UnitJsonPanel({
 }) {
   const [copied, setCopied] = useState(false)
 
+  // Serialised once per unit rather than on every parent render. The dialog is
+  // always mounted, so without this the whole blocks tree was re-stringified
+  // on each card click even while it was closed. Keyed on `unit` and not on
+  // `open`, so the text is still there through the close animation.
+  const json = useMemo(() => (unit ? JSON.stringify(unit.blocks, null, 2) : ""), [unit])
+
   const copy = async () => {
     if (!unit) return
     try {
-      await navigator.clipboard.writeText(JSON.stringify(unit.blocks, null, 2))
+      await navigator.clipboard.writeText(json)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -57,7 +63,7 @@ export function UnitJsonPanel({
           className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-[12px] leading-relaxed text-slate-800"
           style={{ fontFamily: "var(--font-dm-mono), monospace" }}
         >
-          {unit ? JSON.stringify(unit.blocks, null, 2) : ""}
+          {json}
         </pre>
       </DialogContent>
     </Dialog>

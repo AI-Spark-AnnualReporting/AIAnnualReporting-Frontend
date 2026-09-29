@@ -157,7 +157,10 @@ export function PreviewAllPanel({
       render: (scale) =>
         qc
           .fetchQuery({
-            queryKey: ["pm", "cycle", cycleId, "cover-preview", coverKey, scale ?? null],
+            // The scale is appended only when there IS one: at base scale the
+            // key must be exactly the picker's five-element key, or this is a
+            // different cache entry and the reuse above never happens.
+            queryKey: ["pm", "cycle", cycleId, "cover-preview", coverKey, ...(scale ? [scale] : [])],
             queryFn: () =>
               annualDesignApi.previewCover(cycleId, coverKey as string, scale),
             staleTime: Infinity,
@@ -173,7 +176,9 @@ export function PreviewAllPanel({
       render: (scale) =>
         qc
           .fetchQuery({
-            queryKey: ["pm", "cycle", cycleId, "toc-preview", tocKey, scale ?? null],
+            // Same five-element shape as the contents picker at base scale —
+            // see the note on the cover key above.
+            queryKey: ["pm", "cycle", cycleId, "toc-preview", tocKey, ...(scale ? [scale] : [])],
             queryFn: () => annualDesignApi.previewToc(cycleId, tocKey as string, scale),
             staleTime: Infinity,
             retry: false,
@@ -495,6 +500,10 @@ export function PreviewAllPanel({
                         key={i}
                         src={sheet}
                         alt={`${page.caption}, sheet ${i + 1}`}
+                        // A sharp sheet is a multi-megabyte data URI that
+                        // decodes to tens of MB. Async keeps that decode off
+                        // the scroll path; nothing about what is shown moves.
+                        decoding="async"
                         className="block w-full rounded-lg border border-slate-200 bg-white shadow-sm"
                       />
                     ))}
