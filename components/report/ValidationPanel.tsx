@@ -187,7 +187,18 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         .filter((m) => m.sections === 0)
         .map((m) => ({ where: m.title, lead: [], detail: "" })),
     },
-  ].filter((g) => g.items.length > 0)
+  ]
+    // A finding whose `detail` never arrived. The strategic-brief judgement is
+    // the one that does it: its gaps are the ask objects passed straight
+    // through, and the model does not always write the explaining sentence.
+    // Normalised once here rather than guarded in each reader - `tableRow` and
+    // `asWritten` both call string methods on it, and a missing sentence must
+    // render as a row without a quote, not as a crashed page.
+    .map((g) => ({
+      ...g,
+      items: g.items.map((item) => ({ ...item, detail: item.detail ?? "" })),
+    }))
+    .filter((g) => g.items.length > 0)
 
   const problems = groups.reduce((n, g) => n + (g.count ?? g.items.length), 0)
 
@@ -233,7 +244,11 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
               checked
             </p>
             <p className="mt-0.5 text-sm text-slate-500">
-              Validate again to cover them: {unchecked.join(", ")}
+              Validate again to cover them:{" "}
+              {/* The raw code. These are the sections that came back with no
+                  verdict, and a title comes off the verdict - so there is
+                  nothing to look up and the code is tidied instead. */}
+              {unchecked.map(prettifyCode).join(", ")}
             </p>
           </div>
         </div>
@@ -531,7 +546,7 @@ function Stat({
           {excluded.length > 0 && (
             <>
               <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                Not counted
+                Not applicable
               </p>
               <ul className="mt-1.5 space-y-1">
                 {excluded.map((row) => (

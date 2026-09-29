@@ -632,7 +632,18 @@ export function useAssembleReport(cycleId: string) {
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-      toast.success("Report assembled")
+      toast.success(
+        report.validation_stale
+          ? "Report assembled — validate it again"
+          : "Report assembled",
+        report.validation_stale
+          ? {
+              description:
+                "The earlier validation describes the previous version, so it is no longer shown or printed.",
+              duration: 8000,
+            }
+          : undefined,
+      )
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to assemble report")),

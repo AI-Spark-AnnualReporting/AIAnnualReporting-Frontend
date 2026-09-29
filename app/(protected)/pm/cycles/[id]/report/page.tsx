@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import {
+  AlertTriangle,
   ArrowLeft,
   ChevronDown,
   FileDown,
@@ -322,6 +323,22 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           </>
         )}
       </div>
+
+      {/* The toast is gone in five seconds; the report is still unchecked.
+          This stays until a validation that describes THIS assembly exists,
+          which is the same moment `validation_stale` goes false. Hidden once
+          locked - a signed-off report cannot be re-validated, so nagging about
+          it asks for something that is no longer possible. */}
+      {report?.validation_stale && !locked && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 print:hidden">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            This report was re-assembled after it was validated. The earlier
+            result describes the previous version, so it is no longer shown or
+            printed &mdash; validate it again.
+          </span>
+        </div>
+      )}
 
       {validate.isPending && <ReportValidateLoader />}
 

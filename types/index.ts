@@ -281,6 +281,11 @@ export interface FinalReport {
   // The last Validate-report run, or null. The server drops it when it predates
   // the current assembly, so what arrives here is always about this document.
   validation?: import("@/lib/api/pm").ReportValidation | null
+  // True when a validation exists but describes an earlier assembly, so the
+  // server withheld it. Tells "re-assembled since it was checked" apart from
+  // "never checked" - both arrive with `validation` null, and only one of them
+  // means the Validation Report page has just dropped out of the export.
+  validation_stale?: boolean
 }
 
 // Readiness of a cycle to enter the Report Builder.
