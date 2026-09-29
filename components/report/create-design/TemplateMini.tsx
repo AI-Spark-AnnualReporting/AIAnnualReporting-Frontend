@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Schematic thumbnails of the five page templates.
+ * Schematic thumbnails of the six page templates.
  *
  * Hand-drawn bars rather than a real render, for the same reason MiniCover is:
  * a grid of five live pages is far too heavy, and a card only needs to say
@@ -117,6 +117,58 @@ function TemplateMiniInner({
     )
   }
 
+  // The card shows the OPENER sheet, because that is what distinguishes this
+  // template — the body sheets that follow are three plain columns and would
+  // be indistinguishable from the prose card at this size.
+  if (templateKey === "executive_statement") {
+    return (
+      <div style={{ ...shell, padding: 0, gap: 0 }}>
+        <div
+          style={{
+            padding: 7,
+            flex: "0 0 55%",
+            display: "flex",
+            flexDirection: "column",
+            borderLeft: `1px solid ${accent}`,
+            margin: "7px 0 0 7px",
+            position: "relative",
+          }}
+        >
+          {/* the node dot that sits on the rule */}
+          <div
+            style={{
+              position: "absolute",
+              left: -3,
+              top: -3,
+              width: 5,
+              height: 5,
+              borderRadius: 3,
+              border: `1px solid ${accent}`,
+              background: "#fff",
+            }}
+          />
+          <div style={line("34%", "#9AA0B4", 2)} />
+          <div style={{ ...line("92%", accent, 5), marginTop: 5 }} />
+          <div style={{ ...line("86%", accent, 5), marginTop: 3 }} />
+          <div style={{ ...line("58%", accent, 5), marginTop: 3 }} />
+          <div style={{ flex: 1 }} />
+          <div style={line("46%", "#6B7085", 3)} />
+          <div style={{ ...line("38%", "#9AA0B4", 2), marginTop: 2 }} />
+        </div>
+        {/* full-bleed portrait area, hard to the right and bottom trim */}
+        <div
+          style={ph({
+            flex: 1,
+            margin: "5px 0 0 7px",
+            borderRadius: "4px 0 0 0",
+            borderRight: "none",
+            borderBottom: "none",
+          })}
+        />
+      </div>
+    )
+  }
+
   if (templateKey === "financial_table") {
     return (
       <div style={shell}>
@@ -194,4 +246,5 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   kpi_stat_grid: "Figure grid",
   financial_table: "Table",
   statement_letter: "Letter",
+  executive_statement: "Executive statement",
 }

@@ -51,6 +51,7 @@ const FALLBACK_OPTIONS = [
   "kpi_stat_grid",
   "financial_table",
   "statement_letter",
+  "executive_statement",
 ].map((key) => ({
   key,
   recommended: false,
