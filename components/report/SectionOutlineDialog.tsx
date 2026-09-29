@@ -165,7 +165,7 @@ export function SectionOutlineDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>Report outline</DialogTitle>
           <DialogDescription>
@@ -173,7 +173,11 @@ export function SectionOutlineDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1">
+        {/* min-w-0: DialogContent is a grid, and a grid item's automatic
+            minimum size otherwise grows to its content's min-content width —
+            a long section title would then widen the whole dialog instead of
+            truncating, forcing a horizontal scrollbar. */}
+        <div className="min-w-0 space-y-1">
           {ordered.map((section, i) => {
             const subs = subsectionsOf(section.content)
             const mode = SECTION_MODES[section.mode]

@@ -251,6 +251,13 @@ body {
   0%   { transform: scale(.6); opacity: .55; }
   100% { transform: scale(1.5); opacity: 0; }
 }
+/* Filled-circle pulse (ported from the department/pm build loaders' orb) —
+   two solid discs growing from small to large while fading, layered behind
+   onb-ring's thin outlines for a fuller "sonar" pulse. */
+@keyframes onb-ping {
+  0%   { transform: scale(.75); opacity: .6; }
+  75%, 100% { transform: scale(1.8); opacity: 0; }
+}
 @keyframes dpulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: .3; }

@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 // src/pages/onboarding/AiLoadingScreen.tsx so a long wait looks the same in
 // both products. Styling is inline and the keyframes (onb-*, dpulse) live in
 // app/globals.css under the same names, so the two copies stay diffable.
+// onb-ping is a local addition (not from Centriton) — the small/big filled-circle
+// pulse from the department/pm build loaders' orb, layered behind onb-ring.
 //
 // Drive it either way:
 //   • `controlledProgress` — a real percentage from the caller (capped at 99
@@ -29,6 +31,27 @@ function AnimatedLoader() {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
       <div style={{ position: "relative", width: 92, height: 92, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {/* Filled-circle pulse, small and big, staggered — the department/pm
+            build loaders' orb effect, layered behind the outlined rings. */}
+        <span
+          style={{
+            position: "absolute",
+            inset: -6,
+            borderRadius: "50%",
+            background: "rgba(64,64,200,.16)",
+            animation: "onb-ping 2.6s ease-out infinite",
+          }}
+        />
+        <span
+          style={{
+            position: "absolute",
+            inset: 14,
+            borderRadius: "50%",
+            background: "rgba(64,64,200,.22)",
+            animation: "onb-ping 2.6s ease-out infinite",
+            animationDelay: "0.7s",
+          }}
+        />
         {[0, 0.6, 1.2].map((d) => (
           <span
             key={d}
