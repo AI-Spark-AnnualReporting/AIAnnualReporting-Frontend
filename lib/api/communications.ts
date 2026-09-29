@@ -1,3 +1,4 @@
+import type { ReportValidation } from "@/lib/api/pm"
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { getActingCompany } from "@/lib/actingCompany"
@@ -329,6 +330,9 @@ export interface ThreadDetail {
   assignment: ReviewAssignment | null
   // See ThreadSummary — true once this thread has ever been a review.
   has_review: boolean
+  // A validation is on file for this report. The boolean only - the findings
+  // live on the reviewer screen, which is where they can be read.
+  has_validation?: boolean
   // True only for the assigned reviewer — gates "Open as reviewer".
   can_review: boolean
   created_at: string
@@ -510,6 +514,9 @@ export interface ReportStatusOption {
 }
 
 export interface ReportHubResponse {
+  // A validation is on file for this report. The boolean only - the findings
+  // are on the reviewer screen, which is where they are read.
+  has_validation?: boolean
   report: ThreadReport
   statuses: ReportStatusOption[]
   // False once locked/published — render the panel read-only.
@@ -587,6 +594,12 @@ export interface ReviewViewResponse {
   // screen is read-only. `can_comment` is the derived form — use that.
   removed_at: string | null
   can_comment: boolean
+  // What the Validate run found, for annual reports that have one. Null for
+  // quarterly and earnings reviews, for a report never validated, and for a
+  // validation the server judged stale - re-assembling clears it, because a
+  // verdict about a previous version of the document reads as current while
+  // quoting figures that are no longer on the page.
+  validation?: ReportValidation | null
   // Only the ticked sections (e.g. 11 of 19). Empty when the narrative hasn't
   // been generated — hide the per-section rail.
   sections: ReviewSection[]

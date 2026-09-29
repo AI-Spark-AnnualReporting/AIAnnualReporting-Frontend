@@ -44,17 +44,83 @@ export interface FindingSide {
 /** What a Validate-report run found. Only figures_traced/figures_total is ever
  *  printed in the annual report; the rest are model judgements and stay on the
  *  PM's screen. */
+export interface CoverageStat {
+  title: string
+  sections: number
+  percent: number
+}
+
 export interface ReportValidation {
   figures_total: number
   figures_traced: number
-  untraced: { section_code: string; title: string; value: string }[]
+  // Which of the two recorded sources each figure matched. Absent on a
+  // validation stored before documents were checked, which is why the panel
+  // and the statement both fall back to the plain ratio without it.
+  figures_by_source?: {
+    submission: number
+    document: number
+    neither: number
+  } | null
+  // context is the sentence the figure sits in. Optional: validations stored
+  // before it was captured have the bare value only.
+  untraced: { section_code: string; title: string; value: string; context?: string }[]
   instruction_text: { section_code: string; title: string; line: string; marker: string }[]
   voice: { section_code: string; title: string; phrase: string }[]
   preferred_words: Record<string, number>
+  // The house style this run was judged against, kept with the verdict rather
+  // than read back from the company later - brand_voice is edited over time,
+  // and a finding made under one rule set must not be explained by another.
+  // Null when the company stores no style at all.
+  tone_rules?: {
+    person: string
+    register: string
+    sentence_style: string
+    tone_adjectives: string[]
+    banned_words: string[]
+    preferred_words: string[]
+    do: string[]
+    dont: string[]
+  } | null
   conflicts: { measure: string; detail: string }[]
   redundancy: { sections: string[]; detail: string }[]
   brief_gaps: { ask: string; detail: string }[]
+  // How many explicit asks the brief made in all, so the gaps can be read as a
+  // share. Null when the judgement gave no usable count, and on any validation
+  // stored before it was asked for.
+  brief_asks_total?: number | null
+  // Every ask the brief made, covered or not, and which section covers it.
+  // Empty on a validation stored before the covered ones were named - at full
+  // coverage there are no gaps, and without this a card reading "7 of 7"
+  // cannot say seven of what.
+  brief_asks?: { ask: string; covered?: boolean; where?: string; detail?: string }[]
   emphasis: { primary_leads?: boolean; detail?: string; missing?: string[] } | null
+  // How much of the report carries each concept message, and the house style.
+  // Counted over the sections that were read, never the whole report. Null on a
+  // validation stored before coverage was measured.
+  coverage?: {
+    sections_checked: number
+    // Per metric, because they are not scored over the same sections: an
+    // auditor's report carries neither the brand theme nor the house style, and
+    // a risk disclosure is governed by the house style but is no place for a
+    // theme. Absent on a validation stored before that was asked.
+    concept_sections?: number
+    tone_sections?: number
+    // What was left out of those bases, and what the section is for.
+    excluded?: {
+      section_code: string
+      title: string
+      purpose: string
+      concept: boolean
+      tone: boolean
+    }[]
+    // Null when no message is marked primary, which one live cycle is.
+    primary: CoverageStat | null
+    secondary: CoverageStat[]
+    secondary_any: { sections: number; percent: number }
+    // Null when the company stored no house style. It must not score: with no
+    // rules nothing can be flagged, so every such company would read 100%.
+    tone: { sections: number; percent: number } | null
+  } | null
   // Sections the model never returned a verdict for. NOT the same as clean —
   // nobody looked at these.
   sections_unchecked: string[]
@@ -62,7 +128,13 @@ export interface ReportValidation {
     title?: string
     covers?: string
     concept?: string
+    // Which concept messages this section carries, by title. The evidence
+    // behind the coverage percentages.
+    concepts?: string[]
     unsupported?: { label: string; detail: string }[]
+    // Every figure the section states, named by the measure it belongs to.
+    // Counting the distinct measures is what gives the conflict check a base.
+    figures?: { label?: string; value?: string; measure?: string }[]
   }>
   validated_at: string
 }

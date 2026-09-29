@@ -11,7 +11,11 @@ import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader } from "@/components/ui/spinner"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import { ValidationPanel } from "@/components/report/ValidationPanel"
-import { useFinalReport, useValidateReport } from "@/hooks/useReportBuilder"
+import {
+  useFinalReport,
+  useReportApproval,
+  useValidateReport,
+} from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { formatDateTime } from "@/lib/utils"
 
@@ -38,6 +42,12 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   const reportQuery = useFinalReport(cycleId)
   const validate = useValidateReport(cycleId)
   const { data: dash } = usePMCycleDashboard(cycleId)
+  const { data: approval } = useReportApproval(cycleId)
+  // A signed-off report cannot be edited, so a fresh verdict on it is a cost
+  // with nothing to act on - and the stored one is what the printed Validation
+  // Report page states. Overwriting it would leave the file and the screen
+  // disagreeing about a document nobody can change.
+  const locked = !!approval?.locked
 
   // Fire once. The ref, not isPending: pending is still false on the render
   // that schedules the call, and React runs effects twice in dev — without it
@@ -119,14 +129,21 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           title="Report Validation"
           description={
             validation
-              ? `${cycleName ?? "This report"} — checked ${formatDateTime(validation.validated_at)}`
+              ? `${cycleName ?? "This report"} — checked ${formatDateTime(validation.validated_at)}${
+                  locked ? " · approved, so this is the final check" : ""
+                }`
               : `${cycleName ?? "This report"} — not checked yet`
           }
           action={
             <Button
               variant="outline"
               onClick={run}
-              disabled={running}
+              disabled={running || locked}
+              title={
+                locked
+                  ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
+                  : undefined
+              }
             >
               <ShieldCheck className="mr-2 h-4 w-4" />
               {validation ? "Validate again" : "Validate report"}

@@ -29,7 +29,9 @@ import { PageLoader } from "@/components/ui/spinner"
 import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
+import { useRouter } from "next/navigation"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
+import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import {
   useApproveReport,
   useAssembleReport,
@@ -37,6 +39,7 @@ import {
   useFinalReport,
   useRenderReport,
   useReportApproval,
+  useValidateReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { QUERY_KEYS } from "@/lib/constants"
@@ -68,7 +71,9 @@ interface DashboardData {
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
   const qc = useQueryClient()
+  const router = useRouter()
   const reportQuery = useFinalReport(cycleId)
+  const validate = useValidateReport(cycleId)
   // The document as the engine will print it. Only once there is something to
   // assemble — asking before that is a guaranteed 422.
   const assembledQuery = useAssembledReport(cycleId, reportQuery.isSuccess)
@@ -105,6 +110,10 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const report = reportQuery.data
   // 404 / missing report → empty state with an Assemble CTA.
   const reportMissing = !!reportQuery.error || !report
+  // A stale one never reaches here - the server drops any validation that
+  // predates the current assembly - so this means "there is a result that
+  // describes this document".
+  const hasValidation = !!report?.validation
 
   const locked = !!approval?.locked
 
@@ -163,20 +172,6 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                   )}
                   Re-assemble
                 </Button>
-                {/* Opens its own tab and runs there, so the document is not
-                    blocked for the ~30s the check takes and the findings can
-                    sit on a second screen beside it. */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    window.open(`/pm/cycles/${cycleId}/validation?run=1`, "_blank")
-                  }
-                  className="h-8"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
-                  Validate report
-                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -188,6 +183,67 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </Button>
               </>
             )}
+            {/* Outside the locked group above. Re-assembling a signed-off
+                report is refused by the API, so those buttons rightly go away -
+                but reading what the validation found is not a change to
+                anything, and an approved report is when someone most wants to
+                know whether it was checked. A locked report therefore keeps the
+                button in its read-only form and can never re-run the check. */}
+                {/* The run happens on the click rather than on the
+                    validation page's mount. Fired from a mount effect the
+                    mutation completed - the request returned 200 and onSuccess
+                    ran - but the component never re-rendered and the loader sat
+                    there until a three-minute failsafe cleared it. From a click
+                    it behaves. So: click here, navigate when it is done, and
+                    the page that receives them only ever reads a stored
+                    result. */}
+                {(!locked || hasValidation) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    // A signed-off report is never re-validated - the API
+                    // refuses to change it, and a fresh verdict on a document
+                    // nobody can edit is a cost with no action behind it.
+                    if (locked) {
+                      router.push(`/pm/cycles/${cycleId}/validation`)
+                      return
+                    }
+                    // Already validated: open it. Re-running costs ~16 model
+                    // calls and half a minute to reproduce a result that is
+                    // already on file, and the server has already discarded
+                    // this one if the report was re-assembled since - so a
+                    // validation that survives to here describes the document
+                    // currently on screen. "Validate again" lives on the page
+                    // it opens, for when the PM does want a fresh run.
+                    if (hasValidation) {
+                      router.push(`/pm/cycles/${cycleId}/validation`)
+                      return
+                    }
+                    validate.mutate(undefined, {
+                      // Only on success. A failed run must leave the PM on the
+                      // report with the error toast, not on a validation page
+                      // showing a result that is not the one they just asked
+                      // for.
+                      onSuccess: () =>
+                        router.push(`/pm/cycles/${cycleId}/validation`),
+                    })
+                  }}
+                  disabled={validate.isPending}
+                  className="h-8"
+                >
+                  {validate.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {validate.isPending
+                    ? "Validating\u2026"
+                    : hasValidation
+                      ? "View validation"
+                      : "Validate report"}
+                </Button>
+                )}
             {/* Not gated on completeness — the confirm dialog is where the
                 one-way consequence gets spelled out. Same as the board report. */}
             {approval?.can_approve && (
@@ -267,6 +323,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         )}
       </div>
 
+      {validate.isPending && <ReportValidateLoader />}
+
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
           {reportMissing ? (
@@ -276,6 +334,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                              assembled={assembled}
                              assembledPending={assembledQuery.isPending} />
           )}
+
         </div>
 
         {/* The Communication Hub rail, same composition as the board report's:

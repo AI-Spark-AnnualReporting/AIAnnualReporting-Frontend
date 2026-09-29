@@ -61,19 +61,14 @@ export function useValidateReport(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => pmApi.validateReport(cycleId),
-    onSuccess: (data) => {
-      const v = data.validation
-      const problems =
-        v.untraced.length + v.instruction_text.length + v.conflicts.length +
-        v.redundancy.length + v.brief_gaps.length + v.voice.length
-      toast.success(
-        problems === 0
-          ? "Report validated — nothing to fix"
-          : `Report validated — ${problems} thing${problems === 1 ? "" : "s"} to look at`,
-      )
-      // The assembled report now carries a validation, which changes what the
-      // document prints.
+    // No success toast. The result is a panel and a statement page on screen,
+    // both of which say more than a count in a corner, and the toast landed on
+    // top of them the moment they appeared.
+    onSuccess: () => {
+      // The assembled report now carries a validation, which changes both what
+      // the document prints and what the report page shows beneath it.
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Couldn't validate the report")),
