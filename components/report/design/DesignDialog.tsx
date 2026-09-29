@@ -9,12 +9,48 @@ import { useQueryClient } from "@tanstack/react-query"
 
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
-  DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY,
+  DEFAULT_LAYOUT_KEY, HEADER_FOOTER_DEFAULTS, HEADER_STYLES, LAYOUT_TYPOGRAPHY,
   type AnnualDesign, type BrandColors, type ColorPalette,
-  type CoverTemplate, type DesignSelection, type Typography,
+  type CoverTemplate, type DesignSelection, type HeaderFooter, type Typography,
 } from "@/types/report-design"
 import { MiniCover } from "./MiniCover"
 import { TypographyControls, hasCustomTypography } from "./TypographyControls"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+// Embedded, not reimplemented — both were already presentational.
+import { CoverDesignPanel } from "../create-design/CoverDesignPanel"
+import { TocDesignPanel } from "../create-design/TocDesignPanel"
+
+/**
+ * The four groups the dialog is divided into.
+ *
+ * Grouped rather than one tab per setting: a tab holding a single row of
+ * thumbnails is a worse place to look than a heading, and the strip has to fit
+ * the dialog's existing width. "Pages" collects the three "pick a design"
+ * choices — cover, contents and section openers — because they read as one
+ * decision even though they write three different keys.
+ */
+export type CustomizeTab = "brand" | "typography" | "pages" | "headerFooter"
+
+const TABS: { key: CustomizeTab; label: string; blurb: string }[] = [
+  { key: "brand", label: "Brand",
+    blurb: "Five brand inks, or a preset. Changes preview live." },
+  { key: "typography", label: "Typography",
+    blurb: "Type for headings, subheadings and body text." },
+  { key: "pages", label: "Pages",
+    blurb: "The cover, the contents page and how each section opens." },
+  { key: "headerFooter", label: "Header & Footer",
+    blurb: "The running band at the top and foot of every page." },
+]
+
+// The shared Tabs component styles itself from theme tokens, while this dialog
+// is pinned to literal hex (see the note at the top of the file). Restyling the
+// shared component would change it everywhere, so the palette is overridden
+// here instead.
+const TAB_LIST = "h-auto gap-1 rounded-full bg-[#F1F5F9] p-1"
+const TAB_TRIGGER =
+  "rounded-full px-3 py-1.5 text-[12px] font-semibold text-[#64748B] "
+  + "data-[state=active]:bg-white data-[state=active]:text-[#0F172A] "
+  + "data-[state=active]:shadow-sm"
 
 /**
  * How this report should look: cover layout, brand colours, type.
@@ -178,11 +214,20 @@ export interface DesignDialogProps {
   }
   /**
    * Colours only: the Layout tiles and the type controls are hidden, and Apply
-   * sends `brand` alone. The same modal, narrowed — the Create Design screen
-   * already owns the cover and the page templates in its own rail, so showing
-   * them here as well would give one report two places to choose each.
+   * sends `brand` alone.
+   *
+   * SUPERSEDED BY TABS, and kept only so existing callers keep compiling. It
+   * existed because the Create Design screen owned the cover in its own rail,
+   * so showing the Layout tiles here too would give one report two places to
+   * pick a cover. Tabs solve that properly: the cover now lives in the Pages
+   * tab and the old Layout picker — a different field, `cover_template_key`,
+   * against the rail's `cover2_template_key` — is not offered at all.
+   *
+   * New callers should pass `defaultTab` instead.
    */
   colorsOnly?: boolean
+  /** Which group to open on. Defaults to Brand. */
+  defaultTab?: CustomizeTab
   /**
    * Who performs the save. Given, it replaces the internal call — so a screen
    * holding this record in a query cache can write through its own mutation and
@@ -194,8 +239,14 @@ export interface DesignDialogProps {
 }
 
 export function DesignDialog({
-  cycleId, open, onOpenChange, cover, colorsOnly, onApply, onSaved,
+  cycleId, open, onOpenChange, cover, colorsOnly, defaultTab, onApply, onSaved,
 }: DesignDialogProps) {
+  // Which group is showing. The rail's Cover and Contents entries open this
+  // dialog straight onto "pages", so the setting a person clicked for is the
+  // one in front of them.
+  const [tab, setTab] = useState<CustomizeTab>(defaultTab ?? "brand")
+  useEffect(() => { if (open) setTab(defaultTab ?? "brand") }, [open, defaultTab])
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -223,6 +274,17 @@ export function DesignDialog({
   // customised: the layout changes immediately, the type waits for an answer.
   const [swapPrompt, setSwapPrompt] = useState<
     { to: string; toDefaults: Typography } | null>(null)
+
+  // Pages tab. Each is its own key on the design record, and each is an
+  // OPT-OUT: undefined means "this report has never chosen one", which the
+  // engine reads as "render what you always did". Never default them here —
+  // seeding a value would silently opt every report in.
+  const [cover2Key, setCover2Key] = useState<string | undefined>(undefined)
+  const [tocKey, setTocKey] = useState<string | undefined>(undefined)
+  const [dividerKey, setDividerKey] = useState<string | undefined>(undefined)
+
+  // Header & Footer. Same rule — undefined until someone touches the tab.
+  const [headerFooter, setHeaderFooter] = useState<HeaderFooter | undefined>(undefined)
 
   const visible = useMemo(
     () => templates.filter((t) => !HIDDEN_TEMPLATES.has(t.key)),
@@ -283,6 +345,24 @@ export function DesignDialog({
           ?? current.company_default?.typography
           ?? LAYOUT_TYPOGRAPHY[key]
           ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY])
+
+        // The Pages and Header tabs seed WITHOUT a final fallback, unlike the
+        // ladder above. Absence is meaningful for these four: it is how the
+        // engine knows the report has never chosen, and so should keep
+        // rendering what it always rendered. Substituting a "sensible default"
+        // here would opt every existing report into a new look the moment
+        // somebody opened this dialog and pressed Apply.
+        // `?? undefined` because the API sends null for "never chosen" while
+        // these hold undefined for it; without it a null would be sent back on
+        // Apply as a real value.
+        setCover2Key(current.cover2_template_key
+          ?? current.company_default?.cover2_template_key ?? undefined)
+        setTocKey(current.toc_template_key
+          ?? current.company_default?.toc_template_key ?? undefined)
+        setDividerKey(current.divider_template_key
+          ?? current.company_default?.divider_template_key ?? undefined)
+        setHeaderFooter(current.header_footer
+          ?? current.company_default?.header_footer ?? undefined)
     }
 
     const cachedDesign = qc.getQueryData<AnnualDesign>(reportDesignKey(cycleId))
@@ -366,17 +446,24 @@ export function DesignDialog({
     setSaving(true)
     setError(null)
     try {
-      // Omitted keys are left alone server-side, so the colours-only save
-      // cannot clobber the cover or contents choices this report already has.
-      const selection: DesignSelection = colorsOnly
-        ? { brand }
-        : { cover_template_key: layoutKey, brand, typography }
+      // OMITTED KEYS ARE LEFT ALONE SERVER-SIDE, and that is what makes the
+      // tabs safe. Each key is sent only when this dialog actually holds a
+      // value for it, so opening Customize to change one colour cannot wipe a
+      // cover, a contents design or a header setting chosen elsewhere.
+      //
+      // `cover_template_key` is deliberately never sent: the old Layout picker
+      // is gone, and writing the value we happened to load would be a phantom
+      // edit nobody made.
+      const selection: DesignSelection = { brand, typography }
+      if (cover2Key) selection.cover2_template_key = cover2Key
+      if (tocKey) selection.toc_template_key = tocKey
+      if (dividerKey) selection.divider_template_key = dividerKey
+      if (headerFooter) selection.header_footer = headerFooter
+
       if (onApply) await onApply(selection)
       else await annualDesignApi.save(cycleId, selection)
-      toast.success(colorsOnly ? "Colours saved" : "Design saved", {
-        description: colorsOnly
-          ? "The pages will redraw in them."
-          : "Your next export will use it.",
+      toast.success("Design saved", {
+        description: "Your next export will use it.",
       })
       onSaved?.()
       onOpenChange(false)
@@ -387,11 +474,11 @@ export function DesignDialog({
     }
   }
 
-  const locked = design?.locked
-  // No layout to choose in colours-only mode, so an empty template catalogue is
-  // no longer a reason to refuse the save.
-  const applyDisabled =
-    saving || loading || !!locked || (!colorsOnly && visible.length === 0)
+  const locked = !!design?.locked
+  // The Layout picker is gone, so an empty cover-template catalogue is no
+  // longer a reason to refuse a save — there is nothing left on this dialog
+  // that depends on it.
+  const applyDisabled = saving || loading || locked
   // The ink the layout thumbnails are drawn in. Named for what it is used for,
   // not for the `accent` role — they are different things and the role now
   // exists, so sharing the word would read as a bug.
@@ -422,17 +509,29 @@ export function DesignDialog({
                       -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden ${PANEL}
                       bg-white shadow-2xl focus:outline-none`}
         >
+        <Tabs
+          value={tab}
+          onValueChange={(v) => setTab(v as CustomizeTab)}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           {/* Header */}
-          <div className="flex items-center justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
-            <div>
+          <div className="flex items-start justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
+            <div className="min-w-0">
               <DialogPrimitive.Title className="text-[15px] font-extrabold text-[#0F172A]">
-                {colorsOnly ? "Colours" : "Report design"}
+                Customize
               </DialogPrimitive.Title>
+              {/* The blurb follows the tab, so the subtitle always describes
+                  what is actually on screen rather than the dialog in general. */}
               <DialogPrimitive.Description className="mt-0.5 text-[12px] text-[#64748B]">
-                {colorsOnly
-                  ? "Five brand inks, or a preset. Changes preview live."
-                  : "Layout, colours and type. Changes preview live."}
+                {TABS.find((t) => t.key === tab)?.blurb}
               </DialogPrimitive.Description>
+              <TabsList className={`mt-3 ${TAB_LIST}`}>
+                {TABS.map((t) => (
+                  <TabsTrigger key={t.key} value={t.key} className={TAB_TRIGGER}>
+                    {t.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
             <DialogPrimitive.Close
               aria-label="Close"
@@ -450,8 +549,14 @@ export function DesignDialog({
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,40%)]">
             {/* Left pane */}
             <div className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
-              {/* Layout — hidden when this modal is opened just for colours. */}
-              <section aria-label="Layout" hidden={colorsOnly}>
+              {/* THE OLD LAYOUT PICKER, DELIBERATELY NOT SHOWN.
+                  It writes `cover_template_key` — a different field from the
+                  Pages tab's `cover2_template_key` — so offering both gave one
+                  report two cover pickers, which is the exact thing the
+                  `colorsOnly` flag was invented to prevent. The markup stays
+                  because `layoutKey` is still what "recommended" type is
+                  measured against, and the swap prompt reads it. */}
+              <section aria-label="Layout" hidden>
                 <SectionHeader>Layout</SectionHeader>
                 {loading ? (
                   <div className="py-2 text-[12px] text-[#94A3B8]">Loading…</div>
@@ -509,6 +614,7 @@ export function DesignDialog({
                 )}
               </section>
 
+              <TabsContent value="brand" className="mt-0 flex flex-col gap-6">
               {/* Brand colour */}
               <section aria-label="Brand colour">
                 <SectionHeader>Brand colour</SectionHeader>
@@ -634,8 +740,13 @@ export function DesignDialog({
                 )}
               </section>
 
-              {/* Typography */}
-              {!colorsOnly && swapPrompt && (
+              </TabsContent>
+
+              {/* Typography — the whole block was unreachable while this dialog
+                  only ever opened in colours mode, which is what took 15 real
+                  controls off the screen when the old Design button was hidden. */}
+              <TabsContent value="typography" className="mt-0 flex flex-col gap-6">
+              {swapPrompt && (
                 <div
                   role="alert"
                   className={`flex flex-wrap items-center justify-between gap-2 ${TILE} border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#78350F]`}
@@ -659,14 +770,30 @@ export function DesignDialog({
                   </div>
                 </div>
               )}
-              {!colorsOnly && (
-                <TypographyControls
-                  value={typography}
-                  onChange={setTypography}
-                  recommended={recommended}
-                  layoutName={layoutName}
+              <TypographyControls
+                value={typography}
+                onChange={setTypography}
+                recommended={recommended}
+                layoutName={layoutName}
+              />
+              </TabsContent>
+
+              <TabsContent value="pages" className="mt-0 flex flex-col gap-6">
+                <PagesTab
+                  cycleId={cycleId}
+                  coverKey={cover2Key}
+                  tocKey={tocKey}
+                  dividerKey={dividerKey}
+                  locked={locked}
+                  onCover={setCover2Key}
+                  onToc={setTocKey}
+                  onDivider={setDividerKey}
                 />
-              )}
+              </TabsContent>
+
+              <TabsContent value="headerFooter" className="mt-0 flex flex-col gap-6">
+                <HeaderFooterTab value={headerFooter} onChange={setHeaderFooter} />
+              </TabsContent>
             </div>
 
             {/* Right pane — preview */}
@@ -701,6 +828,7 @@ export function DesignDialog({
               {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}
             </button>
           </div>
+        </Tabs>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
@@ -714,6 +842,266 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
     <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-[#64748B]">
       {children}
     </div>
+  )
+}
+
+/**
+ * A labelled switch.
+ *
+ * Hand-built because this app has no `switch` component and the Radix package
+ * is not installed; adding a dependency for four toggles would be the more
+ * expensive choice. It is a real `role="switch"` button so it reads correctly
+ * to a screen reader and answers the space bar.
+ */
+function ToggleRow({
+  label, hint, checked, onChange, disabled, disabledHint,
+}: {
+  label: string
+  hint?: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+  disabledHint?: string
+}) {
+  return (
+    <div className={"flex items-start justify-between gap-4 py-2 " + (disabled ? "opacity-50" : "")}>
+      <div className="min-w-0">
+        <div className="text-[12.5px] font-semibold text-[#0F172A]">{label}</div>
+        {(disabled && disabledHint ? disabledHint : hint) && (
+          <div className="mt-0.5 text-[11px] leading-snug text-[#64748B]">
+            {disabled && disabledHint ? disabledHint : hint}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={
+          "relative mt-0.5 h-[22px] w-[38px] shrink-0 rounded-full transition-colors "
+          + (disabled ? "cursor-not-allowed " : "cursor-pointer ")
+          + (checked ? "bg-[#6366F1]" : "bg-[#CBD5E1]")
+        }
+      >
+        <span
+          aria-hidden
+          className={
+            "absolute top-[3px] h-4 w-4 rounded-full bg-white shadow transition-[left] "
+            + (checked ? "left-[19px]" : "left-[3px]")
+          }
+        />
+      </button>
+    </div>
+  )
+}
+
+// The five section-opener designs, mirroring Centriton/divider_templates.py.
+// Written out rather than fetched because the list is tiny and fixed, and a
+// catalogue round trip to draw five labels would make the tab flicker.
+const DIVIDERS: { key: string; label: string; blurb: string }[] = [
+  { key: "rule", label: "Rule", blurb: "A small number and the name, over one brand rule." },
+  { key: "banded", label: "Banded", blurb: "A deep brand band with the name reversed out." },
+  { key: "full", label: "Full", blurb: "The whole sheet in brand colour, name set large and low." },
+  { key: "figure", label: "Figure", blurb: "A small name at the top, picture area filling the sheet." },
+  { key: "numeral", label: "Numeral", blurb: "An enormous section number as the only graphic." },
+]
+
+/**
+ * Pages — the three "pick a design" choices, together.
+ *
+ * Cover and Contents were panels in the Create Design rail. They are embedded
+ * here rather than rewritten: both were already presentational, taking
+ * `chosen`/`onChoose`/`locked`/`saving`, so the only change is that the choice
+ * is staged until Apply rather than written on click.
+ */
+function PagesTab({
+  cycleId, coverKey, tocKey, dividerKey, locked,
+  onCover, onToc, onDivider,
+}: {
+  cycleId: string
+  coverKey?: string
+  tocKey?: string
+  dividerKey?: string
+  locked: boolean
+  onCover: (k: string) => void
+  onToc: (k: string) => void
+  onDivider: (k: string) => void
+}) {
+  return (
+    <>
+      <section aria-label="Cover">
+        <SectionHeader>Cover</SectionHeader>
+        <CoverDesignPanel
+          cycleId={cycleId}
+          chosen={coverKey ?? null}
+          locked={locked}
+          onChoose={onCover}
+          saving={false}
+        />
+      </section>
+
+      <section aria-label="Contents page">
+        <SectionHeader>Contents page</SectionHeader>
+        <TocDesignPanel
+          cycleId={cycleId}
+          chosen={tocKey ?? null}
+          locked={locked}
+          onChoose={onToc}
+          saving={false}
+        />
+      </section>
+
+      <section aria-label="Section openers">
+        <SectionHeader>Section openers</SectionHeader>
+        <p className="mb-2 text-[11px] leading-snug text-[#64748B]">
+          The page that introduces each section. Left alone, it follows the
+          cover you picked.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {DIVIDERS.map((d) => {
+            const active = dividerKey === d.key
+            return (
+              <button
+                key={d.key}
+                type="button"
+                disabled={locked}
+                onClick={() => onDivider(d.key)}
+                aria-pressed={active}
+                className={
+                  `${TILE} border-2 px-3 py-2 text-left transition-colors `
+                  + (locked ? "cursor-not-allowed opacity-60 " : "cursor-pointer ")
+                  + (active
+                    ? "border-[#6366F1] bg-[#EEF2FF]"
+                    : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
+                }
+              >
+                <div className={"text-[12.5px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
+                  {d.label}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-[#64748B]">{d.blurb}</div>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    </>
+  )
+}
+
+/**
+ * Header & Footer.
+ *
+ * The three styles are not new rendering — the engine has always drawn them,
+ * but only ever chose between them as a side-effect of which cover was picked.
+ * This tab makes that choice explicit, which is the thing that went missing
+ * when the old Design dialog was hidden.
+ *
+ * `undefined` value means the report has never been near this tab. The first
+ * edit seeds the defaults, which are exactly what the renderer already does,
+ * so opening the tab and toggling something back changes nothing.
+ */
+function HeaderFooterTab({
+  value, onChange,
+}: {
+  value: HeaderFooter | undefined
+  onChange: (v: HeaderFooter) => void
+}) {
+  const v = value ?? HEADER_FOOTER_DEFAULTS
+  const set = (patch: Partial<HeaderFooter>) => onChange({ ...v, ...patch })
+  const setHeader = (patch: Partial<HeaderFooter["header"]>) =>
+    onChange({ ...v, header: { ...v.header, ...patch } })
+  const setFooter = (patch: Partial<HeaderFooter["footer"]>) =>
+    onChange({ ...v, footer: { ...v.footer, ...patch } })
+
+  // Under bold the section strip IS the header, so the running title has no
+  // meaning. Greyed rather than hidden, so the control does not appear to
+  // vanish when someone is comparing styles.
+  const boldish = v.style === "bold"
+
+  return (
+    <>
+      <section aria-label="Style">
+        <SectionHeader>Style</SectionHeader>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {HEADER_STYLES.map((s) => {
+            const active = v.style === s.value
+            return (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => set({ style: s.value })}
+                aria-pressed={active}
+                className={
+                  `cursor-pointer ${TILE} border-2 px-3 py-2 text-left transition-colors `
+                  + (active
+                    ? "border-[#6366F1] bg-[#EEF2FF]"
+                    : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
+                }
+              >
+                <div className={"text-[12.5px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
+                  {s.label}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-[#64748B]">{s.blurb}</div>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section aria-label="Header">
+        <SectionHeader>Header</SectionHeader>
+        <div className="divide-y divide-[#F1F5F9]">
+          <ToggleRow
+            label="Show the header"
+            hint="The band across the top of every page after the cover."
+            checked={v.header.enabled}
+            onChange={(b) => setHeader({ enabled: b })}
+          />
+          <ToggleRow
+            label="Show the logo"
+            checked={v.header.show_logo}
+            onChange={(b) => setHeader({ show_logo: b })}
+            disabled={!v.header.enabled}
+          />
+          <ToggleRow
+            label="Show the section name"
+            hint="The running title on the left, naming the section you are in."
+            checked={v.header.show_section_name}
+            onChange={(b) => setHeader({ show_section_name: b })}
+            disabled={!v.header.enabled || boldish}
+            disabledHint={boldish
+              ? "Bold draws a section strip instead, so this does not apply."
+              : undefined}
+          />
+        </div>
+      </section>
+
+      <section aria-label="Footer">
+        <SectionHeader>Footer</SectionHeader>
+        <div className="divide-y divide-[#F1F5F9]">
+          <ToggleRow
+            label="Show the footer"
+            checked={v.footer.enabled}
+            onChange={(b) => setFooter({ enabled: b })}
+          />
+          <ToggleRow
+            label="Show page numbers"
+            hint="Reads “Page 7 of 42”. Counted from the cover."
+            checked={v.footer.show_page_numbers}
+            onChange={(b) => setFooter({ show_page_numbers: b })}
+            disabled={!v.footer.enabled}
+          />
+        </div>
+        <p className="mt-3 text-[11px] leading-snug text-[#94A3B8]">
+          Word exports carry the header and footer on/off switches and page
+          numbers. The three styles are PDF only — Word has no equivalent, and
+          pretending otherwise would make the two downloads disagree.
+        </p>
+      </section>
+    </>
   )
 }
 

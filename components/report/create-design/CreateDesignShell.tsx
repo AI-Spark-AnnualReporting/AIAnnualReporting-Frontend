@@ -30,7 +30,7 @@ import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
 import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
 import {
-  DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey,
+  DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey, type CustomizeTab,
 } from "@/components/report/design/DesignDialog"
 import type { DesignSelection } from "@/types/report-design"
 
@@ -74,10 +74,14 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // The cover is a report-level choice too, and it also settles how every
   // section's opening page looks — so it sits above Contents in the rail.
   const [coverOpen, setCoverOpen] = useState(false)
-  // The colours modal. Report-level like the cover and the contents page, but a
-  // dialog rather than a rail entry: it restyles pages that are already laid
-  // out instead of being one of the things laid out.
+  // The Customize dialog. Report-level like the cover and the contents page,
+  // but a dialog rather than a rail entry: it restyles pages that are already
+  // laid out instead of being one of the things laid out.
   const [colorsOpen, setColorsOpen] = useState(false)
+  // Which of its tabs to open on. The header button goes to Brand; the rail's
+  // Cover and Contents entries go straight to Pages, so what somebody clicked
+  // for is the thing in front of them.
+  const [customizeTab, setCustomizeTab] = useState<CustomizeTab>("brand")
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
@@ -316,10 +320,10 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
             queryFn: () => annualDesignApi.catalogue(),
             staleTime: Infinity,
           })}
-          onClick={() => setColorsOpen(true)}
+          onClick={() => { setCustomizeTab("brand"); setColorsOpen(true) }}
         >
           <Palette className="mr-1.5 h-3.5 w-3.5" />
-          Colors
+          Customize
         </Button>
         <Button
           variant="ghost"
@@ -435,10 +439,20 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                 onReExtract={reExtract}
                 coverActive={coverOpen}
                 coverDesign={reportDesign.data?.cover2_template_key ?? null}
-                onSelectCover={() => { exitPreview(); setCoverOpen(true); setTocOpen(false) }}
+                // Cover and Contents now open the Customize dialog on its Pages
+                // tab, so every report-level appearance setting is reachable
+                // from one place instead of two. The in-pane panels they used
+                // to open are the same components, embedded there.
+                onSelectCover={() => {
+                  exitPreview(); setCoverOpen(false); setTocOpen(false)
+                  setCustomizeTab("pages"); setColorsOpen(true)
+                }}
                 tocActive={tocOpen}
                 tocDesign={reportDesign.data?.toc_template_key ?? null}
-                onSelectToc={() => { exitPreview(); setTocOpen(true); setCoverOpen(false) }}
+                onSelectToc={() => {
+                  exitPreview(); setCoverOpen(false); setTocOpen(false)
+                  setCustomizeTab("pages"); setColorsOpen(true)
+                }}
               />
             </div>
           </div>
@@ -582,7 +596,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
         cycleId={cycleId}
         open={colorsOpen}
         onOpenChange={setColorsOpen}
-        colorsOnly
+        defaultTab={customizeTab}
         cover={{ title: cycleName }}
         onApply={async (selection) => {
           await saveBrand.mutateAsync(selection)
