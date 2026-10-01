@@ -22,7 +22,7 @@ This is the single source of truth for the frontend — paste it anywhere you ne
   - `status` ∈ `pending | drafting | locked` — where it is in the workflow
   - `ai_allowed` (boolean) — if `false`, the PM provides content manually (text or upload, based on `content_source`)
 - **Server state via TanStack Query.** Mutations always patch the affected list cache directly (the canonical pattern in `hooks/useReportBuilder.ts → patchSectionInList`), then invalidate the readiness query.
-- **Auth via JWT** (access + refresh in `localStorage`). Refresh-on-401 is automatic, with a single-flight queue.
+- **Auth via Centriyon SSO.** Centriyon mints the JWT; SAR stores only `access_token` in `localStorage`. There is **no refresh token** — a 401 clears storage and redirects to Centriyon login. See §5.
 - **Two backend workarounds**: PM dashboard list + per-cycle dashboard are proxied through Next.js Route Handlers that impersonate department users and aggregate session data.
 
 ---
@@ -38,7 +38,7 @@ This is the single source of truth for the frontend — paste it anywhere you ne
 | Component primitives | Radix UI (slot, dialog, dropdown, select, tabs, progress, separator, label, avatar, toast) + shadcn/ui patterns | latest |
 | Server state | TanStack Query (+ Devtools) | `^5.90` |
 | Forms | React Hook Form + Zod (`@hookform/resolvers`) | `^7.71` / `^4.3` |
-| HTTP client | Axios singleton with JWT auto-refresh + single-flight refresh queue | `^1.13` |
+| HTTP client | Axios singleton; attaches the Centriyon JWT, 401 → Centriyon login redirect (no refresh flow) | `^1.13` |
 | File upload | `react-dropzone` (drag + drop for attach + extract sections) | `^15` |
 | DnD | `@dnd-kit/core` + `@dnd-kit/sortable` (section reorder in plan view) | `^6.3` / `^10` |
 | Icons | `lucide-react` | `^0.575` |
@@ -46,7 +46,7 @@ This is the single source of truth for the frontend — paste it anywhere you ne
 | Markdown render | `react-markdown` (prose preview of drafts + final report) | `^10.1` |
 | Date utils | `date-fns` (used by `lib/utils.ts` helpers) | `^4.1` |
 | Theme | `next-themes` (wired but UI runs light-only) | `^0.4` |
-| Auth | JWT (access + refresh, `localStorage`) | — |
+| Auth | Centriyon SSO — Centriyon-issued JWT in `localStorage`, no refresh token | — |
 
 `package.json` declares only `dev`, `build`, `start`, `lint` — no test or storybook runner.
 
