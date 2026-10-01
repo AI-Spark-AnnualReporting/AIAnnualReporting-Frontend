@@ -28,6 +28,7 @@ import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
+import type { DesignOption } from "@/lib/api/createDesign"
 import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
 import {
   DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey, type CustomizeTab,
@@ -60,6 +61,21 @@ const FALLBACK_OPTIONS = [
   counts: {},
   dropped: {},
 }))
+
+/**
+ * A section's saved cards plus any template it does not list.
+ *
+ * The options are stored when a section is extracted, so a section laid out
+ * before a template existed never offers it — Chairman's Statement showed five
+ * cards after Executive statement and Editorial were added. The missing ones
+ * are appended without counts (those need a re-extract); clicking one still
+ * draws the real page.
+ */
+function withEveryTemplate(options: DesignOption[]): DesignOption[] {
+  const listed = new Set(options.map((option) => option.key))
+  const missing = FALLBACK_OPTIONS.filter((option) => !listed.has(option.key))
+  return [...options, ...missing]
+}
 
 export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
@@ -541,14 +557,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                       )}
                     </div>
                   )}
-                  {/* Never an empty column: when the recommendation lookup
-                      failed, offer every template as a plain card rather than
-                      a sentence saying they are selectable and nothing to
-                      click. */}
+                  {/* Every template, always: the saved cards first, then
+                      any the section was extracted too early to list — and
+                      all of them when the recommendation lookup failed. */}
                   <TemplateCardGrid
-                    options={
-                      unit.options.length > 0 ? unit.options : FALLBACK_OPTIONS
-                    }
+                    options={withEveryTemplate(unit.options)}
                     previewKey={effectivePreview}
                     chosenKey={unit.template_key}
                     onPreview={setPreviewKey}

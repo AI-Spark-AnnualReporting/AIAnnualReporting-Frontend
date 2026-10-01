@@ -164,14 +164,21 @@ apiClient.interceptors.response.use(
     const fullUrl = error.config?.baseURL && error.config?.url
       ? `${error.config.baseURL}${error.config.url}`
       : (error.config?.url ?? "<unknown>")
-    console.error("[API Error]", {
+    // The summary goes in the MESSAGE, not only the object after it: Next's
+    // dev overlay prints that object as "{}", which hid every detail below.
+    console.error(
+      `[API Error] ${error.response?.status ?? "(no response)"} ` +
+        `${(error.config?.method ?? "").toUpperCase()} ${fullUrl} — ` +
+        `${backendMessage ?? error.message ?? "unknown error"}`,
+      {
       status: error.response?.status ?? "(no response)",
       code: error.code,                            // e.g. ERR_NETWORK, ERR_BAD_REQUEST, ECONNABORTED
       message: error.message,                      // e.g. "Network Error", "timeout of 30000ms exceeded"
       method: error.config?.method,
       url: fullUrl,
       responseData,
-    })
+      },
+    )
 
     // Axios describes a timeout as "timeout of 30000ms exceeded" and a dropped
     // connection as "Network Error". Both end up rendered verbatim wherever a
