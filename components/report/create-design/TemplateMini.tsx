@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Schematic thumbnails of the six page templates.
+ * Schematic thumbnails of the page templates.
  *
  * Hand-drawn bars rather than a real render, for the same reason MiniCover is:
  * a grid of five live pages is far too heavy, and a card only needs to say
@@ -176,6 +176,58 @@ function TemplateMiniInner({
     )
   }
 
+  // Two sheets in one card, because the alternation IS the template: the
+  // quote-and-photo sheet on top, the photo grid underneath, split by a
+  // hairline for the page turn.
+  if (templateKey === "editorial_alternating") {
+    return (
+      <div style={{ ...shell, gap: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: 2 }}>
+          <div style={{ display: "flex", gap: 3, flex: "0 0 46%" }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2.5, paddingTop: 2 }}>
+              <div style={line("92%", accent, 4)} />
+              <div style={line("84%", accent, 4)} />
+              <div style={line("60%", accent, 4)} />
+              <div style={{ flex: 1 }} />
+              <div style={line("40%", "#6B7085", 2)} />
+            </div>
+            <div
+              style={ph({
+                flex: 1,
+                borderLeft: `1px solid ${accent}`,
+                borderBottom: `1px solid ${accent}`,
+                borderRadius: "0 0 0 4px",
+                marginRight: -7,
+              })}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 3, flex: 1 }}>
+            {col(4)}
+            {col(4)}
+            {col(4)}
+          </div>
+        </div>
+        <div style={{ ...line("100%", "#E4E6F1", 1), margin: "4px 0" }} />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateRows: "repeat(2, 1fr)",
+            gap: 3,
+            flex: "0 0 38%",
+          }}
+        >
+          {col(4)}
+          {col(4)}
+          <div style={ph({ borderRadius: 2 })} />
+          {col(4)}
+          <div style={ph({ borderRadius: 2 })} />
+          {col(4)}
+        </div>
+      </div>
+    )
+  }
+
   if (templateKey === "financial_table") {
     return (
       <div style={shell}>
@@ -254,4 +306,5 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   financial_table: "Table",
   statement_letter: "Letter",
   executive_statement: "Executive statement",
+  editorial_alternating: "Editorial — alternating",
 }

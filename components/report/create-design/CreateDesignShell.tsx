@@ -52,6 +52,7 @@ const FALLBACK_OPTIONS = [
   "financial_table",
   "statement_letter",
   "executive_statement",
+  "editorial_alternating",
 ].map((key) => ({
   key,
   recommended: false,
