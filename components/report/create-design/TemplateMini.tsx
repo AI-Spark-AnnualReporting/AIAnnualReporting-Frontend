@@ -38,10 +38,17 @@ const line = (w: string, c = "#D7DAE5", h = 2.5): React.CSSProperties => ({
   flexShrink: 0,
 })
 
-/** The placeholder motif — the same grey dashed box the real page draws. */
+/**
+ * The placeholder motif — the same checkerboard the real page draws
+ * (Centriton templates/pages/page.css `.imgph`). Squares are 3px here, not
+ * the page's 16pt scaled down, which turns to mush at thumbnail size.
+ */
 const ph = (extra: React.CSSProperties = {}): React.CSSProperties => ({
-  background: "#F1F1F4",
-  border: "1px dashed #B8BCC8",
+  backgroundColor: "#FFFFFF",
+  backgroundImage: "repeating-conic-gradient(#E6E6E6 0% 25%, #FFFFFF 0% 50%)",
+  backgroundSize: "6px 6px",
+  backgroundPosition: "center",
+  border: "1px solid #B8BCC8",
   borderRadius: 2,
   flexShrink: 0,
   ...extra,
