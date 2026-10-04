@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useState } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { getInitials, cn } from "@/lib/utils"
 import {
@@ -10,6 +11,8 @@ import {
   BookOpen,
   Megaphone,
   LogOut,
+  PanelLeftOpen,
+  PanelLeftClose,
 } from "lucide-react"
 
 // Reviewing department submissions now belongs to the HOD, so the PM no longer
@@ -25,11 +28,45 @@ export function PMSidebar() {
   const { user, logout } = useAuth()
   const pathname = usePathname()
 
+  // Create Design is a canvas screen and wants the width. Scoped by route
+  // rather than the global "sidebar-set-mode" event so it cannot leak to other
+  // pages, and so a refresh inside the screen still comes back collapsed.
+  const autoHide = pathname?.includes("/create-design") ?? false
+
+  // Expanding is per-visit only — never persisted. Navigating away drops the
+  // override, so the next visit starts collapsed again. The pathname is stable
+  // within the screen, so an expand survives for as long as you stay.
+  //
+  // Reset during render rather than from an effect: the shell keeps this
+  // component mounted across navigation, so the route change is the only
+  // signal, and doing it here avoids a frame of wrongly-expanded nav.
+  const [expandedByUser, setExpandedByUser] = useState(false)
+  const [seenPathname, setSeenPathname] = useState(pathname)
+  if (seenPathname !== pathname) {
+    setSeenPathname(pathname)
+    setExpandedByUser(false)
+  }
+
   if (!user) return null
 
   function isActive(href: string, exact?: boolean): boolean {
     if (exact) return pathname === href
     return pathname.startsWith(href)
+  }
+
+  // Collapsed: a sliver to click back open, keeping the nav's slot in the row.
+  if (autoHide && !expandedByUser) {
+    return (
+      <button
+        data-app-chrome="true"
+        onClick={() => setExpandedByUser(true)}
+        title="Open navigation"
+        aria-label="Open navigation"
+        className="app-sidebar flex h-full w-6 shrink-0 items-center justify-center border-r border-white/10 bg-[#3535b5] text-white/60 transition-colors hover:bg-[#3d3dc0] hover:text-white"
+      >
+        <PanelLeftOpen className="h-4 w-4" />
+      </button>
+    )
   }
 
   return (
@@ -46,6 +83,16 @@ export function PMSidebar() {
           <p className="text-[13px] font-extrabold tracking-[-0.2px] text-white">Centriyon</p>
           <p className="text-[9px] text-white/30">PM Workspace</p>
         </div>
+        {autoHide && (
+          <button
+            onClick={() => setExpandedByUser(false)}
+            title="Hide navigation for more space"
+            aria-label="Hide navigation"
+            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-white/40 transition-colors hover:bg-white/10 hover:text-white/90"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Nav */}

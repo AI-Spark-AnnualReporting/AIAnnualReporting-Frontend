@@ -1119,7 +1119,7 @@ export const pmApi = {
   // binary and corrupts the file.
   renderReport: async (
     cycleId: string,
-    format: "docx" | "pdf",
+    format: "docx" | "pdf" | "idml",
   ): Promise<{ blob: Blob; filename: string }> => {
     try {
       const response = await apiClient.post(

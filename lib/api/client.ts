@@ -11,12 +11,75 @@ const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1"
 
+/**
+ * The ceiling for a call that has not thought about its own.
+ *
+ * Short on purpose: most of this API is a handful of database reads, and a
+ * request still running after half a minute is a request in trouble. Anything
+ * that legitimately takes longer — a render, a model call, a screen that reads
+ * a whole assembled report — sets its own and says why. A call that inherits
+ * this one has not made a decision, and "timeout of 30000ms exceeded" in front
+ * of a user is what that looks like.
+ */
+export const DEFAULT_TIMEOUT_MS = 30000
+
+/**
+ * The shape every rejected apiClient call arrives in.
+ *
+ * `code` is the load-bearing field. Screens that must tell one failure from
+ * another — a kickoff that timed out is not a kickoff that failed, because the
+ * backend is probably still generating and submitting again would duplicate it
+ * — branch on this, never on `message`. `message` is written for a person and
+ * is free to change wording; it was changed once, and two kickoff guards that
+ * regex-matched it silently stopped firing.
+ */
+export interface ApiError {
+  /** Backend error slug, or TIMEOUT / NETWORK / UNKNOWN_ERROR when there was no response. */
+  error: string
+  /** Human-readable. For display only — never branch on it. */
+  message: string
+  /** HTTP status, absent when the request never got a response. */
+  status?: number
+  /** Axios's own code: ECONNABORTED, ETIMEDOUT, ERR_NETWORK, ERR_BAD_REQUEST… */
+  code: string | null
+  details?: unknown
+}
+
+/**
+ * True when the client gave up waiting, rather than the server saying no.
+ *
+ * The `message` fallback is deliberate. An error that never passed through the
+ * interceptor below (a raw axios reject from a call made another way) still has
+ * to be recognised, and for a kickoff the safe direction is to treat an unknown
+ * failure as "it may have gone through" — locking the form — rather than
+ * re-enabling a button that fires a second one.
+ */
+export function isTimeoutError(err: unknown): boolean {
+  const e = err as Partial<ApiError> & { message?: unknown }
+  if (e?.code === "ECONNABORTED" || e?.code === "ETIMEDOUT") return true
+  if (e?.error === "TIMEOUT") return true
+  return typeof e?.message === "string" && /timeout|ECONNABORTED/i.test(e.message)
+}
+
+/**
+ * True when this session may no longer touch what it asked for.
+ *
+ * Single-sourced because two places act on it and they must not drift: the
+ * query client refuses to retry these (no amount of retrying fixes a revoked
+ * session), and a screen holding a stale payload must stop pretending it still
+ * works.
+ */
+export function isAuthError(err: unknown): boolean {
+  const status = (err as Partial<ApiError> | undefined)?.status
+  return status === 401 || status === 403
+}
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 30000,
+  timeout: DEFAULT_TIMEOUT_MS,
 })
 
 // Request interceptor: attach the Centriyon-issued JWT, and — for Spark staff —
@@ -101,19 +164,54 @@ apiClient.interceptors.response.use(
     const fullUrl = error.config?.baseURL && error.config?.url
       ? `${error.config.baseURL}${error.config.url}`
       : (error.config?.url ?? "<unknown>")
-    console.error("[API Error]", {
+    // The summary goes in the MESSAGE, not only the object after it: Next's
+    // dev overlay prints that object as "{}", which hid every detail below.
+    console.error(
+      `[API Error] ${error.response?.status ?? "(no response)"} ` +
+        `${(error.config?.method ?? "").toUpperCase()} ${fullUrl} — ` +
+        `${backendMessage ?? error.message ?? "unknown error"}`,
+      {
       status: error.response?.status ?? "(no response)",
       code: error.code,                            // e.g. ERR_NETWORK, ERR_BAD_REQUEST, ECONNABORTED
       message: error.message,                      // e.g. "Network Error", "timeout of 30000ms exceeded"
       method: error.config?.method,
       url: fullUrl,
       responseData,
-    })
+      },
+    )
 
-    const normalizedError = {
-      error: responseData?.error || responseData?.detail || "UNKNOWN_ERROR",
-      message: backendMessage || error.message || "An unexpected error occurred",
+    // Axios describes a timeout as "timeout of 30000ms exceeded" and a dropped
+    // connection as "Network Error". Both end up rendered verbatim wherever a
+    // screen shows err.message, which is a stack trace pointed at a person who
+    // can only wait or retry. Say the thing they can act on instead.
+    //
+    // REWORDING THIS IS ONLY SAFE BECAUSE `code` CARRIES THE FACT. The friendly
+    // sentence shipped once without it, and two screens that decided "was this
+    // a timeout?" by matching the old axios wording stopped deciding anything —
+    // which on the kickoff screen re-enabled a submit button while the backend
+    // was still generating, i.e. a duplicate kickoff. Anything that needs to
+    // know what went wrong reads `code` (or isTimeoutError above).
+    const isTimeout =
+      error.code === "ECONNABORTED" || error.code === "ETIMEDOUT"
+    const isOffline = error.code === "ERR_NETWORK"
+    const transportMessage = isTimeout
+      ? "The server took too long to answer. It may still be busy finishing earlier work — try again in a moment."
+      : isOffline
+        ? "Could not reach the server. Check your connection and try again."
+        : null
+
+    const normalizedError: ApiError = {
+      error:
+        responseData?.error ||
+        responseData?.detail ||
+        (isTimeout ? "TIMEOUT" : isOffline ? "NETWORK" : "UNKNOWN_ERROR"),
+      message:
+        backendMessage ||
+        transportMessage ||
+        error.message ||
+        "An unexpected error occurred",
       status: error.response?.status,
+      code: error.code ?? null,
       details: responseData?.details || responseData,
     }
 

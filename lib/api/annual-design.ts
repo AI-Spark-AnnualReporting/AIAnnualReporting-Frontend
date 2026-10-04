@@ -23,6 +23,10 @@ import type {
   ColorPalette,
   CoverTemplate,
   DesignSelection,
+  CoverDesign,
+  CoverPreview,
+  TocDesign,
+  TocPreview,
 } from "@/types/report-design"
 
 /** The document, exactly as the export engine will print it. */
@@ -65,10 +69,18 @@ export interface AssembledReport {
 }
 
 export const annualDesignApi = {
-  /** The cycle's current cover/brand/type choice, for pre-selecting the controls. */
+  /**
+   * The cycle's current cover/brand/type choice, for pre-selecting the controls.
+   *
+   * Cheap, but it runs on the Create Design screen alongside a pre-warm that
+   * is drawing pages, so it is queueing behind render work rather than doing
+   * any of its own. The client default cut it off at 30s and left the cover
+   * and contents pickers with nothing selected.
+   */
   get: async (cycleId: string): Promise<AnnualDesign> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
+      { timeout: 60000 },
     )
     return data
   },
@@ -83,6 +95,9 @@ export const annualDesignApi = {
     const { data } = await apiClient.patch(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
       selection,
+      // Same queue as get, above, and this one is a person's choice — losing it
+      // to a timeout means they pick the cover again and wonder why.
+      { timeout: 60000 },
     )
     return data
   },
@@ -114,6 +129,63 @@ export const annualDesignApi = {
       color_palettes: data?.color_palettes ?? [],
     }
   },
+
+  /**
+   * The five contents-page designs.
+   *
+   * Proxied from the render engine, which owns them — there is no second list
+   * of names and descriptions on this side to fall out of date.
+   */
+  /**
+   * The four annual covers. Proxied from the engine that owns them.
+   *
+   * Proxied, so it waits on the render engine — the same engine the pre-warm
+   * is keeping busy — and then on this backend. Two queues, one list of names.
+   */
+  coverDesigns: async (): Promise<{ templates: CoverDesign[]; default: string }> => {
+    const { data } = await apiClient.get(`/pm/cover-designs`, { timeout: 60000 })
+    return { templates: data?.templates ?? [], default: data?.default ?? "statement" }
+  },
+
+  /** Draw this cycle's cover in one design, with its real title and brand. */
+  previewCover: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<CoverPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/cover-preview`,
+      { design, scale },
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  /** The five contents designs. Proxied too — see coverDesigns for the timeout. */
+  tocDesigns: async (): Promise<{ templates: TocDesign[]; default: string }> => {
+    const { data } = await apiClient.get(`/pm/toc-designs`, { timeout: 60000 })
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "classic",
+    }
+  },
+
+  /**
+   * Draw this cycle's contents page in one design.
+   *
+   * Uses the report's real sections, so a PM compares this document's own
+   * hierarchy rather than a mockup of someone else's. The long timeout is
+   * load-bearing: the engine launches a browser per render and the axios
+   * default would kill it.
+   */
+  previewToc: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<TocPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/toc-preview`,
+      { design, scale },
+      { timeout: 120000 },
+    )
+    return data
+  },
 }
 
 /**
@@ -124,7 +196,7 @@ export const annualDesignApi = {
  * failed every real report while looking like a network fault.
  */
 export async function downloadAnnualReport(
-  cycleId: string, format: "pdf" | "docx",
+  cycleId: string, format: "pdf" | "docx" | "idml",
 ): Promise<{ blob: Blob; filename: string }> {
   const res = await apiClient.post(
     `/pm/cycles/${encodeURIComponent(cycleId)}/render`,

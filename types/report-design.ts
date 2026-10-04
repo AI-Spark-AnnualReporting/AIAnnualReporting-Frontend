@@ -57,18 +57,40 @@ export interface Typography {
   body: TypographyRole
 }
 
+/**
+ * A brand as five inks, every one optional.
+ *
+ * Optional is load-bearing, not laziness. Cycles saved before the palette grew
+ * past two colours carry only `primary`/`secondary`, and the API still returns
+ * those two-key objects verbatim — so anything reading `accent`, `text` or
+ * `light` has to cope with the key being absent rather than assume a string.
+ */
 export interface BrandColors {
   primary?: string
   secondary?: string
+  /** The third colour, for highlights and callouts. */
+  accent?: string
+  /** The dark readable ink body copy is set in. */
+  text?: string
+  /** The pale tint for rules, dividers and table banding. */
+  light?: string
   /** A preset's key, or "custom" when someone typed their own hex. */
   palette_key?: string
 }
 
+/**
+ * One preset in the picker. `accent`/`text`/`light` are optional here for the
+ * same reason as above: a cached or older catalogue response carries only the
+ * two colours the presets used to have.
+ */
 export interface ColorPalette {
   key: string
   name: string
   primary: string
   secondary: string
+  accent?: string
+  text?: string
+  light?: string
 }
 
 export interface CoverTemplate {
@@ -85,11 +107,29 @@ export interface CompanyDesignDefault {
   cover_template_key: string | null
   brand: BrandColors
   typography: Typography | null
+  /**
+   * Optional, because the company-defaults validator has historically accepted
+   * only cover/toc/typography and silently DROPPED anything else — which is
+   * why a company-level annual cover could never be saved even though the
+   * resolver reads one. Declared optional rather than required so this type
+   * stays honest whether or not a given deployment has that fix.
+   */
+  toc_template_key?: string | null
+  cover2_template_key?: string | null
+  divider_template_key?: string | null
+  header_footer?: HeaderFooter | null
 }
 
 export interface AnnualDesign {
   cycle_id: string
   cover_template_key: string | null
+  /** The cycle's OWN contents-design pick, null when it has never chosen. */
+  toc_template_key: string | null
+  cover2_template_key: string | null
+  /** The cycle's OWN section-opener pick, null when it has never chosen. */
+  divider_template_key: string | null
+  /** The cycle's OWN running-band settings, null when it has never chosen. */
+  header_footer: HeaderFooter | null
   brand: BrandColors
   typography: Typography | null
   company_default: CompanyDesignDefault | null
@@ -106,11 +146,106 @@ export interface AnnualDesign {
   locked: boolean
 }
 
+/** Which of the three running-band looks the renderer draws. */
+export type HeaderStyle = "auto" | "classic" | "minimal" | "bold"
+
+export const HEADER_STYLES: { value: HeaderStyle; label: string; blurb: string }[] = [
+  { value: "auto", label: "Match the cover",
+    blurb: "Follows the cover you picked. What every report does today." },
+  { value: "classic", label: "Classic",
+    blurb: "Letterhead — logo, section name, report and period, over a rule." },
+  { value: "minimal", label: "Minimal",
+    blurb: "A rule and the logo. No running text at the head of the page." },
+  { value: "bold", label: "Bold",
+    blurb: "Full-bleed brand bars, with a section strip across the head." },
+]
+
+/**
+ * The running header and footer.
+ *
+ * `style` sits at the TOP level rather than inside `header`, because the bold
+ * style paints the top band AND the bottom band and moves the footer to
+ * on-brand ink. A `header.style` that silently restyled the footer would be a
+ * lie in the shape.
+ *
+ * Under `bold` the section strip IS the header, so `show_section_name` has no
+ * meaning there — the tab greys it out rather than offering a dead control.
+ */
+export interface HeaderFooter {
+  style: HeaderStyle
+  header: { enabled: boolean; show_logo: boolean; show_section_name: boolean }
+  footer: { enabled: boolean; show_page_numbers: boolean }
+}
+
+/**
+ * Exactly what the renderer does today, so touching the tab changes nothing
+ * until a control is moved. Absence of the whole key is the real opt-out —
+ * these are what the first edit starts from.
+ */
+export const HEADER_FOOTER_DEFAULTS: HeaderFooter = {
+  style: "auto",
+  header: { enabled: true, show_logo: true, show_section_name: true },
+  footer: { enabled: true, show_page_numbers: true },
+}
+
 /** The body of a save. Every field optional: one control can be saved alone. */
 export interface DesignSelection {
   cover_template_key?: string
   brand?: BrandColors
   typography?: Typography | null
+  /**
+   * One of the five section-opener designs. Absent is the OPT-OUT, as with
+   * the contents page below: the engine then derives the opener from the
+   * cover, exactly as it always has.
+   */
+  divider_template_key?: string
+  /** The running bands. Absent = today's behaviour, derived from the cover. */
+  header_footer?: HeaderFooter
+  /**
+   * Which of the five contents-page designs this report prints.
+   *
+   * Absent is not "the default" — it is the OPT-OUT. A report that has never
+   * chosen one renders the flat contents page every other report family still
+   * gets, so omitting this key is how the engine knows to leave the page
+   * alone. Set from the Create Design screen, not from the cover modal.
+   */
+  toc_template_key?: string
+  /** Which of the four annual covers this report prints. Absent = the original. */
+  cover2_template_key?: string
+}
+
+/** One contents-page design, as the engine that owns them describes it. */
+export interface CoverDesign {
+  key: string
+  purpose: string
+  full_bleed: boolean
+  /** The divider treatment this cover brings with it. */
+  divider: string
+}
+
+export interface CoverPreview {
+  design: string
+  page_count: number
+  divider: string
+  pages: string[]
+}
+
+export interface TocDesign {
+  key: string
+  purpose: string
+  full_bleed: boolean
+  sub_page_numbers: boolean
+}
+
+/** A rendered preview of one design — one PNG data URI per sheet. */
+export interface TocPreview {
+  design: string
+  page_count: number
+  entries: number
+  depth: number
+  /** True when the folios drawn are illustrative rather than resolved. */
+  estimated_pages: boolean
+  pages: string[]
 }
 
 // Per-role size limits, matching the backend's report_typography._SIZE_RANGES.

@@ -541,7 +541,7 @@ export function useRenderReport(cycleId: string) {
     // app's own renderer — that is where the engine lives, and it is the only
     // way the cover, colours and type chosen in the design controls reach the
     // file. The document that comes back is the one the preview showed.
-    mutationFn: ({ format }: { format: "docx" | "pdf" }) =>
+    mutationFn: ({ format }: { format: "docx" | "pdf" | "idml" }) =>
       downloadAnnualReport(cycleId, format),
     onSuccess: ({ blob: rendered, filename }) => {
       // An IDML is a zip inside. Left typed as such, the browser sniffs it and
