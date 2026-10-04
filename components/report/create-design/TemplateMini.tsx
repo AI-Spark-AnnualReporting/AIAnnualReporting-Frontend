@@ -228,6 +228,54 @@ function TemplateMiniInner({
     )
   }
 
+  // The opening field (large standfirst over a numbered index of the
+  // subheadings), then two numbered movements: a big coral numeral in the
+  // margin rail beside the heading and its prose.
+  if (templateKey === "editorial_movements") {
+    const movement = (n: number) => (
+      <div style={{ display: "flex", gap: 4, flex: 1, paddingTop: 4, borderTop: "1px dotted #DDC39B" }}>
+        <div style={{ flex: "0 0 26%", display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: 13, lineHeight: 1, color: "#F58675", fontWeight: 300 }}>{`0${n}`}</div>
+          <div style={line("70%", "#C75111", 1.5)} />
+          <div style={line("55%", accent, 3)} />
+        </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2.5 }}>
+          <div style={line("62%", accent, 3.5)} />
+          {col(4)}
+        </div>
+      </div>
+    )
+    return (
+      <div style={{ ...shell, gap: 4 }}>
+        <div
+          style={{
+            background: accent,
+            margin: "-7px 0 0 -7px",
+            padding: "8px 7px 6px 7px",
+            borderRadius: "0 0 6px 0",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2.5,
+            flex: "0 0 40%",
+          }}
+        >
+          <div style={line("30%", "#F58675", 1.5)} />
+          <div style={line("94%", "#FFFFFF", 3)} />
+          <div style={line("88%", "#F58675", 3)} />
+          <div style={line("72%", "#FFFFFF", 3)} />
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2 }}>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} style={line("80%", "rgba(255,255,255,0.55)", 1.5)} />
+            ))}
+          </div>
+        </div>
+        {movement(1)}
+        {movement(2)}
+      </div>
+    )
+  }
+
   if (templateKey === "financial_table") {
     return (
       <div style={shell}>
@@ -307,4 +355,5 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   statement_letter: "Letter",
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
+  editorial_movements: "Editorial — movements",
 }

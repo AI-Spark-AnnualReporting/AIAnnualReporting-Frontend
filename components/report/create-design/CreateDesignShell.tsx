@@ -54,6 +54,7 @@ const FALLBACK_OPTIONS = [
   "statement_letter",
   "executive_statement",
   "editorial_alternating",
+  "editorial_movements",
 ].map((key) => ({
   key,
   recommended: false,
