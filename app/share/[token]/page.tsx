@@ -29,11 +29,12 @@ import {
   MIN_SELECTED_AREAS,
   MAX_SELECTED_AREAS,
   MAX_AREAS_ON_PAGE,
+  MIN_AREAS_ON_PAGE,
 } from "@/lib/areasOfFocus"
 import type { AreaOfFocus } from "@/lib/areasOfFocus"
 import type { ConceptMessage, SurveyQuestion } from "@/lib/api/pm"
 import {
-  AlertTriangle, CheckCircle2, FileText, Link2Off, Loader2, MessageSquareQuote,
+  AlertTriangle, CheckCircle2, FileText, Info, Link2Off, Loader2, MessageSquareQuote,
   Plus, Send, Upload,
 } from "lucide-react"
 
@@ -82,10 +83,6 @@ export default function ClientSharePage({
   const [brief, setBrief] = useState("")
   const [areas, setAreas] = useState<AreaOfFocus[]>([])
   const [concepts, setConcepts] = useState<ConceptMessage[]>([])
-  // How many areas arrived from Spark. Anything past this the client wrote, and
-  // only those get a bin — Spark's own areas are dropped by marking them
-  // "Not used", which already keeps them out of the report.
-  const [sparkAreaCount, setSparkAreaCount] = useState(0)
 
   // Their own strategic brief, optional. Uploaded immediately on pick, not held
   // until submit — the file is what guides the AI draft, so it has to land
@@ -152,7 +149,6 @@ export default function ClientSharePage({
           setBrief(src.strategic_brief ?? "")
           setAreas((src.areas_of_focus ?? []) as AreaOfFocus[])
           setConcepts((src.concept_messages ?? []) as ConceptMessage[])
-          setSparkAreaCount((v.payload.areas_of_focus ?? []).length)
         }
       })
       .catch((err) => {
@@ -238,7 +234,9 @@ export default function ClientSharePage({
   const canSubmit = editable && !submitting && (
     view?.stage === "questionnaire"
       ? isComplete(questions, answers)
-      : areasValid && !blankAreas
+      : view?.stage === "brief"
+        ? brief.trim().length > 0
+        : areasValid && !blankAreas
   )
 
   /** Their own area, with an empty concept message to write underneath it. */
@@ -261,21 +259,28 @@ export default function ClientSharePage({
     if (!canSubmit || !view) return
     setSubmitting(true)
     try {
+      // Each gate sends only its own half. The brief gate has no areas yet —
+      // they are written from whatever this call stores, once Spark approves.
       const response: ShareResponsePayload =
         view.stage === "questionnaire"
           ? {
               answers: buildAnswersPayload(questions, answers),
               added_questions: extraQuestions.map((q) => ({ id: q.id, text: q.text })),
             }
-          : {
-              strategic_brief: brief,
-              areas_of_focus: areas,
-              concept_messages: concepts,
-            }
+          : view.stage === "brief"
+            ? { strategic_brief: brief }
+            : {
+                areas_of_focus: areas,
+                concept_messages: concepts,
+              }
       const next = await clientShareApi.submit(token, {
         response,
-        client_note: view.stage === "brief" ? note.trim() || undefined : undefined,
+        client_note: view.stage === "areas" ? note.trim() || undefined : undefined,
       })
+      // Closed only once it has landed, so the dialog's own spinner covers
+      // the request. Closing first left the client watching an unchanged page
+      // with no sign anything was happening.
+      setConfirmSend(false)
       setView(next)
       setJustSent(true)
     } catch (err) {
@@ -338,12 +343,16 @@ export default function ClientSharePage({
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">
             {view.stage === "questionnaire"
               ? "A few questions about the year ahead"
-              : "Review the strategic direction"}
+              : view.stage === "brief"
+                ? "Review the strategic brief"
+                : "Review the areas of focus"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {view.stage === "questionnaire"
               ? "Your answers shape the strategic brief for this annual report."
-              : "Read through the brief, the areas of focus and the concept messages. Edit anything that isn't right."}
+              : view.stage === "brief"
+                ? "This is the direction for the whole report. Edit anything that isn't right — everything else is written from it."
+                : "Each area has its concept message beneath it. Edit anything that isn't right."}
           </p>
         </div>
 
@@ -537,25 +546,48 @@ export default function ClientSharePage({
             reader to reconstruct a pairing nothing on screen states — and it is
             the pairing, not either half, that the primary/secondary choice is
             actually about. */}
+        {/* The brief gate: this and nothing else. Everything downstream is
+            written FROM it, once Spark approves what the client sends back,
+            so showing that work here would be asking them to sign off on a
+            brief while the consequences of the old one sat underneath it. */}
         {view.stage === "brief" && (
+          <section>
+            {editable ? (
+              <>
+                <Textarea
+                  value={brief}
+                  onChange={(e) => setBrief(e.target.value)}
+                  rows={18}
+                  className="text-sm leading-relaxed"
+                />
+                {!brief.trim() && (
+                  <p className="mt-2 text-sm font-medium text-amber-700">
+                    The brief can&apos;t be empty.
+                  </p>
+                )}
+              </>
+            ) : (
+              /* Once it is sent there is nothing to type into, so it stops
+                 looking like somewhere to type. A read-only textarea keeps the
+                 focus ring, the inner scrollbar and the fixed height of a form
+                 field, which reads as "broken input" rather than "finished".
+                 Rendered as plain text, not markdown: this is the client's own
+                 wording, and running it through a renderer would both restyle
+                 what they wrote and put untrusted content through an HTML
+                 path. */
+              <div className="whitespace-pre-line rounded-2xl border border-border bg-card p-5 text-sm leading-relaxed text-foreground shadow-sm">
+                {brief}
+              </div>
+            )}
+          </section>
+        )}
+
+        {view.stage === "areas" && (
           <div className="space-y-8">
             <section>
-              <h2 className="mb-2 text-lg font-semibold text-foreground">Strategic brief</h2>
-              <Textarea
-                value={brief}
-                readOnly={!editable}
-                onChange={(e) => setBrief(e.target.value)}
-                rows={14}
-                className="text-sm leading-relaxed"
-              />
-            </section>
-
-            <section>
-              <h2 className="text-lg font-semibold text-foreground">Areas of focus</h2>
               <p className="mb-3 text-sm text-muted-foreground">
-                Each area has its concept message beneath it. Mark{" "}
-                {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} of them as used, and pick
-                exactly one to lead the report.
+                Mark {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} of them as used, and
+                pick exactly one to lead the report.
               </p>
               <div className="space-y-4">
                 {areas.map((area, i) => (
@@ -575,9 +607,14 @@ export default function ClientSharePage({
                         prev.map((m, k) => (k === i ? { ...m, ...next } : m)),
                       )
                     }
-                    // Theirs to remove; Spark's are dropped with "Not used".
+                    // Any area, on the first round — the same rule Spark has.
+                    // With five on the page there is no room to add, so
+                    // deleting one is the only way to make room for their own.
+                    // Never below two: the server refuses a smaller set.
                     onRemove={
-                      canAdd && i >= sparkAreaCount ? () => removeArea(i) : undefined
+                      canAdd && areas.length > MIN_AREAS_ON_PAGE
+                        ? () => removeArea(i)
+                        : undefined
                     }
                     // One choice, two records: the area says which areas are
                     // used, the message says which concept leads. They must not
@@ -602,6 +639,17 @@ export default function ClientSharePage({
                   />
                 ))}
               </div>
+              {/* Says how to make room rather than leaving a greyed-out button
+                  with its reason hidden in a tooltip. */}
+              {canAdd && areas.length >= MAX_AREAS_ON_PAGE && (
+                <p className="mt-4 flex items-start gap-1.5 text-xs font-medium text-indigo-700">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {MAX_AREAS_ON_PAGE} is the maximum. To add your own, delete one
+                    first.
+                  </span>
+                </p>
+              )}
               {canAdd && (
                 <Button
                   type="button"
@@ -613,7 +661,7 @@ export default function ClientSharePage({
                       ? `At most ${MAX_AREAS_ON_PAGE} areas of focus on the page`
                       : "Add an area of your own and write its concept message"
                   }
-                  className="mt-4"
+                  className="mt-2"
                 >
                   <Plus className="h-4 w-4" /> Add area of focus
                 </Button>
@@ -633,9 +681,11 @@ export default function ClientSharePage({
           </div>
         )}
 
-        {/* Their note on the bundle. Editing the copy says what they'd write;
-            this is for "I'm uneasy about area 2" without rewriting it. */}
-        {editable && view.stage === "brief" && (
+        {/* Their note on the areas. Editing the copy says what they'd write;
+            this is for "I'm uneasy about area 2" without rewriting it. The
+            brief gate has no note: there is one thing on that page, and the
+            text box IS the way to say what they think of it. */}
+        {editable && view.stage === "areas" && (
           <div className="mt-8 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <label className="text-sm font-semibold text-foreground">
               Anything you&apos;d like to add?{" "}
@@ -673,7 +723,12 @@ export default function ClientSharePage({
                 }
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
-                <Send className="h-4 w-4" /> Send response
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {submitting ? "Sending…" : "Send response"}
               </Button>
             </div>
           </div>
@@ -692,7 +747,9 @@ export default function ClientSharePage({
         <DialogDescription>
           {view.stage === "questionnaire"
             ? "You won't be able to change your answers afterwards — if something needs correcting later, ask your Spark contact to send it back to you."
-            : "You won't be able to change it afterwards — ask your Spark contact to send it back if something needs correcting."}
+            : view.stage === "brief"
+              ? "You won't be able to change it afterwards. Once the Spark team approve it, the areas of focus for the report are written from this brief — so it's worth a last read."
+              : "You won't be able to change it afterwards — ask your Spark contact to send it back if something needs correcting."}
         </DialogDescription>
         <div className="flex justify-end gap-2 pt-2">
           <Button
@@ -704,7 +761,7 @@ export default function ClientSharePage({
           </Button>
           <Button
             disabled={submitting}
-            onClick={() => { setConfirmSend(false); submit() }}
+            onClick={submit}
             className="bg-indigo-600 text-white hover:bg-indigo-700"
           >
             {submitting ? (

@@ -24,7 +24,7 @@ import type { ShareRequest, ShareStage } from "@/lib/api/share"
 import { driftSinceResponse, type CurrentBundle } from "@/lib/shareDrift"
 import { ClientDriftNotice } from "@/components/pm/ClientDriftNotice"
 import {
-  AlertTriangle, BellRing, Check, CheckCircle2, Clock, Copy, Loader2, Mail,
+  AlertTriangle, BellRing, Check, CheckCircle2, Clock, Copy, Info, Loader2, Mail,
   Send, Undo2,
 } from "lucide-react"
 
@@ -47,8 +47,14 @@ const STAGE_COPY: Record<ShareStage, { noun: string; blurb: string }> = {
     blurb: "The client answers these questions — their answers shape the brief.",
   },
   brief: {
-    noun: "brief, areas of focus and concept messages",
-    blurb: "The client reviews and edits all three together, then sends them back.",
+    noun: "strategic brief",
+    blurb:
+      "The client reviews and edits the brief on its own. Approving what they " +
+      "send back is what writes the areas of focus and concept messages from it.",
+  },
+  areas: {
+    noun: "areas of focus and concept messages",
+    blurb: "The client reviews and edits these together, then sends them back.",
   },
 }
 
@@ -66,6 +72,24 @@ const fmt = (iso?: string | null) =>
 function remindedToday(share: ShareRequest) {
   if (!share.last_reminded_at) return false
   return Date.now() - new Date(share.last_reminded_at).getTime() < 24 * 60 * 60 * 1000
+}
+
+/** When the next reminder becomes allowed: 24h after the last one.
+ *
+ *  Rolling, not a calendar day — one sent at 11pm blocks until 11pm tomorrow,
+ *  which "sent today" quietly misstates. Saying the actual time is the only
+ *  version a PM can plan around. */
+function nextReminderAt(share: ShareRequest) {
+  if (!share.last_reminded_at) return null
+  const when = new Date(
+    new Date(share.last_reminded_at).getTime() + 24 * 60 * 60 * 1000,
+  )
+  const today = new Date().toDateString() === when.toDateString()
+  const time = when.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })
+  return today ? time : `${time} on ${fmt(when.toISOString())}`
 }
 
 /** Button label and colour follow the state — this is the only bit of the
@@ -98,10 +122,15 @@ export function ShareWithClientButton({
   stage,
   share,
   current,
+  suggestedEmail,
 }: {
   cycleId: string
   stage: ShareStage
   share?: ShareRequest | null
+  /** The address an earlier gate on this cycle was sent to. Filled into the
+   *  box so Spark does not retype an address they already sent to — it is the
+   *  same client, and it stays editable for the case where it isn't. */
+  suggestedEmail?: string | null
   /** What is on the cycle right now. Given, the dialog can tell you when you
    *  are about to sign off something the client never saw. */
   current?: CurrentBundle
@@ -110,7 +139,11 @@ export function ShareWithClientButton({
   const isSpark = user?.role === "spark_internal"
 
   const [open, setOpen] = useState(false)
-  const [email, setEmail] = useState("")
+  // null means untouched, so the earlier gate's address shows through until
+  // Spark types. Derived rather than copied in by effect: an effect that
+  // writes state would also type the address back in after they cleared it.
+  const [email, setEmail] = useState<string | null>(null)
+  const emailValue = email ?? suggestedEmail ?? ""
   const [sendBackNote, setSendBackNote] = useState("")
   const [sendBackOpen, setSendBackOpen] = useState(false)
 
@@ -154,7 +187,7 @@ export function ShareWithClientButton({
 
   const send = () =>
     createShare.mutate(
-      { stage, client_email: (share?.client_email ?? email).trim() },
+      { stage, client_email: (share?.client_email ?? emailValue).trim() },
       { onSuccess: () => { setConfirm(null); setOpen(false) } },
     )
 
@@ -209,7 +242,7 @@ export function ShareWithClientButton({
                 <label className="text-sm font-medium text-foreground">Client email</label>
                 <Input
                   type="email"
-                  value={email}
+                  value={emailValue}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="client@company.com"
                   className="text-sm"
@@ -224,7 +257,7 @@ export function ShareWithClientButton({
                 </Button>
                 <Button
                   type="button"
-                  disabled={busy || !email.includes("@")}
+                  disabled={busy || !emailValue.includes("@")}
                   onClick={() => setConfirm("send")}
                   className="bg-indigo-600 text-white hover:bg-indigo-700"
                 >
@@ -277,6 +310,18 @@ export function ShareWithClientButton({
                   <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     We couldn&apos;t email this — copy the link and send it yourself.
+                  </p>
+                )}
+                {/* Why the reminder button is dead, and until when. The tooltip
+                    that used to carry this is unreachable on a touch screen,
+                    and "today" misstates a rolling 24h window. */}
+                {share.status === "pending" && remindedToday(share) && (
+                  <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-indigo-700">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      One reminder a day — you can send another after{" "}
+                      {nextReminderAt(share)}.
+                    </span>
                   </p>
                 )}
               </div>
@@ -346,8 +391,18 @@ export function ShareWithClientButton({
                     }
                     onClick={() => escalateShare.mutate(stage)}
                   >
-                    <BellRing className="h-4 w-4" />
-                    {remindedToday(share) ? "Reminder sent today" : "Send reminder"}
+                    {/* It goes through our mailer to Centriyon's, so there is a
+                        real wait. Disabling alone just looks broken. */}
+                    {escalateShare.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <BellRing className="h-4 w-4" />
+                    )}
+                    {escalateShare.isPending
+                      ? "Sending reminder…"
+                      : remindedToday(share)
+                        ? "Reminder sent today"
+                        : "Send reminder"}
                   </Button>
                 )}
                 {share.status === "responded" && !sendBackOpen && (
@@ -404,6 +459,7 @@ export function ShareWithClientButton({
                   </Button>
                 )}
               </div>
+
             </div>
           )}
         </DialogContent>
@@ -427,10 +483,21 @@ export function ShareWithClientButton({
                 <>
                   They&apos;ll get an email with a private link to{" "}
                   <span className="font-medium text-foreground">
-                    {(share?.client_email ?? email).trim() || "the client"}
+                    {(share?.client_email ?? emailValue).trim() || "the client"}
                   </span>
                   . From this point you can&apos;t add to the set or refine it with
                   AI — only reword what&apos;s there.
+                </>
+              ) : stage === "brief" ? (
+                <>
+                  This signs off the brief, then writes the areas of focus and
+                  concept messages from it —{" "}
+                  <span className="font-medium text-foreground">
+                    about a minute
+                  </span>
+                  , so the button will sit and think. Afterwards the brief is
+                  locked for good: it can&apos;t be edited or sent out again, so
+                  send it back instead if anything still needs their eyes.
                 </>
               ) : (
                 <>
@@ -472,7 +539,13 @@ export function ShareWithClientButton({
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              {confirm === "send" ? "Send it" : changed ? "Approve anyway" : "Approve"}
+              {confirm === "send"
+                ? "Send it"
+                : approveShare.isPending && stage === "brief"
+                  ? "Writing the areas of focus…"
+                  : changed
+                    ? "Approve anyway"
+                    : "Approve"}
             </Button>
           </div>
         </DialogContent>

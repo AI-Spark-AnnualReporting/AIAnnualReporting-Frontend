@@ -33,9 +33,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  ArrowLeft, ArrowRight, CheckCircle2, Clock, Loader2, Plus, ShieldAlert,
-  Sparkles, Undo2,
+  ArrowLeft, ArrowRight, CheckCircle2, Clock, Download, FileText, Loader2,
+  Plus, ShieldAlert, Sparkles, Undo2,
 } from "lucide-react"
+import { documentsApi } from "@/lib/api/documents"
 
 /* ────────────────────────────────────────────────────────────────────────────
    STRATEGIC BRIEF & THEMES — Step 1: Questionnaire
@@ -84,6 +85,22 @@ export default function KickoffQuestionnairePage({
   const sendBackShare = useSendBackShare(id)
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [sendBackNote, setSendBackNote] = useState("")
+  const [downloading, setDownloading] = useState(false)
+
+  /** Open the client's attachment. The signed URL expires, so it is fetched
+   *  fresh on each click rather than held on the share. */
+  const downloadAttachment = async () => {
+    if (!share?.document_id) return
+    setDownloading(true)
+    try {
+      const { download_url } = await documentsApi.getDownloadUrl(share.document_id)
+      window.open(download_url, "_blank", "noopener,noreferrer")
+    } catch {
+      toast.error("Couldn't open that file. Try again in a moment.")
+    } finally {
+      setDownloading(false)
+    }
+  }
   // The client sign-off belongs to spark_internal: they are the only role
   // that can send a link, approve a response or chase one. For everyone else
   // the share simply does not exist here — no button, and none of the locks
@@ -283,7 +300,11 @@ export default function KickoffQuestionnairePage({
         </div>
 
         {/* ── Stepper ── */}
-        <KickoffStepper current={1} />
+        {/* Three steps only in Spark's flow, where the brief is signed off
+            before the areas of focus are written from it. Everyone else keeps
+            both on one screen, so showing a third here would promise a step
+            that never arrives. */}
+        <KickoffStepper current={1} steps={sparkFlow ? 3 : 2} />
 
         {/* ── Access error (403 / 404) ── */}
         {questionsError && (
@@ -451,9 +472,44 @@ export default function KickoffQuestionnairePage({
               </div>
             )}
 
-            {/* The strategic brief document is the CLIENT's to attach now —
-                it's their document, and they upload it on their own link
-                alongside the answers. Nothing to do here. */}
+            {/* The client attaches the strategic brief on their own link, so
+                there is no upload here. But it is not nothing to show: the
+                brief generator summarises this file as the first of its three
+                LLM calls, so approving these answers approves its influence
+                on the brief too. Read-only — if it is the wrong file, Send
+                back with a note and the client replaces it. */}
+            {share?.document_name && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 shadow-sm">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+                    <FileText className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">
+                      {share.document_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Your client attached this — it will guide the brief.
+                    </p>
+                  </div>
+                </div>
+                {share.document_id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={downloading}
+                    onClick={downloadAttachment}
+                  >
+                    {downloading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    Download
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

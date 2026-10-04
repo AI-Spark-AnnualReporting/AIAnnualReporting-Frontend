@@ -1,32 +1,26 @@
 "use client"
 
-import { use, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { PageLoader } from "@/components/ui/spinner"
+import { use } from "react"
+import { KickoffDirectionScreen } from "@/components/pm/kickoff-direction-screen"
 
 /**
- * The concept messages used to live here, on their own screen.
+ * Step 3 — the areas of focus and their concept messages.
  *
- * They don't any more: each message is written for one area of focus and now
- * sits inside that area's card on the Strategic Direction screen, written in
- * the same run as the brief. Splitting them across two screens meant the client
- * could only ever be shown half the work at a time.
+ * This route used to redirect here-to-there: the three parts were one bundle
+ * on step 2, so there was nothing of its own to show. The client sign-off
+ * split them in two -- the brief is approved first, and approving it is what
+ * writes these -- so the screen exists again, and old links land on the right
+ * thing rather than a redirect.
  *
- * This stays as a redirect rather than being deleted — the route is in browser
- * history, in notification deep links and in anything a PM has bookmarked, and
- * a dead link is a worse answer than the right page.
+ * Opening it before the brief is signed off sends you back to step 2: the
+ * areas genuinely do not exist yet, and a screen with nothing on it is a worse
+ * answer than being told why.
  */
-export default function ConceptMessagesRedirect({
+export default function AreasOfFocusPage({
   params,
 }: {
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const router = useRouter()
-
-  useEffect(() => {
-    router.replace(`/pm/cycles/${id}/kickoff/review`)
-  }, [id, router])
-
-  return <PageLoader />
+  return <KickoffDirectionScreen id={id} step={3} />
 }

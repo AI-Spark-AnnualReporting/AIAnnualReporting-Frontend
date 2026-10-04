@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { shareApi, ShareStage } from "@/lib/api/share"
 
-/** Both gates' state for one cycle.
+/** Every gate's state for one cycle.
  *
  *  Polled, not static: the client submits from their own browser with nothing
  *  to tell this one, so a PM sitting on the kickoff screen would otherwise stare
@@ -44,7 +44,8 @@ export function useApproveShare(cycleId: string) {
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId, "shares"] })
       // The gate opening changes what the cycle screens allow, so the cycle
-      // itself is refetched too.
+      // itself is refetched too. On the brief gate it has also just gained
+      // its areas of focus and concept messages, which live on the cycle.
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
       toast.success(result.message)
     },
@@ -77,5 +78,23 @@ export function useEscalateShare(cycleId: string) {
     },
     onError: (err: { message?: string }) =>
       toast.error(err?.message || "Couldn't send the reminder."),
+  })
+}
+
+/** Rebuild the areas of focus from the signed-off brief.
+ *
+ *  Only reachable when approving the brief failed to produce them. The
+ *  approval has already happened and cannot be repeated, so this is the PM's
+ *  only way off an empty card. */
+export function useGenerateAreas(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => shareApi.generateAreas(cycleId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
+      toast.success("Areas of focus generated from the approved brief.")
+    },
+    onError: (err: { message?: string }) =>
+      toast.error(err?.message || "Couldn't generate the areas of focus."),
   })
 }

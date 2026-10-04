@@ -88,6 +88,8 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
       <div className="fixed inset-0 z-[1400] overflow-y-auto">
         <AiLoadingScreen
           title="Assembling your report"
+          // No bar, like every other loader: it was a timer, not real progress.
+          showProgress={false}
           subtitle="Pulling every written section together and writing the executive summary."
           milestones={ASSEMBLE_MILESTONES}
           tips={ASSEMBLE_TIPS}

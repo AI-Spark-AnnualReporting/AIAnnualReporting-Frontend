@@ -16,14 +16,17 @@ export interface AreaOfFocus {
 export const MIN_SELECTED_AREAS = 2
 export const MAX_SELECTED_AREAS = 5
 
-/** How many areas may sit on the page at once — not the same limit.
+/** How many areas may sit on the page at all — a separate rule from how many
+ *  are MARKED USED (MIN/MAX_SELECTED_AREAS).
  *
- *  MAX_SELECTED_AREAS is how many may be MARKED USED, and the server enforces
- *  it. This one only governs the Add button. They used to be the same number,
- *  which meant a cycle (generation always writes 5) had no room for anyone to
- *  add their own, on either side. The extras sit as "Not used" and are already
- *  kept out of the report. */
-export const MAX_AREAS_ON_PAGE = 8
+ *  2 to 5, for every role. The maximum used to be 8, to leave room beside the
+ *  5 that generation writes; it was brought down to 5 deliberately, so every
+ *  cycle now starts full and adding an area means removing one first.
+ *
+ *  The server enforces both bounds in save_brief (app/schemas/brief.py
+ *  MIN/MAX_AREAS_ON_PAGE), so these only keep the buttons honest. */
+export const MIN_AREAS_ON_PAGE = 2
+export const MAX_AREAS_ON_PAGE = 5
 
 /**
  * Mirrors the server's validator (app/schemas/brief.py — `validate_areas`).
