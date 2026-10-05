@@ -1,14 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { Lock, ShieldAlert, Sparkles, Star, Target } from "lucide-react"
+import { Lock, ShieldAlert, Sparkles } from "lucide-react"
 import { useConceptMessages } from "@/hooks/useSessions"
-import { primaryIndexOf } from "@/lib/conceptMessages"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { ProsePreview } from "@/components/ui/prose-preview"
-import type { ConceptMessage } from "@/lib/api/pm"
-import { cn } from "@/lib/utils"
+import { AreaConceptCard } from "@/components/report/AreaConceptCard"
+import type { AreaOfFocus, ConceptMessage } from "@/lib/api/pm"
 
 /** A real failure, as opposed to "nothing has been written yet". */
 export function ErrorPanel({ title, body }: { title: string; body: string }) {
@@ -23,145 +21,86 @@ export function ErrorPanel({ title, body }: { title: string; body: string }) {
   )
 }
 
-/* The read half of ConceptMessageCard. That component can't be reused here —
-   it takes five mutation callbacks — so this keeps its layout and drops the
-   controls, with the editable radio replaced by a static badge.
-
-   Every message renders in full — primary and secondary alike. Both steer the
-   section writer, so hiding either one behind a click would leave the PM
-   confirming a narrative they haven't read. */
-function ConceptCard({
-  index,
-  message,
-  isPrimary,
-  isRtl,
-}: {
-  index: number
-  message: ConceptMessage
-  isPrimary: boolean
-  isRtl: boolean
-}) {
-  const dir = isRtl ? "rtl" : "ltr"
-  const slogan = message.area_slogan?.trim() ?? ""
-  const title = message.title.trim()
-  const hasSlogan = slogan.length > 0
-  // The slogan heads the card; the title only moves into the box when there is
-  // a slogan above it, so it is never printed twice.
-  const heading = hasSlogan ? slogan : title
-  const bodyTitle = hasSlogan ? title : ""
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border p-4",
-        isPrimary
-          ? "border-indigo-500 bg-indigo-50/60 ring-1 ring-indigo-300"
-          : "border-indigo-100 bg-indigo-50/40",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-semibold text-indigo-600">
-          {index + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              {/* The area of focus is what the card is about, so it heads it —
-                  label and slogan on one bold line, so the area is readable at a
-                  glance rather than sitting in small grey text. The message's
-                  own title sits with the copy it titles, inside the box below.
-
-                  A hand-added message has no slogan to link back to, so there
-                  the title keeps the heading slot — otherwise the card would
-                  have no heading at all. */}
-              <h4
-                dir={dir}
-                className={cn(
-                  "flex min-w-0 items-center gap-1.5 text-base font-bold text-indigo-700",
-                  isRtl && "flex-row-reverse text-right",
-                )}
-                title={heading || undefined}
-              >
-                <Target className="h-4 w-4 shrink-0" />
-                {heading ? (
-                  <span className="truncate">
-                    {hasSlogan ? `Area of focus: ${slogan}` : title}
-                  </span>
-                ) : (
-                  <span className="font-normal italic text-muted-foreground">Untitled message</span>
-                )}
-              </h4>
-            </div>
-            <span
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                isPrimary ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600",
-              )}
-            >
-              {isPrimary && <Star className="h-2.5 w-2.5 fill-current" />}
-              {isPrimary ? "primary" : "secondary"}
-            </span>
-          </div>
-
-          <div className="mt-3 rounded-lg border bg-white p-4">
-            {bodyTitle && (
-              // Centred: it titles the copy beneath it, so it reads as a
-              // heading over the block rather than as its first line. No RTL
-              // variant — centring is direction-neutral.
-              <p dir={dir} className="mb-2 text-center text-sm font-bold text-slate-900">
-                {bodyTitle}
-              </p>
-            )}
-            {message.description.trim() ? (
-              // Three paragraphs of 100-120 words, split on blank lines.
-              <ProsePreview content={message.description} className="prose-indigo" dir={dir} />
-            ) : (
-              <p className="text-sm italic text-muted-foreground">
-                No description was written for this message.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+/** One area of focus with the concept message written from it. */
+interface AreaPair {
+  area: AreaOfFocus
+  message?: ConceptMessage
 }
 
 /**
- * Read-only presentation of the cycle's concept messages — the narrative
- * written per area of focus, primary first.
+ * Pair message N with area N — position is the only link between the two
+ * lists. A message past the end of the areas (added by hand) gets a stand-in
+ * area built from its own label, so it is still shown.
+ */
+function pairAreasWithMessages(areas: AreaOfFocus[], messages: ConceptMessage[]): AreaPair[] {
+  const pairs: AreaPair[] = []
+  const count = Math.max(areas.length, messages.length)
+  for (let i = 0; i < count; i++) {
+    const message = messages[i]
+    const area = areas[i] ?? {
+      slogan: message?.area_slogan ?? message?.title ?? "",
+      sub_slogans: [],
+      role: message?.role ?? "secondary",
+    }
+    pairs.push({ area, message })
+  }
+  return pairs
+}
+
+/**
+ * The pairs that go into the report, primary first.
  *
- * Nothing is editable here, same as the areas-of-focus card it sits beside:
- * these are written on the kickoff wizard's Concept Messages step, which stays
- * the single edit surface. This one only has to let the PM read what the report
- * is about to be built from.
+ * Same rule as the backend's report_service._area_is_used: an area marked
+ * "none" is dropped, and an area with no role yet counts as used — that is a
+ * cycle where nobody has chosen, so everything is still in play.
+ */
+function usedPairsPrimaryFirst(pairs: AreaPair[]): AreaPair[] {
+  const used = pairs.filter((p) => p.area.role !== "none")
+  const primary = used.filter((p) => p.area.role === "primary")
+  const rest = used.filter((p) => p.area.role !== "primary")
+  return [...primary, ...rest]
+}
+
+/** Read-only, so the card's edit callbacks have nothing to do. */
+const noop = () => {}
+
+/**
+ * Read-only view of the cycle's areas of focus, each with its concept message
+ * in the same card — only the areas the PM/client marked primary or secondary,
+ * primary first.
  *
- * Fetches for itself so both the plan step and the brief page mount it as a
- * one-liner rather than threading query state down.
+ * Nothing is editable here: both are written on the kickoff wizard, which
+ * stays the single edit surface. Reuses the wizard's AreaConceptCard in its
+ * read-only mode so the pairing looks the same everywhere.
+ *
+ * Fetches the messages for itself so both the plan step and the brief page
+ * mount it as a one-liner.
  */
 export function ConceptMessagesSummary({
   cycleId,
+  areas,
   isRtl,
   locked,
 }: {
   cycleId: string
+  areas: AreaOfFocus[]
   isRtl?: boolean
   /** Locked plan → show the lock chip; presentation is identical either way. */
   locked?: boolean
 }) {
   const { data, isLoading, error } = useConceptMessages(cycleId)
   const messages = data?.concept_messages ?? []
-  const primaryIndex = primaryIndexOf(messages)
+  const pairs = usedPairsPrimaryFirst(pairAreasWithMessages(areas, messages))
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Concept Messages
+            Areas of Focus &amp; Concept Messages
           </span>
           <span className="text-xs text-muted-foreground">
-            The narrative behind each area of focus · primary first
+            The areas chosen for this report, each with its narrative · primary first
           </span>
         </div>
         {locked && (
@@ -183,30 +122,35 @@ export function ConceptMessagesSummary({
           title="Couldn't load the concept messages"
           body="The request failed. Refresh the page to try again."
         />
-      ) : messages.length === 0 ? (
+      ) : pairs.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-muted p-10 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100">
             <Sparkles className="h-5 w-5 text-indigo-600" />
           </div>
-          <p className="font-semibold text-foreground">No concept messages yet</p>
+          <p className="font-semibold text-foreground">No areas of focus or concept messages yet</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Nothing has been written for this cycle, or the last generation came back empty.
-            They&apos;re written and edited on the kickoff wizard&apos;s Concept Messages step.
+            Nothing has been chosen for this cycle yet. Areas and their concept messages
+            are written and picked on the kickoff wizard.
           </p>
           <Link href={`/pm/cycles/${cycleId}/kickoff/review`}>
-            <Button variant="outline">Go to Concept Messages</Button>
+            <Button variant="outline">Go to Areas of Focus</Button>
           </Link>
         </div>
       ) : (
         <div className="space-y-3">
-          {messages.map((m, i) => (
-            <ConceptCard
-              key={i}
-              index={i}
-              message={m}
-              isPrimary={i === primaryIndex}
-              isRtl={!!isRtl}
-            />
+          {pairs.map((p, i) => (
+            <div key={i} dir={isRtl ? "rtl" : "ltr"}>
+              <AreaConceptCard
+                index={i}
+                area={p.area}
+                message={p.message}
+                roleGroup={`summary-${cycleId}`}
+                readOnly
+                onAreaChange={noop}
+                onMessageChange={noop}
+                onRoleChange={noop}
+              />
+            </div>
           ))}
         </div>
       )}

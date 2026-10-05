@@ -1090,7 +1090,10 @@ export const pmApi = {
     return data
   },
 
-  // 120s — backend writes exec summary + assembles. refresh=true regenerates.
+  // 5 min — backend writes the exec summary, checks every section's title,
+  // embeds the report and extracts its figures, one AI call after another. A
+  // long report ran past the old 120s; the browser then gave up while the
+  // server carried on and saved the report anyway. refresh=true regenerates.
   assembleReport: async (
     cycleId: string,
     refresh = false,
@@ -1100,9 +1103,24 @@ export const pmApi = {
     >(
       `/pm/cycles/${cycleId}/assemble${refresh ? "?refresh=true" : ""}`,
       undefined,
-      { timeout: 120000 },
+      { timeout: 300000 },
     )
     return (data as { report?: FinalReport }).report ?? (data as FinalReport)
+  },
+
+  // Start assembling in the background — answers in about a second, so the
+  // normal timeout is plenty. The builder then polls getFinalReport until a
+  // newer report appears. already_running = this server was already
+  // assembling the cycle (a double click) and nothing new was started.
+  startAssemble: async (
+    cycleId: string,
+    refresh = false,
+  ): Promise<{ status: "running"; already_running: boolean }> => {
+    const params = refresh ? "background=true&refresh=true" : "background=true"
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/assemble?${params}`,
+    )
+    return data
   },
 
   getFinalReport: async (cycleId: string): Promise<FinalReport> => {
