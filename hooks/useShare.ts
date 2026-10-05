@@ -41,13 +41,14 @@ export function useApproveShare(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (stage: ShareStage) => shareApi.approve(cycleId, stage),
-    onSuccess: (result) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId, "shares"] })
       // The gate opening changes what the cycle screens allow, so the cycle
       // itself is refetched too. On the brief gate it has also just gained
       // its areas of focus and concept messages, which live on the cycle.
+      // No success toast: every approve is followed straight away by a
+      // full-screen loader, which already says it worked.
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
-      toast.success(result.message)
     },
     onError: (err: { message?: string }) =>
       toast.error(err?.message || "Couldn't approve the client's response."),
