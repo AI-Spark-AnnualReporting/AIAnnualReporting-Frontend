@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { RouteGuard } from "@/components/auth/RouteGuard"
+import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
@@ -84,6 +85,11 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const approvalQuery = useReportApproval(cycleId)
   const approval = approvalQuery.data
   const approve = useApproveReport(cycleId)
+  // Spark doesn't send reports out for review, so the rail drops the whole
+  // "Review & approval" card for them — without the share button it only
+  // said "Not yet shared for review."
+  const { user } = useAuth()
+  const isSpark = user?.role === "spark_internal"
 
   const [reassembleOpen, setReassembleOpen] = useState(false)
   const [designOpen, setDesignOpen] = useState(false)
@@ -297,12 +303,14 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
             }}
           >
             <ReportStatusCard status={approval.status} approvedAt={approval.approved_at} />
-            <ReportHubPanel
-              reportId={approval.report_id}
-              showStatus={false}
-              readOnly={locked}
-              onChanged={approvalQuery.refetch}
-            />
+            {!isSpark && (
+              <ReportHubPanel
+                reportId={approval.report_id}
+                showStatus={false}
+                readOnly={locked}
+                onChanged={approvalQuery.refetch}
+              />
+            )}
           </aside>
         )}
       </div>
