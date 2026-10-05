@@ -38,8 +38,12 @@ export function ShareReportModal({
   ownerUserId,
   onClose,
   onShared,
+  hasValidation = false,
 }: {
   reportId: string
+  // Passed down to the attached-report card, which says so before you ask
+  // someone to sign the report off.
+  hasValidation?: boolean
   // The report being shared — drives the "Attached report" block.
   report?: ThreadReport
   // The author's usr_ id. They cannot review their own report (the backend
@@ -196,7 +200,7 @@ export function ShareReportModal({
                 <>
                   <div style={SECTION_LABEL}>ATTACHED REPORT</div>
                   <div style={{ marginBottom: 20 }}>
-                    <AttachedReportCard report={report} disabled />
+                    <AttachedReportCard report={report} disabled hasValidation={hasValidation} />
                   </div>
                 </>
               )}

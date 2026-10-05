@@ -130,6 +130,8 @@ export const QUERY_KEYS = {
   PM_DASHBOARD: ["pm", "dashboard"],
   PM_CYCLE: (id: string) => ["pm", "cycle", id],
   BUILD_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "readiness"],
+  DRAFT_FINDINGS: (cycleId: string) => ["pm", "cycle", cycleId, "draft-findings"],
+  DEPARTMENT_CLAIMS: (cycleId: string) => ["pm", "cycle", cycleId, "department-claims"],
   PM_CYCLE_SECTIONS: (cycleId: string) => ["pm", "cycle", cycleId, "sections"],
   PM_CYCLE_PLAN: (cycleId: string) => ["pm", "cycle", cycleId, "plan"],
   PM_AVAILABLE_OPTIONAL: (cycleId: string) => ["pm", "cycle", cycleId, "optional-available"],

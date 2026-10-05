@@ -12,6 +12,7 @@ import {
   type ReviewSection,
   type ReviewViewResponse,
 } from "@/lib/api/communications"
+import { ValidationPanel } from "@/components/report/ValidationPanel"
 import { dirOf } from "@/lib/lang"
 import { statusPill } from "@/lib/report-status"
 import {
@@ -191,6 +192,9 @@ export function ReviewerView({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<ReviewViewResponse | null>(null)
+  // Which pane the reviewer is on. Local to the modal - it is an overlay, not
+  // a route, so there is no URL to keep in step.
+  const [tab, setTab] = useState<"report" | "validation">("report")
 
   // Which section's composer is open. `null` = the report-level composer.
   const [composerFor, setComposerFor] = useState<string | null | undefined>(undefined)
@@ -489,6 +493,10 @@ export function ReviewerView({
     ? allSections.filter((s) => !/cover/i.test(s.id) && !/toc/i.test(s.id))
     : allSections
 
+  // Null for a quarterly or earnings review, a report never validated, and a
+  // validation the server judged stale.
+  const hasValidation = !!data?.validation
+
   return (
     <div style={{ ...OVERLAY, alignItems: "stretch", justifyContent: "stretch", padding: 10 }} onClick={onClose}>
       <div
@@ -606,6 +614,37 @@ export function ReviewerView({
           >
             {/* Report + sections */}
             <div style={{ overflowY: "auto", padding: "18px 24px 24px", background: "#F4F5FA", minWidth: 0 }}>
+              {/* Tabs only when there is a second thing to show. A tab that
+                  opens onto nothing is worse than no tab - and only annual
+                  reports are validated, so most reviews have one pane. */}
+              {hasValidation && (
+                <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+                  {(["report", "validation"] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setTab(key)}
+                      style={{
+                        border: "none",
+                        cursor: "pointer",
+                        borderRadius: 9,
+                        padding: "7px 14px",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        letterSpacing: "-.1px",
+                        background: tab === key ? "#fff" : "transparent",
+                        color: tab === key ? "#1A1D2E" : "#8890AE",
+                        boxShadow: tab === key ? "0 1px 2px rgba(26,29,46,.08)" : "none",
+                      }}
+                    >
+                      {key === "report" ? "Report" : "Validation"}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {tab === "report" && (
+              <>
               {/* Reviewing instructions, so only where a review is happening.
                   The exception is the removal notice: someone reading a thread
                   they were taken out of needs to know why it is read-only. */}
@@ -876,6 +915,18 @@ export function ReviewerView({
                   </div>
                 )}
               </div>
+              )}
+              </>
+              )}
+
+              {/* The panel only. The statement is a summary of the same
+                  numbers the panel opens with, and the reviewer has no use for
+                  a second copy of them - it is written for the board, and the
+                  board reads it in the printed report. */}
+              {tab === "validation" && data?.validation && (
+                <div style={{ maxWidth: 940, margin: "0 auto" }}>
+                  <ValidationPanel validation={data.validation} />
+                </div>
               )}
             </div>
 

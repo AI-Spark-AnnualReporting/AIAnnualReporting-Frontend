@@ -305,6 +305,14 @@ export interface FinalReport {
   // through the last sub-heading). Optional — absent on older backends, in
   // which case the preview falls back to the per-section `number` field.
   outline?: OutlineEntry[]
+  // The last Validate-report run, or null. The server drops it when it predates
+  // the current assembly, so what arrives here is always about this document.
+  validation?: import("@/lib/api/pm").ReportValidation | null
+  // True when a validation exists but describes an earlier assembly, so the
+  // server withheld it. Tells "re-assembled since it was checked" apart from
+  // "never checked" - both arrive with `validation` null, and only one of them
+  // means the Validation Report page has just dropped out of the export.
+  validation_stale?: boolean
 }
 
 // Readiness of a cycle to enter the Report Builder.
@@ -500,7 +508,8 @@ export interface Notification {
    *  the backend (NotificationResponse.related_type) but was never declared
    *  here. Needed to tell a report-readiness row and Centriton's board-index
    *  warning (identified by ("report", <report id>)) apart from any other
-   *  "alert". */
+   *  "alert". "session_claims" marks a failed fact read, which the bell turns
+   *  into a click-to-retry row instead of a link. */
   related_type?: string | null
   related_id?: string
   action_url?: string

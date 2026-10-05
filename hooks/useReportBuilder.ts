@@ -3,6 +3,11 @@ import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
+import type {
+  DepartmentClaimsResponse,
+  DraftFindingsResponse,
+  ResolveFindingPayload,
+} from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import {
   addSubsectionInstruction,
@@ -27,6 +32,237 @@ export function useBuildReadiness(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
   })
+}
+
+// The cycle's stored pre-build draft findings. Read-only — it never triggers
+// the check, so landing on the cycle page costs nothing. `checked_at: null`
+// means the PM has not run the check yet.
+export function useDraftFindings(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId),
+    queryFn: () => pmApi.draftFindings(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+// The PM's consent, and the end of the findings stage. Not optimistic: the
+// caller navigates into the builder on success, so a failure must stay put
+// rather than land him on a page he never actually unlocked.
+/**
+ * Validate the assembled report.
+ *
+ * Not optimistic and deliberately slow: the run is ~16 model calls. The result
+ * is stored server-side before the response is sent, so a dropped connection
+ * costs the response and never the work — the panel reads the stored validation
+ * on the next load either way.
+ */
+export function useValidateReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.validateReport(cycleId),
+    // No success toast. The result is a panel and a statement page on screen,
+    // both of which say more than a count in a corner, and the toast landed on
+    // top of them the moment they appeared.
+    onSuccess: () => {
+      // The assembled report now carries a validation, which changes both what
+      // the document prints and what the report page shows beneath it.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't validate the report")),
+  })
+}
+
+export function useLockDraftFindings(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.lockDraftFindings(cycleId),
+    onSuccess: (data) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), data)
+    },
+    onError: (err: MutationError) => {
+      // Already locked is not a failure — it is the state the PM was asking
+      // for. It happens when the page was rendered before an earlier lock
+      // (another tab, or a back-navigation to stale data). Refresh instead of
+      // blocking them, and let the caller carry on to the builder.
+      if (isAlreadyLocked(err)) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId) })
+        return
+      }
+      toast.error(readError(err, "Could not open the Report Builder"))
+    },
+  })
+}
+
+/** A lock refused because the cycle is already locked, rather than a real error. */
+export function isAlreadyLocked(err: unknown): boolean {
+  return (err as { response?: { status?: number } })?.response?.status === 409
+}
+
+// Run the checks. N+1 model calls server-side, so this is slow by design —
+// callers show a pending state rather than an optimistic one.
+export function useCheckDrafts(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.checkDrafts(cycleId),
+    onSuccess: (result: DraftFindingsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), result)
+      toast.success(
+        result.findings.length === 0
+          ? "No problems found in the department drafts"
+          : `${result.findings.length} thing${result.findings.length === 1 ? "" : "s"} to check`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't check the drafts")),
+  })
+}
+
+// What each approved department stated. Read-only — landing on the claims page
+// costs nothing. A department with an empty list and a null extracted_at never
+// had its claims read, which the page turns into its Extract-claims state.
+export function useDepartmentClaims(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId),
+    queryFn: () => pmApi.departmentClaims(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+// Fill in claims for departments missing them. One model call per missing
+// department, so it is slow by design — the caller shows a pending state.
+export function useExtractDepartmentClaims(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.extractDepartmentClaims(cycleId),
+    onSuccess: (result: DepartmentClaimsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId), result)
+      toast.success(
+        result.total_claims === 0
+          ? "Nothing could be read from the answers"
+          : `Read ${result.total_claims} facts`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't read the departments' answers")),
+  })
+}
+
+// Resolve one finding. "edited"/"removed" rewrite the department's approved
+// submission, so the session caches are invalidated too — the PM can open that
+// submission from the finding and would otherwise see the pre-correction text.
+// Shared mutation key for every resolve on a cycle, so the page can tell when
+// all writes have settled and do one reconciling refetch.
+export const FINDING_WRITE_KEY = (cycleId: string) => ["pm", "cycle", cycleId, "finding-write"]
+
+// Serialize the resolves for a cycle. The server does a read-modify-write on the
+// whole draft_findings JSONB, so two concurrent writes would lose one another's
+// change — working through a list of findings is exactly the case that produces
+// rapid successive clicks. Same approach as HOD question curation
+// (hooks/useHod.ts): the screen updates instantly, only the network sends queue.
+const cycleWriteChains = new Map<string, Promise<unknown>>()
+function serializeWrite<T>(cycleId: string, run: () => Promise<T>): Promise<T> {
+  const prev = cycleWriteChains.get(cycleId) ?? Promise.resolve()
+  const result = prev.then(run, run)
+  cycleWriteChains.set(cycleId, result.then(() => undefined, () => undefined))
+  return result
+}
+
+/* Resolve one finding.
+ *
+ * Optimistic rather than batched: the click lands on screen with no wait, and
+ * the write still goes immediately. Holding a session's worth of decisions in
+ * memory and saving once would lose the lot on a closed tab — and an edit
+ * rewrites the department's real submission, so the report text and the
+ * findings would disagree until the save.
+ *
+ * The server response is deliberately NOT written back per call: a queued write
+ * returning mid-sequence would overwrite the optimistic state of findings the
+ * PM has clicked since. The page reconciles once, when the queue drains. */
+export function useResolveFinding(cycleId: string) {
+  const qc = useQueryClient()
+  const key = QUERY_KEYS.DRAFT_FINDINGS(cycleId)
+
+  return useMutation({
+    mutationKey: FINDING_WRITE_KEY(cycleId),
+    mutationFn: ({
+      findingId,
+      payload,
+    }: {
+      findingId: string
+      payload: ResolveFindingPayload
+    }) => serializeWrite(cycleId, () => pmApi.resolveFinding(cycleId, findingId, payload)),
+
+    onMutate: async ({ findingId, payload }) => {
+      await qc.cancelQueries({ queryKey: key })
+      const prev = qc.getQueryData<DraftFindingsResponse>(key)
+      if (prev) qc.setQueryData<DraftFindingsResponse>(key, applyResolve(prev, findingId, payload))
+      return { prev }
+    },
+
+    // Put the previous state back, so a failed write does not leave the screen
+    // claiming a correction that never landed.
+    onError: (err: MutationError, _vars, context) => {
+      const prev = (context as { prev?: DraftFindingsResponse } | undefined)?.prev
+      if (prev) qc.setQueryData(key, prev)
+      toast.error(readError(err, "Couldn't save that change"))
+    },
+
+    onSettled: (_data, _err, variables) => {
+      if (variables.payload.action !== "accepted") {
+        qc.invalidateQueries({ queryKey: ["pm", "session"] })
+        qc.invalidateQueries({ queryKey: ["session"] })
+      }
+    },
+  })
+}
+
+/* The optimistic shape of one resolve, matching what the server will store.
+ *
+ * `undo` reopens and drops the resolution; everything else marks the finding
+ * and records who did it. The text this writes is only what the screen shows
+ * until the reconciling refetch — the server remains the source of truth. */
+function applyResolve(
+  prev: DraftFindingsResponse,
+  findingId: string,
+  payload: ResolveFindingPayload,
+): DraftFindingsResponse {
+  const now = new Date().toISOString()
+
+  const findings = prev.findings.map((f) => {
+    if (f.id !== findingId) return f
+    if (payload.action === "undo") {
+      return { ...f, status: "open" as const, resolution: null }
+    }
+    const status =
+      payload.action === "edited"
+        ? ("corrected" as const)
+        : payload.action === "removed"
+          ? ("removed" as const)
+          : ("accepted" as const)
+    const side = f.sides.find((sd) => sd.session_id === payload.session_id) ?? f.sides[0]
+    return {
+      ...f,
+      status,
+      resolution: {
+        session_id: payload.action === "accepted" ? null : (side?.session_id ?? null),
+        action: payload.action,
+        from: payload.action === "accepted" ? null : (side?.sentence ?? null),
+        to: payload.action === "edited" ? (payload.sentence ?? null) : null,
+        by: "",
+        at: now,
+      },
+    }
+  })
+
+  return {
+    ...prev,
+    findings,
+    open_count: findings.filter((f) => f.status === "open").length,
+  }
 }
 
 // Resolved report sections for a cycle (PM-access).
@@ -489,7 +725,18 @@ export function useAssembleReport(cycleId: string) {
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-      toast.success("Report assembled")
+      toast.success(
+        report.validation_stale
+          ? "Report assembled — validate it again"
+          : "Report assembled",
+        report.validation_stale
+          ? {
+              description:
+                "The earlier validation describes the previous version, so it is no longer shown or printed.",
+              duration: 8000,
+            }
+          : undefined,
+      )
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to assemble report")),
