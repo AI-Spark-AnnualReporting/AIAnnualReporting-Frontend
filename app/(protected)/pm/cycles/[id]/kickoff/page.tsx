@@ -57,6 +57,27 @@ import { documentsApi } from "@/lib/api/documents"
    (kickoff/review) via sessionStorage — see lib/kickoffBriefStorage.
 ──────────────────────────────────────────────────────────────────────────── */
 
+/** Move each answer and rejection to wherever its question sits now.
+ *  The form keys both by POSITION, and adding a question slots it in before
+ *  the catch-all — without this the new question inherits the catch-all's
+ *  answer and rejection, and every answer after a deleted question slides
+ *  onto its neighbour. A question that wasn't there before starts empty. */
+function remapByQuestionId(
+  value: QuestionnaireValue,
+  oldIds: string[],
+  questions: SurveyQuestion[],
+): QuestionnaireValue {
+  const answers: QuestionnaireValue["answers"] = {}
+  const rejected: QuestionnaireValue["rejected"] = {}
+  questions.forEach((q, newIndex) => {
+    const oldIndex = oldIds.indexOf(q.id)
+    if (oldIndex < 0) return
+    if (value.answers[oldIndex]) answers[newIndex] = value.answers[oldIndex]
+    if (value.rejected[oldIndex]) rejected[newIndex] = true
+  })
+  return { answers, rejected }
+}
+
 /** Question positions that carry a saved rejection. */
 function flaggedRejections(questions: SurveyQuestion[]): Record<number, boolean> {
   const out: Record<number, boolean> = {}
@@ -188,9 +209,21 @@ export default function KickoffQuestionnairePage({
     ])
   }
 
+  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null)
+
+  /** Delete one of Spark's own questions, showing it as "Deleting…" until the
+   *  list reloads. */
   const removeQuestion = async (questionId: string) => {
     if (savingQuestions) return
-    await saveQuestions(questions.filter((q) => q.id !== questionId))
+    setDeletingQuestionId(questionId)
+    try {
+      await saveQuestions(questions.filter((q) => q.id !== questionId))
+      // saveQuestions only starts the reload; wait for it so the card is gone
+      // before the spinner is, instead of snapping back for a moment.
+      await qc.refetchQueries({ queryKey: ["pm", "survey-questions", id] })
+    } finally {
+      setDeletingQuestionId(null)
+    }
   }
 
   const editQuestion = async (questionId: string, text: string) => {
@@ -208,6 +241,19 @@ export default function KickoffQuestionnairePage({
 
   const answeredCount = useMemo(() => countAnswered(questions, qValue), [questions, qValue])
   const required = useMemo(() => countRequired(questions, qValue), [questions, qValue])
+
+  // When the question list changes (add, delete), carry each answer and
+  // rejection along with its question. Runs before the seeding below, so a
+  // seed in the same render still has the last word.
+  const [knownIds, setKnownIds] = useState<string[] | null>(null)
+  const idKey = questions.map((q) => q.id).join("|")
+  if (questions.length && knownIds?.join("|") !== idKey) {
+    if (knownIds) {
+      const oldIds = knownIds
+      setQValue((prev) => remapByQuestionId(prev, oldIds, questions))
+    }
+    setKnownIds(questions.map((q) => q.id))
+  }
 
   // Fill the form with the client's answers the moment they SUBMIT, not when
   // they are approved — the PM has to read them to decide whether to approve.
@@ -458,6 +504,7 @@ export default function KickoffQuestionnairePage({
               onRemoveQuestion={canEditQuestions ? removeQuestion : undefined}
               onEditQuestion={canEditQuestions ? editQuestion : undefined}
               onToggleRejected={saveRejection}
+              deletingQuestionId={deletingQuestionId}
             />
 
             {/* Says WHY the add box is gone. Without this the box simply

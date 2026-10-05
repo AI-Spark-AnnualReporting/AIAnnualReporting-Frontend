@@ -24,7 +24,7 @@ export {
 } from "@/lib/questionnaireAnswers"
 export type { Answer, QuestionnaireValue } from "@/lib/questionnaireAnswers"
 import { cn } from "@/lib/utils"
-import { Ban, Check, RotateCcw, Trash2, X } from "lucide-react"
+import { Ban, Check, Loader2, RotateCcw, Trash2, X } from "lucide-react"
 
 /* ────────────────────────────────────────────────────────────────────────────
    The strategic questionnaire, rendered once and used twice: by the PM on
@@ -79,6 +79,7 @@ export function QuestionnaireForm({
   onRemoveQuestion,
   onEditQuestion,
   onToggleRejected,
+  deletingQuestionId,
 }: {
   questions: SurveyQuestion[]
   value: QuestionnaireValue
@@ -101,6 +102,9 @@ export function QuestionnaireForm({
    *  once; this records it, so it survives a refresh and says who made it.
    *  Omitted on the client's page, which sends its rejections with the reply. */
   onToggleRejected?: (questionId: string, rejected: boolean) => void
+  /** The question whose delete is saving: its card fades and stops taking
+   *  clicks, and its Delete button shows a spinner until the list reloads. */
+  deletingQuestionId?: string | null
 }) {
   const { answers, rejected } = value
   const mine = new Set(editableQuestionIds ?? [])
@@ -192,8 +196,10 @@ export function QuestionnaireForm({
         return (
           <div
             key={i}
+            aria-busy={deletingQuestionId === q.id}
             className={cn(
               "rounded-2xl border bg-card p-5 shadow-sm transition-colors",
+              deletingQuestionId === q.id && "pointer-events-none opacity-50",
               isRejected
                 ? "border-dashed border-border bg-muted/30"
                 : answered
@@ -266,10 +272,19 @@ export function QuestionnaireForm({
                 <button
                   type="button"
                   onClick={() => onRemoveQuestion(q.id)}
+                  disabled={deletingQuestionId === q.id}
                   title="Delete this question"
                   className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
                 >
-                  <Trash2 className="h-3 w-3" /> Delete
+                  {deletingQuestionId === q.id ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" /> Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-3 w-3" /> Delete
+                    </>
+                  )}
                 </button>
               )}
               {!readOnly && (
