@@ -151,6 +151,30 @@ export const createDesignApi = {
   },
 
   /**
+   * Start structuring one section in the background.
+   *
+   * Answers straight away (202); the work carries on on the server and the
+   * caller polls `get` until the section reads as extracted. The "Designing
+   * your report pages" screen uses this: holding one long request open per
+   * section meant a request cut off in the browser lost the screen while the
+   * server finished the section anyway. `already_running` means this server
+   * was already structuring it (a refresh mid-run) and nothing new started.
+   */
+  startExtract: async (
+    cycleId: string,
+    sectionCode: string,
+    force = false,
+  ): Promise<{ status: "running"; section_code: string; already_running: boolean }> => {
+    const params = force ? "background=true&force=true" : "background=true"
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-extract?${params}`,
+    )
+    return data
+  },
+
+  /**
    * Record the template chosen for one page. `null` clears it.
    *
    * Small, but it is a read-modify-write of the section's whole envelope and
