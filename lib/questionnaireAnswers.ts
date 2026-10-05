@@ -65,6 +65,27 @@ export function isComplete(questions: SurveyQuestion[], v: QuestionnaireValue) {
   return required > 0 && answeredCount(questions, v) === required
 }
 
+/** Merge what the person typed (custom pills + the unsent draft) into the
+ *  ticked chips. Typed text that exactly matches a chip counts as that chip
+ *  being ticked; an exact repeat is dropped. The "Other…" box blocks these on
+ *  Enter, but an edited pill or a draft submitted without Enter skips that
+ *  check. Returns chips first, then custom text — splitAnswer relies on that
+ *  order. */
+function answerParts(a: Answer, options: string[]): string[] {
+  const selected = [...a.selected]
+  const custom: string[] = []
+  for (const raw of [...a.custom, a.text]) {
+    const typed = raw.trim()
+    if (!typed) continue
+    if (options.includes(typed)) {
+      if (!selected.includes(typed)) selected.push(typed)
+    } else if (!custom.includes(typed)) {
+      custom.push(typed)
+    }
+  }
+  return [...selected, ...custom]
+}
+
 /** One entry per ANSWERED question — unanswered and rejected ones are omitted
  *  (there is no server-side required-count check). Multi-select chips + every
  *  custom pill are joined into a single comma-separated string per the API
@@ -76,7 +97,7 @@ export function buildAnswersPayload(
   return questions.reduce<GenerateBriefAnswer[]>((acc, q, i) => {
     const a = v.answers[i]
     if (!a || v.rejected[i]) return acc
-    const parts = [...a.selected, ...a.custom, a.text.trim()].filter(Boolean)
+    const parts = answerParts(a, q.options ?? [])
     if (parts.length === 0) return acc
     acc.push({ question_id: q.id, answer: parts.join(", ") })
     return acc
@@ -107,12 +128,13 @@ export function splitAnswer(answer: string, options: string[]): Answer {
       rest = rest.slice(option.length).replace(/^,\s*/, "")
       continue
     }
-    // Nothing matched, so the next comma-delimited piece is the person's own
-    // wording. Take one piece and try the options again on what's left.
-    const comma = rest.indexOf(", ")
-    const piece = comma === -1 ? rest : rest.slice(0, comma)
-    if (piece.trim()) custom.push(piece.trim())
-    rest = comma === -1 ? "" : rest.slice(comma + 2)
+    // Nothing matched. buildAnswersPayload puts every chip before the custom
+    // pills, so everything left is the person's own wording. Keep it as ONE
+    // pill: splitting on ", " would shred a sentence like "partner, buy, or
+    // invest" into fragments. Two separate custom pills come back merged —
+    // the wire format can't tell them apart from one pill with a comma.
+    custom.push(rest)
+    break
   }
 
   return { selected, custom, text: "" }

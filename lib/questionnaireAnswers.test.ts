@@ -66,6 +66,16 @@ const AUDIENCE = [
 }
 
 {
+  // A written-in answer with commas in it stays one pill, not one per comma.
+  const a = splitAnswer(
+    "Investors and shareholders, Inspired to partner, buy, renew, invest, or engage",
+    AUDIENCE,
+  )
+  assert.deepEqual(a.selected, ["Investors and shareholders"])
+  assert.deepEqual(a.custom, ["Inspired to partner, buy, renew, invest, or engage"])
+}
+
+{
   assert.deepEqual(splitAnswer("", AUDIENCE), { selected: [], custom: [], text: "" })
 }
 
@@ -95,6 +105,34 @@ const AUDIENCE = [
   assert.deepEqual(after.answers[0].custom, ["Regulators"])
   assert.equal(after.answers[1].text, "Keep it short.")
   assert.deepEqual(after.rejected, {}, "nothing was skipped")
+}
+
+{
+  // Typed text that repeats a chip or a pill is saved once, as the chip.
+  // Covers the unsent draft and a pill edited into a chip's wording — both
+  // skip the duplicate check in the "Other…" box.
+  const questions: Q[] = [{ id: "t1", text: "Audience?", source: "template", options: AUDIENCE }]
+  const v: QuestionnaireValue = {
+    answers: {
+      0: {
+        selected: ["Industry analysts"],
+        custom: ["Regulators", "Customers and clients"],
+        text: "Industry analysts",
+      },
+    },
+    rejected: {},
+  }
+  assert.deepEqual(buildAnswersPayload(questions as never, v), [
+    { question_id: "t1", answer: "Industry analysts, Customers and clients, Regulators" },
+  ])
+
+  const draftOnly: QuestionnaireValue = {
+    answers: { 0: { selected: [], custom: ["Regulators"], text: " Regulators " } },
+    rejected: {},
+  }
+  assert.deepEqual(buildAnswersPayload(questions as never, draftOnly), [
+    { question_id: "t1", answer: "Regulators" },
+  ])
 }
 
 // ── skipped questions ──────────────────────────────────────────────────────
