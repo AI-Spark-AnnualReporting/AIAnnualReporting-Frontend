@@ -280,13 +280,16 @@ export default function ClientSharePage({
               }
       const next = await clientShareApi.submit(token, {
         response,
-        client_note: view.stage === "areas" ? note.trim() || undefined : undefined,
+        client_note: view.stage !== "questionnaire" ? note.trim() || undefined : undefined,
       })
       // Closed only once it has landed, so the dialog's own spinner covers
       // the request. Closing first left the client watching an unchanged page
       // with no sign anything was happening.
       setConfirmSend(false)
       setView(next)
+      // The server now lists their questions on the link itself (renumbered),
+      // so the browser-only copies would show twice.
+      setExtraQuestions([])
       setJustSent(true)
     } catch (err) {
       toast.error(
@@ -466,8 +469,9 @@ export default function ClientSharePage({
 
             {/* Optional attachment. Uploads on pick rather than on submit: the
                 file guides the AI draft, so it has to be on the cycle before
-                the answers are sent. */}
-            {editable && (
+                the answers are sent. Once sent it stays on the page, read-only,
+                so a returning client can see their file arrived. */}
+            {(editable || docName) && (
               <div
                 className={cn(
                   "mt-4 rounded-2xl border border-dashed p-4",
@@ -530,15 +534,17 @@ export default function ClientSharePage({
                       </p>
                     </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant={docName ? "outline" : "default"}
-                    disabled={docState === "uploading"}
-                    onClick={() => fileRef.current?.click()}
-                    className={cn(!docName && "bg-indigo-600 text-white hover:bg-indigo-700")}
-                  >
-                    <Upload className="h-4 w-4" /> {docName ? "Replace" : "Upload file"}
-                  </Button>
+                  {editable && (
+                    <Button
+                      type="button"
+                      variant={docName ? "outline" : "default"}
+                      disabled={docState === "uploading"}
+                      onClick={() => fileRef.current?.click()}
+                      className={cn(!docName && "bg-indigo-600 text-white hover:bg-indigo-700")}
+                    >
+                      <Upload className="h-4 w-4" /> {docName ? "Replace" : "Upload file"}
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -686,11 +692,10 @@ export default function ClientSharePage({
           </div>
         )}
 
-        {/* Their note on the areas. Editing the copy says what they'd write;
-            this is for "I'm uneasy about area 2" without rewriting it. The
-            brief gate has no note: there is one thing on that page, and the
-            text box IS the way to say what they think of it. */}
-        {editable && view.stage === "areas" && (
+        {/* Their note on the brief or the areas. Editing the copy says what
+            they'd write; this is for "section 2 feels long" without rewriting
+            it. The questionnaire has none: its last question is the catch-all. */}
+        {editable && view.stage !== "questionnaire" && (
           <div className="mt-8 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <label className="text-sm font-semibold text-foreground">
               Anything you&apos;d like to add?{" "}
@@ -703,6 +708,20 @@ export default function ClientSharePage({
               placeholder="Context, concerns, anything the team should know…"
               className="mt-2 text-sm"
             />
+          </div>
+        )}
+
+        {/* Their note, once sent. The box above only exists while they can
+            edit, so without this the note vanished from their own view. */}
+        {!editable && view.stage !== "questionnaire" && view.client_note && (
+          <div className="mt-8 flex items-start gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <MessageSquareQuote className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">Your note to the Spark team</p>
+              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
+                {view.client_note}
+              </p>
+            </div>
           </div>
         )}
 

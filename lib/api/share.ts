@@ -66,7 +66,7 @@ export interface ShareRequest {
   /** The latest note sent back to the client, and how many rounds so far. */
   review_comment?: string | null
   revision_count: number
-  /** Their own note back to Spark. Areas gate only. */
+  /** Their own note back to Spark. Brief and areas gates. */
   client_note?: string | null
   response: ShareResponsePayload
   /** The file the client attached, on the questionnaire gate only. Carried
@@ -103,6 +103,8 @@ export interface ClientShareView {
   /** Set when their work came back for changes — shown at the top of the page. */
   review_comment?: string | null
   revision_count: number
+  /** The note they sent with their response, shown back to them read-only. */
+  client_note?: string | null
   /** The file the client attached, if any. */
   document_name?: string | null
 }
