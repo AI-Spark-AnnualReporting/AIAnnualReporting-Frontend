@@ -56,6 +56,20 @@ const isLongForm = (q: SurveyQuestion) => (q.options ?? []).some((o) => o.length
  *  options is ours, a UI affordance, so nothing here may be sliced off. */
 const hasOptions = (q: SurveyQuestion) => !!q.options && q.options.length > 0
 
+const REJECTED_BY_LABEL: Record<string, string> = {
+  spark: "Spark",
+  pm: "the PM",
+  client: "the client",
+}
+
+function formatRejectedAt(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+}
+
 export function QuestionnaireForm({
   questions,
   value,
@@ -64,6 +78,7 @@ export function QuestionnaireForm({
   editableQuestionIds,
   onRemoveQuestion,
   onEditQuestion,
+  onToggleRejected,
 }: {
   questions: SurveyQuestion[]
   value: QuestionnaireValue
@@ -82,6 +97,10 @@ export function QuestionnaireForm({
    *  list is still Spark's to change. Committed on blur, not per keystroke —
    *  each commit is a save. */
   onEditQuestion?: (questionId: string, text: string) => void
+  /** Persist a rejection as it happens. The form still flips it on screen at
+   *  once; this records it, so it survives a refresh and says who made it.
+   *  Omitted on the client's page, which sends its rejections with the reply. */
+  onToggleRejected?: (questionId: string, rejected: boolean) => void
 }) {
   const { answers, rejected } = value
   const mine = new Set(editableQuestionIds ?? [])
@@ -154,8 +173,12 @@ export function QuestionnaireForm({
     })
   }
 
-  const toggleRejected = (index: number) =>
-    onChange({ ...value, rejected: { ...rejected, [index]: !rejected[index] } })
+  const toggleRejected = (index: number) => {
+    const next = !rejected[index]
+    onChange({ ...value, rejected: { ...rejected, [index]: next } })
+    const q = questions[index]
+    if (q) onToggleRejected?.(q.id, next)
+  }
 
   return (
     <div className="space-y-4">
@@ -223,7 +246,13 @@ export function QuestionnaireForm({
                 )}
                 {isRejected && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Skipped — this question won&apos;t be used in the brief.
+                    {/* Who decided, once it's saved. Until then — the moment
+                        between the click and the save — the plain line. */}
+                    {q.rejected_by
+                      ? `Rejected by ${REJECTED_BY_LABEL[q.rejected_by] ?? q.rejected_by}${
+                          q.rejected_at ? ` on ${formatRejectedAt(q.rejected_at)}` : ""
+                        } — this question won't be used in the brief.`
+                      : "Skipped — this question won't be used in the brief."}
                   </p>
                 )}
 

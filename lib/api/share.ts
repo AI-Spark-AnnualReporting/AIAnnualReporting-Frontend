@@ -37,6 +37,8 @@ export interface ShareResponsePayload {
   /** Questions the client wrote themselves. The server renumbers the ids and
    *  re-points their answers, so these are only ever a suggestion of an id. */
   added_questions?: { id: string; text: string }[]
+  /** Questions the client rejected, recorded on the server as theirs. */
+  rejected_question_ids?: string[]
   strategic_brief?: string
   areas_of_focus?: AreaOfFocus[]
   concept_messages?: ConceptMessage[]

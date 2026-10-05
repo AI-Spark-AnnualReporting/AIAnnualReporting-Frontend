@@ -187,6 +187,10 @@ export interface SurveyQuestion {
   // always free text — no option pills.
   source: "template" | "generated" | "manual"
   options: string[] | null
+  /** Who rejected it — absent while it's in use. The question stays in the
+   *  list so the rejection can be traced. */
+  rejected_by?: "spark" | "pm" | "client" | null
+  rejected_at?: string | null
 }
 
 export interface SurveyQuestionsResponse {
@@ -531,6 +535,21 @@ export const pmApi = {
   // Replace the whole question set — how Spark's own questions are added and
   // removed. 409 while the client holds the link: they are answering the list
   // as it was sent.
+  // PUT /pm/cycles/{id}/questions/{qid}/rejection — reject one question, or
+  // bring it back, recording who. Changes one question's flags, never which
+  // questions exist, so it is allowed after the questionnaire has been shared.
+  setQuestionRejection: async (
+    cycleId: string,
+    questionId: string,
+    rejected: boolean,
+  ): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.put<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/questions/${encodeURIComponent(questionId)}/rejection`,
+      { rejected },
+    )
+    return data
+  },
+
   saveSurveyQuestions: async (
     cycleId: string,
     questions: SurveyQuestion[],

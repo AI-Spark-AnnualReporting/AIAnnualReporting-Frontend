@@ -266,6 +266,11 @@ export default function ClientSharePage({
           ? {
               answers: buildAnswersPayload(questions, answers),
               added_questions: extraQuestions.map((q) => ({ id: q.id, text: q.text })),
+              // Recorded on the question as "rejected by the client", so Spark
+              // can tell a deliberate skip from a missed one.
+              rejected_question_ids: questions
+                .filter((_, i) => answers.rejected[i])
+                .map((q) => q.id),
             }
           : view.stage === "brief"
             ? { strategic_brief: brief }

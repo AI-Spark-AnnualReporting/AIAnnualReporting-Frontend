@@ -57,6 +57,15 @@ import { documentsApi } from "@/lib/api/documents"
    (kickoff/review) via sessionStorage — see lib/kickoffBriefStorage.
 ──────────────────────────────────────────────────────────────────────────── */
 
+/** Question positions that carry a saved rejection. */
+function flaggedRejections(questions: SurveyQuestion[]): Record<number, boolean> {
+  const out: Record<number, boolean> = {}
+  questions.forEach((q, i) => {
+    if (q.rejected_by) out[i] = true
+  })
+  return out
+}
+
 export default function KickoffQuestionnairePage({
   params,
 }: {
@@ -214,7 +223,41 @@ export default function KickoffQuestionnairePage({
   const seedKey = share?.responded_at ?? null
   if (seedKey && seedKey !== seededFrom && questions.length && submittedAnswers?.length) {
     setSeededFrom(seedKey)
-    setQValue(valueFromAnswers(questions, submittedAnswers))
+    const fromAnswers = valueFromAnswers(questions, submittedAnswers)
+    setQValue({
+      ...fromAnswers,
+      rejected: { ...fromAnswers.rejected, ...flaggedRejections(questions) },
+    })
+  }
+
+  // Rejections are saved on the questions now, so a refresh brings them back.
+  // Re-applied whenever the saved flags change (after each save's refetch).
+  // Only ever ADDS: an Undo clears the local mark first and the flag after,
+  // and this must not put back what the PM just took away.
+  const [flagsSeeded, setFlagsSeeded] = useState<string | null>(null)
+  const flagKey = questions.map((q) => `${q.id}:${q.rejected_by ?? ""}`).join("|")
+  if (questions.length && flagKey !== flagsSeeded) {
+    setFlagsSeeded(flagKey)
+    setQValue((prev) => ({
+      ...prev,
+      rejected: { ...prev.rejected, ...flaggedRejections(questions) },
+    }))
+  }
+
+  /** Record a rejection as it happens. The form has already flipped it on
+   *  screen; on failure that is reverted, so the screen never shows a
+   *  rejection that was not saved. */
+  const saveRejection = async (questionId: string, rejected: boolean) => {
+    try {
+      await pmApi.setQuestionRejection(id, questionId, rejected)
+      qc.invalidateQueries({ queryKey: ["pm", "survey-questions", id] })
+    } catch (err) {
+      const index = questions.findIndex((q) => q.id === questionId)
+      if (index >= 0) {
+        setQValue((prev) => ({ ...prev, rejected: { ...prev.rejected, [index]: !rejected } }))
+      }
+      toast.error((err as { message?: string })?.message || "Couldn't save that.")
+    }
   }
 
   const progressPct = required > 0 ? Math.round((answeredCount / required) * 100) : 0
@@ -414,6 +457,7 @@ export default function KickoffQuestionnairePage({
                 .map((q) => q.id)}
               onRemoveQuestion={canEditQuestions ? removeQuestion : undefined}
               onEditQuestion={canEditQuestions ? editQuestion : undefined}
+              onToggleRejected={saveRejection}
             />
 
             {/* Says WHY the add box is gone. Without this the box simply
