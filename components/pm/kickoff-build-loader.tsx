@@ -106,6 +106,28 @@ export const BRIEF_LOADER = {
   ],
 } as const
 
+/** Spark's generate-brief: the brief ALONE. The areas of focus and their
+ *  concept messages are only written once the client approves this brief, so
+ *  the steps must not promise them. */
+export const BRIEF_ONLY_LOADER = {
+  estimatedMs: 30_000,
+  title: "Writing your strategic brief",
+  subtitle: "Drawn from your client's answers and their document.",
+  stages: [
+    "Reading your answers…",
+    "Reading the client's document…",
+    "Shaping the objective & narrative…",
+    "Writing the strategic brief…",
+    "Running a final read-through…",
+  ],
+  tips: [
+    "The brief is a draft. You can edit or refine it afterwards.",
+    "The document your client attached steers the draft closer to it.",
+    "The areas of focus are written once your client approves this brief.",
+    "Once this goes to the client it can't be regenerated, only edited by hand.",
+  ],
+} as const
+
 /** Copy for the areas-of-focus rewrite that follows a brief change. */
 export const AREAS_REFRESH_LOADER = {
   title: "Updating your areas of focus",

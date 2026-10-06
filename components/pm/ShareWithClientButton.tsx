@@ -41,19 +41,24 @@ import {
    permanently greyed-out Continue button with no explanation on the page.
 ──────────────────────────────────────────────────────────────────────────── */
 
-const STAGE_COPY: Record<ShareStage, { noun: string; blurb: string }> = {
+const STAGE_COPY: Record<ShareStage, { noun: string; blurb: string; locks: string }> = {
   questionnaire: {
     noun: "questionnaire",
+    locks: "you can't add to the set or refine it with AI — only reword what's there.",
     blurb: "The client answers these questions — their answers shape the brief.",
   },
   brief: {
     noun: "strategic brief",
+    locks:
+      "the brief can't be regenerated or refined with AI. You can still edit it by hand once they reply.",
     blurb:
       "The client reviews and edits the brief on its own. Approving what they " +
       "send back is what writes the areas of focus and concept messages from it.",
   },
   areas: {
     noun: "areas of focus and concept messages",
+    locks:
+      "the areas and concept messages can't be refined with AI. You can still edit them by hand once they reply.",
     blurb: "The client reviews and edits these together, then sends them back.",
   },
 }
@@ -208,8 +213,100 @@ export function ShareWithClientButton({
         {t.label}
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o)
+          if (!o) setConfirm(null)
+        }}
+      >
         <DialogContent className="sm:max-w-lg">
+          {/* ── The two one-way steps ──
+              Sending hands the cycle to someone outside the company and freezes
+              Spark's own editing. Approving is the signature the rest of the
+              wizard is gated on. Neither can be taken back, so neither happens
+              on a single click. Shown as a second step IN this window rather
+              than a second window stacked on top of it. */}
+          {confirm !== null ? (
+            <>
+            <DialogHeader>
+              <DialogTitle>
+                {confirm === "send"
+                  ? `Send the ${copy.noun} to the client?`
+                  : "Approve the client's response?"}
+              </DialogTitle>
+              <DialogDescription>
+                {confirm === "send" ? (
+                  <>
+                    They&apos;ll get an email with a private link to{" "}
+                    <span className="font-medium text-foreground">
+                      {(share?.client_email ?? emailValue).trim() || "the client"}
+                    </span>
+                    . From this point {copy.locks}
+                  </>
+                ) : stage === "brief" ? (
+                  <>
+                    This signs off the brief, then writes the areas of focus and
+                    concept messages from it —{" "}
+                    <span className="font-medium text-foreground">
+                      about a minute
+                    </span>
+                    , so the button will sit and think. Afterwards the brief is
+                    locked for good: it can&apos;t be edited or sent out again, so
+                    send it back instead if anything still needs their eyes.
+                  </>
+                ) : (
+                  <>
+                    This signs off what the client sent and opens the next step. It
+                    can&apos;t be undone — send it back instead if anything still needs
+                    their eyes.
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+
+            {confirm === "approve" && (
+              <ClientDriftNotice
+                changed={changed}
+                canSendBack
+                className="rounded-xl"
+              />
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setConfirm(null)}
+              >
+                ← Back
+              </Button>
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={confirm === "send" ? send : approve}
+                className="bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : confirm === "send" ? (
+                  <Send className="h-4 w-4" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                {confirm === "send"
+                  ? "Send it"
+                  : approveShare.isPending && stage === "brief"
+                    ? "Writing the areas of focus…"
+                    : changed
+                      ? "Approve anyway"
+                      : "Approve"}
+              </Button>
+            </div>
+            </>
+          ) : (
+          <>
           <DialogHeader>
             <DialogTitle>
               {!share && (isSpark ? "Share with client" : "Not yet with the client")}
@@ -462,94 +559,11 @@ export function ShareWithClientButton({
 
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* ── The two one-way steps ──
-          Sending hands the cycle to someone outside the company and freezes
-          Spark's own editing. Approving is the signature the rest of the wizard
-          is gated on. Neither can be taken back, so neither happens on a single
-          click. */}
-      <Dialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {confirm === "send"
-                ? `Send the ${copy.noun} to the client?`
-                : "Approve the client's response?"}
-            </DialogTitle>
-            <DialogDescription>
-              {confirm === "send" ? (
-                <>
-                  They&apos;ll get an email with a private link to{" "}
-                  <span className="font-medium text-foreground">
-                    {(share?.client_email ?? emailValue).trim() || "the client"}
-                  </span>
-                  . From this point you can&apos;t add to the set or refine it with
-                  AI — only reword what&apos;s there.
-                </>
-              ) : stage === "brief" ? (
-                <>
-                  This signs off the brief, then writes the areas of focus and
-                  concept messages from it —{" "}
-                  <span className="font-medium text-foreground">
-                    about a minute
-                  </span>
-                  , so the button will sit and think. Afterwards the brief is
-                  locked for good: it can&apos;t be edited or sent out again, so
-                  send it back instead if anything still needs their eyes.
-                </>
-              ) : (
-                <>
-                  This signs off what the client sent and opens the next step. It
-                  can&apos;t be undone — send it back instead if anything still needs
-                  their eyes.
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          {confirm === "approve" && (
-            <ClientDriftNotice
-              changed={changed}
-              canSendBack
-              className="rounded-xl"
-            />
+          </>
           )}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={() => setConfirm(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={busy}
-              onClick={confirm === "send" ? send : approve}
-              className="bg-indigo-600 text-white hover:bg-indigo-700"
-            >
-              {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : confirm === "send" ? (
-                <Send className="h-4 w-4" />
-              ) : (
-                <Check className="h-4 w-4" />
-              )}
-              {confirm === "send"
-                ? "Send it"
-                : approveShare.isPending && stage === "brief"
-                  ? "Writing the areas of focus…"
-                  : changed
-                    ? "Approve anyway"
-                    : "Approve"}
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
+
     </>
   )
 }

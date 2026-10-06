@@ -39,7 +39,8 @@ import {
 import type { ShareRequest, ShareStage } from "@/lib/api/share"
 import type { LucideIcon } from "lucide-react"
 import {
-  KickoffBuildLoader, AREAS_REFRESH_LOADER, BRIEF_LOADER, BRIEF_SIGNOFF_LOADER,
+  KickoffBuildLoader, AREAS_REFRESH_LOADER, BRIEF_LOADER, BRIEF_ONLY_LOADER,
+  BRIEF_SIGNOFF_LOADER,
 } from "@/components/pm/kickoff-build-loader"
 import { AreaConceptCard } from "@/components/report/AreaConceptCard"
 import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
@@ -206,6 +207,15 @@ const REGENERATE_ALL_CONSENT: ConsentCopy = {
   variant: "destructive",
 }
 
+/** Spark's version. In Spark's flow the areas of focus are only written once
+ *  the client's brief is approved, so Regenerate rebuilds the brief alone. */
+const REGENERATE_BRIEF_CONSENT: ConsentCopy = {
+  ...REGENERATE_ALL_CONSENT,
+  description:
+    "This rebuilds the strategic brief from your original answers. The current brief is " +
+    "discarded, including any refinements and manual edits.",
+}
+
 const realignAreasInstruction = (brief: string) =>
   "The strategic brief has been rewritten. Update every area of focus so it reflects the " +
   "brief below — reword, replace or drop whatever no longer fits, and keep the same number " +
@@ -278,7 +288,11 @@ export function KickoffDirectionScreen({
 }) {
   const router = useRouter()
   const qc = useQueryClient()
-  const { data: pmData, isLoading: cycleLoading } = usePMCycleDashboard(id)
+  const {
+    data: pmData,
+    isLoading: cycleLoading,
+    isFetching: cycleFetching,
+  } = usePMCycleDashboard(id)
   // No share button here — the brief and areas go out as part of the step-3
   // bundle. But every save on this screen 409s while that bundle is with the
   // client, so the screen has to say so rather than fail on click.
@@ -492,7 +506,8 @@ export function KickoffDirectionScreen({
     // concept message, so it is gone from the first share onwards and the
     // server refuses it too.
     if (briefShared) return
-    if (phase === "result" && !(await askConsent(REGENERATE_ALL_CONSENT))) return
+    const consent = sparkFlow ? REGENERATE_BRIEF_CONSENT : REGENERATE_ALL_CONSENT
+    if (phase === "result" && !(await askConsent(consent))) return
     runGenerate(answersRef.current)
   }
 
@@ -553,6 +568,11 @@ export function KickoffDirectionScreen({
     // again once the second call put them back. Debounced saves were already
     // covered by saveTimer; an immediate one (add, delete) was not.
     if (saveState === "saving") return
+    // And never from a copy that is about to be replaced. Right after a
+    // generate the cache still holds the cycle from BEFORE it (no brief) while
+    // the refetch is in flight; syncing from that blanked the brief that had
+    // just been shown, until the refetch landed and put it back.
+    if (cycleFetching) return
 
     const signature = JSON.stringify([cycle.kickoff_brief, cycle.areas_of_focus])
     if (signature === seededRef.current) return
@@ -590,7 +610,7 @@ export function KickoffDirectionScreen({
     // then reports a difference between two copies taken at different moments.
     qc.invalidateQueries({ queryKey: ["pm", "cycle", id, "shares"] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cycle, phase, briefDirty, saveState])
+  }, [cycle, phase, briefDirty, saveState, cycleFetching])
 
   // Returns the refined brief so the caller can feed it straight into the areas
   // regeneration; null on failure.
@@ -1873,7 +1893,10 @@ export function KickoffDirectionScreen({
 
       {/* Full-screen loader for the initial generation — it writes the brief and
           the first areas of focus in one call. */}
-      {phase === "loading" && <KickoffBuildLoader {...BRIEF_LOADER} />}
+      {/* Spark's run writes the brief alone; everyone else's writes all three. */}
+      {phase === "loading" && (
+        <KickoffBuildLoader {...(sparkFlow ? BRIEF_ONLY_LOADER : BRIEF_LOADER)} />
+      )}
 
       {/* Full-screen loader while the areas are rewritten against a changed
           brief — same treatment as the other multi-call AI passes. */}
