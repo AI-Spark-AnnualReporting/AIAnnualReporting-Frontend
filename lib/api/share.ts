@@ -105,6 +105,9 @@ export interface ClientShareView {
   revision_count: number
   /** The note they sent with their response, shown back to them read-only. */
   client_note?: string | null
+  /** Who sent the link — shown as "Questions? <name> · <email>". */
+  contact_name?: string | null
+  contact_email?: string | null
   /** The file the client attached, if any. */
   document_name?: string | null
 }

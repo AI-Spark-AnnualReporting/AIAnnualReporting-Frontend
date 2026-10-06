@@ -13,6 +13,17 @@ import {
 } from "@/components/ui/dialog"
 import { AreaConceptCard } from "@/components/report/AreaConceptCard"
 import {
+  AreasReview,
+  BriefReview,
+  QuestionnaireReview,
+} from "@/components/share/ResponseReview"
+import {
+  BannerStatus,
+  CentriyonFooter,
+  CentriyonMark,
+  ClientShareBanner,
+} from "@/components/share/ClientShareBanner"
+import {
   QuestionnaireForm,
   QuestionnaireValue,
   buildAnswersPayload,
@@ -52,6 +63,73 @@ import {
    - Any way to edit after submitting. The link goes read-only the moment it is
      sent, so what Spark reads is what Spark approves.
 ──────────────────────────────────────────────────────────────────────────── */
+
+/** Where the client stands on this link, for the banner. */
+function bannerStatus(view: ClientShareView): BannerStatus {
+  if (view.status === "approved") return "approved"
+  if (view.status !== "pending") return "sent"
+  if (view.review_comment && view.revision_count > 0) return "sent_back"
+  return "open"
+}
+
+/** The banner's headline for each stage and state. */
+function bannerTitle(view: ClientShareView, status: BannerStatus): string {
+  if (status === "sent" || status === "approved") {
+    return "Thank you — your response is with the Centriyon team"
+  }
+  if (status === "sent_back") return "A few changes, please"
+  if (view.stage === "questionnaire") return "A few questions about the year ahead"
+  if (view.stage === "brief") return "Review the strategic brief"
+  return "Review the areas of focus"
+}
+
+/** The line under the headline. */
+function bannerSubtitle(view: ClientShareView, status: BannerStatus): string {
+  if (status === "approved") {
+    return "It has been approved. Nothing more is needed from you. Everything below is what you sent."
+  }
+  if (status === "sent") {
+    return "Nothing more is needed from you right now. Everything below is what you sent."
+  }
+  if (status === "sent_back") {
+    return view.stage === "questionnaire"
+      ? "Your previous answers are below. Edit what needs changing and send them again."
+      : "What you sent is below. Edit what needs changing and send it again."
+  }
+  if (view.stage === "questionnaire") {
+    return "Your answers shape the strategic brief for this annual report. Pick the closest option for each, or write your own."
+  }
+  if (view.stage === "brief") {
+    return "This is the direction for the whole report. Edit anything that isn't right — everything else is written from it."
+  }
+  return `Each area has its concept message beneath it. Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} of them as used, pick exactly one to lead, and edit anything that isn't right.`
+}
+
+/** Roughly how long the questionnaire takes: under a minute a question,
+ *  rounded to the nearest 5, and never less than 5. */
+function questionnaireMinutes(questionCount: number): number {
+  return Math.max(5, Math.round((questionCount * 0.8) / 5) * 5)
+}
+
+/** The short chips under the headline, while the link is still open. */
+function bannerFacts(
+  view: ClientShareView,
+  questionCount: number,
+  areaCount: number,
+  firstRound: boolean,
+): string[] {
+  if (view.stage === "questionnaire") {
+    const facts = [
+      `${questionCount} questions`,
+      `About ${questionnaireMinutes(questionCount)} minutes`,
+    ]
+    if (firstRound) facts.push("You can add your own questions")
+    facts.push("You can attach your own brief")
+    return facts
+  }
+  if (view.stage === "brief") return ["About 5 minutes", "You can add a note"]
+  return [`${areaCount} areas of focus`, "About 10 minutes", "You can add a note"]
+}
 
 export default function ClientSharePage({
   params,
@@ -304,7 +382,8 @@ export default function ClientSharePage({
 
   if (stumbled) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-muted/30 p-6">
+        <CentriyonMark />
         <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-border bg-card p-10 text-center shadow-sm">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
             <AlertTriangle className="h-5 w-5 text-amber-700" />
@@ -324,7 +403,8 @@ export default function ClientSharePage({
 
   if (dead || !view) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-muted/30 p-6">
+        <CentriyonMark />
         <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-border bg-card p-10 text-center shadow-sm">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Link2Off className="h-5 w-5 text-muted-foreground" />
@@ -332,72 +412,47 @@ export default function ClientSharePage({
           <p className="font-semibold text-foreground">This link is no longer valid.</p>
           <p className="text-sm text-muted-foreground">
             It may have been replaced by a newer one. Check your inbox for a more
-            recent message, or contact your Spark contact.
+            recent message, or contact your Centriyon contact.
           </p>
         </div>
       </div>
     )
   }
 
+  // Named so it can't be mistaken for the browser's global `status`.
+  const bannerState = bannerStatus(view)
+
   return (
     <>
     <div className="min-h-screen bg-muted/30">
-      <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-        {/* ── Header ── */}
-        <div className="mb-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
-            {view.cycle_name}
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">
-            {view.stage === "questionnaire"
-              ? "A few questions about the year ahead"
-              : view.stage === "brief"
-                ? "Review the strategic brief"
-                : "Review the areas of focus"}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {view.stage === "questionnaire"
-              ? "Your answers shape the strategic brief for this annual report."
-              : view.stage === "brief"
-                ? "This is the direction for the whole report. Edit anything that isn't right — everything else is written from it."
-                : "Each area has its concept message beneath it. Edit anything that isn't right."}
-          </p>
-        </div>
-
+      <ClientShareBanner
+        stage={view.stage}
+        cycleName={view.cycle_name}
+        title={bannerTitle(view, bannerState)}
+        subtitle={bannerSubtitle(view, bannerState)}
+        facts={editable ? bannerFacts(view, questions.length, areas.length, firstRound) : []}
+        status={bannerState}
+        submittedAt={view.submitted_at}
+        progress={view.stage === "questionnaire" && editable ? { answered, required } : null}
+        contactName={view.contact_name}
+        contactEmail={view.contact_email}
+      />
+      {/* Pulled up into the banner's lower edge, so the first card overlaps it
+          and the page reads as one piece. */}
+      <div className="relative mx-auto -mt-12 max-w-4xl px-4 pb-10 sm:px-6">
         {/* ── Sent back for changes ──
             Above everything: it is the reason they are here, and reading their
-            own answers first would bury it. */}
+            own answers first would bury it. The banner already says what to do
+            with it. */}
         {editable && view.review_comment && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
             <MessageSquareQuote className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div className="min-w-0">
               <p className="font-semibold text-amber-900">
-                A note from the Spark team
+                A note from the Centriyon team
               </p>
               <p className="mt-1 whitespace-pre-line text-sm text-amber-900">
                 {view.review_comment}
-              </p>
-              <p className="mt-2 text-sm text-amber-800">
-                Your previous answers are below — edit what needs changing and send
-                them again.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Already submitted ── */}
-        {!editable && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-4">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
-            <div>
-              <p className="font-semibold text-green-800">
-                Thank you — your response is with the Spark team.
-              </p>
-              <p className="mt-0.5 text-sm text-green-700">
-                {view.status === "approved"
-                  ? "It has been approved. Nothing more is needed from you."
-                  : "Nothing more is needed from you right now."}
-                {" "}Everything below is what you sent.
               </p>
             </div>
           </div>
@@ -406,16 +461,6 @@ export default function ClientSharePage({
         {/* ── Questionnaire ── */}
         {view.stage === "questionnaire" && (
           <>
-            {editable && (
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Pick the closest option for each — or write your own.
-                </p>
-                <p className="text-sm font-medium text-muted-foreground tabular-nums">
-                  <span className="text-foreground">{answered}</span> of {required} answered
-                </p>
-              </div>
-            )}
             <QuestionnaireForm
               questions={questions}
               value={answers}
@@ -438,7 +483,7 @@ export default function ClientSharePage({
                   Something we didn&apos;t ask about?
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Add your own question and answer it — it goes to the Spark team with
+                  Add your own question and answer it — it goes to the Centriyon team with
                   the rest.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -569,7 +614,8 @@ export default function ClientSharePage({
                   value={brief}
                   onChange={(e) => setBrief(e.target.value)}
                   rows={18}
-                  className="text-sm leading-relaxed"
+                  // Solid, not the default transparent: it overlaps the banner.
+                  className="rounded-2xl bg-card p-5 text-sm leading-relaxed shadow-sm"
                 />
                 {!brief.trim() && (
                   <p className="mt-2 text-sm font-medium text-amber-700">
@@ -596,10 +642,6 @@ export default function ClientSharePage({
         {view.stage === "areas" && (
           <div className="space-y-8">
             <section>
-              <p className="mb-3 text-sm text-muted-foreground">
-                Mark {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} of them as used, and
-                pick exactly one to lead the report.
-              </p>
               <div className="space-y-4">
                 {areas.map((area, i) => (
                   <AreaConceptCard
@@ -717,7 +759,7 @@ export default function ClientSharePage({
           <div className="mt-8 flex items-start gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <MessageSquareQuote className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">Your note to the Spark team</p>
+              <p className="text-sm font-semibold text-foreground">Your note to the Centriyon team</p>
               <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
                 {view.client_note}
               </p>
@@ -734,7 +776,7 @@ export default function ClientSharePage({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 Once you send this you won&apos;t be able to change it — get in touch
-                with your Spark contact if you need to.
+                with your Centriyon contact if you need to.
               </p>
               <Button
                 type="button"
@@ -757,44 +799,74 @@ export default function ClientSharePage({
             </div>
           </div>
         )}
+
+        <CentriyonFooter />
       </div>
     </div>
 
-    {/* Last chance before it locks. */}
+    {/* Last chance before it locks: a read-only summary of exactly what is
+        about to go, so the client checks it once more rather than sending
+        straight past a one-line warning. */}
     <Dialog open={confirmSend} onOpenChange={(o) => !submitting && setConfirmSend(o)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[calc(100%-2rem)] sm:max-w-4xl">
         <DialogTitle className="text-lg">
           {view.stage === "questionnaire"
-            ? "Send your answers to the Spark team?"
-            : "Send this back to the Spark team?"}
+            ? "Review your answers"
+            : view.stage === "brief"
+              ? "Review your strategic brief"
+              : "Review your areas of focus"}
         </DialogTitle>
         <DialogDescription>
-          {view.stage === "questionnaire"
-            ? "You won't be able to change your answers afterwards — if something needs correcting later, ask your Spark contact to send it back to you."
-            : view.stage === "brief"
-              ? "You won't be able to change it afterwards. Once the Spark team approve it, the areas of focus for the report are written from this brief — so it's worth a last read."
-              : "You won't be able to change it afterwards — ask your Spark contact to send it back if something needs correcting."}
+          {view.stage === "brief"
+            ? "Once the Centriyon team approve it, the areas of focus for the report are written from this brief, so it's worth a last read."
+            : "This is exactly what the Centriyon team will receive."}
         </DialogDescription>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button
-            variant="outline"
-            disabled={submitting}
-            onClick={() => setConfirmSend(false)}
-          >
-            Keep editing
-          </Button>
-          <Button
-            disabled={submitting}
-            onClick={submit}
-            className="bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Send it
-          </Button>
+
+        {view.stage === "questionnaire" && (
+          <QuestionnaireReview
+            questions={questions}
+            value={answers}
+            ownQuestionIds={extraQuestions.map((q) => q.id)}
+            documentName={docName}
+          />
+        )}
+        {view.stage === "brief" && (
+          <BriefReview
+            brief={brief}
+            originalBrief={view.payload.strategic_brief ?? ""}
+            note={note}
+          />
+        )}
+        {view.stage === "areas" && (
+          <AreasReview areas={areas} concepts={concepts} note={note} />
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <p className="text-xs text-muted-foreground">
+            You can&apos;t change this after sending. Ask your Centriyon contact to
+            send it back if something needs correcting.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              disabled={submitting}
+              onClick={() => setConfirmSend(false)}
+            >
+              ← Back to edit
+            </Button>
+            <Button
+              disabled={submitting}
+              onClick={submit}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Confirm &amp; send
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -808,7 +880,7 @@ export default function ClientSharePage({
             <CheckCircle2 className="h-6 w-6 text-green-600" />
           </span>
           <DialogTitle className="text-lg">
-            Thank you — your response is with the Spark team.
+            Thank you — your response is with the Centriyon team.
           </DialogTitle>
           <DialogDescription>
             {closeBlocked
