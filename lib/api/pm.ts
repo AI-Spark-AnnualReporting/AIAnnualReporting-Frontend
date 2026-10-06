@@ -4,7 +4,7 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
-  ContentLanguage,
+  ContentLanguage, WritingStyle,
 } from "@/types"
 
 export interface ReviewPayload {
@@ -1263,14 +1263,20 @@ export const pmApi = {
     return data
   },
 
+  // Also carries the section's writing style when given, so Start Building
+  // saves feeders and style in one request. Omitted = style left unchanged.
   setFeeders: async (
     cycleId: string,
     sectionCode: string,
     departmentCodes: string[],
+    writingStyle?: WritingStyle,
   ): Promise<PlanResponse> => {
     const { data } = await apiClient.put(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/feeders`,
-      { departments: departmentCodes },
+      {
+        departments: departmentCodes,
+        ...(writingStyle ? { writing_style: writingStyle } : {}),
+      },
     )
     return data.plan ?? data
   },

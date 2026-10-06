@@ -22,6 +22,7 @@ import type {
   ReportApproval,
   ReportTheme,
   SectionMode,
+  WritingStyle,
 } from "@/types"
 
 // Whether a cycle is ready to enter the Report Builder.
@@ -988,10 +989,12 @@ export function useSetFeeders(cycleId: string) {
     mutationFn: ({
       sectionCode,
       departmentCodes,
+      writingStyle,
     }: {
       sectionCode: string
       departmentCodes: string[]
-    }) => pmApi.setFeeders(cycleId, sectionCode, departmentCodes),
+      writingStyle?: WritingStyle
+    }) => pmApi.setFeeders(cycleId, sectionCode, departmentCodes, writingStyle),
     // Optimistically update the plan cache so the pill and counter update the
     // moment the popover closes — independent of what the backend returns
     // (some setFeeders responses are shape-inconsistent in practice).
@@ -1032,7 +1035,7 @@ export function useSetFeeders(cycleId: string) {
       }
       return { previous }
     },
-    onSuccess: (plan) => {
+    onSuccess: (plan, vars) => {
       // Backend persists and returns the post-update plan now that the field
       // rename has shipped (was `department_codes` on the server, silently
       // dropping our `departments` key). Cache write is safe again; matches
@@ -1040,6 +1043,20 @@ export function useSetFeeders(cycleId: string) {
       // No toast: the only caller is the Sections step's batch save, which
       // reports once for the whole set. Toasting here fired once per section.
       setPlanCache(qc, cycleId, plan)
+      // The style lives on the section row, not the feeder map, so patch the
+      // sections cache too — otherwise the card falls back to the old style
+      // until the next refetch.
+      if (vars.writingStyle) {
+        qc.setQueryData<CycleReportSection[]>(
+          QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+          (sections) =>
+            sections?.map((s) =>
+              s.section_code === vars.sectionCode
+                ? { ...s, writing_style: vars.writingStyle }
+                : s,
+            ),
+        )
+      }
     },
     onError: (err: MutationError, _vars, context) => {
       if (context?.previous) {

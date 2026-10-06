@@ -36,8 +36,15 @@ import {
   type FeederMapEntry,
   type PickableSectionMode,
   type SectionMode,
+  type WritingStyle,
 } from "@/types"
-import type { PendingSourceChange, PendingSources } from "@/lib/pendingSectionSources"
+import {
+  THEME_SOURCE_NOTE,
+  isThemeSection,
+  takesWritingStyle,
+  type PendingSourceChange,
+  type PendingSources,
+} from "@/lib/pendingSectionSources"
 import { FeederPicker, type FeederDepartment } from "./FeederPicker"
 
 interface PlanSectionGridProps {
@@ -123,6 +130,7 @@ export function PlanSectionGrid({
                 deptByCode={deptByCode}
                 onPendingChange={onPendingChange}
                 pendingMode={pendingMode}
+                pendingStyle={pending[s.section_code]?.writing_style}
                 readOnly={readOnly}
                 isRtl={isRtl}
               />
@@ -146,6 +154,7 @@ function SectionTile({
   deptByCode,
   onPendingChange,
   pendingMode,
+  pendingStyle,
   readOnly,
   isRtl,
 }: {
@@ -160,6 +169,7 @@ function SectionTile({
   deptByCode: Map<string, string>
   onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   pendingMode?: SectionMode
+  pendingStyle?: WritingStyle
   readOnly?: boolean
   isRtl?: boolean
 }) {
@@ -183,12 +193,16 @@ function SectionTile({
   // Generate and analyze sections both require department feeders as their source.
   const needsSource =
     !isExtract &&
+    !isThemeSection(section.section_code) &&
     (isAnalyze || section.mode === "generate") &&
     section.ai_allowed &&
     feederCodes.length === 0
   // A section whose mode nobody has chosen yet gets the same amber treatment: it is
   // the other thing that blocks Continue, so it should look the same.
   const needsMode = !section.mode_confirmed
+  // An AI-written or analyze section with no style blocks the plan.
+  const showsStyle = takesWritingStyle(effectiveMode, section.ai_allowed)
+  const needsStyle = !readOnly && showsStyle && !(pendingStyle ?? section.writing_style)
 
   return (
     <div
@@ -197,11 +211,11 @@ function SectionTile({
       className={cn(
         "group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all",
         "hover:shadow-md",
-        (needsSource || needsMode) && "border-amber-200",
+        (needsSource || needsMode || needsStyle) && "border-amber-200",
         isDragging && "z-10 opacity-60 shadow-lg ring-2 ring-indigo-300",
       )}
     >
-      {(needsSource || needsMode) && (
+      {(needsSource || needsMode || needsStyle) && (
         <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-amber-400" />
       )}
       {/* dir on the row so the drag handle, the "01" number chip and the badges
@@ -243,6 +257,14 @@ function SectionTile({
               onPendingChange={onPendingChange}
               readOnly={readOnly}
             />
+            {showsStyle && (
+              <StylePicker
+                section={section}
+                pendingStyle={pendingStyle}
+                onPendingChange={onPendingChange}
+                readOnly={readOnly}
+              />
+            )}
           </div>
           <FeederArea
             section={section}
@@ -366,6 +388,88 @@ function ModePicker({
   )
 }
 
+const WRITING_STYLES: { value: WritingStyle; label: string; hint: string }[] = [
+  { value: "paragraphs", label: "Paragraphs", hint: "Flowing narrative text" },
+  { value: "bullets", label: "Bullet points", hint: "Short points under each subheading" },
+  { value: "ai", label: "Let AI decide", hint: "Paragraphs, bullets or a mix — whatever suits the material" },
+]
+
+// How the AI lays this section out. Staged like the mode, and saved with the
+// feeders on Start Building. Required: until the PM picks, the pill is amber
+// ("Choose writing style") and the plan can't advance — the same treatment as
+// an unchosen mode. A locked plan from before the rule shows an unpicked
+// section as "Paragraphs", since that is what the AI used.
+function StylePicker({
+  section,
+  pendingStyle,
+  onPendingChange,
+  readOnly,
+}: {
+  section: CycleReportSection
+  pendingStyle?: WritingStyle
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  readOnly?: boolean
+}) {
+  const current = pendingStyle ?? section.writing_style ?? null
+  const label = WRITING_STYLES.find((s) => s.value === current)?.label
+  const pill = "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+
+  if (readOnly) {
+    return (
+      <span className={cn(pill, "bg-slate-100 text-slate-600")}>
+        {label ?? "Paragraphs"}
+      </span>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            pill,
+            "border transition-colors",
+            // Amber, like "Choose a mode": an unpicked style blocks Continue.
+            label
+              ? "border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200"
+              : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+          )}
+          title="How the AI writes this section"
+        >
+          {!label && <AlertCircle className="h-3 w-3" />}
+          {label ?? "Choose writing style"}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {WRITING_STYLES.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            className="flex items-start gap-2"
+            onSelect={() =>
+              onPendingChange(section.section_code, { writing_style: option.value })
+            }
+          >
+            <Check
+              className={cn(
+                "mt-0.5 h-3.5 w-3.5 shrink-0",
+                current !== option.value && "opacity-0",
+              )}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-medium">{option.label}</span>
+              <span className="block text-[11px] leading-snug text-muted-foreground">
+                {option.hint}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function FeederArea({
   section,
   feederCodes,
@@ -392,6 +496,10 @@ function FeederArea({
   // ai_allowed=false; a company section says so with mode='manual' while keeping
   // ai_allowed=true, because on those rows the flag means "AI is permitted if you
   // choose it" and the PM must stay able to switch back.
+  // Theme Rationale reads the theme, not departments — nothing to pick.
+  if (isThemeSection(section.section_code) && !isExtract && !isAnalyze) {
+    return <p className="text-xs text-muted-foreground italic">{THEME_SOURCE_NOTE}</p>
+  }
   if ((section.mode === "manual" || !section.ai_allowed) && !isExtract && !isAnalyze) {
     return (
       <p className="text-xs text-muted-foreground italic">

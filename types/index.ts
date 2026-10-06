@@ -157,7 +157,14 @@ export interface CycleReportSection {
   // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
   // modes and for older responses (treat missing as "pending").
   analysis_state?: SectionAnalysisState | null
+  // How the AI lays out a generate-mode section. Null/missing = the PM has not
+  // chosen yet; the card says "Choose writing style" and the AI writes it as
+  // paragraphs, which is how every section was written before the choice.
+  writing_style?: WritingStyle | null
 }
+
+/** Paragraphs (the default), bullet points, or the AI chooses. */
+export type WritingStyle = "paragraphs" | "bullets" | "ai"
 
 export interface ResolveSectionsResponse {
   success: boolean

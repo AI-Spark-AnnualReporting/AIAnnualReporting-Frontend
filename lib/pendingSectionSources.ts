@@ -1,4 +1,4 @@
-import type { CycleReportSection, FeederMapEntry, SectionMode } from "@/types"
+import type { CycleReportSection, FeederMapEntry, SectionMode, WritingStyle } from "@/types"
 
 // Source edits the PM has made on the Sections step but not yet saved.
 //
@@ -11,7 +11,31 @@ import type { CycleReportSection, FeederMapEntry, SectionMode } from "@/types"
 export type PendingSourceChange = {
   feeders?: string[]
   mode?: SectionMode
+  writing_style?: WritingStyle
 }
+
+/**
+ * Does a section take a writing style? Every analyze section (the analysis
+ * agent writes it, whatever the catalogue's ai_allowed says) and every
+ * AI-allowed generate section. One rule for the card, the plan's counter and
+ * the save, matching the backend's _sections_missing_writing_style.
+ */
+export function takesWritingStyle(mode: string | undefined, aiAllowed: boolean): boolean {
+  if (mode === "analyze") return true
+  return mode === "generate" && aiAllowed
+}
+
+/** Theme Rationale: in every report, written from the theme, not departments. */
+export const THEME_RATIONALE_CODE = "theme_rationale"
+
+/** The one section that needs no feeder departments — see THEME_RATIONALE_CODE. */
+export function isThemeSection(sectionCode: string): boolean {
+  return sectionCode === THEME_RATIONALE_CODE
+}
+
+/** What the card and the builder say instead of naming departments. */
+export const THEME_SOURCE_NOTE =
+  "Written from the report's theme (brief, areas of focus, concept messages)"
 
 /** section_code -> the unsaved change on it. */
 export type PendingSources = Record<string, PendingSourceChange>
@@ -86,7 +110,13 @@ export function mergePending(
     merged.mode !== undefined &&
     (merged.mode !== savedMode || !section.mode_confirmed)
 
-  if (!feedersChanged && !modeChanged) {
+  // Any pick on an unchosen section is a change — paragraphs included, since
+  // choosing it is what turns "Choose writing style" into a decision.
+  const styleChanged =
+    merged.writing_style !== undefined &&
+    merged.writing_style !== (section.writing_style ?? null)
+
+  if (!feedersChanged && !modeChanged && !styleChanged) {
     delete next[section.section_code]
     return next
   }
@@ -94,6 +124,7 @@ export function mergePending(
   next[section.section_code] = {
     ...(feedersChanged ? { feeders: merged.feeders } : {}),
     ...(modeChanged ? { mode: merged.mode } : {}),
+    ...(styleChanged ? { writing_style: merged.writing_style } : {}),
   }
   return next
 }
@@ -138,6 +169,26 @@ export function demo() {
   console.assert(
     Object.keys(backAgain).length === 0,
     "switching back to the saved mode should clear the pending entry",
+  )
+
+  // Theme Rationale needs no departments; every other section still does.
+  console.assert(isThemeSection("theme_rationale"), "theme_rationale is the theme section")
+  console.assert(!isThemeSection("strategy_objectives"), "other sections are not")
+
+  // Any pick on an unchosen section is pending — paragraphs included.
+  const bullets = mergePending({}, section, entry, { writing_style: "bullets" })
+  console.assert(bullets.s1?.writing_style === "bullets", "a style change is pending")
+  console.assert(
+    mergePending({}, section, entry, { writing_style: "paragraphs" }).s1
+      ?.writing_style === "paragraphs",
+    "choosing paragraphs on an unchosen section is a change",
+  )
+  // Re-picking the style a section already has is not.
+  const styled = { ...section, writing_style: "bullets" } as CycleReportSection
+  console.assert(
+    Object.keys(mergePending({}, styled, entry, { writing_style: "bullets" }))
+      .length === 0,
+    "re-picking the saved style leaves nothing pending",
   )
 
   // ...but on a section nobody has decided, picking the placeholder mode IS the
