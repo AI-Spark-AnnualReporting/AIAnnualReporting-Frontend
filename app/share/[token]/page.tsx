@@ -64,6 +64,27 @@ import {
      sent, so what Spark reads is what Spark approves.
 ──────────────────────────────────────────────────────────────────────────── */
 
+/** The form filled from their previous reply.
+ *
+ *  Skipped means "they rejected it", taken from the list their reply now
+ *  records. Guessing it from a missing answer marked every question Spark
+ *  brought back or added since their last round as skipped, because they had
+ *  never answered it. Older replies, saved before the list existed, keep the
+ *  guess. */
+function valueFromReply(
+  questions: SurveyQuestion[],
+  reply: ShareResponsePayload,
+): QuestionnaireValue {
+  const value = valueFromAnswers(questions, reply.answers ?? [])
+  const rejectedIds = reply.rejected_question_ids
+  if (!Array.isArray(rejectedIds)) return value
+  const rejected: QuestionnaireValue["rejected"] = {}
+  questions.forEach((q, i) => {
+    if (rejectedIds.includes(q.id)) rejected[i] = true
+  })
+  return { ...value, rejected }
+}
+
 /** Where the client stands on this link, for the banner. */
 function bannerStatus(view: ClientShareView): BannerStatus {
   if (view.status === "approved") return "approved"
@@ -218,7 +239,7 @@ export default function ClientSharePage({
           const submitted = v.response?.answers
           setAnswers(
             submitted?.length
-              ? valueFromAnswers(v.payload.questions ?? [], submitted)
+              ? valueFromReply(v.payload.questions ?? [], v.response)
               : emptyQuestionnaireValue,
           )
           setDocName(v.document_name ?? null)
