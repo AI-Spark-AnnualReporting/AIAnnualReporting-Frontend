@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -6,6 +7,7 @@ import { pmApi } from "@/lib/api/pm"
 import type {
   DepartmentClaimsResponse,
   DraftFindingsResponse,
+  ExternalReportInput,
   ResolveFindingPayload,
 } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
@@ -58,10 +60,15 @@ export function useDraftFindings(cycleId: string) {
  * costs the response and never the work — the panel reads the stored validation
  * on the next load either way.
  */
+// `stage` is the server's progress line while the run is polled.
 export function useValidateReport(cycleId: string) {
   const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => pmApi.validateReport(cycleId),
+  const [stage, setStage] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: () => {
+      setStage(null)
+      return pmApi.validateReport(cycleId, setStage)
+    },
     // No success toast. The result is a panel and a statement page on screen,
     // both of which say more than a count in a corner, and the toast landed on
     // top of them the moment they appeared.
@@ -73,6 +80,26 @@ export function useValidateReport(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Couldn't validate the report")),
+  })
+  return { ...mutation, stage }
+}
+
+// Annual Report Validator: upload an external report and start its job.
+export function useStartExternalValidation() {
+  return useMutation({
+    mutationFn: (input: ExternalReportInput) => pmApi.startExternalValidation(input),
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't start the validation")),
+  })
+}
+
+// A validation job, re-read every 3s until it finishes.
+export function useValidationJob(jobId: string) {
+  return useQuery({
+    queryKey: ["validation-job", jobId],
+    queryFn: () => pmApi.getValidationJob(jobId),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" || !query.state.data ? 3000 : false,
   })
 }
 

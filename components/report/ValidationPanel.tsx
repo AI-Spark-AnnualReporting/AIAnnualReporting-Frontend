@@ -206,12 +206,17 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
     <div className="space-y-5">
       <Overall validation={validation} />
 
-      <Score
-        traced={traced}
-        total={total}
-        distinct={validation.untraced.length}
-        bySource={validation.figures_by_source}
-      />
+      {/* Off for an external report (Annual Report Validator): it has no
+          sources, so every figure would read as unsourced. Absent on older
+          results, which all traced figures. */}
+      {validation.figure_tracing !== false && (
+        <Score
+          traced={traced}
+          total={total}
+          distinct={validation.untraced.length}
+          bySource={validation.figures_by_source}
+        />
+      )}
 
       <Coverage validation={validation} />
 
@@ -227,7 +232,9 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
           <div>
             <p className="text-sm font-bold text-emerald-900">Nothing to fix</p>
             <p className="mt-0.5 text-sm text-emerald-800">
-              Every figure traces to a department, and no section contradicts another.
+              {validation.figure_tracing === false
+                ? "No part of the report contradicts another, and it follows the brief, concept messages and tone."
+                : "Every figure traces to a department, and no section contradicts another."}
             </p>
           </div>
         </div>

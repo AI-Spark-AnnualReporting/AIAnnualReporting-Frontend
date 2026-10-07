@@ -358,7 +358,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         </div>
       )}
 
-      {validate.isPending && <ReportValidateLoader />}
+      {validate.isPending && <ReportValidateLoader stage={validate.stage} />}
 
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
