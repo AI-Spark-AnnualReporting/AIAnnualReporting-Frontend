@@ -31,6 +31,36 @@ export type ShareStage = "questionnaire" | "brief" | "areas"
 export type ShareStatus = "pending" | "responded" | "approved"
 export type ShareEmailStatus = "pending" | "sent" | "failed"
 
+/** One thing that happened to a gate — see the backend's history_service. */
+export interface KickoffHistoryEntry {
+  id: string
+  /** Which gate it belongs to. */
+  stage: ShareStage
+  /** "generated" = the AI wrote it; "refined" = the AI changed it on an
+   *  instruction, which is kept in `note`. */
+  action:
+    | "shared"
+    | "client_sent"
+    | "sent_back"
+    | "approved"
+    | "reminded"
+    | "edited"
+    | "generated"
+    | "refined"
+  actor_type: "spark" | "client"
+  actor_id?: string | null
+  /** A Spark user's name, or the client's email. */
+  actor_label?: string | null
+  /** The gate's content before and after, shaped per stage. */
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  /** Send-back comment, the client's note, or the address it was shared with. */
+  note?: string | null
+  at: string
+  /** Moves when Spark's autosaves are folded into one edit. */
+  updated_at: string
+}
+
 /** What the client sent back. Shape follows the stage. */
 export interface ShareResponsePayload {
   answers?: GenerateBriefAnswer[]
@@ -154,6 +184,15 @@ export const shareApi = {
    *  Approving the brief normally does this. This is the retry for when that
    *  generation failed: the approval cannot be repeated, so without it the PM
    *  is stuck on an empty card. */
+  /** One gate's history, newest first. spark_internal only. */
+  history: async (cycleId: string, stage: ShareStage): Promise<KickoffHistoryEntry[]> => {
+    const { data } = await apiClient.get<{ entries: KickoffHistoryEntry[] }>(
+      `/pm/cycles/${cycleId}/history`,
+      { params: { stage } },
+    )
+    return data.entries
+  },
+
   generateAreas: async (cycleId: string) => {
     const { data } = await apiClient.post(
       `/pm/cycles/${cycleId}/areas-of-focus/generate`,

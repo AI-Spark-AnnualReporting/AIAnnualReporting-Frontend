@@ -12,6 +12,7 @@ import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { KickoffStepper } from "@/components/pm/kickoff-stepper"
 import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
+import { KickoffHistoryButton } from "@/components/pm/KickoffHistoryPanel"
 import { useAuth } from "@/contexts/AuthContext"
 import {
   QuestionnaireForm,
@@ -384,7 +385,10 @@ export default function KickoffQuestionnairePage({
           {/* Client sign-off. The client answers these questions, so this gate
               comes before anything else on the page can be finished. */}
           {sparkFlow && !questionsError && total > 0 && (
-            <ShareWithClientButton cycleId={id} stage="questionnaire" share={share} />
+            <div className="flex shrink-0 items-center gap-2">
+              <KickoffHistoryButton cycleId={id} stage="questionnaire" />
+              <ShareWithClientButton cycleId={id} stage="questionnaire" share={share} />
+            </div>
           )}
         </div>
 

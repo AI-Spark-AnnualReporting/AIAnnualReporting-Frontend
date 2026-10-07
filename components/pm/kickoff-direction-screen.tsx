@@ -44,6 +44,7 @@ import {
 } from "@/components/pm/kickoff-build-loader"
 import { AreaConceptCard } from "@/components/report/AreaConceptCard"
 import { ShareWithClientButton } from "@/components/pm/ShareWithClientButton"
+import { KickoffHistoryButton } from "@/components/pm/KickoffHistoryPanel"
 import { KickoffLoader } from "@/components/pm/kickoff-loader"
 import { ClientDriftNotice } from "@/components/pm/ClientDriftNotice"
 import { useAuth } from "@/contexts/AuthContext"
@@ -214,6 +215,15 @@ const REGENERATE_BRIEF_CONSENT: ConsentCopy = {
   description:
     "This rebuilds the strategic brief from your original answers. The current brief is " +
     "discarded, including any refinements and manual edits.",
+}
+
+/** Show a single Enter as a new line, the way the brief was typed.
+ *  Markdown joins lines split by one newline into the same paragraph, so the
+ *  card ran "line one" and "line two" together while History and the
+ *  client's page (plain text) kept them apart. Two trailing spaces are
+ *  Markdown's own hard line break; blank lines still make paragraphs. */
+function keepLineBreaks(text: string): string {
+  return text.replace(/([^\n])\n(?!\n)/g, "$1  \n")
 }
 
 const realignAreasInstruction = (brief: string) =>
@@ -1129,31 +1139,42 @@ export function KickoffDirectionScreen({
               here at once put an enabled "Share with client" for the AREAS on
               the brief screen, next to the brief's own status — two buttons for
               two different things, reading as one. */}
-          {sparkFlow && phase === "result" && showBrief && (
-            <ShareWithClientButton
-              cycleId={id}
-              stage="brief"
-              share={briefShare}
-              // Whoever answered the questionnaire is the client on this
-              // cycle — no reason to make Spark remember the address.
-              suggestedEmail={shares?.questionnaire?.client_email}
-              // So the dialog can warn when an edit has moved the text away
-              // from the version the client actually signed.
-              current={{ strategic_brief: result?.brief }}
-            />
-          )}
-          {sparkFlow && phase === "result" && showAreas && (
-            <ShareWithClientButton
-              cycleId={id}
-              stage="areas"
-              share={areasShare}
-              // The brief gate is the nearest one, and by here it has certainly
-              // been sent — these areas came from approving it.
-              suggestedEmail={
-                briefShare?.client_email ?? shares?.questionnaire?.client_email
-              }
-              current={{ areas_of_focus: areas, concept_messages: list }}
-            />
+          {sparkFlow && phase === "result" && (
+            <div className="flex shrink-0 items-center gap-2">
+              {/* From the start: the history is recorded before sharing too. */}
+              {sparkFlow && phase === "result" && showBrief && (
+                <KickoffHistoryButton cycleId={id} stage="brief" />
+              )}
+              {sparkFlow && phase === "result" && showAreas && (
+                <KickoffHistoryButton cycleId={id} stage="areas" />
+              )}
+              {sparkFlow && phase === "result" && showBrief && (
+                <ShareWithClientButton
+                  cycleId={id}
+                  stage="brief"
+                  share={briefShare}
+                  // Whoever answered the questionnaire is the client on this
+                  // cycle — no reason to make Spark remember the address.
+                  suggestedEmail={shares?.questionnaire?.client_email}
+                  // So the dialog can warn when an edit has moved the text away
+                  // from the version the client actually signed.
+                  current={{ strategic_brief: result?.brief }}
+                />
+              )}
+              {sparkFlow && phase === "result" && showAreas && (
+                <ShareWithClientButton
+                  cycleId={id}
+                  stage="areas"
+                  share={areasShare}
+                  // The brief gate is the nearest one, and by here it has certainly
+                  // been sent — these areas came from approving it.
+                  suggestedEmail={
+                    briefShare?.client_email ?? shares?.questionnaire?.client_email
+                  }
+                  current={{ areas_of_focus: areas, concept_messages: list }}
+                />
+              )}
+            </div>
           )}
         </div>
 
@@ -1398,7 +1419,7 @@ export function KickoffDirectionScreen({
                 />
               ) : (
                 <div className="mt-4 rounded-lg border bg-muted/20 p-4">
-                  <ProsePreview content={result.brief} className="prose-indigo" />
+                  <ProsePreview content={keepLineBreaks(result.brief)} className="prose-indigo" />
                 </div>
               )}
               {/* The same !briefShared as the button above it. Toggling this

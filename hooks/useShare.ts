@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { shareApi, ShareStage } from "@/lib/api/share"
+import { CycleShares, shareApi, ShareStage } from "@/lib/api/share"
+
+/** One gate's history. Fetched only while the History panel is open, and
+ *  fresh each time it opens. */
+export function useKickoffHistory(cycleId: string, stage: ShareStage, open: boolean) {
+  return useQuery({
+    queryKey: ["pm", "cycle", cycleId, "history", stage],
+    queryFn: () => shareApi.history(cycleId, stage),
+    enabled: open && !!cycleId,
+    staleTime: 0,
+  })
+}
 
 /** Every gate's state for one cycle.
  *
@@ -41,7 +52,15 @@ export function useApproveShare(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (stage: ShareStage) => shareApi.approve(cycleId, stage),
-    onSuccess: () => {
+    onSuccess: (result, stage) => {
+      // Write the approved share into the cache straight away. The caller
+      // moves on at once (the brief gate goes to step 3), and step 3 checks
+      // "is the brief approved?" — read from a cache still saying
+      // "responded" while the refetch was in flight, it sent Spark back to
+      // step 2 showing the old status.
+      qc.setQueryData<CycleShares>(["pm", "cycle", cycleId, "shares"], (old) =>
+        old ? { ...old, [stage]: result.share } : old,
+      )
       qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId, "shares"] })
       // The gate opening changes what the cycle screens allow, so the cycle
       // itself is refetched too. On the brief gate it has also just gained
