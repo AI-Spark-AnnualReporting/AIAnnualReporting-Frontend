@@ -4,12 +4,225 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
-  ContentLanguage,
+  ContentLanguage, WritingStyle,
 } from "@/types"
 
 export interface ReviewPayload {
   action: PMReviewAction
   review_notes?: string
+}
+
+// ---------------------------------------------------------------------------
+// Pre-build draft checks
+// The PM runs these from the Report Builder card once every department is
+// approved and before the builder opens — the last point at which a correction
+// still reaches the generated report.
+// ---------------------------------------------------------------------------
+
+// One department's side of a finding. `sentence` is verbatim from that
+// department's submission, which is what makes the inline edit safe: the
+// backend replaces this exact string.
+export interface FindingSide {
+  session_id: string
+  department: string
+  sentence: string
+  // Which copy of this sentence, when the draft repeats it verbatim. Sent back
+  // untouched on resolve so the backend edits the flagged one.
+  occurrence: number
+  // Populated on a figure_conflict, from the claim behind the sentence.
+  value?: string | null
+  period?: string | null
+  // company | department. Shown on the finding so a wrong call by the model is
+  // obvious to the PM, who can clear it in one click.
+  scope?: string | null
+  // What this department was asked. Often the reason two figures differ.
+  question?: string | null
+}
+
+// One fact a department stated, read out of its ANSWERS - never its draft,
+// which is model-written from those same answers.
+/** What a Validate-report run found. Only figures_traced/figures_total is ever
+ *  printed in the annual report; the rest are model judgements and stay on the
+ *  PM's screen. */
+export interface CoverageStat {
+  title: string
+  sections: number
+  percent: number
+}
+
+export interface ReportValidation {
+  figures_total: number
+  figures_traced: number
+  // Which of the two recorded sources each figure matched. Absent on a
+  // validation stored before documents were checked, which is why the panel
+  // and the statement both fall back to the plain ratio without it.
+  figures_by_source?: {
+    submission: number
+    document: number
+    neither: number
+  } | null
+  // context is the sentence the figure sits in. Optional: validations stored
+  // before it was captured have the bare value only.
+  untraced: { section_code: string; title: string; value: string; context?: string }[]
+  instruction_text: { section_code: string; title: string; line: string; marker: string }[]
+  voice: { section_code: string; title: string; phrase: string }[]
+  preferred_words: Record<string, number>
+  // The house style this run was judged against, kept with the verdict rather
+  // than read back from the company later - brand_voice is edited over time,
+  // and a finding made under one rule set must not be explained by another.
+  // Null when the company stores no style at all.
+  tone_rules?: {
+    person: string
+    register: string
+    sentence_style: string
+    tone_adjectives: string[]
+    banned_words: string[]
+    preferred_words: string[]
+    do: string[]
+    dont: string[]
+  } | null
+  conflicts: { measure: string; detail: string }[]
+  redundancy: { sections: string[]; detail: string }[]
+  brief_gaps: { ask: string; detail: string }[]
+  // How many explicit asks the brief made in all, so the gaps can be read as a
+  // share. Null when the judgement gave no usable count, and on any validation
+  // stored before it was asked for.
+  brief_asks_total?: number | null
+  // Every ask the brief made, covered or not, and which section covers it.
+  // Empty on a validation stored before the covered ones were named - at full
+  // coverage there are no gaps, and without this a card reading "7 of 7"
+  // cannot say seven of what.
+  brief_asks?: { ask: string; covered?: boolean; where?: string; detail?: string }[]
+  emphasis: { primary_leads?: boolean; detail?: string; missing?: string[] } | null
+  // How much of the report carries each concept message, and the house style.
+  // Counted over the sections that were read, never the whole report. Null on a
+  // validation stored before coverage was measured.
+  coverage?: {
+    sections_checked: number
+    // Per metric, because they are not scored over the same sections: an
+    // auditor's report carries neither the brand theme nor the house style, and
+    // a risk disclosure is governed by the house style but is no place for a
+    // theme. Absent on a validation stored before that was asked.
+    concept_sections?: number
+    tone_sections?: number
+    // What was left out of those bases, and what the section is for.
+    excluded?: {
+      section_code: string
+      title: string
+      purpose: string
+      concept: boolean
+      tone: boolean
+    }[]
+    // Null when no message is marked primary, which one live cycle is.
+    primary: CoverageStat | null
+    secondary: CoverageStat[]
+    secondary_any: { sections: number; percent: number }
+    // Null when the company stored no house style. It must not score: with no
+    // rules nothing can be flagged, so every such company would read 100%.
+    tone: { sections: number; percent: number } | null
+  } | null
+  // Sections the model never returned a verdict for. NOT the same as clean —
+  // nobody looked at these.
+  sections_unchecked: string[]
+  sections: Record<string, {
+    title?: string
+    covers?: string
+    concept?: string
+    // Which concept messages this section carries, by title. The evidence
+    // behind the coverage percentages.
+    concepts?: string[]
+    unsupported?: { label: string; detail: string }[]
+    // Every figure the section states, named by the measure it belongs to.
+    // Counting the distinct measures is what gives the conflict check a base.
+    figures?: { label?: string; value?: string; measure?: string }[]
+  }>
+  validated_at: string
+}
+
+export interface DepartmentClaim {
+  id: string
+  text: string
+  metric?: string | null
+  // A numeric string, or null for a fact with no number. Non-numeric facts are
+  // kept: without them every ordinary draft sentence would look unsupported.
+  value?: string | null
+  unit?: string | null
+  period?: string | null
+  // Only company-scoped facts are compared across departments.
+  scope: string
+  question_id?: string | null
+  // What another department said that disagrees with this fact. Null means
+  // nothing disagrees — which only reads as "no issue" once the drafts have
+  // actually been analyzed (see findings_checked_at on the response).
+  dispute?: string | null
+}
+
+export interface DepartmentClaimsGroup {
+  session_id: string
+  department: string
+  claims: DepartmentClaim[]
+  // null means this department's claims were never read - extraction failed, or
+  // the cycle predates the feature. The page offers Extract claims.
+  extracted_at: string | null
+}
+
+export interface DepartmentClaimsResponse {
+  success: boolean
+  cycle_id: string
+  departments: DepartmentClaimsGroup[]
+  total_claims: number
+  // When the drafts were last analyzed. Null means never, which is what
+  // separates "no issue found" from "nothing has checked yet".
+  findings_checked_at?: string | null
+}
+
+// What the PM did about a finding. `from` is the pre-correction sentence — the
+// only record that an approved submission was edited, since the department and
+// its HOD are not notified.
+export interface FindingResolution {
+  session_id: string | null
+  action: "edited" | "removed" | "accepted"
+  // The submission exactly as it stood before this edit, so Undo can restore
+  // it verbatim. Absent on findings resolved before Undo existed.
+  before_text?: string | null
+  from: string | null
+  to: string | null
+  by: string
+  at: string
+}
+
+// invented_claim — a sentence the department's own answers do not support; one
+// entry in `sides`. figure_conflict — departments disagreeing on one measure;
+// two or more entries in `sides`.
+export interface DraftFinding {
+  id: string
+  kind: "invented_claim" | "figure_conflict"
+  label: string
+  detail: string
+  status: "open" | "corrected" | "removed" | "accepted"
+  sides: FindingSide[]
+  resolution?: FindingResolution | null
+}
+
+export interface DraftFindingsResponse {
+  success: boolean
+  cycle_id: string
+  findings: DraftFinding[]
+  open_count: number
+  // null means the check has never been run for this cycle — not the same as
+  // "ran and found nothing".
+  checked_at: string | null
+  // Set when the PM consented and opened the Report Builder. Non-null means the
+  // findings page is a read-only record: no more resolves, no re-running the
+  // check. One-way — there is no unlock.
+  locked_at: string | null
+  locked_by: string | null
+}
+
+export interface ResolveFindingPayload {
+  action: "edited" | "removed" | "accepted" | "undo"
+  session_id?: string
+  sentence?: string
 }
 
 export interface ReminderPayload {
@@ -802,6 +1015,63 @@ export const pmApi = {
     return data
   },
 
+  // Pre-build draft checks. Runs the AI checks across every approved department
+  // draft — one call per department for unsupported claims, plus one across all
+  // of them for figures that disagree. Slow by nature (it is N+1 model calls run
+  // concurrently server-side), so the caller shows a pending state.
+  checkDrafts: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/check-drafts`)
+    return data
+  },
+
+  // The stored findings from the last check — does NOT re-run it.
+  // checked_at is null when the PM has never run the check, which is what
+  // distinguishes "nothing wrong" from "not looked yet".
+  draftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/draft-findings`)
+    return data
+  },
+
+  // Record the PM's consent and close the findings. One-way, and the server
+  // refuses if any finding is still open.
+  lockDraftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/lock`,
+    )
+    return data
+  },
+
+  // What each approved department stated, read from its answers. Read-only and
+  // cheap - it never triggers extraction.
+  departmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/department-claims`)
+    return data
+  },
+
+  // Fill in claims for any approved department missing them. The fallback when
+  // the background extraction at approval failed. One model call per missing
+  // department, so it is slow - callers show a pending state.
+  extractDepartmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/department-claims/extract`)
+    return data
+  },
+
+  // Resolve one finding. action "edited" rewrites the sentence inside that
+  // department's approved submission and requires `sentence`; "removed" deletes
+  // it; "accepted" changes no text. session_id picks which department's sentence
+  // to act on and is required for edited/removed on a figure_conflict.
+  resolveFinding: async (
+    cycleId: string,
+    findingId: string,
+    payload: ResolveFindingPayload,
+  ): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/${findingId}/resolve`,
+      payload,
+    )
+    return data
+  },
+
   // Resolved report sections for a cycle (PM-access).
   getCycleSections: async (cycleId: string): Promise<CycleReportSection[]> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sections`)
@@ -993,14 +1263,20 @@ export const pmApi = {
     return data
   },
 
+  // Also carries the section's writing style when given, so Start Building
+  // saves feeders and style in one request. Omitted = style left unchanged.
   setFeeders: async (
     cycleId: string,
     sectionCode: string,
     departmentCodes: string[],
+    writingStyle?: WritingStyle,
   ): Promise<PlanResponse> => {
     const { data } = await apiClient.put(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/feeders`,
-      { departments: departmentCodes },
+      {
+        departments: departmentCodes,
+        ...(writingStyle ? { writing_style: writingStyle } : {}),
+      },
     )
     return data.plan ?? data
   },
@@ -1086,6 +1362,20 @@ export const pmApi = {
   assemblyReadiness: async (cycleId: string): Promise<AssemblyReadiness> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${cycleId}/assembly-readiness`,
+    )
+    return data
+  },
+
+  // Check the assembled report against what the departments submitted.
+  //
+  // ~16 model calls server-side, so the 30s client default would abort a run
+  // that was about to succeed — and the work is saved before the response is
+  // sent, so an aborted request loses the answer while the server carries on.
+  validateReport: async (cycleId: string): Promise<{ validation: ReportValidation }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/validate`,
+      undefined,
+      { timeout: 180_000 },
     )
     return data
   },

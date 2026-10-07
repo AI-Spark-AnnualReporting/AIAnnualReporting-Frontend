@@ -104,6 +104,10 @@ export function ContentSection({
   // uploading, so a source in the wrong language is never sent.
   const [fileLangWarning, setFileLangWarning] = useState<string | null>(null)
   const [checkingLang, setCheckingLang] = useState(false)
+  // The file being uploaded, kept until it is read so the progress card can
+  // name it and "Try again" can resend it. Null when nothing is in flight.
+  const [uploadingFile, setUploadingFile] = useState<File | null>(null)
+  const [uploadFailed, setUploadFailed] = useState(false)
 
   // The company's previous manual content, used to pre-fill empty sections.
   // companyId comes from the authenticated user (/auth/me) — a PM is scoped to
@@ -343,6 +347,14 @@ export function ContentSection({
     }
     const file = accepted[0]
     if (!file) return
+    await startUpload(file)
+  }
+
+  // Check the language, then upload and extract. Shared by a new file and the
+  // progress card's "Try again", so a retry runs the exact same steps.
+  const startUpload = async (file: File) => {
+    setUploadingFile(file)
+    setUploadFailed(false)
     // Verify language first — only upload if it matches the cycle's language.
     setFileLangWarning(null)
     setCheckingLang(true)
@@ -355,6 +367,8 @@ export function ContentSection({
             ? res.detected_language
             : undefined
         setFileLangWarning(documentLanguageWarning(contentLanguage, detected))
+        // The warning takes over from here; there is nothing in flight.
+        setUploadingFile(null)
         return
       }
     } catch {
@@ -378,7 +392,10 @@ export function ContentSection({
           setMirroredHeadings([])
           setThinHeadings([])
           setView("auto")
+          setUploadingFile(null)
         },
+        // Keep the file so the card can offer "Try again" with it.
+        onError: () => setUploadFailed(true),
       },
     )
   }
@@ -454,7 +471,21 @@ export function ContentSection({
               "rounded-2xl outline-dashed outline-2 outline-offset-4 outline-indigo-300",
           )}
         >
-          {assisted && pane === "picker" ? (
+          {uploadingFile && (uploading || uploadFailed) ? (
+            // Replaces whichever pane was showing: until the file is read
+            // there is nothing to choose or edit, and the PM needs to see that
+            // something is happening.
+            <UploadProgressCard
+              fileName={uploadingFile.name}
+              checkingLanguage={checkingLang}
+              failed={uploadFailed}
+              onRetry={() => startUpload(uploadingFile)}
+              onCancel={() => {
+                setUploadingFile(null)
+                setUploadFailed(false)
+              }}
+            />
+          ) : assisted && pane === "picker" ? (
             // The front door for the two statements the app offers to draft.
             // It replaces the body rather than sitting above it: the question
             // is which source fills this section, and an empty box underneath
@@ -603,7 +634,6 @@ export function ContentSection({
                 ) : null}
               </div>
 
-              {upload.isPending && <ExtractingNotice />}
 
               {/* Writing lane. Always on screen too — a PM who never uploads
                   can write the section here. */}
@@ -672,15 +702,18 @@ export function ContentSection({
             </>
           )}
 
-          {/* Replace flow reuses the dropzone hook — render an off-screen root
-              so `dz.open()` has an input to trigger. */}
-          {attachment && (
-            <div className="sr-only">
-              <div {...dz.getRootProps()}>
-                <input {...dz.getInputProps()} />
-              </div>
-            </div>
-          )}
+          {/* The ONE file input every upload control opens with dz.open():
+              Upload, Replace, and the statement picker's "Choose a file" /
+              "Upload anyway". Always mounted — it used to exist only beside
+              the editor or once a file was attached, so on the statement
+              picker dz.open() had no input and the click did nothing.
+              `hidden`, not `sr-only`: sr-only is position:absolute with no
+              positioned ancestor here, so it landed below the panel and gave
+              the whole page an outer scrollbar. dz.open() clicks the input
+              directly, which works on a display:none input. */}
+          <div className="hidden">
+            <input {...dz.getInputProps()} />
+          </div>
         </div>
       </div>
 
@@ -864,18 +897,78 @@ function ContentBody({
   )
 }
 
-function ExtractingNotice() {
-  return (
-    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-foreground">
-          Extracting content…
+// Shown in place of the panel while an uploaded file is checked and read, and
+// if reading it fails. Three steps so the PM can see it moving, not one vague
+// spinner: the language check, the extraction, and "ready".
+function UploadProgressCard({
+  fileName,
+  checkingLanguage,
+  failed,
+  onRetry,
+  onCancel,
+}: {
+  fileName: string
+  checkingLanguage: boolean
+  failed: boolean
+  onRetry: () => void
+  onCancel: () => void
+}) {
+  if (failed) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-6 py-12 text-center">
+        <AlertCircle className="h-8 w-8 text-amber-600" />
+        <p className="text-base font-semibold text-slate-900">
+          Couldn&apos;t read &ldquo;{fileName}&rdquo;
         </p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Reading the document and pulling out the relevant text.
+        <p className="max-w-md text-sm text-slate-600">
+          The upload or the text extraction failed. Try again, or pick a different file.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={onRetry} className="bg-indigo-600 text-white hover:bg-indigo-700">
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Try again
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const steps = [
+    { label: "Checking the document's language", state: checkingLanguage ? "active" : "done" },
+    { label: "Extracting the text", state: checkingLanguage ? "waiting" : "active" },
+    { label: "Ready to review", state: "waiting" },
+  ]
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
+      <div>
+        <p className="text-base font-semibold text-slate-900">
+          Reading &ldquo;{fileName}&rdquo;
+        </p>
+        <p className="mt-1 max-w-md text-sm text-slate-500">
+          Pulling the text into this section — this takes a few seconds. Don&apos;t
+          close the page.
         </p>
       </div>
+      <ul className="space-y-1.5 text-left text-sm">
+        {steps.map((step) => (
+          <li key={step.label} className="flex items-center gap-2">
+            {step.state === "done" ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            ) : step.state === "active" ? (
+              <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+            ) : (
+              <span className="h-4 w-4 rounded-full border border-slate-300" />
+            )}
+            <span className={step.state === "waiting" ? "text-slate-400" : "text-slate-700"}>
+              {step.label}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -892,9 +985,10 @@ function UploadButton({
   dz: ReturnType<typeof useDropzone>
   uploading: boolean
 }) {
+  // No input here: the panel mounts the one input dz.open() clicks. A second
+  // copy would steal the dropzone's input ref from it.
   return (
     <>
-      <input {...dz.getInputProps()} />
       <Button
         type="button"
         variant="outline"

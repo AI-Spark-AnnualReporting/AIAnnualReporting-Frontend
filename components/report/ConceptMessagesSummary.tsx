@@ -28,23 +28,49 @@ interface AreaPair {
 }
 
 /**
- * Pair message N with area N — position is the only link between the two
- * lists. A message past the end of the areas (added by hand) gets a stand-in
- * area built from its own label, so it is still shown.
+ * Which area a message belongs to: matched on its `area_slogan`, else its
+ * position. Same rule as the backend's area_index_for_message.
+ *
+ * Position alone ("message N is area N") is only true when a cycle holds one
+ * message per area in area order. Older cycles hold one message per CHOSEN
+ * area, primary first — paired by position, each area showed another area's
+ * message and the primary showed none.
+ */
+function areaIndexFor(areas: AreaOfFocus[], index: number, message: ConceptMessage): number | null {
+  const wanted = (message.area_slogan ?? "").trim().toLowerCase()
+  if (wanted) {
+    const match = areas.findIndex((a) => (a.slogan ?? "").trim().toLowerCase() === wanted)
+    if (match >= 0) return match
+  }
+  return index < areas.length ? index : null
+}
+
+/**
+ * Each area with its own message. A message that matches no area (added by
+ * hand), or a second message for an area already taken, gets a stand-in area
+ * built from its own label, so it is still shown.
  */
 function pairAreasWithMessages(areas: AreaOfFocus[], messages: ConceptMessage[]): AreaPair[] {
-  const pairs: AreaPair[] = []
-  const count = Math.max(areas.length, messages.length)
-  for (let i = 0; i < count; i++) {
-    const message = messages[i]
-    const area = areas[i] ?? {
-      slogan: message?.area_slogan ?? message?.title ?? "",
-      sub_slogans: [],
-      role: message?.role ?? "secondary",
+  const pairs: AreaPair[] = areas.map((area) => ({ area, message: undefined }))
+  const leftovers: AreaPair[] = []
+
+  messages.forEach((message, index) => {
+    const position = areaIndexFor(areas, index, message)
+    if (position !== null && !pairs[position].message) {
+      pairs[position].message = message
+      return
     }
-    pairs.push({ area, message })
-  }
-  return pairs
+    leftovers.push({
+      area: {
+        slogan: message.area_slogan ?? message.title ?? "",
+        sub_slogans: [],
+        role: message.role ?? "secondary",
+      },
+      message,
+    })
+  })
+
+  return [...pairs, ...leftovers]
 }
 
 /**

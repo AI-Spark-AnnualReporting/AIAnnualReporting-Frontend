@@ -23,6 +23,7 @@ import {
   useSaveGenerateContent,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { isThemeSection } from "@/lib/pendingSectionSources"
 import { cn } from "@/lib/utils"
 import type { CycleReportSection } from "@/types"
 
@@ -53,7 +54,11 @@ export function GenerateSection({
   const deptByCode = new Map(
     (pmData?.departments ?? []).map((d) => [d.department_code, d.department_name]),
   )
-  const feederNames = feederCodes.map((c) => deptByCode.get(c) ?? c)
+  // Theme Rationale has no departments: it is written from the theme.
+  const isTheme = isThemeSection(sectionCode)
+  const feederNames = isTheme
+    ? ["the strategic brief, areas of focus and concept messages"]
+    : feederCodes.map((c) => deptByCode.get(c) ?? c)
 
   const generate = useGenerateSection(cycleId)
   const refine = useRefineSection(cycleId)
@@ -69,7 +74,7 @@ export function GenerateSection({
             <PendingView
               cycleId={cycleId}
               feederNames={feederNames}
-              hasFeeders={feederCodes.length > 0}
+              hasFeeders={isTheme || feederCodes.length > 0}
               generating={generate.isPending}
               onGenerate={() => generate.mutate({ sectionCode })}
             />

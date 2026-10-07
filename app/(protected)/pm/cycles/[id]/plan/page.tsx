@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -21,11 +21,13 @@ import { PageLoader } from "@/components/ui/spinner"
 import { AddSectionPicker } from "@/components/report/AddSectionPicker"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import { DepartmentCoverage } from "@/components/report/DepartmentCoverage"
+import { PlanBuildLoader } from "@/components/report/PlanBuildLoader"
 import { PlanSectionGrid } from "@/components/report/PlanSectionGrid"
 import { ConceptMessagesSummary } from "@/components/report/ConceptMessagesSummary"
 import { SuggestedThemesEditor } from "@/components/report/SuggestedThemesEditor"
 import {
   useBuildPlan,
+  useDraftFindings,
   useLockPlan,
   usePMCycleSections,
   usePlan,
@@ -37,7 +39,9 @@ import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import {
   applyPending,
+  isThemeSection,
   mergePending,
+  takesWritingStyle,
   type PendingSourceChange,
   type PendingSources,
 } from "@/lib/pendingSectionSources"
@@ -150,7 +154,23 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
   const pmData = pmDataRaw as PMDashboardData | undefined
 
-  if (planQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
+  // The builder is reached by consenting on the findings page, which locks the
+  // findings. Typing this address would otherwise walk straight past both the
+  // consent and any finding still unresolved, which is the whole point of the
+  // check — so an unconsented cycle is sent back.
+  const findingsQuery = useDraftFindings(cycleId)
+  const router = useRouter()
+  const consented = !!findingsQuery.data?.locked_at
+  useEffect(() => {
+    if (!findingsQuery.isLoading && !consented) {
+      router.replace(`/pm/cycles/${cycleId}/findings`)
+    }
+  }, [findingsQuery.isLoading, consented, router, cycleId])
+
+  if (planQuery.isLoading || sectionsQuery.isLoading || findingsQuery.isLoading) {
+    return <PageLoader />
+  }
+  if (!consented) return <PageLoader />
 
   const cycleName = pmData?.cycle?.cycle_name
   // Arabic cycles render section/theme titles right-to-left.
@@ -192,7 +212,10 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const needsMode = sections.filter(
     (s) => !s.mode_confirmed && !pending[s.section_code]?.mode,
   ).length
-  const canLockSections = needsSource === 0 && needsMode === 0 && sections.length > 0
+  // Every AI-written section needs a writing style before the plan can lock.
+  const needsStyle = countSectionsNeedingStyle(feeders, sections, pending)
+  const canLockSections =
+    needsSource === 0 && needsMode === 0 && needsStyle === 0 && sections.length > 0
   const hasUnsaved = Object.keys(pending).length > 0
 
   const onPendingChange = (
@@ -246,10 +269,26 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode ??
           sections.find((s) => s.section_code === sectionCode)?.mode
         const takesFeeders = finalMode === "generate" || finalMode === "analyze"
-        if (change.feeders && takesFeeders) {
+        // The style rides on the feeders call — one request per section. Only
+        // AI-written and analyze sections have one; the backend refuses it on
+        // any other mode. For analyze, that same call re-runs the analysis, so
+        // the findings are rewritten in the chosen style.
+        const writingStyle = takesWritingStyle(
+          finalMode,
+          sections.find((s) => s.section_code === sectionCode)?.ai_allowed ?? true,
+        )
+          ? change.writing_style
+          : undefined
+        if ((change.feeders || writingStyle) && takesFeeders) {
           await setFeeders.mutateAsync({
             sectionCode,
-            departmentCodes: change.feeders,
+            // A style-only change resends the departments the section already has.
+            departmentCodes:
+              change.feeders ??
+              (plan.feeders ?? []).find((f) => f.section_code === sectionCode)
+                ?.departments ??
+              [],
+            writingStyle,
           })
         }
         delete remaining[sectionCode]
@@ -297,6 +336,7 @@ function PlanShell({ cycleId }: { cycleId: string }) {
           departments={departments}
           needsSource={needsSource}
           needsMode={needsMode}
+          needsStyle={needsStyle}
           locked={sectionsLocked}
           lockedAt={plan.sections_locked_at}
           isRtl={isRtl}
@@ -509,6 +549,7 @@ function SectionsStep({
   departments,
   needsSource,
   needsMode,
+  needsStyle,
   locked,
   lockedAt,
   isRtl,
@@ -522,6 +563,7 @@ function SectionsStep({
   departments: Array<{ department_code: string; department_name: string }>
   needsSource: number
   needsMode: number
+  needsStyle: number
   locked: boolean
   lockedAt: string | null
   isRtl: boolean
@@ -529,7 +571,8 @@ function SectionsStep({
   pending: PendingSources
   onContinue: () => void
 }) {
-  const canLock = needsSource === 0 && needsMode === 0 && sections.length > 0
+  const canLock =
+    needsSource === 0 && needsMode === 0 && needsStyle === 0 && sections.length > 0
 
   return (
     <section className="space-y-5">
@@ -552,6 +595,11 @@ function SectionsStep({
           {!locked && needsSource > 0 && (
             <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
               {needsSource} need a source
+            </span>
+          )}
+          {!locked && needsStyle > 0 && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+              {needsStyle} need a writing style
             </span>
           )}
         </div>
@@ -596,11 +644,13 @@ function SectionsStep({
             </Button>
           ) : (
             <>
-              {!canLock && (needsSource > 0 || needsMode > 0) && (
+              {!canLock && (needsSource > 0 || needsMode > 0 || needsStyle > 0) && (
                 <span className="hidden text-xs text-amber-700 sm:block">
                   {needsMode > 0
                     ? "Choose how every flagged section is produced to continue."
-                    : "Assign a source to every flagged section to continue."}
+                    : needsSource > 0
+                      ? "Assign a source to every flagged section to continue."
+                      : "Choose a writing style for every flagged section to continue."}
                 </span>
               )}
               {/* Advancing no longer locks — the plan is locked at "Start Building". */}
@@ -723,7 +773,9 @@ function StartBuildingAction({
   // picked a moment ago but not yet written is still sourced.
   const needsSource = countSectionsNeedingFeeders(feeders, sections)
   const disabled =
-    needsSource > 0 || sections.some((s) => !s.mode_confirmed && !pending[s.section_code]?.mode)
+    needsSource > 0 ||
+    sections.some((s) => !s.mode_confirmed && !pending[s.section_code]?.mode) ||
+    countSectionsNeedingStyle(feeders, sections, pending) > 0
 
   // One wait, three phases. Saving runs first because locking freezes the
   // blueprint — set_section_feeders asserts the plan is unlocked, so a source
@@ -755,6 +807,8 @@ function StartBuildingAction({
     // Never invoke the AI for manual sections — the PM writes those directly.
     if (!s.ai_allowed) return false
     if (s.status !== "pending") return false
+    // Theme Rationale has no departments — it is written from the theme.
+    if (isThemeSection(s.section_code)) return true
     return (entry?.departments.length ?? 0) > 0
   })
 
@@ -896,6 +950,27 @@ function StartBuildingAction({
 
 function EmptyPlan({ cycleId }: { cycleId: string }) {
   const build = useBuildPlan(cycleId)
+
+  // Fire once, on arrival. The PM has just consented to open the builder, so
+  // asking them to press Generate is a second confirmation of a decision they
+  // already made — and the page behind the button is empty either way.
+  //
+  // The ref, not `build.isPending`, is what makes it once: pending is false on
+  // the render that schedules the call, and React runs effects twice in dev.
+  // Without it this bills two AI runs on every arrival.
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    build.mutate()
+    // build is a stable mutation object; re-running on its identity would
+    // defeat the guard's purpose anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (build.isPending) return <PlanBuildLoader />
+
+  // Only reached if the automatic run failed — the card becomes the retry.
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-10 shadow-sm">
       <div className="mx-auto max-w-md text-center">
@@ -903,12 +978,12 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           <Sparkles className="h-7 w-7 text-indigo-600" />
         </div>
         <h2 className="mb-1.5 text-lg font-bold text-slate-900">
-          Report theme and outline
+          {build.isError ? "Couldn't build the plan" : "Report theme and outline"}
         </h2>
         <p className="mb-5 text-sm text-slate-500">
-          We&apos;ll run two AI passes over your approved department content to
-          propose a headline, themes, and per-section feeders. This usually
-          takes 30–60 seconds.
+          {build.isError
+            ? "The run didn't finish. Make sure at least one department session is approved, then try again."
+            : "We'll run two AI passes over your approved department content to propose a headline, themes, and per-section feeders. This usually takes 30–60 seconds."}
         </p>
         <Button
           onClick={() => build.mutate()}
@@ -924,19 +999,34 @@ function EmptyPlan({ cycleId }: { cycleId: string }) {
           ) : (
             <>
               <Sparkles className="mr-2 h-4 w-4" />
-              Generate
+              {build.isError ? "Try again" : "Generate"}
             </>
           )}
         </Button>
-        {build.isError && (
-          <p className="mt-3 text-xs text-red-600">
-            Couldn&apos;t generate the plan. Make sure at least one department
-            session is approved.
-          </p>
-        )}
       </div>
     </div>
   )
+}
+
+/**
+ * AI-written sections with no writing style chosen yet (saved or staged).
+ *
+ * The same sections the card shows the style picker on: effective mode
+ * 'generate' and AI allowed. The backend's lock_plan refuses on the same rule,
+ * so the plan can't be locked from a stale tab either.
+ */
+function countSectionsNeedingStyle(
+  feeders: FeederMapEntry[] | undefined,
+  sections: CycleReportSection[],
+  pending: PendingSources,
+): number {
+  const feederByCode = new Map((feeders ?? []).map((f) => [f.section_code, f]))
+  return sections.filter((s) => {
+    const change = pending[s.section_code]
+    const mode = change?.mode ?? feederByCode.get(s.section_code)?.mode ?? s.mode
+    if (!takesWritingStyle(mode, s.ai_allowed)) return false
+    return !(change?.writing_style ?? s.writing_style)
+  }).length
 }
 
 function countSectionsNeedingFeeders(
@@ -960,6 +1050,8 @@ function countSectionsNeedingFeeders(
     // counter returned 0, so Continue stayed enabled on an unsourced plan.
     const mode = entry?.mode ?? s.mode
     if (mode !== "generate" && mode !== "analyze") return false
+    // Theme Rationale is written from the theme; it has no departments to need.
+    if (isThemeSection(s.section_code)) return false
     return (entry?.departments.length ?? 0) === 0
   }).length
 }

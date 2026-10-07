@@ -7,7 +7,8 @@ import {
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
   useEscalations, useBulkReminder, usePreviousBrief, useSetQuestionsDeadline,
 } from "@/hooks/useSessions"
-import { useBuildReadiness, usePlan } from "@/hooks/useReportBuilder"
+import { useBuildReadiness, useCheckDrafts, useDraftFindings, usePlan } from "@/hooks/useReportBuilder"
+import { DraftCheckLoader } from "@/components/report/DraftCheckLoader"
 import { PageHeader } from "@/components/ui/page-header"
 import { KickoffLoader } from "@/components/pm/kickoff-loader"
 import { Button } from "@/components/ui/button"
@@ -39,7 +40,7 @@ import {
   ArrowLeft, Bell, FileText, Eye, Loader2, Download,
   AlertTriangle, BookOpen, CheckCircle2, Clock, RefreshCw, Sparkles,
   FileUp, Zap, AlertOctagon, BellRing, Trophy, ShieldAlert,
-  ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X, Target,
+  ListChecks, ClipboardCheck, Hammer, ArrowRight, Calendar, X, Target, ListTree, ScanSearch,
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate, deptLeadLabel } from "@/lib/utils"
@@ -88,6 +89,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   // the plan screen has nothing left to do, so the builder is the resume point.
   const { data: plan } = usePlan(id)
   const planLocked = !!plan?.sections_locked
+  // Pre-build draft checks. Read-only here — running the check is an explicit
+  // click inside the panel, so opening this page never costs a model call.
+  const { data: draftFindings } = useDraftFindings(id)
+  // Analysing here rather than on the findings page so the PM starts it from
+  // the card and lands on the findings once it returns.
+  const checkDrafts = useCheckDrafts(id)
   const setQuestionsDeadline = useSetQuestionsDeadline(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -757,6 +764,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
 
       {/* Full-screen animated loader while AI generates the question set */}
       {submittingKickoff && <KickoffLoader />}
+      {checkDrafts.isPending && <DraftCheckLoader />}
 
       {/* ── Header ── */}
       <div className="flex items-center gap-3">
@@ -819,6 +827,28 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   </Button>
                 </Link>
               )}
+              {/* What each approved department stated, read from their answers.
+                  Gated on an approval existing, since that is when claims are
+                  read — before then the page has nothing to show. */}
+              {(readiness?.departments_approved ?? 0) > 0 && (
+                <Link href={`/pm/cycles/${id}/claims`}>
+                  <Button variant="outline">
+                    <ListTree className="mr-2 h-4 w-4" />
+                    Department Claims
+                  </Button>
+                </Link>
+              )}
+              {/* Once everything is handled the main button below goes straight
+                  to the builder, so this is what keeps the findings — and the
+                  record of what was corrected — reachable. */}
+              {draftFindings?.checked_at && (
+                <Link href={`/pm/cycles/${id}/findings`}>
+                  <Button variant="outline">
+                    <ScanSearch className="mr-2 h-4 w-4" />
+                    Draft Findings
+                  </Button>
+                </Link>
+              )}
               {(notStarted.length > 0 || inProgress.length > 0) && (
                 <Button variant="outline" onClick={() => setBulkOpen(true)}>
                   <BellRing className="mr-2 h-4 w-4" />
@@ -863,21 +893,77 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             const total = readiness?.departments_total ?? 0
             const approved = readiness?.departments_approved ?? 0
 
-            if (readiness?.can_build) {
-              // Pick up where the PM left off. Once the plan is locked the plan
-              // screen is read-only — nothing there can be changed — so landing
-              // on it means an extra click past a page that can only be looked
-              // at. The drafting happens in the builder.
-              const href = planLocked
-                ? `/pm/cycles/${id}/build`
-                : `/pm/cycles/${id}/plan`
+            // Gated on an approval existing, NOT on can_build. Analysing reads
+            // approved department drafts; report sections are about assembling
+            // the report afterwards and have nothing to do with it. Tying this
+            // to can_build hid the button on every cycle whose sections were
+            // not resolved, leaving real approved drafts uncheckable.
+            // Open Report Builder keeps the full can_build gate, on the
+            // findings page.
+            if (approved > 0) {
+              // The route to the builder runs through the findings page, so the
+              // PM cannot assemble a report without first seeing what the
+              // analysis found. Open Report Builder lives there, not here.
+              const alreadyAnalyzed = !!draftFindings?.checked_at
+              const stillOpen = draftFindings?.open_count ?? 0
+              // A locked cycle refuses analysis, so offering it here only
+              // produces a red error. Locked-but-never-analyzed is a real
+              // state: cycles whose plan was already locked were backfilled
+              // when this feature shipped, and they never ran the check.
+              const findingsLocked = !!draftFindings?.locked_at
+              const noAnalysisPossible = alreadyAnalyzed || findingsLocked
+
+              // Everything handled: the findings are no longer in the way, so
+              // go straight to the builder. The header keeps a link back to
+              // them for the record of what was corrected.
+              if (noAnalysisPossible && stillOpen === 0 && readiness?.can_build) {
+                // Once the plan is locked the plan screen is read-only, so
+                // landing on it is an extra click — resume in the builder.
+                const href = planLocked
+                  ? `/pm/cycles/${id}/build`
+                  : `/pm/cycles/${id}/plan`
+                return (
+                  <Link href={href}>
+                    <Button>
+                      {planLocked ? "Continue Report Builder" : "Open Report Builder"}
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                )
+              }
+
+              if (noAnalysisPossible) {
+                return (
+                  <Link href={`/pm/cycles/${id}/findings`}>
+                    <Button>
+                      {stillOpen > 0
+                        ? `View Findings (${stillOpen})`
+                        : "View Findings"}
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                )
+              }
               return (
-                <Link href={href}>
-                  <Button>
-                    {planLocked ? "Continue Report Builder" : "Open Report Builder"}
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
+                <Button
+                  onClick={() =>
+                    // onSettled, not onSuccess: this button is the only route
+                    // to the builder, so a failed model call must still land
+                    // the PM on the findings page — where Analyze again and
+                    // Open Report Builder both live. Staying here would leave
+                    // them with no way to build at all.
+                    checkDrafts.mutate(undefined, {
+                      onSettled: () => router.push(`/pm/cycles/${id}/findings`),
+                    })
+                  }
+                  disabled={checkDrafts.isPending}
+                >
+                  {checkDrafts.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  {checkDrafts.isPending ? "Analyzing…" : "Analyze Department Drafts"}
+                  {!checkDrafts.isPending && <ArrowRight className="ml-2 h-4 w-4" />}
+                </Button>
               )
             }
 
@@ -907,6 +993,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               </span>
             </div>
           )}
+        {/* The analysis is started from the button above; its findings live on
+            their own page, which is also the only way into the builder. */}
       </div>
 
       {/* ── Kickoff never finished ──
@@ -1938,6 +2026,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }

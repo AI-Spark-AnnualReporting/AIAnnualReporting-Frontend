@@ -157,7 +157,14 @@ export interface CycleReportSection {
   // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
   // modes and for older responses (treat missing as "pending").
   analysis_state?: SectionAnalysisState | null
+  // How the AI lays out a generate-mode section. Null/missing = the PM has not
+  // chosen yet; the card says "Choose writing style" and the AI writes it as
+  // paragraphs, which is how every section was written before the choice.
+  writing_style?: WritingStyle | null
 }
+
+/** Paragraphs (the default), bullet points, or the AI chooses. */
+export type WritingStyle = "paragraphs" | "bullets" | "ai"
 
 export interface ResolveSectionsResponse {
   success: boolean
@@ -305,6 +312,14 @@ export interface FinalReport {
   // through the last sub-heading). Optional — absent on older backends, in
   // which case the preview falls back to the per-section `number` field.
   outline?: OutlineEntry[]
+  // The last Validate-report run, or null. The server drops it when it predates
+  // the current assembly, so what arrives here is always about this document.
+  validation?: import("@/lib/api/pm").ReportValidation | null
+  // True when a validation exists but describes an earlier assembly, so the
+  // server withheld it. Tells "re-assembled since it was checked" apart from
+  // "never checked" - both arrive with `validation` null, and only one of them
+  // means the Validation Report page has just dropped out of the export.
+  validation_stale?: boolean
 }
 
 // Readiness of a cycle to enter the Report Builder.
@@ -500,7 +515,8 @@ export interface Notification {
    *  the backend (NotificationResponse.related_type) but was never declared
    *  here. Needed to tell a report-readiness row and Centriton's board-index
    *  warning (identified by ("report", <report id>)) apart from any other
-   *  "alert". */
+   *  "alert". "session_claims" marks a failed fact read, which the bell turns
+   *  into a click-to-retry row instead of a link. */
   related_type?: string | null
   related_id?: string
   action_url?: string

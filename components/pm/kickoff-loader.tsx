@@ -85,12 +85,51 @@ const TIPS = [
 ]
 const ROTATE_MS = 6500
 
-export function KickoffLoader() {
+export interface LoaderStage {
+  icon: React.ElementType
+  title: string
+  sub: string
+  pct: number
+}
+
+/**
+ * Props are all optional and default to the kickoff walkthrough above, so the
+ * original `<KickoffLoader />` call is unchanged. They exist because the same
+ * full-screen treatment suits any long AI wait on this page — the draft check
+ * reuses it with its own, much shorter, stages.
+ */
+export interface KickoffLoaderProps {
+  stages?: LoaderStage[]
+  finalizing?: string[]
+  tips?: string[]
+  /** Milliseconds per stage. Kickoff runs ~3 minutes; the draft check ~10s. */
+  stageMs?: number
+  /** Headline above the checklist. */
+  title?: string
+  /** Reassurance line under the progress bar. */
+  footer?: string
+}
+
+export function KickoffLoader({
+  stages,
+  finalizing,
+  tips,
+  stageMs,
+  title,
+  footer,
+}: KickoffLoaderProps = {}) {
   const [stage, setStage] = useState(0)
   const [finalIdx, setFinalIdx] = useState(0)
   const [tipIdx, setTipIdx] = useState(0)
 
-  const lastStage = STAGES.length - 1
+  const allStages = stages ?? STAGES
+  const allFinalizing = finalizing ?? FINALIZING
+  const allTips = tips ?? TIPS
+  const perStageMs = stageMs ?? STAGE_MS
+  const heading = title ?? "Generating your questions"
+  const footerNote = footer ?? "Please keep this window open — questions are on their way"
+
+  const lastStage = allStages.length - 1
   const onFinalStage = stage === lastStage
 
   // Advance through the pipeline stages, then stop on the last one.
@@ -98,30 +137,30 @@ export function KickoffLoader() {
     if (onFinalStage) return
     const id = setInterval(
       () => setStage((s) => Math.min(s + 1, lastStage)),
-      STAGE_MS
+      perStageMs
     )
     return () => clearInterval(id)
-  }, [onFinalStage, lastStage])
+  }, [onFinalStage, lastStage, perStageMs])
 
   // Once on the final stage, rotate reassurance copy so it never looks frozen.
   useEffect(() => {
     if (!onFinalStage) return
     const id = setInterval(
-      () => setFinalIdx((i) => (i + 1) % FINALIZING.length),
+      () => setFinalIdx((i) => (i + 1) % allFinalizing.length),
       4200
     )
     return () => clearInterval(id)
-  }, [onFinalStage])
+  }, [onFinalStage, allFinalizing.length])
 
   // Rotate the bottom tips independently of the stage timer.
   useEffect(() => {
-    const id = setInterval(() => setTipIdx((i) => (i + 1) % TIPS.length), ROTATE_MS)
+    const id = setInterval(() => setTipIdx((i) => (i + 1) % allTips.length), ROTATE_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [allTips.length])
 
-  const current = STAGES[stage]
+  const current = allStages[stage]
   const Icon = current.icon
-  const sub = onFinalStage ? FINALIZING[finalIdx] : current.sub
+  const sub = onFinalStage ? allFinalizing[finalIdx] : current.sub
   const progress = current.pct
   const swapKey = `${stage}-${onFinalStage ? finalIdx : 0}`
 
@@ -186,7 +225,7 @@ export function KickoffLoader() {
 
       {/* heading */}
       <div className="relative z-10 mt-9 max-w-md px-6 text-center">
-        <h2 className="text-2xl font-bold text-slate-800">Generating your questions</h2>
+        <h2 className="text-2xl font-bold text-slate-800">{heading}</h2>
         <p
           key={`s-${swapKey}`}
           className="mt-1.5 min-h-[2.5rem] text-sm text-slate-500"
@@ -198,7 +237,7 @@ export function KickoffLoader() {
 
       {/* live step checklist — lets the PM watch the pipeline progress */}
       <div className="relative z-10 mt-7 w-[22rem] max-w-[90vw] rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-sm backdrop-blur">
-        {STAGES.map((s, i) => {
+        {allStages.map((s, i) => {
           const done = i < stage
           const active = i === stage
           const StepIcon = s.icon
@@ -206,13 +245,13 @@ export function KickoffLoader() {
             <div
               key={i}
               className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2 transition-colors duration-500",
+                "flex items-center gap-3 rounded-xl px-3 py-2",
                 active && "bg-indigo-50"
               )}
             >
               <div
                 className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-500",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
                   done
                     ? "border-emerald-500 bg-emerald-500 text-white"
                     : active
@@ -230,7 +269,7 @@ export function KickoffLoader() {
               </div>
               <span
                 className={cn(
-                  "text-sm transition-colors duration-500",
+                  "text-sm",
                   done
                     ? "font-medium text-slate-400 line-through decoration-slate-300"
                     : active
@@ -257,7 +296,7 @@ export function KickoffLoader() {
         />
       </div>
       <p className="relative z-10 mt-2.5 text-xs font-medium tracking-wide text-slate-400">
-        Please keep this window open — questions are on their way
+        {footerNote}
       </p>
 
       {/* rotating tip */}
@@ -268,7 +307,7 @@ export function KickoffLoader() {
           className="text-xs text-slate-500"
           style={{ animation: "kl-fade-up 0.5s ease-out" }}
         >
-          {TIPS[tipIdx]}
+          {allTips[tipIdx]}
         </p>
       </div>
     </div>
