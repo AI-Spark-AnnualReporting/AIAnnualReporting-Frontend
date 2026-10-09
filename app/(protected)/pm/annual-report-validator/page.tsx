@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PageHeader } from "@/components/ui/page-header"
 import { Textarea } from "@/components/ui/textarea"
+import { PreviousValidationsList } from "@/components/report/PreviousValidationsList"
 import { useStartExternalValidation } from "@/hooks/useReportBuilder"
-import type { ToneRules } from "@/lib/api/pm"
 
 /* Annual Report Validator: validate an EXTERNAL annual report, one made
    outside this system.
@@ -33,59 +33,7 @@ const ACCEPT = ".pdf,.docx"
 const MAX_CONCEPTS = 5
 
 interface ConceptRow {
-  title: string
   message: string
-}
-
-// The tone form keeps lists as typed text; they are split on send.
-interface ToneForm {
-  person: string
-  register: string
-  sentence_style: string
-  tone_adjectives: string
-  banned_words: string
-  preferred_words: string
-  do: string
-  dont: string
-}
-
-const EMPTY_TONE: ToneForm = {
-  person: "",
-  register: "",
-  sentence_style: "",
-  tone_adjectives: "",
-  banned_words: "",
-  preferred_words: "",
-  do: "",
-  dont: "",
-}
-
-/** One item per line or comma, blanks dropped. */
-function toList(text: string): string[] {
-  const items: string[] = []
-  for (const part of text.split(/[\n,]/)) {
-    if (part.trim()) items.push(part.trim())
-  }
-  return items
-}
-
-/** The typed tone, in the shape the backend reads. */
-function toToneRules(tone: ToneForm): ToneRules {
-  return {
-    person: tone.person.trim(),
-    register: tone.register.trim(),
-    sentence_style: tone.sentence_style.trim(),
-    tone_adjectives: toList(tone.tone_adjectives),
-    banned_words: toList(tone.banned_words),
-    preferred_words: toList(tone.preferred_words),
-    do: toList(tone.do),
-    dont: toList(tone.dont),
-  }
-}
-
-/** True when at least one tone rule is filled in. */
-function hasToneRule(tone: ToneForm): boolean {
-  return Object.values(tone).some((value) => value.trim() !== "")
 }
 
 function ValidatorForm() {
@@ -96,22 +44,21 @@ function ValidatorForm() {
   const [brief, setBrief] = useState("")
   const [briefFile, setBriefFile] = useState<File | null>(null)
   const [conceptsFromFile, setConceptsFromFile] = useState(false)
-  const [concepts, setConcepts] = useState<ConceptRow[]>([{ title: "", message: "" }])
+  const [concepts, setConcepts] = useState<ConceptRow[]>([{ message: "" }])
   const [conceptFile, setConceptFile] = useState<File | null>(null)
-  const [tone, setTone] = useState<ToneForm>(EMPTY_TONE)
+  const [toneText, setToneText] = useState("")
+  const [toneFile, setToneFile] = useState<File | null>(null)
 
-  const typedConcepts = concepts.filter((c) => c.title.trim())
+  // No title to type any more - the backend draws a short one from the
+  // message itself when none is given, so readiness only needs the message.
+  const typedConcepts = concepts.filter((c) => c.message.trim())
   const briefReady = brief.trim() !== "" || briefFile !== null
   const conceptsReady = conceptsFromFile ? conceptFile !== null : typedConcepts.length > 0
-  const toneReady = hasToneRule(tone)
+  const toneReady = toneText.trim() !== "" || toneFile !== null
   const canRun = !!report && briefReady && conceptsReady && toneReady && !start.isPending
 
   function updateConcept(index: number, change: Partial<ConceptRow>) {
     setConcepts(concepts.map((c, i) => (i === index ? { ...c, ...change } : c)))
-  }
-
-  function updateTone(key: keyof ToneForm, value: string) {
-    setTone({ ...tone, [key]: value })
   }
 
   function run() {
@@ -123,7 +70,8 @@ function ValidatorForm() {
         briefFile: brief.trim() ? null : briefFile,
         concepts: conceptsFromFile ? [] : typedConcepts,
         conceptFile: conceptsFromFile ? conceptFile : null,
-        tone: toToneRules(tone),
+        toneText: toneText.trim(),
+        toneFile: toneText.trim() ? null : toneFile,
       },
       {
         onSuccess: (data) => router.push(`/pm/annual-report-validator/runs/${data.job_id}`),
@@ -132,7 +80,7 @@ function ValidatorForm() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
+    <div className="w-full space-y-6 p-6">
       <PageHeader
         title="Annual Report Validator"
         description="Validate an external annual report against its strategic brief, concept messages and tone. Long reports take a few minutes; you can leave the run page open or come back to it."
@@ -190,19 +138,13 @@ function ValidatorForm() {
                   <span className="mt-2 w-16 shrink-0 text-xs text-slate-400">
                     {i === 0 ? "Primary" : "Secondary"}
                   </span>
-                  <div className="flex-1 space-y-1.5">
-                    <Input
-                      placeholder="Title, e.g. Resilient Growth"
-                      value={c.title}
-                      onChange={(e) => updateConcept(i, { title: e.target.value })}
-                    />
-                    <Textarea
-                      rows={2}
-                      placeholder="The message, in a sentence or two"
-                      value={c.message}
-                      onChange={(e) => updateConcept(i, { message: e.target.value })}
-                    />
-                  </div>
+                  <Textarea
+                    rows={2}
+                    placeholder="The message, in a sentence or two"
+                    value={c.message}
+                    onChange={(e) => updateConcept(i, { message: e.target.value })}
+                    className="flex-1"
+                  />
                   {concepts.length > 1 && (
                     <Button
                       variant="ghost"
@@ -219,7 +161,7 @@ function ValidatorForm() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setConcepts([...concepts, { title: "", message: "" }])}
+                  onClick={() => setConcepts([...concepts, { message: "" }])}
                 >
                   <Plus className="mr-1.5 h-3.5 w-3.5" /> Add concept message
                 </Button>
@@ -231,26 +173,25 @@ function ValidatorForm() {
 
       <Field
         label="Tone"
-        hint="The house style the report should follow. Fill in at least one. For lists, put one item per line or separate them with commas."
+        hint="Paste the company's house-style guide, or upload it as a file. The AI reads out the rules it states - voice, register, banned and preferred words, do's and don'ts."
       >
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ToneInput label="Voice" placeholder="e.g. we / the Company" value={tone.person} onChange={(v) => updateTone("person", v)} />
-          <ToneInput label="Register" placeholder="e.g. formal" value={tone.register} onChange={(v) => updateTone("register", v)} />
-          <ToneInput label="Sentence style" placeholder="e.g. short, active" value={tone.sentence_style} onChange={(v) => updateTone("sentence_style", v)} />
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <ToneList label="Tone adjectives" value={tone.tone_adjectives} onChange={(v) => updateTone("tone_adjectives", v)} />
-          <ToneList label="Banned words" value={tone.banned_words} onChange={(v) => updateTone("banned_words", v)} />
-          <ToneList label="Preferred words" value={tone.preferred_words} onChange={(v) => updateTone("preferred_words", v)} />
-          <ToneList label="Do's" value={tone.do} onChange={(v) => updateTone("do", v)} />
-          <ToneList label="Don'ts" value={tone.dont} onChange={(v) => updateTone("dont", v)} />
+        <div className="space-y-2">
+          <Textarea
+            rows={6}
+            placeholder="Paste the house-style guide…"
+            value={toneText}
+            onChange={(e) => setToneText(e.target.value)}
+          />
+          {!toneText.trim() && (
+            <Input type="file" accept={ACCEPT} onChange={(e) => setToneFile(e.target.files?.[0] ?? null)} />
+          )}
         </div>
       </Field>
 
       <div className="flex items-center justify-end gap-3">
         {!canRun && !start.isPending && (
           <p className="text-xs text-slate-400">
-            The report, brief, concept messages and at least one tone rule are all required.
+            The report, brief, concept messages and a tone guide are all required.
           </p>
         )}
         <Button onClick={run} disabled={!canRun}>
@@ -258,6 +199,8 @@ function ValidatorForm() {
           {start.isPending ? "Uploading…" : "Validate report"}
         </Button>
       </div>
+
+      <PreviousValidationsList />
     </div>
   )
 }
@@ -272,38 +215,3 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
   )
 }
 
-function ToneInput({
-  label,
-  placeholder,
-  value,
-  onChange,
-}: {
-  label: string
-  placeholder: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs text-slate-500">{label}</Label>
-      <Input placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  )
-}
-
-function ToneList({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs text-slate-500">{label}</Label>
-      <Textarea rows={2} value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  )
-}

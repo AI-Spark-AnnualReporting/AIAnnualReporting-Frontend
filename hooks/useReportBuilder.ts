@@ -93,6 +93,15 @@ export function useStartExternalValidation() {
   })
 }
 
+// Re-run a past external validation with no re-upload.
+export function useRetryExternalValidation() {
+  return useMutation({
+    mutationFn: (jobId: string) => pmApi.retryExternalValidation(jobId),
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't start the retry")),
+  })
+}
+
 // A validation job, re-read every 3s until it finishes.
 export function useValidationJob(jobId: string) {
   return useQuery({
@@ -100,6 +109,15 @@ export function useValidationJob(jobId: string) {
     queryFn: () => pmApi.getValidationJob(jobId),
     refetchInterval: (query) =>
       query.state.data?.status === "running" || !query.state.data ? 3000 : false,
+  })
+}
+
+// This admin's own past Annual Report Validator runs, for the "previous
+// validations" list above the form.
+export function useExternalValidations() {
+  return useQuery({
+    queryKey: ["external-validations"],
+    queryFn: () => pmApi.listExternalValidations(),
   })
 }
 

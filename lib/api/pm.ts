@@ -157,16 +157,24 @@ export interface ToneRules {
 }
 
 // What the user gives the Annual Report Validator. Everything is required;
-// the brief and the concept messages may be typed or uploaded as a file.
+// the brief, concept messages and tone may be typed/pasted or uploaded as a
+// file. Tone has no typed/structured path like concepts does - paste and
+// file both arrive as free text, which the server always reads with the
+// model (see ToneRules, the shape it comes back as once read).
 export interface ExternalReportInput {
   report: File
   brief: string
   // Used by the server only when `brief` is empty.
   briefFile: File | null
-  concepts: { title: string; message: string }[]
+  // No title to type - the server draws a short one from the message when
+  // none is given.
+  concepts: { message: string }[]
   // Used by the server only when `concepts` is empty.
   conceptFile: File | null
-  tone: ToneRules
+  // A pasted house-style guide.
+  toneText: string
+  // Used by the server only when `toneText` is empty.
+  toneFile: File | null
 }
 
 // A validation running in the background (GET /pm/validation-jobs/{id}).
@@ -176,6 +184,19 @@ export interface ValidationJob {
   // What it is doing now, while running.
   stage: string | null
   validation: ReportValidation | null
+  error: string | null
+}
+
+// One row of GET /pm/validation-jobs (list) - lightweight, so the list of
+// past runs doesn't pull the full validation payload for every one. `score`
+// is the same weighted "Overall" percentage the results panel shows,
+// computed server-side; null until the run completes.
+export interface ValidationJobSummary {
+  job_id: string
+  filename: string
+  status: "running" | "completed" | "failed"
+  created_at: string
+  score: number | null
   error: string | null
 }
 
@@ -1440,6 +1461,19 @@ export const pmApi = {
     return data
   },
 
+  // This admin's own past Annual Report Validator runs, newest first.
+  listExternalValidations: async (): Promise<ValidationJobSummary[]> => {
+    const { data } = await apiClient.get("/pm/validation-jobs")
+    return data.jobs ?? []
+  },
+
+  // Re-run a job with the report, brief, concepts and tone it already saved
+  // - no re-upload.
+  retryExternalValidation: async (jobId: string): Promise<{ job_id: string }> => {
+    const { data } = await apiClient.post(`/pm/validation-jobs/${jobId}/retry`)
+    return data
+  },
+
   // Poll a validation job until it finishes. Resolves with the validation,
   // or throws with the job's own error so the toast says what went wrong.
   waitForValidationJob: async (
@@ -1473,7 +1507,10 @@ export const pmApi = {
     if (input.conceptFile) {
       form.append("concept_file", input.conceptFile)
     }
-    form.append("tone", JSON.stringify(input.tone))
+    form.append("tone_text", input.toneText)
+    if (input.toneFile) {
+      form.append("tone_file", input.toneFile)
+    }
     const { data } = await apiClient.post("/pm/validate-upload", form, {
       headers: { "Content-Type": undefined },
       // Only the upload itself; the checks run after this answers.
