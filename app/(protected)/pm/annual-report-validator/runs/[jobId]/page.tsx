@@ -73,7 +73,7 @@ function ValidatorRun({ jobId }: { jobId: string }) {
     return <Failed message="This validation could not be found." onBack={goBack} />
   }
 
-  const { status, stage, validation, error } = job.data
+  const { status, stage, validation, error, retryable } = job.data
   // Remembered from an earlier render: React's documented way to keep
   // information from previous renders without an effect.
   if (status === "running" && !sawRunning) setSawRunning(true)
@@ -103,7 +103,10 @@ function ValidatorRun({ jobId }: { jobId: string }) {
     return (
       <Failed
         message={error || "Validation failed. Please try again."}
-        onRetry={retryThis}
+        // Only when the run saved what a retry needs. A run that failed while
+        // reading its concepts or tone saved nothing, and the button only led
+        // to "This run didn't save enough to retry".
+        onRetry={retryable ? retryThis : undefined}
         onBack={goBack}
       />
     )
@@ -118,9 +121,17 @@ function ValidatorRun({ jobId }: { jobId: string }) {
         title="Annual Report Validator"
         description={`${validation.filename ?? "External report"} — checked ${checkedAt(validation.validated_at)}`}
         action={
-          <Button variant="outline" onClick={retryThis}>
-            Validate again
-          </Button>
+          retryable ? (
+            <Button variant="outline" onClick={retryThis}>
+              Validate again
+            </Button>
+          ) : (validation.skipped ?? []).length > 0 ? (
+            // A check was skipped for an input with nothing usable in it -
+            // re-running the same input would only skip it again.
+            <Button variant="outline" onClick={goBack}>
+              Start a new validation
+            </Button>
+          ) : undefined
         }
       />
       <ValidationPanel validation={validation} />
@@ -134,7 +145,9 @@ function Failed({
   onBack,
 }: {
   message: string
-  // Absent when the id itself didn't resolve to a job - nothing to retry.
+  // Absent when there's nothing to retry with: the id doesn't resolve to a
+  // job, or the run failed before saving its inputs. Then the page offers
+  // "Start a new validation", which goes back to the form.
   onRetry?: () => void
   onBack: () => void
 }) {
@@ -150,7 +163,11 @@ function Failed({
           <p className="mt-0.5 text-sm text-rose-800">{message}</p>
         </div>
       </div>
-      {onRetry && <Button onClick={onRetry}>Validate again</Button>}
+      {onRetry ? (
+        <Button onClick={onRetry}>Validate again</Button>
+      ) : (
+        <Button onClick={onBack}>Start a new validation</Button>
+      )}
     </div>
   )
 }
