@@ -468,8 +468,11 @@ function Coverage({
         footer={<ToneRules rules={validation.tone_rules} />}
       />
       <p className="px-1 text-xs text-slate-400">
-        Judged by the model across {checked} section{checked === 1 ? "" : "s"}, and
-        printed in the report under &ldquo;Assessed&rdquo;.
+        Judged by the model across {checked} section{checked === 1 ? "" : "s"}
+        {/* An external report (figure tracing off) is never printed by us. */}
+        {validation.figure_tracing === false
+          ? "."
+          : <>, and printed in the report under &ldquo;Assessed&rdquo;.</>}
       </p>
     </div>
   )

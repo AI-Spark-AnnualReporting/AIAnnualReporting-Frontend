@@ -225,6 +225,40 @@ body {
 .btn:disabled:hover, .btn[disabled]:hover { transform: none; }
 .bp:disabled:hover, .bp[disabled]:hover { background: #4040C8; box-shadow: none; }
 .bs:disabled:hover, .bs[disabled]:hover { background: #fff; border-color: #E2E4F0; color: #5A6080; }
+.bsm { padding: 5px 11px; font-size: 11px; }
+
+/* ── Annual Report Validator form ──────────────────────────────────────────
+   Copied verbatim from Centrion_Frontend/src/index.css (.card, .ct, .tabs,
+   .tab, .inp) so Spark's validator here looks exactly like admin's in
+   Centriyon. Unlayered for the same reason as the buttons above. Keep the two
+   copies in step: a change to one validator's look belongs in both. */
+.card {
+  background: #fff; border: 1px solid #E2E4F0;
+  border-radius: 16px; box-shadow: 0 2px 12px rgba(64,64,200,.06);
+}
+.ct { font-size: 13px; font-weight: 700; color: #1A1D2E; letter-spacing: -.1px; }
+.tabs {
+  display: flex; gap: 0; background: #F2F3FA; border-radius: 22px;
+  padding: 4px; margin-bottom: 16px; width: fit-content;
+  border: 1px solid #E2E4F0;
+}
+.tab {
+  padding: 6px 16px; border-radius: 20px; font-size: 12px;
+  font-weight: 600; cursor: pointer; color: #5A6080;
+  border: none; background: transparent; font-family: inherit; transition: .15s;
+}
+.tab.act {
+  background: #4040C8; color: #fff;
+  box-shadow: 0 4px 12px rgba(64,64,200,.25); font-weight: 700;
+}
+.inp {
+  width: 100%; padding: 10px 13px;
+  border: 1.5px solid #E2E4F0; border-radius: 10px;
+  font-size: 12px; color: #1A1D2E; font-family: inherit;
+  outline: none; transition: .15s; background: #fff;
+}
+.inp:focus { border-color: #4040C8; box-shadow: 0 0 0 3px rgba(64,64,200,.1); }
+.inp::placeholder { color: #9BA3C4; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    AI loading screen — ported from Centriton's AiLoadingScreen so the long

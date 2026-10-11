@@ -85,11 +85,11 @@ export function useValidateReport(cycleId: string) {
 }
 
 // Annual Report Validator: upload an external report and start its job.
+// No toast on failure: the form shows the server's reason next to the
+// Validate button, the way admin's Centriyon page does.
 export function useStartExternalValidation() {
   return useMutation({
     mutationFn: (input: ExternalReportInput) => pmApi.startExternalValidation(input),
-    onError: (err: MutationError) =>
-      toast.error(readError(err, "Couldn't start the validation")),
   })
 }
 
@@ -118,6 +118,14 @@ export function useExternalValidations() {
   return useQuery({
     queryKey: ["external-validations"],
     queryFn: () => pmApi.listExternalValidations(),
+    // Re-read whenever the form opens. Under the app's 60s default, a run
+    // finished a moment ago was missing from the list after Back.
+    staleTime: 0,
+    // And keep no copy once the form is left: otherwise coming back shows the
+    // old list for a moment before the fresh one replaces it. With none kept,
+    // the cards show their loading placeholders, then the fresh list - the
+    // same as admin's page in Centriyon.
+    gcTime: 0,
   })
 }
 
