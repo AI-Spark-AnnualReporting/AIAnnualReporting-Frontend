@@ -23,9 +23,9 @@ import type {
   ColorPalette,
   CoverTemplate,
   DesignSelection,
-  CoverDesign,
+  CoverDesignSpecs,
   CoverPreview,
-  TocDesign,
+  TocDesignSpecs,
   TocPreview,
 } from "@/types/report-design"
 
@@ -141,10 +141,17 @@ export const annualDesignApi = {
    *
    * Proxied, so it waits on the render engine — the same engine the pre-warm
    * is keeping busy — and then on this backend. Two queues, one list of names.
+   *
+   * `landscape` is the one landscape cover, kept out of `templates` so the
+   * portrait picker never lists it. Undefined from an engine that predates it.
    */
-  coverDesigns: async (): Promise<{ templates: CoverDesign[]; default: string }> => {
+  coverDesigns: async (): Promise<CoverDesignSpecs> => {
     const { data } = await apiClient.get(`/pm/cover-designs`, { timeout: 60000 })
-    return { templates: data?.templates ?? [], default: data?.default ?? "statement" }
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "statement",
+      landscape: data?.landscape ?? undefined,
+    }
   },
 
   /** Draw this cycle's cover in one design, with its real title and brand. */
@@ -159,12 +166,16 @@ export const annualDesignApi = {
     return data
   },
 
-  /** The five contents designs. Proxied too — see coverDesigns for the timeout. */
-  tocDesigns: async (): Promise<{ templates: TocDesign[]; default: string }> => {
+  /**
+   * The five contents designs. Proxied too — see coverDesigns for the timeout
+   * and for why the one landscape design comes back separately.
+   */
+  tocDesigns: async (): Promise<TocDesignSpecs> => {
     const { data } = await apiClient.get(`/pm/toc-designs`, { timeout: 60000 })
     return {
       templates: data?.templates ?? [],
       default: data?.default ?? "classic",
+      landscape: data?.landscape ?? undefined,
     }
   },
 

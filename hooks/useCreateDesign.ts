@@ -12,6 +12,7 @@ import { toast } from "sonner"
 
 import { createDesignApi, type CycleDesign, type DesignEnvelope } from "@/lib/api/createDesign"
 import { QUERY_KEYS } from "@/lib/constants"
+import type { Orientation } from "@/lib/orientation"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 
 export function useCycleDesign(cycleId: string) {
@@ -38,6 +39,9 @@ function patchSection(
     )
     // Recount rather than trust a delta: a re-extract can change how many
     // pages a section even has.
+    //
+    // Portrait picks only, as the backend counts them. Landscape counts are
+    // worked out on screen with countPicked() from lib/orientation.
     let unitsTotal = 0
     let unitsChosen = 0
     for (const s of sections) {
@@ -50,6 +54,10 @@ function patchSection(
   })
 }
 
+/**
+ * Save one page's template pick. `orientation` (default portrait) says which
+ * of the page's two picks it is.
+ */
 export function useSetTemplate(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -57,14 +65,44 @@ export function useSetTemplate(cycleId: string) {
       sectionCode,
       unitIndex,
       templateKey,
+      orientation,
     }: {
       sectionCode: string
       unitIndex: number
       templateKey: string | null
-    }) => createDesignApi.setTemplate(cycleId, sectionCode, unitIndex, templateKey),
+      orientation?: Orientation
+    }) =>
+      createDesignApi.setTemplate(
+        cycleId,
+        sectionCode,
+        unitIndex,
+        templateKey,
+        orientation ?? "portrait",
+      ),
     onSuccess: (res) => patchSection(qc, cycleId, res.section_code, res.design),
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not save that template choice")),
+  })
+}
+
+/**
+ * "Use for all sections" in landscape: fill every page with no landscape pick.
+ *
+ * The answer carries every section it changed, so each one is patched into
+ * the cache in place — the same no-refetch reasoning as a single pick, above.
+ */
+export function useApplyLandscapeToAll(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ templateKey }: { templateKey: string }) =>
+      createDesignApi.applyLandscapeToAll(cycleId, templateKey),
+    onSuccess: (res) => {
+      for (const [sectionCode, design] of Object.entries(res.sections)) {
+        patchSection(qc, cycleId, sectionCode, design)
+      }
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not apply that template to every section")),
   })
 }
 

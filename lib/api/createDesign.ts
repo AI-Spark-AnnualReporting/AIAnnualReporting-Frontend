@@ -2,10 +2,12 @@
  * The page designer's API surface.
  *
  * Three calls: structure one section, read the whole cycle back, record a
- * choice. Extraction is per section rather than one batch call so the client
- * can fan out and count completions — the progress on the loading screen is
- * real for that reason.
+ * choice (one page at a time, or every page at once in landscape).
+ * Extraction is per section rather than one batch call so the client can fan
+ * out and count completions — the progress on the loading screen is real for
+ * that reason.
  */
+import type { Orientation } from "@/lib/orientation"
 import type { SectionBlocks } from "./sectionBlocks"
 import { apiClient } from "./client"
 
@@ -41,6 +43,16 @@ export interface DesignUnit {
   options_error?: string
   template_key: string | null
   chosen_at: string | null
+  /**
+   * The LANDSCAPE pick for this page, kept separate from the portrait one
+   * above so switching orientation and back finds both still there. Only a
+   * person sets it — the art director never picks landscape. Absent on pages
+   * extracted before landscape existed, which reads the same as null.
+   * Read it through `pickedKey()` rather than directly.
+   */
+  landscape_template_key?: string | null
+  /** When the landscape pick was made. Absent or null when there is none. */
+  landscape_chosen_at?: string | null
   /** True when the art director chose this template and nobody has overridden it. */
   template_auto?: boolean
   /** block id -> the emphasis the art director gave it. */
@@ -177,6 +189,10 @@ export const createDesignApi = {
   /**
    * Record the template chosen for one page. `null` clears it.
    *
+   * `orientation` says WHICH pick this is: portrait writes `template_key`,
+   * landscape writes `landscape_template_key` and leaves the portrait pick
+   * alone. The backend refuses a portrait key sent as landscape and vice versa.
+   *
    * Small, but it is a read-modify-write of the section's whole envelope and
    * it is fired by a card click while the pre-warm is drawing pages. Giving it
    * room is the difference between a slow save and a lost choice.
@@ -186,14 +202,40 @@ export const createDesignApi = {
     sectionCode: string,
     unitIndex: number,
     templateKey: string | null,
+    orientation: Orientation = "portrait",
   ): Promise<{ section_code: string; design: DesignEnvelope }> => {
     const { data } = await apiClient.put(
       `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
         sectionCode,
       )}/create-design-template`,
-      { unit_index: unitIndex, template_key: templateKey },
+      { unit_index: unitIndex, template_key: templateKey, orientation },
       { timeout: 60000 },
     )
     return data
+  },
+
+  /**
+   * "Use for all sections" in landscape: give every page with no landscape
+   * pick yet this landscape template, in one request.
+   *
+   * Pages that already have a landscape pick are left alone, and portrait
+   * picks are never touched. Comes back with every section it changed, keyed
+   * by section code, so the screen can patch them in without a refetch.
+   *
+   * Same timeout as setTemplate and for the same reason, only more so: it is
+   * that read-modify-write once per section, fired while the pre-warm is busy.
+   *
+   * @returns how many pages were filled, and each changed section's envelope
+   */
+  applyLandscapeToAll: async (
+    cycleId: string,
+    templateKey: string,
+  ): Promise<{ applied: number; sections: Record<string, DesignEnvelope> }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-landscape-all`,
+      { template_key: templateKey },
+      { timeout: 60000 },
+    )
+    return { applied: data?.applied ?? 0, sections: data?.sections ?? {} }
   },
 }

@@ -7,6 +7,12 @@
  * of those lists so a bad value fails at save rather than at download.
  */
 
+import type { Orientation } from "@/lib/orientation"
+
+// Defined once, in lib/orientation.ts beside the helpers that read it, and
+// re-exported so anything already importing design types finds it here too.
+export type { Orientation }
+
 export type TypographyFamily =
   | "DejaVu Sans"
   | "Inter"
@@ -144,6 +150,12 @@ export interface AnnualDesign {
    * because it already said approved.
    */
   locked: boolean
+  /**
+   * Which way the report prints. The backend sends "portrait" for a report
+   * that has never chosen, but read it through `orientationOf()` anyway: a
+   * backend deployed before landscape existed omits the key entirely.
+   */
+  orientation: Orientation
 }
 
 /** Which of the three running-band looks the renderer draws. */
@@ -212,6 +224,12 @@ export interface DesignSelection {
   toc_template_key?: string
   /** Which of the four annual covers this report prints. Absent = the original. */
   cover2_template_key?: string
+  /**
+   * Portrait or landscape. Absent leaves the saved orientation alone, like
+   * every other field here. Switching keeps both orientations' page picks —
+   * it only decides which set the screen and the export read.
+   */
+  orientation?: Orientation
 }
 
 /** One contents-page design, as the engine that owns them describes it. */
@@ -235,6 +253,26 @@ export interface TocDesign {
   purpose: string
   full_bleed: boolean
   sub_page_numbers: boolean
+}
+
+/**
+ * The cover designs, as `/pm/cover-designs` lists them.
+ *
+ * `templates` is the portrait menu only. The one landscape cover sits apart in
+ * `landscape` so no portrait picker can offer it; it is optional because an
+ * engine deployed before landscape existed does not send it.
+ */
+export interface CoverDesignSpecs {
+  templates: CoverDesign[]
+  default: string
+  landscape?: CoverDesign
+}
+
+/** The contents designs, as `/pm/toc-designs` lists them. Same split as covers. */
+export interface TocDesignSpecs {
+  templates: TocDesign[]
+  default: string
+  landscape?: TocDesign
 }
 
 /** A rendered preview of one design — one PNG data URI per sheet. */
