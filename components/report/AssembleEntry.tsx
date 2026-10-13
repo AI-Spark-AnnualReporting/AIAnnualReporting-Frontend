@@ -15,6 +15,7 @@ import {
   useAssembleReport,
   useAssemblyReadiness,
   useFinalReport,
+  useReportApproval,
 } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS } from "@/lib/constants"
 
@@ -25,10 +26,18 @@ interface AssembleEntryProps {
 export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readinessQuery = useAssemblyReadiness(cycleId)
   const finalReportQuery = useFinalReport(cycleId)
+  const approvalQuery = useReportApproval(cycleId)
   const assemble = useAssembleReport(cycleId)
   const router = useRouter()
 
-  if (readinessQuery.isLoading) {
+  // Hold the skeleton until we know whether a report (or its sign-off) already
+  // exists — otherwise Assemble flashes up first and a fast click on it hits a
+  // 409 from the API.
+  if (
+    readinessQuery.isLoading ||
+    finalReportQuery.isLoading ||
+    approvalQuery.isLoading
+  ) {
     return (
       <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
@@ -49,7 +58,9 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   // Use the final-report query as the source of truth for whether a report
   // exists — assembly-readiness may not return has_final_report reliably.
-  const hasReport = finalReportQuery.isSuccess
+  // An approved report is locked and is, by definition, assembled — even if the
+  // final-report read failed, assembling again is refused, so never offer it.
+  const hasReport = finalReportQuery.isSuccess || !!approvalQuery.data?.locked
 
   // Final report already exists → View Report only (redirect, no API call).
   // Re-assemble is available on the report page itself.
