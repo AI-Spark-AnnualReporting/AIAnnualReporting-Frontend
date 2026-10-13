@@ -1,13 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useContext, useState } from "react"
 import { Loader2, MessageSquareText, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { FixPrefillContext } from "@/lib/validation-fixes"
 
 interface SectionChatProps {
   refining: boolean
   onRefine: (instruction: string) => void
+  /** This box's section. When the PM arrived from a validation finding for it,
+   *  the box starts with that finding's instruction - sent only on their click. */
+  sectionCode?: string
 }
 
 const SUGGESTED_CHIPS = [
@@ -16,8 +20,11 @@ const SUGGESTED_CHIPS = [
   "Expand detail",
 ] as const
 
-export function SectionChat({ refining, onRefine }: SectionChatProps) {
-  const [instruction, setInstruction] = useState("")
+export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProps) {
+  const prefill = useContext(FixPrefillContext)
+  const [instruction, setInstruction] = useState(() =>
+    prefill && prefill.sectionCode === sectionCode ? prefill.text : "",
+  )
   const [turns, setTurns] = useState<{ instruction: string }[]>([])
 
   const trimmed = instruction.trim()

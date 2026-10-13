@@ -59,6 +59,8 @@ export interface ReportValidation {
   figures_by_source?: {
     submission: number
     document: number
+    // Typed by the PM by hand. Absent on validations stored before it existed.
+    pm?: number
     neither: number
   } | null
   // context is the sentence the figure sits in. Optional: validations stored
@@ -81,7 +83,13 @@ export interface ReportValidation {
     do: string[]
     dont: string[]
   } | null
-  conflicts: { measure: string; detail: string }[]
+  // `sections`: which section carries which value. Absent on validations
+  // stored before the fix workflow, which then offer no Edit buttons.
+  conflicts: {
+    measure: string
+    detail: string
+    sections?: { section_code: string; title: string; value: string }[]
+  }[]
   redundancy: { sections: string[]; detail: string }[]
   brief_gaps: { ask: string; detail: string }[]
   // How many explicit asks the brief made in all, so the gaps can be read as a
@@ -135,6 +143,10 @@ export interface ReportValidation {
     // Every figure the section states, named by the measure it belongs to.
     // Counting the distinct measures is what gives the conflict check a base.
     figures?: { label?: string; value?: string; measure?: string }[]
+    // Whether the concept / tone checks apply to this section at all.
+    applies?: { concept?: boolean; tone?: boolean }
+    // A table-only section, never read by the AI.
+    data_only?: boolean
   }>
   validated_at: string
   // false on an external report (Annual Report Validator), which has no
@@ -145,6 +157,21 @@ export interface ReportValidation {
   skipped?: { check: string; file: string | null; reason: string }[]
   // The uploaded file's name, on an external report only.
   filename?: string
+  // Sections the PM edited since this check (own report, from the stored
+  // per-section fingerprints). Absent on older validations and fresh runs.
+  edited_since_check?: string[]
+  // A fingerprint of each section's text when checked (own report only).
+  section_hashes?: Record<string, string>
+  // The section the PM sent each uncovered brief ask or concept message to,
+  // keyed by its text. Cleared by the next validation run.
+  chosen_sections?: Record<string, string>
+}
+
+// One section the AI suggests for a brief ask or concept message nothing covers.
+export interface SectionSuggestion {
+  section_code: string
+  title: string
+  reason: string
 }
 
 // House-style rules, in the shape the backend stores as companies.brand_voice.
@@ -1177,10 +1204,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/extract-content`,
-      { content },
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -1231,10 +1260,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string | null,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/analyze-content`,
-      { content },
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -1248,10 +1279,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/content`,
-      { content },
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -1260,6 +1293,24 @@ export const pmApi = {
   // Backend takes the current section + the instruction, runs an LLM pass, and
   // returns the wholly-rewritten section. Stateless on the backend: each call
   // stands alone (no transcript), so the latest content IS the persisted state.
+  // Up to 3 sections that could cover something the validation found nothing
+  // covering. Empty when none fits - the PM can still pick any section.
+  suggestSections: async (cycleId: string, text: string): Promise<SectionSuggestion[]> => {
+    const { data } = await apiClient.post<{ suggestions: SectionSuggestion[] }>(
+      `/pm/cycles/${cycleId}/validation/suggest-sections`,
+      { text },
+      { timeout: 60000 },
+    )
+    return data.suggestions
+  },
+
+  chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/chosen-section`, {
+      text,
+      section_code: sectionCode,
+    })
+  },
+
   refineSection: async (
     cycleId: string,
     sectionCode: string,
@@ -1279,10 +1330,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/manual-content`,
-      { content },
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },

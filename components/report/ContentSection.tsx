@@ -331,7 +331,9 @@ export function ContentSection({
   // exactly that; `saved` is already the server's text by the time we return.
   const handleSave = async (next: string) => {
     try {
-      await save.mutateAsync({ sectionCode, content: next })
+      // An AI statement draft is not the PM's typing: its figures must still
+      // trace to a source, so they are not marked as PM-entered.
+      await save.mutateAsync({ sectionCode, content: next, typedByPm: !drafted })
       setSeed(null)
       setEditing(false)
     } catch {

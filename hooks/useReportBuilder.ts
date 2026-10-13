@@ -425,6 +425,31 @@ export type MutationError = {
 // which GET /sections now returns complete (attachment/verified/locked_at
 // included), so it no longer risks snapping the panel back to a field-less
 // version. Readiness is invalidated too (independent query).
+/**
+ * Mark a just-saved section as edited in the cached validation result, so the
+ * validation page shows it "Fixed" the moment the PM goes back, instead of
+ * after its (slow) refetch. The refetch still runs and has the final word -
+ * e.g. an edit undone exactly stops counting. Only for validations that stored
+ * section fingerprints; older ones are left alone, as the server leaves them.
+ */
+function markEditedSinceCheck(
+  qc: ReturnType<typeof useQueryClient>,
+  cycleId: string,
+  sectionCode: string,
+) {
+  qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), (old) => {
+    const validation = old?.validation
+    if (!old || !validation?.section_hashes?.[sectionCode]) return old
+    const edited = validation.edited_since_check ?? []
+    if (edited.includes(sectionCode)) return old
+    return {
+      ...old,
+      validation: { ...validation, edited_since_check: [...edited, sectionCode] },
+    }
+  })
+  qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+}
+
 function patchSectionInList(
   qc: ReturnType<typeof useQueryClient>,
   cycleId: string,
@@ -445,6 +470,7 @@ function patchSectionInList(
       )
     },
   )
+  markEditedSinceCheck(qc, cycleId, updated.section_code)
   qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
   qc.invalidateQueries({ queryKey: QUERY_KEYS.BUILD_READINESS(cycleId) })
   // Lock/unlock changes the assemble gate (locked count, can_assemble,
@@ -484,10 +510,12 @@ export function useSetExtractContent(cycleId: string) {
     mutationFn: ({
       sectionCode,
       content,
+      typedByPm = true,
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.setExtractContent(cycleId, sectionCode, content),
+      typedByPm?: boolean
+    }) => pmApi.setExtractContent(cycleId, sectionCode, content, typedByPm),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Content saved")
@@ -533,10 +561,14 @@ export function useSaveManualContent(cycleId: string) {
     mutationFn: ({
       sectionCode,
       content,
+      typedByPm = true,
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.saveManualContent(cycleId, sectionCode, content),
+      // False when the text is an AI statement draft: its figures must still
+      // trace to a source.
+      typedByPm?: boolean
+    }) => pmApi.saveManualContent(cycleId, sectionCode, content, typedByPm),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Section saved")
@@ -571,7 +603,7 @@ export function useSetAnalyzeContent(cycleId: string) {
     }: {
       sectionCode: string
       content: string | null
-    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content),
+    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content, true),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Content saved")
@@ -596,7 +628,7 @@ export function useSaveGenerateContent(cycleId: string) {
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.saveContent(cycleId, sectionCode, content),
+    }) => pmApi.saveContent(cycleId, sectionCode, content, true),
     // Write the typed text into the cache before the round-trip so the preview
     // swaps the instant the editor closes, and roll it back if the PUT fails —
     // same shape as useReorderSections.

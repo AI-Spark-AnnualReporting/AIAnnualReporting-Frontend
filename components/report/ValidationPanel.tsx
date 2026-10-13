@@ -1,10 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { AlertTriangle, Check, ChevronDown, FileQuestion } from "lucide-react"
+import Link from "next/link"
+import { AlertTriangle, Check, ChevronDown, FileQuestion, Pencil, Sparkles } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
+import { ChooseSectionDialog } from "@/components/report/ChooseSectionDialog"
 import type { ReportValidation } from "@/lib/api/pm"
 import { cn } from "@/lib/utils"
+import {
+  VALIDATION_SUMMARY_CODE,
+  bannedWordsInstruction,
+  briefAskTodo,
+  type ChooseTarget,
+  buildFixHref,
+  conceptInstruction,
+  redundancyInstruction,
+  type FixAction,
+} from "@/lib/validation-fixes"
 
 /* What the validation found, for the PM.
  *
@@ -16,7 +29,23 @@ import { cn } from "@/lib/utils"
 
 const SHOWN = 6
 
-export function ValidationPanel({ validation }: { validation: ReportValidation }) {
+export function ValidationPanel({
+  validation,
+  cycleId,
+  locked = false,
+}: {
+  validation: ReportValidation
+  /** Given on a cycle's own report: turns on the Fix buttons. The external
+   *  validator omits it - we don't own those documents. */
+  cycleId?: string
+  /** Approved report: nothing can be edited, so no Fix buttons. */
+  locked?: boolean
+}) {
+  const canFix = !!cycleId && !locked
+  // Sections the PM changed since this check: their findings are greyed until
+  // the next validation says whether the change fixed them.
+  const edited = new Set(validation.edited_since_check ?? [])
+  const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
   const {
     figures_total: total,
     figures_traced: traced,
@@ -69,13 +98,49 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
     ),
   ).size
 
+  // The Fix action for each finding. Empty when fixing is off. The Executive
+  // Summary never gets one: it is rewritten at every assembly (see the note
+  // `Group` shows instead).
+  const editFix = (code: string, label = "Fix"): FixAction[] =>
+    canFix && code !== VALIDATION_SUMMARY_CODE ? [{ kind: "edit", sectionCode: code, label }] : []
+  const aiFix = (code: string, instruction: string): FixAction[] =>
+    canFix && code !== VALIDATION_SUMMARY_CODE
+      ? [{ kind: "ai", sectionCode: code, label: "Fix with AI", instruction }]
+      : []
+  const chooseFix = (text: string, instruction: string, manual = false): FixAction[] =>
+    canFix ? [{ kind: "choose", text, instruction, manual }] : []
+  // An uncovered ask or message belongs to no section until the PM picks one
+  // in the pop-up; that choice is saved, so the row can show Fixed once that
+  // section is edited.
+  const chosenFor = (text: string): string[] => {
+    const code = validation.chosen_sections?.[text.trim()]
+    return code ? [code] : []
+  }
+
+  // Every banned word in a section goes into one instruction, so one click
+  // fixes the lot rather than one word per refine.
+  const bannedBySection = new Map<string, string[]>()
+  for (const v of voiceFindings) {
+    const words = bannedBySection.get(v.section_code) ?? []
+    if (!words.includes(v.phrase)) words.push(v.phrase)
+    bannedBySection.set(v.section_code, words)
+  }
+
+  // What the "pick any section" list offers: every read section bar the summary.
+  const pickable = Object.entries(validation.sections ?? {})
+    .filter(([code]) => code !== VALIDATION_SUMMARY_CODE)
+    .map(([code, review]) => ({ section_code: code, title: review.title || prettifyCode(code) }))
+
   const groups: FindingGroup[] = [
     {
       key: "untraced",
       title: "Figures with no recorded source",
       why:
         "Not in any department's submission, and not in any document uploaded to this cycle.",
-      items: bySentence(validation.untraced),
+      items: bySentence(validation.untraced).map((item) => ({
+        ...item,
+        fixes: editFix(item.codes?.[0] ?? ""),
+      })),
       count: validation.untraced.length,
       percent: bySource && total ? Math.round((bySource.neither / total) * 100) : null,
       reason: bySource
@@ -97,6 +162,8 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         where: i.title || i.section_code,
         lead: [],
         detail: i.line,
+        codes: [i.section_code],
+        fixes: editFix(i.section_code),
       })),
     },
     {
@@ -113,6 +180,12 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         where: c.measure,
         lead: [],
         detail: c.detail,
+        codes: (c.sections ?? []).map((s) => s.section_code),
+        // One button per section involved: the PM decides which number is
+        // right and fixes the other.
+        fixes: (c.sections ?? []).flatMap((s) =>
+          editFix(s.section_code, `Fix ${s.title || prettifyCode(s.section_code)}`),
+        ),
       })),
     },
     {
@@ -129,6 +202,8 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         where: b.ask,
         lead: [],
         detail: b.detail,
+        codes: chosenFor(b.ask),
+        fixes: chooseFix(b.ask, briefAskTodo(b.ask), true),
       })),
     },
     {
@@ -145,11 +220,19 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: checked
         ? `${repeatedSections} of the ${checked} sections checked ${repeatedSections === 1 ? "repeats" : "repeat"} a point another section already makes.`
         : `${validation.redundancy.length} point${validation.redundancy.length === 1 ? " appears" : "s appear"} in more than one section.`,
-      items: validation.redundancy.map((r) => ({
-        where: r.sections.map(titleOf).join(", "),
-        lead: [],
-        detail: r.detail,
-      })),
+      items: validation.redundancy.map((r) => {
+        // The later section gives the repeated point up; the first one to make
+        // it keeps it.
+        const target = r.sections[r.sections.length - 1] ?? ""
+        const others = r.sections.filter((code) => code !== target).map(titleOf)
+        return {
+          where: r.sections.map(titleOf).join(", "),
+          lead: [],
+          detail: r.detail,
+          codes: [target],
+          fixes: aiFix(target, redundancyInstruction(others, r.detail)),
+        }
+      }),
     },
     {
       key: "voice",
@@ -166,6 +249,8 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         where: v.title || v.section_code,
         lead: [v.phrase],
         detail: "",
+        codes: [v.section_code],
+        fixes: aiFix(v.section_code, bannedWordsInstruction(bannedBySection.get(v.section_code) ?? [v.phrase])),
       })),
     },
     {
@@ -185,7 +270,13 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       items: (validation.coverage?.secondary ?? [])
         .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
         .filter((m) => m.sections === 0)
-        .map((m) => ({ where: m.title, lead: [], detail: "" })),
+        .map((m) => ({
+          where: m.title,
+          lead: [],
+          detail: "",
+          codes: chosenFor(m.title),
+          fixes: chooseFix(m.title, conceptInstruction(m.title)),
+        })),
     },
   ]
     // A finding whose `detail` never arrived. The strategic-brief judgement is
@@ -220,13 +311,33 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         />
       )}
 
-      <Coverage validation={validation} />
+      <Coverage
+        validation={validation}
+        cycleId={canFix ? cycleId : undefined}
+        edited={edited}
+      />
 
       <BriefCoverage validation={validation} />
 
       {groups.map((g) => (
-        <Group key={g.key} group={g} />
+        <Group
+          key={g.key}
+          group={g}
+          cycleId={cycleId}
+          canFix={canFix}
+          edited={edited}
+          onChoose={setChoosing}
+        />
       ))}
+
+      {cycleId && (
+        <ChooseSectionDialog
+          cycleId={cycleId}
+          target={choosing}
+          sections={pickable}
+          onClose={() => setChoosing(null)}
+        />
+      )}
 
       {problems === 0 && unchecked.length === 0 && (
         <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-5 py-4">
@@ -338,6 +449,16 @@ function Score({
             {bySource.document.toLocaleString()}
           </strong>{" "}
           from a filed document
+          {/* Shown only when there are any, so a report without them reads as before. */}
+          {!!bySource.pm && (
+            <>
+              {" "}&middot;{" "}
+              <strong className="font-semibold text-[#1A1D2E]">
+                {bySource.pm.toLocaleString()}
+              </strong>{" "}
+              entered by the PM
+            </>
+          )}
         </p>
       )}
 
@@ -360,8 +481,13 @@ function Score({
    section as not carrying the message when nobody looked at it. */
 function Coverage({
   validation,
+  cycleId,
+  edited,
 }: {
   validation: ReportValidation
+  /** Set only when fixing is allowed: adds the "could carry it" fix line. */
+  cycleId?: string
+  edited: Set<string>
 }) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
@@ -393,6 +519,55 @@ function Coverage({
         (review.concepts ?? []).some((c) => (c ?? "").trim().toLowerCase() === wanted),
       )
       .map(([code, review]) => review.title || prettifyCode(code))
+  }
+
+  // The sections a concept message applies to but that don't carry it - the
+  // gap between "7 of 9" and 9 of 9. Unread and table-only sections are left
+  // out (nobody looked / nothing to add to), and so is the Executive Summary,
+  // which is rewritten at assembly rather than edited.
+  const notCarrying = (title: string) => {
+    const wanted = title.trim().toLowerCase()
+    const conceptExempt = new Set(excluded.filter((e) => !e.concept).map((e) => e.section_code))
+    return Object.entries(reviews)
+      .filter(
+        ([code, review]) =>
+          code !== VALIDATION_SUMMARY_CODE &&
+          !review.data_only &&
+          !conceptExempt.has(code) &&
+          review.applies?.concept !== false &&
+          !(review.concepts ?? []).some((c) => (c ?? "").trim().toLowerCase() === wanted),
+      )
+      .map(([code, review]) => ({ code, title: review.title || prettifyCode(code) }))
+  }
+  const fixLine = (messages: { title: string }[]) =>
+    cycleId ? (
+      <NotCarrying
+        cycleId={cycleId}
+        edited={edited}
+        rows={messages.map((m) => ({ message: m.title, sections: notCarrying(m.title) }))}
+      />
+    ) : null
+
+  // A section passes the secondary score by carrying any one secondary
+  // message, so only a section missing every one of them is a gap. Offering a
+  // fix for a section that already carries another one read as an error on a
+  // 100% card.
+  const secondaryFixLine = () => {
+    const missingAll = new Set(
+      Object.keys(reviews).filter((code) =>
+        coverage.secondary.every((m) => notCarrying(m.title).some((s) => s.code === code)),
+      ),
+    )
+    return cycleId ? (
+      <NotCarrying
+        cycleId={cycleId}
+        edited={edited}
+        rows={coverage.secondary.map((m) => ({
+          message: m.title,
+          sections: notCarrying(m.title).filter((s) => missingAll.has(s.code)),
+        }))}
+      />
+    ) : null
   }
 
   // Sections a tone rule was broken in, by either check - and only sections
@@ -438,6 +613,7 @@ function Coverage({
         }
         evidence={primary ? [{ label: primary.title, sections: carriers(primary.title) }] : []}
         excluded={notCounted("concept")}
+        footer={primary ? fixLine([primary]) : null}
       />
       <Stat
         label="Secondary concept messages"
@@ -453,6 +629,7 @@ function Coverage({
           label: m.title,
           sections: carriers(m.title),
         }))}
+        footer={count ? secondaryFixLine() : null}
       />
       </>
       )}
@@ -1114,6 +1291,10 @@ interface FindingItem {
   /** Short values shown as chips, when the finding is about particular ones. */
   lead: string[]
   detail: string
+  /** The section(s) the finding is in, for the "edited since" check. */
+  codes?: string[]
+  /** What the PM can do about it. Empty or absent = no button. */
+  fixes?: FixAction[]
 }
 
 /* One row per sentence, carrying every untraced figure in it.
@@ -1131,7 +1312,7 @@ function bySentence(
     if (row) {
       row.lead.push(u.value)
     } else {
-      rows.set(key, { where, lead: [u.value], detail })
+      rows.set(key, { where, lead: [u.value], detail, codes: [u.section_code] })
     }
   }
   return [...rows.values()]
@@ -1159,7 +1340,20 @@ interface FindingGroup {
 /* Collapsed by default past a handful. One group ran to 364 rows on a real
    report, which buried the other five groups entirely — the PM could not see
    there was anything else wrong. */
-function Group({ group }: { group: FindingGroup }) {
+function Group({
+  group,
+  cycleId,
+  canFix,
+  edited,
+  onChoose,
+}: {
+  group: FindingGroup
+  cycleId?: string
+  canFix: boolean
+  /** Sections edited since the check. */
+  edited: Set<string>
+  onChoose: (target: ChooseTarget) => void
+}) {
   const total = group.count ?? group.items.length
   const blocks = byWhere(group.items)
 
@@ -1228,25 +1422,53 @@ function Group({ group }: { group: FindingGroup }) {
       {/* Capped and scrolled rather than allowed to run: one card held 80
           findings and pushed every other card off the screen. */}
       <ul className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto">
-        {blocks.map((block) => (
-          <li key={block.where} className="px-5 py-3">
-            <button
-              onClick={() => toggle(block.where)}
-              className="flex w-full items-center gap-1.5 text-left"
-            >
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform",
-                  !openSections.has(block.where) && "-rotate-90",
-                )}
-              />
-              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                {block.where}
-              </span>
-              <span className="text-[11px] font-semibold text-slate-300">
-                {block.items.length}
-              </span>
-            </button>
+        {blocks.map((block) => {
+          const codes = [...new Set(block.items.flatMap((item) => item.codes ?? []))]
+          // Greyed only when every section behind the block changed: a
+          // contradiction across two sections is not fixed by editing one.
+          const allEdited = codes.length > 0 && codes.every((code) => edited.has(code))
+          return (
+          <li key={block.where} className={cn("px-5 py-3", allEdited && "bg-emerald-50/50")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => toggle(block.where)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform",
+                    !openSections.has(block.where) && "-rotate-90",
+                  )}
+                />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  {block.where}
+                </span>
+                <span className="text-[11px] font-semibold text-slate-300">
+                  {block.items.length}
+                </span>
+              </button>
+              {allEdited ? (
+                // "Fixed" by request, but it only means the section changed
+                // since the check - the hover says so, and the next validation
+                // is what confirms it.
+                <span
+                  title="This section was edited after the check. Re-assemble & validate to confirm."
+                  className="inline-flex cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800"
+                >
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                  Fixed
+                </span>
+              ) : (
+                canFix && (
+                  <FixButtons
+                    fixes={uniqueFixes(block.items)}
+                    cycleId={cycleId!}
+                    onChoose={onChoose}
+                    summary={codes.includes(VALIDATION_SUMMARY_CODE)}
+                  />
+                )
+              )}
+            </div>
 
             <div
               className={cn(
@@ -1304,8 +1526,147 @@ function Group({ group }: { group: FindingGroup }) {
               })}
             </div>
           </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/* "Not carrying it" on a concept card: the sections a message applies to but
+   doesn't appear in, each with a Fix with AI button. Optional by design - a
+   section need not carry every message, and forcing one in reads as filler -
+   so it is worded as "could carry it", never as an error. */
+function NotCarrying({
+  cycleId,
+  edited,
+  rows,
+}: {
+  cycleId: string
+  edited: Set<string>
+  rows: { message: string; sections: { code: string; title: string }[] }[]
+}) {
+  const shown = rows.filter((row) => row.sections.length > 0)
+  if (shown.length === 0) return null
+
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        Not carrying it
+        <span className="ml-1.5 font-semibold normal-case tracking-normal text-slate-300">
+          optional, these sections could carry it
+        </span>
+      </p>
+      <ul className="mt-2 space-y-2">
+        {shown.map((row) => (
+          <li key={row.message} className="text-xs leading-relaxed">
+            <span className="font-semibold text-[#1A1D2E]">{row.message}</span>
+            <span className="text-slate-400"> — </span>
+            <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1.5 align-middle">
+              {row.sections.map((s) => (
+                <span key={s.code} className="inline-flex items-center gap-1.5">
+                  <span className="text-slate-600">{s.title}</span>
+                  {edited.has(s.code) ? (
+                    <span
+                      title="This section was edited after the check. Re-assemble & validate to confirm."
+                      className="inline-flex cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
+                    >
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                      Fixed
+                    </span>
+                  ) : (
+                    <Button size="sm" className="h-6 px-2 text-[11px]" asChild>
+                      <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
+                        <Sparkles className="mr-1 h-3 w-3" />
+                        Fix with AI
+                      </Link>
+                    </Button>
+                  )}
+                </span>
+              ))}
+            </span>
+          </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+/** One copy of each distinct action across a block's findings - five figures
+ *  in one section are still one "Fix". */
+function uniqueFixes(items: FindingItem[]): FixAction[] {
+  const seen = new Set<string>()
+  const out: FixAction[] = []
+  for (const fix of items.flatMap((item) => item.fixes ?? [])) {
+    const key = fix.kind === "choose" ? `choose:${fix.text}` : `${fix.kind}:${fix.sectionCode}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(fix)
+  }
+  return out
+}
+
+/* The buttons on one section row of a finding card. "Fix with AI" is the
+   filled one: the AI can do it. The rest need the PM. */
+function FixButtons({
+  fixes,
+  cycleId,
+  onChoose,
+  summary,
+}: {
+  fixes: FixAction[]
+  cycleId: string
+  onChoose: (target: ChooseTarget) => void
+  /** The finding involves the Executive Summary, which has no edit screen. */
+  summary: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {summary && (
+        <span className="text-xs text-slate-500">
+          Executive Summary: rewritten when you re-assemble
+        </span>
+      )}
+      {fixes.map((fix) => {
+        if (fix.kind === "choose") {
+          return (
+            <Button
+              key={`choose:${fix.text}`}
+              size="sm"
+              className="h-7"
+              onClick={() =>
+                onChoose({ text: fix.text, instruction: fix.instruction, manual: fix.manual })
+              }
+            >
+              {fix.manual ? (
+                <Pencil className="mr-1 h-3.5 w-3.5" />
+              ) : (
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+              )}
+              Choose section &amp; fix
+            </Button>
+          )
+        }
+        if (fix.kind === "ai") {
+          return (
+            <Button key={`ai:${fix.sectionCode}`} size="sm" className="h-7" asChild>
+              <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction)}>
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                {fix.label}
+              </Link>
+            </Button>
+          )
+        }
+        return (
+          // Blue like the AI fix; the pencil (not the sparkle) says the PM does it.
+          <Button key={`edit:${fix.sectionCode}`} size="sm" className="h-7" asChild>
+            <Link href={buildFixHref(cycleId, fix.sectionCode)}>
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              {fix.label}
+            </Link>
+          </Button>
+        )
+      })}
     </div>
   )
 }

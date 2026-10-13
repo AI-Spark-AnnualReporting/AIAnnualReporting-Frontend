@@ -44,6 +44,7 @@ function RailRow({
   isRtl,
   expanded,
   onToggle,
+  findings = 0,
 }: {
   title: string
   active: boolean
@@ -55,6 +56,8 @@ function RailRow({
   /** Only passed when the section has subsections to disclose. */
   expanded?: boolean
   onToggle?: () => void
+  /** Open validation findings in this section; 0 shows nothing. */
+  findings?: number
 }) {
   return (
     // A div, not a button: the chevron is its own control and a button cannot
@@ -101,6 +104,14 @@ function RailRow({
       >
         {title}
       </button>
+      {findings > 0 && (
+        <span
+          title={`${findings} validation finding${findings === 1 ? "" : "s"}`}
+          className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800"
+        >
+          {findings}
+        </span>
+      )}
       <span
         className={cn(
           "inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium",
@@ -160,6 +171,8 @@ interface SectionListProps {
   showExecutiveSummary?: boolean
   /** Opens the full hierarchy dialog. Omitted = no "View all" row. */
   onViewAll?: () => void
+  /** Open validation findings per section code, shown as a count on the row. */
+  findingCounts?: Record<string, number>
 }
 
 // Left-zone navigation list for the Report Builder. Sections in display order,
@@ -171,6 +184,7 @@ export function SectionList({
   isRtl,
   showExecutiveSummary = false,
   onViewAll,
+  findingCounts = {},
 }: SectionListProps) {
   const ordered = [...sections].sort((a, b) => a.display_order - b.display_order)
 
@@ -220,6 +234,7 @@ export function SectionList({
           modeColor={SECTION_MODES.auto.color}
           onClick={() => onSelect(EXECUTIVE_SUMMARY_CODE)}
           isRtl={isRtl}
+          findings={findingCounts[EXECUTIVE_SUMMARY_CODE]}
         />
       )}
       {ordered.map((section, i) => {
@@ -247,6 +262,7 @@ export function SectionList({
               modeColor={mode?.color ?? "bg-slate-100 text-slate-600"}
               onClick={() => onSelect(section.section_code)}
               isRtl={isRtl}
+              findings={findingCounts[section.section_code]}
               expanded={subs.length > 0 ? isOpen : undefined}
               onToggle={
                 subs.length > 0 ? () => toggle(section.section_code) : undefined

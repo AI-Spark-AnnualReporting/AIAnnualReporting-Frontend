@@ -119,6 +119,10 @@ export function AnalyzeSection({
             />
           ) : (
             <DraftingView
+              // Remount per section, so the refine box starts fresh (and picks
+              // up a validation fix meant for this section).
+              key={sectionCode}
+              sectionCode={sectionCode}
               content={content}
               feederNames={feederNames}
               running={runAnalysis.isPending}
@@ -277,6 +281,7 @@ function PendingView({
 }
 
 function DraftingView({
+  sectionCode,
   content,
   feederNames,
   running,
@@ -287,6 +292,7 @@ function DraftingView({
   onEdit,
   onClear,
 }: {
+  sectionCode: string
   content: string
   feederNames: string[]
   running: boolean
@@ -336,7 +342,7 @@ function DraftingView({
         </div>
       )}
 
-      <SectionChat refining={refining} onRefine={onRefine} />
+      <SectionChat refining={refining} onRefine={onRefine} sectionCode={sectionCode} />
 
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
