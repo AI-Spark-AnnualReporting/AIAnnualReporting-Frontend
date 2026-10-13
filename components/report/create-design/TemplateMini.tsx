@@ -62,6 +62,55 @@ const col = (n: number, w = "100%") => (
   </div>
 )
 
+/**
+ * A column of text lines that runs to the foot of the card whatever its
+ * height. This card is drawn twice the width of the portrait ones, so a fixed
+ * handful of lines left most of the sheet blank and read as an empty page.
+ */
+const ruledColumn: React.CSSProperties = {
+  flex: 1,
+  backgroundImage: "repeating-linear-gradient(to bottom, #D7DAE5 0 2.5px, transparent 2.5px 5px)",
+}
+
+/**
+ * The landscape section page, drawn sideways: title, a strip of six figures on
+ * one row, the picture band, then prose in three columns. Its own shape
+ * because a portrait-proportioned card would misdescribe the paper.
+ */
+function LandscapeColumnsMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 9, gap: 4 }}>
+      <div style={line("10%", accent, 3)} />
+      <div style={line("46%", "#9AA0B4", 5)} />
+      <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, 1fr)",
+          gap: 3,
+          background: "#F4F0F7",
+          padding: 3,
+          flexShrink: 0,
+        }}
+      >
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i}>
+            <div style={line("70%", accent, 5)} />
+            <div style={{ ...line("90%"), marginTop: 1.5 }} />
+          </div>
+        ))}
+      </div>
+      <div style={ph({ flex: "0 0 24%" })} />
+      <div style={{ display: "flex", gap: 6, flex: 1 }}>
+        <div style={ruledColumn} />
+        <div style={ruledColumn} />
+        <div style={ruledColumn} />
+      </div>
+    </div>
+  )
+}
+
+
 function TemplateMiniInner({
   templateKey,
   accent = "#3C0866",
@@ -69,6 +118,10 @@ function TemplateMiniInner({
   templateKey: string
   accent?: string
 }) {
+  if (templateKey === "landscape_columns") {
+    return <LandscapeColumnsMini accent={accent} />
+  }
+
   if (templateKey === "kpi_stat_grid") {
     return (
       <div style={{ ...shell, padding: 0, gap: 0 }}>
@@ -356,4 +409,5 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
   editorial_movements: "Editorial — movements",
+  landscape_columns: "Landscape — figures + columns",
 }

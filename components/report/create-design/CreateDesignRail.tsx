@@ -18,6 +18,7 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import type { DesignSection } from "@/lib/api/createDesign"
+import { pickedKey, type Orientation } from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
@@ -44,12 +45,30 @@ const TOC_DESIGN_NAMES: Record<string, string> = {
   brand_band: "Brand Band",
 }
 
-function sectionState(section: DesignSection) {
+/**
+ * What the report-level Cover and Contents entries say is in use.
+ *
+ * Landscape has exactly one cover and one contents design and always prints
+ * them, so there is never a "Not chosen" to show there.
+ */
+function frontMatterName(
+  design: string | null | undefined,
+  names: Record<string, string>,
+  orientation: Orientation,
+): string {
+  if (orientation === "landscape") return "Landscape"
+  if (!design) return "Not chosen"
+  return names[design] ?? design
+}
+
+function sectionState(section: DesignSection, orientation: Orientation) {
   if (!section.eligible) return "skipped" as const
   if (!section.extracted) return "pending" as const
   if (section.stale) return "stale" as const
   const units = section.design?.units ?? []
-  const chosen = units.filter((u) => u.template_key).length
+  // Counted in the orientation on screen, so a section picked only in
+  // portrait shows as undone while designing landscape.
+  const chosen = units.filter((u) => pickedKey(u, orientation)).length
   if (chosen === 0) return "none" as const
   return chosen === units.length ? ("done" as const) : ("partial" as const)
 }
@@ -81,6 +100,7 @@ export function CreateDesignRail({
   tocActive,
   tocDesign,
   onSelectToc,
+  orientation = "portrait",
 }: {
   sections: DesignSection[]
   selected: RailSelection | null
@@ -99,6 +119,8 @@ export function CreateDesignRail({
   coverActive?: boolean
   coverDesign?: string | null
   onSelectCover?: () => void
+  /** Which set of picks the chips show; portrait unless switched. */
+  orientation?: Orientation
 }) {
   // The blueprint carries a `table_of_contents` section whose content is a
   // placeholder — the exporters draw the real contents page themselves. It has
@@ -127,7 +149,7 @@ export function CreateDesignRail({
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium">Cover</span>
             <span className="block truncate text-[11px] text-slate-500">
-              {coverDesign ? COVER_DESIGN_NAMES[coverDesign] ?? coverDesign : "Not chosen"}
+              {frontMatterName(coverDesign, COVER_DESIGN_NAMES, orientation)}
             </span>
           </span>
         </button>
@@ -153,7 +175,7 @@ export function CreateDesignRail({
                 Contents page
               </span>
               <span className="block truncate text-[11px] text-slate-500">
-                {tocDesign ? TOC_DESIGN_NAMES[tocDesign] ?? tocDesign : "Not chosen"}
+                {frontMatterName(tocDesign, TOC_DESIGN_NAMES, orientation)}
               </span>
             </span>
           </button>
@@ -164,10 +186,11 @@ export function CreateDesignRail({
         const units = section.design?.units ?? []
         const state = failed?.[section.section_code]
           ? "failed"
-          : sectionState(section)
+          : sectionState(section, orientation)
         const active = selected?.code === section.section_code
         const busy = busyCode === section.section_code
         const only = units[0]
+        const onlyPick = only ? pickedKey(only, orientation) : null
 
         return (
           <div key={section.section_code}>
@@ -219,9 +242,16 @@ export function CreateDesignRail({
                 >
                   Retry
                 </button>
-              ) : only?.template_key ? (
+              ) : onlyPick ? (
                 <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
-                  {TEMPLATE_NAMES[only.template_key] ?? only.template_key}
+                  {TEMPLATE_NAMES[onlyPick] ?? onlyPick}
+                </span>
+              ) : only && orientation === "landscape" ? (
+                // Not an error: an unpicked landscape section still prints,
+                // in the plain two-column layout. Muted to say "nothing chosen
+                // yet" rather than "something is wrong".
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+                  Plain layout
                 </span>
               ) : null}
             </div>

@@ -21,13 +21,56 @@ import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
 import { losesContent, lossText, placementText } from "@/lib/createDesignLoss"
+import { pageSize, pickedKey, type Orientation } from "@/lib/orientation"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
 
-// True A4 in CSS px. Used only for the aspect ratio: the panel reserves the
-// SCALED height so it never jumps between renders.
-const PAGE_W = 595
-const PAGE_H = 842
+/**
+ * How wide the page may be drawn. A landscape sheet gets the same type size a
+ * portrait one does at 520px — 520 scaled by the long edge over the short —
+ * or turning the paper sideways would quietly shrink every word on it.
+ */
+function maxPageWidth(orientation: Orientation): number {
+  if (orientation === "portrait") return 520
+  const portrait = pageSize("portrait")
+  return Math.round((520 * portrait.height) / portrait.width)
+}
+
+/**
+ * The line under the template name. The landscape template has no counts —
+ * the art director never looked at it — so "Nothing to place" would be false;
+ * it holds every content type, which is what is said instead.
+ */
+function placementLine(option: DesignOption | null, orientation: Orientation): string {
+  const counted = option && Object.keys(option.counts).length > 0
+  if (orientation === "landscape" && !counted) {
+    return "Every figure, paragraph, quote and table prints — nothing is dropped"
+  }
+  return placementText(option?.counts)
+}
+
+/**
+ * What stands in for the page when a landscape section has no landscape pick.
+ * Drawn the shape of the sideways sheet, so the panel does not change size
+ * the moment a template is picked.
+ */
+function NoLandscapePickCard() {
+  const { width, height } = pageSize("landscape")
+  return (
+    <div className="flex h-full items-start justify-center overflow-y-auto bg-slate-100 p-5">
+      <div
+        className="flex w-full flex-col items-center justify-center gap-2 rounded-[6px] border border-dashed border-slate-300 bg-white p-8 text-center"
+        style={{ maxWidth: maxPageWidth("landscape"), aspectRatio: `${width} / ${height}` }}
+      >
+        <p className="text-sm font-medium text-slate-700">No landscape template yet</p>
+        <p className="max-w-md text-[12px] leading-relaxed text-slate-500">
+          This section prints in the plain two-column landscape layout. Pick the
+          landscape template on the left, or use &lsquo;Use for all sections&rsquo;.
+        </p>
+      </div>
+    </div>
+  )
+}
 
 export function PageRenderPanel({
   cycleId,
@@ -38,6 +81,7 @@ export function PageRenderPanel({
   option,
   onChoose,
   choosing,
+  orientation = "portrait",
 }: {
   cycleId: string
   sectionCode: string
@@ -47,6 +91,8 @@ export function PageRenderPanel({
   option: DesignOption | null
   onChoose: (key: string) => void
   choosing: boolean
+  /** Which way the page prints — sets the reserved shape and the pick compared against. */
+  orientation?: Orientation
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -55,13 +101,17 @@ export function PageRenderPanel({
   const [attempt, setAttempt] = useState(0)
   const [page, setPage] = useState(0)
 
+  // Re-attached whenever the page box comes back. A landscape section with no
+  // pick renders the placeholder card INSTEAD of that box, so observing only
+  // on mount would leave a later pick measuring nothing and drawn at 320px.
+  const hasPage = Boolean(templateKey)
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
     const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [hasPage])
 
   // Read the cache during render, not in an effect: a page you have already
   // looked at must appear immediately, and routing it through state would
@@ -110,7 +160,12 @@ export function PageRenderPanel({
   // you were in a multi-page unit.
   const total = pages?.length ?? 0
   const current = total ? Math.min(page, total - 1) : 0
-  const height = width ? (PAGE_H / PAGE_W) * width : 0
+  const paper = pageSize(orientation)
+  const height = width ? (paper.height / paper.width) * width : 0
+
+  if (!templateKey && orientation === "landscape") {
+    return <NoLandscapePickCard />
+  }
 
   if (!templateKey) {
     return (
@@ -120,7 +175,7 @@ export function PageRenderPanel({
     )
   }
 
-  const chosen = unit.template_key === templateKey
+  const chosen = pickedKey(unit, orientation) === templateKey
 
   return (
     <div className="flex h-full flex-col">
@@ -135,7 +190,7 @@ export function PageRenderPanel({
             )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">
-            {placementText(option?.counts)}
+            {placementLine(option, orientation)}
           </p>
           {/* Loss is no longer a layout trade-off a person chooses between —
               every template holds everything — so this is a defect notice,
@@ -206,7 +261,11 @@ export function PageRenderPanel({
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-slate-100 p-5">
-        <div ref={wrapRef} className="mx-auto w-full max-w-[520px]">
+        <div
+          ref={wrapRef}
+          className="mx-auto w-full"
+          style={{ maxWidth: maxPageWidth(orientation) }}
+        >
           <div
             className="relative w-full overflow-hidden rounded-[6px] border border-slate-200 bg-white shadow-sm"
             style={{ height: height || undefined, minHeight: height ? undefined : 320 }}

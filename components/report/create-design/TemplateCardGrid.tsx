@@ -17,11 +17,33 @@ import { Check, Star, TriangleAlert } from "lucide-react"
 
 import type { DesignOption } from "@/lib/api/createDesign"
 import { losesContent, lossText, placedText } from "@/lib/createDesignLoss"
+import { LANDSCAPE_TEMPLATE_KEY } from "@/lib/orientation"
 
 import { TEMPLATE_NAMES, TemplateMini } from "./TemplateMini"
 
 const TILE = "rounded-[10px]"
 const THUMB = "rounded-[4px]"
+
+/**
+ * What a card says when it has no counts to report. The landscape card never
+ * has any — the art director never looked at it — so without this it would
+ * sit there with an empty caption.
+ */
+const CARD_NOTES: Record<string, string> = {
+  [LANDSCAPE_TEMPLATE_KEY]: "Figures in a strip, a picture band, then three columns of text.",
+}
+
+/**
+ * The card's caption: what it loses, else the recommendation's reason, else
+ * what it places, else its standing note.
+ */
+function cardCaption(option: DesignOption): string {
+  if (losesContent(option.dropped)) return lossText(option.dropped, option.counts)
+  if (option.recommended && option.reason) return option.reason
+  // A no-break space, not an empty string, so a card with nothing to say
+  // keeps its caption line and lines up with its neighbours.
+  return placedText(option.counts) || CARD_NOTES[option.key] || "\u00A0"
+}
 
 export function TemplateCardGrid({
   options,
@@ -50,6 +72,9 @@ export function TemplateCardGrid({
         const active = option.key === previewKey
         const chosen = option.key === chosenKey
         const loses = losesContent(option.dropped)
+        // The sideways thumbnail takes the full row, or it would be drawn at
+        // half the height of its portrait neighbours and read as a sliver.
+        const wide = option.key === LANDSCAPE_TEMPLATE_KEY
         return (
           <button
             key={option.key}
@@ -59,6 +84,7 @@ export function TemplateCardGrid({
             disabled={disabled}
             className={
               `cursor-pointer ${TILE} border-2 p-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ` +
+              (wide ? "col-span-2 " : "") +
               (active
                 ? "border-[#6366F1] bg-[#EEF2FF]"
                 : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
@@ -94,11 +120,7 @@ export function TemplateCardGrid({
             </div>
 
             <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-snug text-[#64748B]">
-              {loses
-                ? lossText(option.dropped, option.counts)
-                : option.recommended && option.reason
-                  ? option.reason
-                  : placedText(option.counts) || " "}
+              {cardCaption(option)}
             </div>
           </button>
         )

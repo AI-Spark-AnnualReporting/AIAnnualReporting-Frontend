@@ -16,6 +16,10 @@
  * Previews are fetched one design at a time, on demand: each is a real Chromium
  * render, and firing four at once to fill a grid nobody has looked at yet would
  * cost four browsers per visit.
+ *
+ * In landscape there is nothing to pick: the report always prints the one
+ * landscape cover, so the panel shows that design alone, marked in use, with
+ * no save button.
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -24,7 +28,9 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
+import { LANDSCAPE_DESIGN_KEY, type Orientation } from "@/lib/orientation"
 import { cn } from "@/lib/utils"
+import type { CoverDesign } from "@/types/report-design"
 
 /**
  * What each cover's divider treatment is called.
@@ -45,9 +51,22 @@ const NAMES: Record<string, string> = {
   band: "Band",
   panel: "Panel",
   monolith: "Monolith",
+  [LANDSCAPE_DESIGN_KEY]: "Landscape",
 }
 
 const title = (key: string) => NAMES[key] ?? key
+
+/**
+ * The designs the list offers: the portrait menu, or just the landscape cover.
+ * Empty in landscape when the engine is too old to send one.
+ */
+function designsToList(
+  specs: { templates: CoverDesign[]; landscape?: CoverDesign } | undefined,
+  orientation: Orientation,
+): CoverDesign[] {
+  if (orientation === "landscape") return specs?.landscape ? [specs.landscape] : []
+  return specs?.templates ?? []
+}
 
 export function CoverDesignPanel({
   cycleId,
@@ -55,12 +74,15 @@ export function CoverDesignPanel({
   locked,
   onChoose,
   saving,
+  orientation = "portrait",
 }: {
   cycleId: string
   chosen: string | null
   locked: boolean
   onChoose: (key: string) => void
   saving: boolean
+  /** Portrait offers the four covers; landscape shows its one cover, in use. */
+  orientation?: Orientation
 }) {
   const [active, setActive] = useState<string | null>(null)
 
@@ -69,14 +91,21 @@ export function CoverDesignPanel({
     queryFn: () => annualDesignApi.coverDesigns(),
     staleTime: Infinity, // static reference data owned by the engine
   })
-  const designs = catalogue.data?.templates ?? []
+  const landscape = orientation === "landscape"
+  const designs = designsToList(catalogue.data, orientation)
   const fallbackKey = catalogue.data?.default ?? "statement"
+  // An engine deployed before landscape existed sends no landscape cover.
+  // Asking it to draw "landscape" anyway would fail, or worse quietly draw a
+  // portrait default, so the panel says so instead.
+  const landscapeMissing = landscape && catalogue.isSuccess && !catalogue.data.landscape
 
   // What the right pane shows: the design being inspected, else the one saved,
   // else the engine's default. Derived during render — this screen's lint
   // rules reject setState inside an effect, and a "which preview is loading"
-  // flag kept by hand is exactly that.
-  const showing = active ?? chosen ?? fallbackKey
+  // flag kept by hand is exactly that. Landscape always shows its one design.
+  const showing = landscape ? LANDSCAPE_DESIGN_KEY : active ?? chosen ?? fallbackKey
+  // In landscape the one design is always the one in use.
+  const inUse = landscape ? LANDSCAPE_DESIGN_KEY : chosen
 
   // One query per design, cached for the visit. React Query handles the
   // in-flight flag, the error and the memo that makes re-picking a design
@@ -84,7 +113,9 @@ export function CoverDesignPanel({
   const previewQuery = useQuery({
     queryKey: ["pm", "cycle", cycleId, "cover-preview", showing],
     queryFn: () => annualDesignApi.previewCover(cycleId, showing),
-    enabled: Boolean(showing),
+    // Landscape waits for the list, so an old engine is never asked to draw a
+    // design it does not have.
+    enabled: Boolean(showing) && (!landscape || Boolean(catalogue.data?.landscape)),
     staleTime: Infinity,
     retry: false,
   })
@@ -109,14 +140,27 @@ export function CoverDesignPanel({
     <div className="flex min-h-0 flex-1">
       <div className="w-[300px] shrink-0 overflow-y-auto border-r p-4">
         <p className="mb-1 text-xs font-semibold text-slate-900">Report cover</p>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-          How the front cover is set. Every design prints every entry —
-          they differ in how the levels are shown, never in what survives.
-        </p>
+        {landscape ? (
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+            A landscape report always prints this cover, so there is nothing to
+            choose here. Switch to Portrait to pick from the other designs.
+          </p>
+        ) : (
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+            How the front cover is set. Every design prints every entry —
+            they differ in how the levels are shown, never in what survives.
+          </p>
+        )}
+        {landscapeMissing && (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+            The export engine on this server does not have the landscape cover
+            yet, so it cannot be previewed.
+          </p>
+        )}
 
         <div className="space-y-2">
           {designs.map((design) => {
-            const isChosen = chosen === design.key
+            const isChosen = inUse === design.key
             const isShowing = showing === design.key
             return (
               <button
@@ -165,21 +209,24 @@ export function CoverDesignPanel({
               </p>
             )}
           </div>
-          <Button
-            size="sm"
-            variant={chosen === showing ? "outline" : "brand"}
-            className="h-8 shrink-0"
-            disabled={locked || saving || chosen === showing}
-            title={
-              locked
-                ? "This report has been approved and locked."
-                : undefined
-            }
-            onClick={() => onChoose(showing)}
-          >
-            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            {chosen === showing ? "In use" : "Use this design"}
-          </Button>
+          {/* No save in landscape: there is only one design to use. */}
+          {!landscape && (
+            <Button
+              size="sm"
+              variant={chosen === showing ? "outline" : "brand"}
+              className="h-8 shrink-0"
+              disabled={locked || saving || chosen === showing}
+              title={
+                locked
+                  ? "This report has been approved and locked."
+                  : undefined
+              }
+              onClick={() => onChoose(showing)}
+            >
+              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {chosen === showing ? "In use" : "Use this design"}
+            </Button>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-100 p-5">
@@ -203,7 +250,12 @@ export function CoverDesignPanel({
                   key={index}
                   src={src}
                   alt={`${title(showing)} cover page ${index + 1}`}
-                  className="mx-auto w-full max-w-2xl rounded border border-slate-300 bg-white shadow-sm"
+                  // A sideways sheet gets more width, or its type would be
+                  // drawn smaller than the portrait covers'.
+                  className={cn(
+                    "mx-auto w-full rounded border border-slate-300 bg-white shadow-sm",
+                    landscape ? "max-w-4xl" : "max-w-2xl",
+                  )}
                 />
               ))}
             </div>
