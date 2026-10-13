@@ -1458,16 +1458,7 @@ function Group({
                   <Check className="h-3 w-3" strokeWidth={3} />
                   Fixed
                 </span>
-              ) : (
-                canFix && (
-                  <FixButtons
-                    fixes={uniqueFixes(block.items)}
-                    cycleId={cycleId!}
-                    onChoose={onChoose}
-                    summary={codes.includes(VALIDATION_SUMMARY_CODE)}
-                  />
-                )
-              )}
+              ) : null}
             </div>
 
             <div
@@ -1525,6 +1516,20 @@ function Group({
                 )
               })}
             </div>
+
+            {/* Under the finding, always in the same place. Beside the title,
+                long section names pushed some buttons onto their own lines and
+                left others on the right. Shown even when the block is closed. */}
+            {!allEdited && canFix && (
+              <div className="mt-2 pl-5">
+                <FixButtons
+                  fixes={uniqueFixes(block.items)}
+                  cycleId={cycleId!}
+                  onChoose={onChoose}
+                  summary={codes.includes(VALIDATION_SUMMARY_CODE)}
+                />
+              </div>
+            )}
           </li>
           )
         })}
@@ -1557,34 +1562,42 @@ function NotCarrying({
           optional, these sections could carry it
         </span>
       </p>
+      {/* A grid, not one running sentence per message: a longer message name
+          wrapped its sections onto the next line, so no two rows lined up.
+          Message names share one column; each section gets a fixed-width
+          slot, so the buttons fall into columns. */}
       <ul className="mt-2 space-y-2">
         {shown.map((row) => (
-          <li key={row.message} className="text-xs leading-relaxed">
-            <span className="font-semibold text-[#1A1D2E]">{row.message}</span>
-            <span className="text-slate-400"> — </span>
-            <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1.5 align-middle">
+          <li
+            key={row.message}
+            className="grid gap-x-3 gap-y-1.5 text-xs sm:grid-cols-[11rem_minmax(0,1fr)]"
+          >
+            <span className="pt-1 font-semibold text-[#1A1D2E]">{row.message}</span>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {row.sections.map((s) => (
-                <span key={s.code} className="inline-flex items-center gap-1.5">
-                  <span className="text-slate-600">{s.title}</span>
+                <div key={s.code} className="flex w-[15rem] items-center justify-between gap-2">
+                  <span className="truncate text-slate-600" title={s.title}>
+                    {s.title}
+                  </span>
                   {edited.has(s.code) ? (
                     <span
                       title="This section was edited after the check. Re-assemble & validate to confirm."
-                      className="inline-flex cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
+                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
                     >
                       <Check className="h-3 w-3" strokeWidth={3} />
                       Fixed
                     </span>
                   ) : (
-                    <Button size="sm" className="h-6 px-2 text-[11px]" asChild>
+                    <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
                       <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
                         <Sparkles className="mr-1 h-3 w-3" />
                         Fix with AI
                       </Link>
                     </Button>
                   )}
-                </span>
+                </div>
               ))}
-            </span>
+            </div>
           </li>
         ))}
       </ul>
@@ -1650,9 +1663,9 @@ function FixButtons({
         if (fix.kind === "ai") {
           return (
             <Button key={`ai:${fix.sectionCode}`} size="sm" className="h-7" asChild>
-              <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction)}>
+              <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction)} title={fix.label}>
                 <Sparkles className="mr-1 h-3.5 w-3.5" />
-                {fix.label}
+                <span className="max-w-[16rem] truncate">{fix.label}</span>
               </Link>
             </Button>
           )
@@ -1660,9 +1673,9 @@ function FixButtons({
         return (
           // Blue like the AI fix; the pencil (not the sparkle) says the PM does it.
           <Button key={`edit:${fix.sectionCode}`} size="sm" className="h-7" asChild>
-            <Link href={buildFixHref(cycleId, fix.sectionCode)}>
+            <Link href={buildFixHref(cycleId, fix.sectionCode)} title={fix.label}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
-              {fix.label}
+              <span className="max-w-[16rem] truncate">{fix.label}</span>
             </Link>
           </Button>
         )
