@@ -18,7 +18,9 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import type { DesignSection } from "@/lib/api/createDesign"
-import { pickedKey, type Orientation } from "@/lib/orientation"
+import {
+  LANDSCAPE_COVER_NAMES, LANDSCAPE_TOC_NAMES, pickedKey, type Orientation,
+} from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
@@ -48,15 +50,14 @@ const TOC_DESIGN_NAMES: Record<string, string> = {
 /**
  * What the report-level Cover and Contents entries say is in use.
  *
- * Landscape has exactly one cover and one contents design and always prints
- * them, so there is never a "Not chosen" to show there.
+ * `design` is the pick in the orientation on screen. A landscape report always
+ * prints one of its designs (the default until another is picked), so the
+ * caller passes the resolved key and "Not chosen" never shows there.
  */
 function frontMatterName(
   design: string | null | undefined,
   names: Record<string, string>,
-  orientation: Orientation,
 ): string {
-  if (orientation === "landscape") return "Landscape"
   if (!design) return "Not chosen"
   return names[design] ?? design
 }
@@ -114,9 +115,11 @@ export function CreateDesignRail({
    * would put a section that does not exist into every lookup on this screen.
    */
   tocActive?: boolean
+  /** The contents design in use in the orientation on screen. */
   tocDesign?: string | null
   onSelectToc?: () => void
   coverActive?: boolean
+  /** The cover in use in the orientation on screen. */
   coverDesign?: string | null
   onSelectCover?: () => void
   /** Which set of picks the chips show; portrait unless switched. */
@@ -131,6 +134,9 @@ export function CreateDesignRail({
   const ordered = [...sections]
     .filter((s) => !(onSelectToc && s.section_code === "table_of_contents"))
     .sort((a, b) => a.order - b.order)
+  const landscape = orientation === "landscape"
+  const coverNames = landscape ? LANDSCAPE_COVER_NAMES : COVER_DESIGN_NAMES
+  const tocNames = landscape ? LANDSCAPE_TOC_NAMES : TOC_DESIGN_NAMES
   return (
     <div className="space-y-0.5 p-3">
       {onSelectCover && (
@@ -149,7 +155,7 @@ export function CreateDesignRail({
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium">Cover</span>
             <span className="block truncate text-[11px] text-slate-500">
-              {frontMatterName(coverDesign, COVER_DESIGN_NAMES, orientation)}
+              {frontMatterName(coverDesign, coverNames)}
             </span>
           </span>
         </button>
@@ -175,7 +181,7 @@ export function CreateDesignRail({
                 Contents page
               </span>
               <span className="block truncate text-[11px] text-slate-500">
-                {frontMatterName(tocDesign, TOC_DESIGN_NAMES, orientation)}
+                {frontMatterName(tocDesign, tocNames)}
               </span>
             </span>
           </button>

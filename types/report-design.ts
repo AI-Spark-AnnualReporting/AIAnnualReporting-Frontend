@@ -156,6 +156,15 @@ export interface AnnualDesign {
    * backend deployed before landscape existed omits the key entirely.
    */
   orientation: Orientation
+  /**
+   * The cycle's OWN landscape cover pick, null when it has never chosen (the
+   * report then prints the default, "landscape"). Read it through
+   * `landscapeCoverKey()`: a backend deployed before there was a choice omits
+   * the key entirely.
+   */
+  landscape_cover_template_key?: string | null
+  /** The cycle's OWN landscape contents pick. Same rules — read it through `landscapeTocKey()`. */
+  landscape_toc_template_key?: string | null
 }
 
 /** Which of the three running-band looks the renderer draws. */
@@ -230,6 +239,14 @@ export interface DesignSelection {
    * it only decides which set the screen and the export read.
    */
   orientation?: Orientation
+  /**
+   * Which of the three landscape covers a landscape report prints. Kept apart
+   * from `cover2_template_key`, so each orientation remembers its own cover.
+   * Absent leaves the saved pick alone.
+   */
+  landscape_cover_template_key?: string
+  /** Which of the three landscape contents pages a landscape report prints. Same rules. */
+  landscape_toc_template_key?: string
 }
 
 /** One contents-page design, as the engine that owns them describes it. */
@@ -239,6 +256,8 @@ export interface CoverDesign {
   full_bleed: boolean
   /** The divider treatment this cover brings with it. */
   divider: string
+  /** The engine's own name for it. Sent for the landscape designs only. */
+  name?: string
 }
 
 export interface CoverPreview {
@@ -253,19 +272,25 @@ export interface TocDesign {
   purpose: string
   full_bleed: boolean
   sub_page_numbers: boolean
+  /** The engine's own name for it. Sent for the landscape designs only. */
+  name?: string
 }
 
 /**
  * The cover designs, as `/pm/cover-designs` lists them.
  *
- * `templates` is the portrait menu only. The one landscape cover sits apart in
- * `landscape` so no portrait picker can offer it; it is optional because an
- * engine deployed before landscape existed does not send it.
+ * `templates` is the portrait menu only. The landscape covers sit apart so no
+ * portrait picker can offer them: `landscape` is the default one and
+ * `landscape_templates` all three, default first. Both are optional because an
+ * engine deployed before landscape existed sends neither; an engine from
+ * before there was a choice sends only `landscape`, and annualDesignApi then
+ * fills `landscape_templates` with that one.
  */
 export interface CoverDesignSpecs {
   templates: CoverDesign[]
   default: string
   landscape?: CoverDesign
+  landscape_templates?: CoverDesign[]
 }
 
 /** The contents designs, as `/pm/toc-designs` lists them. Same split as covers. */
@@ -273,6 +298,7 @@ export interface TocDesignSpecs {
   templates: TocDesign[]
   default: string
   landscape?: TocDesign
+  landscape_templates?: TocDesign[]
 }
 
 /** A rendered preview of one design — one PNG data URI per sheet. */

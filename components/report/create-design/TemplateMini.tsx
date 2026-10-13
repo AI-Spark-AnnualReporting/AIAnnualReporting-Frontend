@@ -17,6 +17,8 @@
 
 import { memo } from "react"
 
+import { LANDSCAPE_TEMPLATE_NAMES } from "@/lib/orientation"
+
 const shell: React.CSSProperties = {
   width: "100%",
   aspectRatio: "1 / 1.3",
@@ -110,6 +112,106 @@ function LandscapeColumnsMini({ accent }: { accent: string }) {
   )
 }
 
+/**
+ * The coral the landscape pages set their figures in (the brand's accent ink
+ * on the real page). Fixed here, like the other minis' greys: the card only
+ * has to say "the big numbers are here".
+ */
+const CORAL = "#F58675"
+
+/**
+ * The figure-rail landscape page, drawn sideways: title top-left, prose in two
+ * columns across the left two-thirds, and a tinted rail down the right holding
+ * the picture, the key figures stacked one under another, then a quote.
+ */
+function LandscapeRailMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 9, gap: 4 }}>
+      <div style={line("10%", accent, 3)} />
+      <div style={line("40%", "#9AA0B4", 5)} />
+      <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
+      <div style={{ display: "flex", gap: 8, flex: 1 }}>
+        <div style={{ display: "flex", gap: 6, flex: 2 }}>
+          <div style={ruledColumn} />
+          <div style={ruledColumn} />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            background: "#F4F0F7",
+            padding: 4,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          <div style={ph({ flex: "0 0 32%" })} />
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i}>
+              <div style={line("55%", CORAL, 7)} />
+              <div style={{ ...line("80%"), marginTop: 2 }} />
+            </div>
+          ))}
+          <div style={{ flex: 1 }} />
+          <div style={line("90%", accent, 2)} />
+          <div style={line("65%", accent, 2)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The brand-hero landscape page, drawn sideways: a brand-colour band across
+ * the top carrying the title, one giant figure and a row of small ones; below
+ * it prose in two wide columns with the picture beside them.
+ */
+function LandscapeHeroMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 0, gap: 0 }}>
+      <div
+        style={{
+          background: accent,
+          padding: "8px 9px",
+          flex: "0 0 40%",
+          display: "flex",
+          gap: 10,
+        }}
+      >
+        <div style={{ flex: "0 0 38%", display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={line("30%", "rgba(255,255,255,0.65)", 2)} />
+          <div style={line("85%", "rgba(255,255,255,0.95)", 5)} />
+          <div style={{ flex: 1 }} />
+          <div style={line("80%", CORAL, 20)} />
+          <div style={line("60%", "rgba(255,255,255,0.8)", 2.5)} />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 5,
+            alignContent: "end",
+          }}
+        >
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i}>
+              <div style={line("70%", "rgba(255,255,255,0.95)", 5)} />
+              <div style={{ ...line("90%", "rgba(255,255,255,0.55)", 2), marginTop: 2 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flex: 1, padding: 9 }}>
+        <div style={{ display: "flex", gap: 6, flex: 2 }}>
+          <div style={ruledColumn} />
+          <div style={ruledColumn} />
+        </div>
+        <div style={ph({ flex: 1 })} />
+      </div>
+    </div>
+  )
+}
 
 function TemplateMiniInner({
   templateKey,
@@ -120,6 +222,12 @@ function TemplateMiniInner({
 }) {
   if (templateKey === "landscape_columns") {
     return <LandscapeColumnsMini accent={accent} />
+  }
+  if (templateKey === "landscape_rail") {
+    return <LandscapeRailMini accent={accent} />
+  }
+  if (templateKey === "landscape_hero") {
+    return <LandscapeHeroMini accent={accent} />
   }
 
   if (templateKey === "kpi_stat_grid") {
@@ -409,5 +517,5 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
   editorial_movements: "Editorial — movements",
-  landscape_columns: "Landscape — figures + columns",
+  ...LANDSCAPE_TEMPLATE_NAMES,
 }

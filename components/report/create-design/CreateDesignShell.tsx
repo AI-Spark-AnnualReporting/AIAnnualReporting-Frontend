@@ -12,8 +12,10 @@
  *
  * The Portrait | Landscape switch in the header decides which of a page's two
  * picks everything below reads. Portrait is the screen as it always was;
- * landscape offers the one landscape template, never auto-picks, and shows a
- * card for a page with no landscape pick (it prints in the plain layout).
+ * landscape offers the three landscape templates, never auto-picks, and shows
+ * a card for a page with no landscape pick (it prints in the plain layout).
+ * The cover and contents page have a landscape pick of their own too, saved
+ * beside the portrait one.
  */
 
 import {
@@ -40,8 +42,8 @@ import { isAuthError } from "@/lib/api/client"
 import type { CycleDesign, DesignOption, DesignUnit } from "@/lib/api/createDesign"
 import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
 import {
-  countPicked, LANDSCAPE_TEMPLATE_KEY, landscapeOptions, orientationOf, pickedKey,
-  type Orientation,
+  countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
+  landscapeOptions, landscapeTocKey, orientationOf, pickedKey, type Orientation,
 } from "@/lib/orientation"
 import {
   DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey, type CustomizeTab,
@@ -173,11 +175,11 @@ function previewButtonTitle(orientation: Orientation, unitsChosen: number): stri
   return "Renders every chosen page — about a second each"
 }
 
-/** The toast after "Use for all sections". */
-function landscapeAppliedText(applied: number): string {
+/** The toast after "Use for all sections", naming the template applied. */
+function landscapeAppliedText(applied: number, templateName: string): string {
   if (applied === 0) return "Every section already has a landscape template"
-  if (applied === 1) return "Landscape template applied to 1 section"
-  return `Landscape template applied to ${applied} sections`
+  if (applied === 1) return `${templateName} applied to 1 section`
+  return `${templateName} applied to ${applied} sections`
 }
 
 export function CreateDesignShell({ cycleId }: { cycleId: string }) {
@@ -253,6 +255,30 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     mutationFn: (key: string) =>
       annualDesignApi.save(cycleId, { toc_template_key: key }),
     onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
+  })
+  // The landscape cover and contents page: saved in their own fields beside
+  // the portrait ones, so each orientation keeps its own.
+  const saveLandscapeCover = useMutation({
+    mutationFn: (key: string) =>
+      annualDesignApi.save(cycleId, { landscape_cover_template_key: key }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(designKey, fresh)
+      // The landscape cover decides which opener every landscape section
+      // opens on, and no render cache key names the opener — so every section
+      // page already drawn would keep the old one. See revokeCycle.
+      revokeCycle(cycleId)
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not save that cover")),
+  })
+  // No revoke: the contents page is drawn on its own, under its own key, and
+  // no section page shows it.
+  const saveLandscapeToc = useMutation({
+    mutationFn: (key: string) =>
+      annualDesignApi.save(cycleId, { landscape_toc_template_key: key }),
+    onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not save that contents page")),
   })
   // Report-level like the two above. Nothing to revoke afterwards: every
   // render cache key names its template, and the two orientations never share
@@ -396,6 +422,30 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const effectivePreview = templateToShow(unit, previewKey, orientation)
   const option = optionFor(unit, effectivePreview, orientation)
 
+  // The cover and contents design in use in the orientation on screen. In
+  // landscape that is the saved landscape pick, else the default — never the
+  // portrait pick, which a landscape report does not print.
+  const coverInUse = landscape
+    ? landscapeCoverKey(reportDesign.data)
+    : reportDesign.data?.cover2_template_key ?? null
+  const tocInUse = landscape
+    ? landscapeTocKey(reportDesign.data)
+    : reportDesign.data?.toc_template_key ?? null
+  const coverSaving = landscape ? saveLandscapeCover.isPending : saveCover.isPending
+  const tocSaving = landscape ? saveLandscapeToc.isPending : saveToc.isPending
+  const chooseCover = (key: string) => {
+    if (landscape) saveLandscapeCover.mutate(key)
+    else saveCover.mutate(key)
+  }
+  const chooseToc = (key: string) => {
+    if (landscape) saveLandscapeToc.mutate(key)
+    else saveToc.mutate(key)
+  }
+
+  // "Use for all sections" applies the landscape card on screen, and says so.
+  const keyToApply = landscapeKeyToApply(previewKey, unit)
+  const nameToApply = LANDSCAPE_TEMPLATE_SHORT_NAMES[keyToApply] ?? keyToApply
+
   const reExtract = (sectionCode: string) => {
     revokeSection(cycleId, sectionCode)
     extract.mutate({ sectionCode, force: true })
@@ -437,11 +487,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
 
   const applyLandscapeToAll = () => {
     applyLandscape.mutate(
-      { templateKey: LANDSCAPE_TEMPLATE_KEY },
+      { templateKey: keyToApply },
       {
         onSuccess: (res) => {
-          if (res.applied === 0) toast(landscapeAppliedText(0))
-          else toast.success(landscapeAppliedText(res.applied))
+          if (res.applied === 0) toast(landscapeAppliedText(0, nameToApply))
+          else toast.success(landscapeAppliedText(res.applied, nameToApply))
         },
       },
     )
@@ -602,10 +652,10 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                 failed={failures}
                 onReExtract={reExtract}
                 coverActive={coverOpen}
-                coverDesign={reportDesign.data?.cover2_template_key ?? null}
+                coverDesign={coverInUse}
                 onSelectCover={() => { exitPreview(); setCoverOpen(true); setTocOpen(false) }}
                 tocActive={tocOpen}
-                tocDesign={reportDesign.data?.toc_template_key ?? null}
+                tocDesign={tocInUse}
                 onSelectToc={() => { exitPreview(); setTocOpen(true); setCoverOpen(false) }}
                 orientation={orientation}
               />
@@ -621,27 +671,31 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
               key={orientation}
               cycleId={cycleId}
               design={data}
-              coverKey={reportDesign.data?.cover2_template_key ?? null}
-              tocKey={reportDesign.data?.toc_template_key ?? null}
+              coverKey={coverInUse}
+              tocKey={tocInUse}
               onExit={exitPreview}
               orientation={orientation}
             />
           ) : coverOpen ? (
+            // Keyed on the orientation so a design inspected in one
+            // orientation is not left on screen in the other.
             <CoverDesignPanel
+              key={orientation}
               cycleId={cycleId}
-              chosen={reportDesign.data?.cover2_template_key ?? null}
+              chosen={coverInUse}
               locked={reportDesign.data?.locked ?? false}
-              saving={saveCover.isPending}
-              onChoose={(key) => saveCover.mutate(key)}
+              saving={coverSaving}
+              onChoose={chooseCover}
               orientation={orientation}
             />
           ) : tocOpen ? (
             <TocDesignPanel
+              key={orientation}
               cycleId={cycleId}
-              chosen={reportDesign.data?.toc_template_key ?? null}
+              chosen={tocInUse}
               locked={reportDesign.data?.locked ?? false}
-              saving={saveToc.isPending}
-              onChoose={(key) => saveToc.mutate(key)}
+              saving={tocSaving}
+              onChoose={chooseToc}
               orientation={orientation}
             />
           ) : !section || !unit ? (
@@ -705,6 +759,8 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                       <p className="text-[11px] leading-relaxed text-slate-500">
                         Pick a landscape template for each section. Sections
                         without one print in a plain two-column landscape layout.
+                        &lsquo;Use for all&rsquo; fills only the sections that
+                        have no landscape template yet.
                       </p>
                       <Button
                         variant="outline"
@@ -718,7 +774,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                         ) : (
                           <ListChecks className="mr-1.5 h-3.5 w-3.5" />
                         )}
-                        Use for all sections
+                        Use {nameToApply} for all sections
                       </Button>
                     </div>
                   )}

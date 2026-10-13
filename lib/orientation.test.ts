@@ -11,10 +11,22 @@
 import assert from "node:assert/strict"
 import { cacheKey } from "./createDesignCache.ts"
 import {
+  LANDSCAPE_COVER_KEYS,
+  LANDSCAPE_COVER_NAMES,
   LANDSCAPE_DESIGN_KEY,
+  LANDSCAPE_OPENER_NAMES,
   LANDSCAPE_TEMPLATE_KEY,
+  LANDSCAPE_TEMPLATE_KEYS,
+  LANDSCAPE_TEMPLATE_NAMES,
+  LANDSCAPE_TEMPLATE_SHORT_NAMES,
+  LANDSCAPE_TOC_KEYS,
+  LANDSCAPE_TOC_NAMES,
   countPicked,
+  isLandscapeTemplateKey,
+  landscapeCoverKey,
+  landscapeKeyToApply,
   landscapeOptions,
+  landscapeTocKey,
   orientationOf,
   pageSize,
   pickedKey,
@@ -84,34 +96,127 @@ assert.deepEqual(pageSize("landscape"), { width: 841.89, height: 595.28 })
 assert.ok(pageSize("portrait").height > pageSize("portrait").width)
 assert.ok(pageSize("landscape").width > pageSize("landscape").height)
 
-// landscapeOptions: one card, the landscape template, nothing recommended.
+// The three landscape section templates, the default first. Copied from the
+// engine's page_templates.LANDSCAPE_KEYS.
+assert.deepEqual([...LANDSCAPE_TEMPLATE_KEYS], [
+  "landscape_columns", "landscape_rail", "landscape_hero",
+])
+assert.equal(LANDSCAPE_TEMPLATE_KEYS[0], LANDSCAPE_TEMPLATE_KEY)
+
+// The landscape covers and contents pages, the default first. Copied from the
+// engine's cover_templates / toc_templates LANDSCAPE_KEYS.
+assert.deepEqual([...LANDSCAPE_COVER_KEYS], ["landscape", "landscape_field", "landscape_quiet"])
+assert.deepEqual([...LANDSCAPE_TOC_KEYS], ["landscape", "landscape_three", "landscape_spread"])
+assert.equal(LANDSCAPE_COVER_KEYS[0], LANDSCAPE_DESIGN_KEY)
+assert.equal(LANDSCAPE_TOC_KEYS[0], LANDSCAPE_DESIGN_KEY)
+// The landscape openers. They follow the cover, so there is no list to pick
+// from — only their names, for the cover picker.
+const LANDSCAPE_OPENER_KEYS = ["landscape", "landscape_field", "landscape_numeral"]
+
+// landscapeOptions: one card per landscape template, nothing recommended.
 const options = landscapeOptions()
-assert.equal(options.length, 1)
-assert.deepEqual(options[0], {
-  key: LANDSCAPE_TEMPLATE_KEY,
-  recommended: false,
-  reason: null,
-  counts: {},
-  dropped: {},
-})
+assert.equal(options.length, 3)
+assert.deepEqual(options.map((option) => option.key), [...LANDSCAPE_TEMPLATE_KEYS])
+for (const option of options) {
+  assert.deepEqual(option, {
+    key: option.key,
+    recommended: false,
+    reason: null,
+    counts: {},
+    dropped: {},
+  })
+}
 // A fresh list each call, so a caller editing one cannot change the next.
 assert.notEqual(landscapeOptions(), landscapeOptions())
+assert.notEqual(landscapeOptions()[0], landscapeOptions()[0])
+
+// isLandscapeTemplateKey: the three, and nothing else.
+for (const key of LANDSCAPE_TEMPLATE_KEYS) assert.ok(isLandscapeTemplateKey(key))
+for (const key of PORTRAIT_PAGE_KEYS) assert.ok(!isLandscapeTemplateKey(key))
+assert.ok(!isLandscapeTemplateKey(null))
+assert.ok(!isLandscapeTemplateKey(undefined))
+assert.ok(!isLandscapeTemplateKey(""))
+assert.ok(!isLandscapeTemplateKey(LANDSCAPE_DESIGN_KEY))
+
+// landscapeKeyToApply: the card on screen, else the page's pick, else the default.
+const railPicked = { landscape_template_key: "landscape_rail" }
+assert.equal(landscapeKeyToApply("landscape_hero", railPicked), "landscape_hero")
+assert.equal(landscapeKeyToApply(null, railPicked), "landscape_rail")
+assert.equal(landscapeKeyToApply(null, { landscape_template_key: null }), LANDSCAPE_TEMPLATE_KEY)
+assert.equal(landscapeKeyToApply(null, {}), LANDSCAPE_TEMPLATE_KEY)
+assert.equal(landscapeKeyToApply(null, null), LANDSCAPE_TEMPLATE_KEY)
+// A portrait key is never applied to landscape, from either source.
+assert.equal(landscapeKeyToApply("kpi_stat_grid", railPicked), "landscape_rail")
+assert.equal(
+  landscapeKeyToApply("kpi_stat_grid", { landscape_template_key: "kpi_stat_grid" }),
+  LANDSCAPE_TEMPLATE_KEY,
+)
+
+// landscapeCoverKey / landscapeTocKey: the saved pick when valid, else the default.
+assert.equal(landscapeCoverKey(null), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeCoverKey(undefined), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeCoverKey({}), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeCoverKey({ landscape_cover_template_key: null }), LANDSCAPE_DESIGN_KEY)
+for (const key of LANDSCAPE_COVER_KEYS) {
+  assert.equal(landscapeCoverKey({ landscape_cover_template_key: key }), key)
+}
+assert.equal(landscapeCoverKey({ landscape_cover_template_key: "statement" }), LANDSCAPE_DESIGN_KEY)
+assert.equal(
+  landscapeCoverKey({ landscape_cover_template_key: "landscape_three" }), LANDSCAPE_DESIGN_KEY)
+// Each reads only its own field.
+assert.equal(landscapeCoverKey({ landscape_toc_template_key: "landscape_three" }), LANDSCAPE_DESIGN_KEY)
+
+assert.equal(landscapeTocKey(null), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeTocKey({}), LANDSCAPE_DESIGN_KEY)
+for (const key of LANDSCAPE_TOC_KEYS) {
+  assert.equal(landscapeTocKey({ landscape_toc_template_key: key }), key)
+}
+assert.equal(landscapeTocKey({ landscape_toc_template_key: "columns" }), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeTocKey({ landscape_toc_template_key: "landscape_field" }), LANDSCAPE_DESIGN_KEY)
+assert.equal(landscapeTocKey({ landscape_cover_template_key: "landscape_field" }), LANDSCAPE_DESIGN_KEY)
+
+// Every landscape key has a display name, and no two share one.
+function assertNamesFor(keys: readonly string[], names: Record<string, string>, label: string) {
+  assert.deepEqual(Object.keys(names).sort(), [...keys].sort(), `${label}: names cover exactly the keys`)
+  const shown = keys.map((key) => names[key])
+  assert.equal(new Set(shown).size, shown.length, `${label}: two keys share a name`)
+  for (const name of shown) assert.ok(name && name.trim(), `${label}: an empty name`)
+}
+assertNamesFor(LANDSCAPE_TEMPLATE_KEYS, LANDSCAPE_TEMPLATE_NAMES, "section templates")
+assertNamesFor(LANDSCAPE_TEMPLATE_KEYS, LANDSCAPE_TEMPLATE_SHORT_NAMES, "section short names")
+assertNamesFor(LANDSCAPE_COVER_KEYS, LANDSCAPE_COVER_NAMES, "covers")
+assertNamesFor(LANDSCAPE_TOC_KEYS, LANDSCAPE_TOC_NAMES, "contents pages")
+assertNamesFor(LANDSCAPE_OPENER_KEYS, LANDSCAPE_OPENER_NAMES, "openers")
+assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_rail, "Figure rail")
 
 // The landscape keys are outside every portrait menu. This is what lets the
 // render cache and the cover/contents preview queries go without an
 // orientation in their keys: a different key IS a different entry.
-assert.ok(!PORTRAIT_PAGE_KEYS.includes(LANDSCAPE_TEMPLATE_KEY))
-assert.ok(!PORTRAIT_COVER_KEYS.includes(LANDSCAPE_DESIGN_KEY))
-assert.ok(!PORTRAIT_TOC_KEYS.includes(LANDSCAPE_DESIGN_KEY))
-assert.ok(!PORTRAIT_DIVIDER_KEYS.includes(LANDSCAPE_DESIGN_KEY))
-
-// …and so the same page, drawn in each orientation, never shares a cache key.
-for (const portraitKey of PORTRAIT_PAGE_KEYS) {
-  const unit = { template_key: portraitKey, landscape_template_key: LANDSCAPE_TEMPLATE_KEY }
-  const portraitCacheKey = cacheKey("cyc", "ceo_review", 1, pickedKey(unit, "portrait")!)
-  const landscapeCacheKey = cacheKey("cyc", "ceo_review", 1, pickedKey(unit, "landscape")!)
-  assert.notEqual(portraitCacheKey, landscapeCacheKey,
-    `portrait ${portraitKey} and landscape share a render-cache key`)
+for (const key of LANDSCAPE_TEMPLATE_KEYS) {
+  assert.ok(!PORTRAIT_PAGE_KEYS.includes(key), `${key} collides with a portrait page`)
 }
+for (const key of LANDSCAPE_COVER_KEYS) {
+  assert.ok(!PORTRAIT_COVER_KEYS.includes(key), `${key} collides with a portrait cover`)
+}
+for (const key of LANDSCAPE_TOC_KEYS) {
+  assert.ok(!PORTRAIT_TOC_KEYS.includes(key), `${key} collides with a portrait contents page`)
+}
+for (const key of LANDSCAPE_OPENER_KEYS) {
+  assert.ok(!PORTRAIT_DIVIDER_KEYS.includes(key), `${key} collides with a portrait opener`)
+}
+
+// …and so the same page, drawn in each orientation, never shares a cache key —
+// nor do two landscape templates of the same page.
+for (const portraitKey of PORTRAIT_PAGE_KEYS) {
+  for (const landscapeKey of LANDSCAPE_TEMPLATE_KEYS) {
+    const unit = { template_key: portraitKey, landscape_template_key: landscapeKey }
+    const portraitCacheKey = cacheKey("cyc", "ceo_review", 1, pickedKey(unit, "portrait")!)
+    const landscapeCacheKey = cacheKey("cyc", "ceo_review", 1, pickedKey(unit, "landscape")!)
+    assert.notEqual(portraitCacheKey, landscapeCacheKey,
+      `portrait ${portraitKey} and ${landscapeKey} share a render-cache key`)
+  }
+}
+const landscapeCacheKeys = LANDSCAPE_TEMPLATE_KEYS.map((key) => cacheKey("cyc", "ceo_review", 1, key))
+assert.equal(new Set(landscapeCacheKeys).size, LANDSCAPE_TEMPLATE_KEYS.length)
 
 console.log("orientation: all checks passed")

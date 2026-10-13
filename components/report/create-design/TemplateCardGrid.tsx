@@ -17,7 +17,7 @@ import { Check, Star, TriangleAlert } from "lucide-react"
 
 import type { DesignOption } from "@/lib/api/createDesign"
 import { losesContent, lossText, placedText } from "@/lib/createDesignLoss"
-import { LANDSCAPE_TEMPLATE_KEY } from "@/lib/orientation"
+import { isLandscapeTemplateKey } from "@/lib/orientation"
 
 import { TEMPLATE_NAMES, TemplateMini } from "./TemplateMini"
 
@@ -25,12 +25,14 @@ const TILE = "rounded-[10px]"
 const THUMB = "rounded-[4px]"
 
 /**
- * What a card says when it has no counts to report. The landscape card never
- * has any — the art director never looked at it — so without this it would
- * sit there with an empty caption.
+ * What a card says when it has no counts to report. The landscape cards never
+ * have any — the art director never looked at them — so without this they
+ * would sit there with an empty caption.
  */
 const CARD_NOTES: Record<string, string> = {
-  [LANDSCAPE_TEMPLATE_KEY]: "Figures in a strip, a picture band, then three columns of text.",
+  landscape_columns: "Figures in a strip, a picture band, then three columns of text.",
+  landscape_rail: "Two columns of text beside a tinted rail: the picture, the key figures, a quote.",
+  landscape_hero: "A brand band with one big figure and a row of small ones, then two columns of text beside the picture.",
 }
 
 /**
@@ -72,9 +74,9 @@ export function TemplateCardGrid({
         const active = option.key === previewKey
         const chosen = option.key === chosenKey
         const loses = losesContent(option.dropped)
-        // The sideways thumbnail takes the full row, or it would be drawn at
+        // A sideways thumbnail takes the full row, or it would be drawn at
         // half the height of its portrait neighbours and read as a sliver.
-        const wide = option.key === LANDSCAPE_TEMPLATE_KEY
+        const wide = isLandscapeTemplateKey(option.key)
         return (
           <button
             key={option.key}

@@ -64,8 +64,8 @@ function NoLandscapePickCard() {
       >
         <p className="text-sm font-medium text-slate-700">No landscape template yet</p>
         <p className="max-w-md text-[12px] leading-relaxed text-slate-500">
-          This section prints in the plain two-column landscape layout. Pick the
-          landscape template on the left, or use &lsquo;Use for all sections&rsquo;.
+          This section prints in the plain two-column landscape layout. Pick a
+          landscape template on the left, or use it for all sections from there.
         </p>
       </div>
     </div>

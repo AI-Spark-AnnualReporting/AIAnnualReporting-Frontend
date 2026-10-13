@@ -14,9 +14,10 @@
  * a time, on demand: each is a real Chromium render, and firing five at once
  * to fill a grid nobody has looked at yet would cost five browsers per visit.
  *
- * In landscape there is nothing to pick: the report always prints the one
- * landscape contents design, so the panel shows that alone, marked in use,
- * with no save button.
+ * In landscape it offers the three landscape contents pages instead. The pick
+ * is saved as the report's LANDSCAPE contents page, beside the portrait one,
+ * so switching orientation never loses either. Until somebody picks, the
+ * default (Brand panel) is the one in use.
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -25,31 +26,36 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
-import { LANDSCAPE_DESIGN_KEY, type Orientation } from "@/lib/orientation"
+import {
+  LANDSCAPE_DESIGN_KEY, LANDSCAPE_TOC_NAMES, type Orientation,
+} from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 import type { TocDesign } from "@/types/report-design"
 
-/** Display names. The engine sends keys and prose; the noun is ours. */
+/**
+ * Display names. The engine sends keys and prose; the noun is ours. The
+ * landscape keys never collide with the portrait ones, so one map serves both.
+ */
 const NAMES: Record<string, string> = {
   classic: "Classic",
   editorial: "Editorial",
   modular: "Modular",
   minimal: "Minimal",
   brand_band: "Brand Band",
-  [LANDSCAPE_DESIGN_KEY]: "Landscape",
+  ...LANDSCAPE_TOC_NAMES,
 }
 
 const title = (key: string) => NAMES[key] ?? key
 
 /**
- * The designs the list offers: the portrait menu, or just the landscape one.
- * Empty in landscape when the engine is too old to send one.
+ * The designs the list offers: the portrait menu, or the landscape ones.
+ * Empty in landscape when the engine is too old to send any.
  */
 function designsToList(
-  specs: { templates: TocDesign[]; landscape?: TocDesign } | undefined,
+  specs: { templates: TocDesign[]; landscape_templates?: TocDesign[] } | undefined,
   orientation: Orientation,
 ): TocDesign[] {
-  if (orientation === "landscape") return specs?.landscape ? [specs.landscape] : []
+  if (orientation === "landscape") return specs?.landscape_templates ?? []
   return specs?.templates ?? []
 }
 
@@ -62,11 +68,17 @@ export function TocDesignPanel({
   orientation = "portrait",
 }: {
   cycleId: string
+  /**
+   * The contents design in use in the orientation on screen. Portrait: the
+   * saved pick, or null when none. Landscape: the saved landscape pick, else
+   * the default.
+   */
   chosen: string | null
   locked: boolean
+  /** Save a pick for the orientation on screen. */
   onChoose: (key: string) => void
   saving: boolean
-  /** Portrait offers the five designs; landscape shows its one design, in use. */
+  /** Portrait offers the five designs; landscape offers the three landscape ones. */
   orientation?: Orientation
 }) {
   const [active, setActive] = useState<string | null>(null)
@@ -78,19 +90,24 @@ export function TocDesignPanel({
   })
   const landscape = orientation === "landscape"
   const designs = designsToList(catalogue.data, orientation)
-  const fallbackKey = catalogue.data?.default ?? "classic"
+  const fallbackKey = landscape
+    ? LANDSCAPE_DESIGN_KEY
+    : catalogue.data?.default ?? "classic"
   // An engine deployed before landscape existed sends no landscape design.
   // Asking it to draw "landscape" anyway would fail, or worse quietly draw a
   // portrait default, so the panel says so instead.
-  const landscapeMissing = landscape && catalogue.isSuccess && !catalogue.data.landscape
+  const landscapeMissing = landscape && catalogue.isSuccess && designs.length === 0
 
-  // What the right pane shows: the design being inspected, else the one saved,
-  // else the engine's default. Derived during render — this screen's lint
-  // rules reject setState inside an effect, and a "which preview is loading"
-  // flag kept by hand is exactly that. Landscape always shows its one design.
-  const showing = landscape ? LANDSCAPE_DESIGN_KEY : active ?? chosen ?? fallbackKey
-  // In landscape the one design is always the one in use.
-  const inUse = landscape ? LANDSCAPE_DESIGN_KEY : chosen
+  // What the right pane shows: the design being inspected, else the one in
+  // use, else the default. Derived during render — this screen's lint rules
+  // reject setState inside an effect, and a "which preview is loading" flag
+  // kept by hand is exactly that. The parent remounts this panel when the
+  // orientation flips, so a design inspected in one never shows in the other.
+  const showing = active ?? chosen ?? fallbackKey
+  const inUse = chosen
+  // Landscape draws only a design the engine listed, so an engine from before
+  // there was a choice is never asked for one it does not have.
+  const canDraw = !landscape || designs.some((design) => design.key === showing)
 
   // One query per design, cached for the visit. React Query handles the
   // in-flight flag, the error and the memo that makes re-picking a design
@@ -100,7 +117,7 @@ export function TocDesignPanel({
     queryFn: () => annualDesignApi.previewToc(cycleId, showing),
     // Landscape waits for the list, so an old engine is never asked to draw a
     // design it does not have.
-    enabled: Boolean(showing) && (!landscape || Boolean(catalogue.data?.landscape)),
+    enabled: Boolean(showing) && canDraw,
     staleTime: Infinity,
     retry: false,
   })
@@ -127,9 +144,8 @@ export function TocDesignPanel({
         <p className="mb-1 text-xs font-semibold text-slate-900">Contents page</p>
         {landscape ? (
           <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-            A landscape report always prints this contents page, so there is
-            nothing to choose here. Switch to Portrait to pick from the other
-            designs.
+            The table of contents of the landscape report. Every design prints
+            every entry. Your portrait contents page is kept as it is.
           </p>
         ) : (
           <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
@@ -140,7 +156,7 @@ export function TocDesignPanel({
         {landscapeMissing && (
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
             The export engine on this server does not have the landscape
-            contents page yet, so it cannot be previewed.
+            contents pages yet, so they cannot be previewed.
           </p>
         )}
 
@@ -195,24 +211,21 @@ export function TocDesignPanel({
               </p>
             )}
           </div>
-          {/* No save in landscape: there is only one design to use. */}
-          {!landscape && (
-            <Button
-              size="sm"
-              variant={chosen === showing ? "outline" : "brand"}
-              className="h-8 shrink-0"
-              disabled={locked || saving || chosen === showing}
-              title={
-                locked
-                  ? "This report has been approved and locked."
-                  : undefined
-              }
-              onClick={() => onChoose(showing)}
-            >
-              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {chosen === showing ? "In use" : "Use this design"}
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant={chosen === showing ? "outline" : "brand"}
+            className="h-8 shrink-0"
+            disabled={locked || saving || chosen === showing || !canDraw}
+            title={
+              locked
+                ? "This report has been approved and locked."
+                : undefined
+            }
+            onClick={() => onChoose(showing)}
+          >
+            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {chosen === showing ? "In use" : "Use this design"}
+          </Button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-100 p-5">

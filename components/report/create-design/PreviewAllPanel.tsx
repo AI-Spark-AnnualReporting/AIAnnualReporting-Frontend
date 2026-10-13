@@ -36,9 +36,7 @@ import type { CycleDesign } from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
-import {
-  LANDSCAPE_DESIGN_KEY, pageSize, pickedKey, type Orientation,
-} from "@/lib/orientation"
+import { pageSize, pickedKey, type Orientation } from "@/lib/orientation"
 
 import { clampZoom, PreviewZoomBar, stepZoom } from "./PreviewZoomBar"
 
@@ -104,17 +102,20 @@ export function PreviewAllPanel({
 }: {
   cycleId: string
   design: CycleDesign | undefined
+  /**
+   * The cover in use in the orientation shown. In landscape the parent passes
+   * the saved landscape cover (the default when none), never the portrait one.
+   */
   coverKey: string | null
+  /** The contents design in use in the orientation shown. Same rule as coverKey. */
   tocKey: string | null
   onExit: () => void
-  /** Which set of pages to show; landscape uses the one landscape cover and contents. */
+  /** Which set of pages to show. */
   orientation?: Orientation
 }) {
-  // Landscape has exactly one cover and one contents design and always prints
-  // them, so there is no "not chosen" — the saved portrait picks are ignored.
   const landscape = orientation === "landscape"
-  const coverDesign = landscape ? LANDSCAPE_DESIGN_KEY : coverKey
-  const tocDesign = landscape ? LANDSCAPE_DESIGN_KEY : tocKey
+  const coverDesign = coverKey
+  const tocDesign = tocKey
   const paper = pageSize(orientation)
   const ratio = paper.height / paper.width
   const qc = useQueryClient()
