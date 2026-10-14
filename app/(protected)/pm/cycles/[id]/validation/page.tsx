@@ -16,6 +16,7 @@ import { ValidationPanel } from "@/components/report/ValidationPanel"
 import {
   readError,
   useFinalReport,
+  usePMCycleSections,
   useReportApproval,
   useValidateReport,
   type MutationError,
@@ -83,6 +84,16 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // Report page states. Overwriting it would leave the file and the screen
   // disagreeing about a document nobody can change.
   const locked = !!approval?.locked
+  // Sections with an AI refine box. Extract and manual sections have none, so
+  // their fixes open by hand. Undefined until loaded, which offers the AI fix.
+  const sectionsQuery = usePMCycleSections(cycleId)
+  const aiSections = sectionsQuery.data
+    ? new Set(
+        sectionsQuery.data
+          .filter((s) => s.mode === "generate" || s.mode === "analyze")
+          .map((s) => s.section_code),
+      )
+    : undefined
 
   // Fire once. The ref, not isPending: pending is still false on the render
   // that schedules the call, and React runs effects twice in dev — without it
@@ -218,7 +229,12 @@ function ValidationView({ cycleId }: { cycleId: string }) {
       )}
 
       {validation ? (
-        <ValidationPanel validation={validation} cycleId={cycleId} locked={locked} />
+        <ValidationPanel
+          validation={validation}
+          cycleId={cycleId}
+          locked={locked}
+          aiSections={aiSections}
+        />
       ) : (
         <EmptyState
           icon={ShieldCheck}

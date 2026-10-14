@@ -89,8 +89,10 @@ export interface ReportValidation {
     measure: string
     detail: string
     sections?: { section_code: string; title: string; value: string }[]
+    // Sent back to mark it "Not a problem". Absent on older validations.
+    key?: string
   }[]
-  redundancy: { sections: string[]; detail: string }[]
+  redundancy: { sections: string[]; detail: string; key?: string }[]
   brief_gaps: { ask: string; detail: string }[]
   // How many explicit asks the brief made in all, so the gaps can be read as a
   // share. Null when the judgement gave no usable count, and on any validation
@@ -165,6 +167,21 @@ export interface ReportValidation {
   // The section the PM sent each uncovered brief ask or concept message to,
   // keyed by its text. Cleared by the next validation run.
   chosen_sections?: Record<string, string>
+  // Findings marked "Not a problem", by key.
+  dismissed?: Record<string, DismissedFinding>
+}
+
+// A finding the PM marked "Not a problem", kept out of every later validation
+// until one of its sections is edited. `finding` is the finding as it stood.
+export interface DismissedFinding {
+  kind: "conflicts" | "redundancy"
+  finding: {
+    measure?: string
+    detail?: string
+    sections?: (string | { section_code: string; title?: string })[]
+  }
+  by: string
+  at: string
 }
 
 // One section the AI suggests for a brief ask or concept message nothing covers.
@@ -1302,6 +1319,12 @@ export const pmApi = {
       { timeout: 60000 },
     )
     return data.suggestions
+  },
+
+  // Mark a "figures that disagree" or repeated-point finding "Not a problem"
+  // (dismissed=true), or undo it (false).
+  dismissFinding: async (cycleId: string, key: string, dismissed: boolean): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/dismiss`, { key, dismissed })
   },
 
   chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {

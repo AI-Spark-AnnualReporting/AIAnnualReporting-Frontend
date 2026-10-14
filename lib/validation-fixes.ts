@@ -18,7 +18,9 @@ export const VALIDATION_SUMMARY_CODE = "executive_summary"
 
 export type FixAction =
   | { kind: "ai"; sectionCode: string; label: string; instruction: string }
-  | { kind: "edit"; sectionCode: string; label: string }
+  // `instruction` on an edit is a to-do for the PM: the section has no AI
+  // refine (extract or manual), so it is shown on the Build page, not run.
+  | { kind: "edit"; sectionCode: string; label: string; instruction?: string }
   | { kind: "choose"; text: string; instruction: string; manual?: boolean }
 
 /** What the "Choose section & fix" pop-up carries to the Build page. */
@@ -174,8 +176,20 @@ export function findingsBySection(validation: ReportValidation): Record<string, 
     if (!toneExempt.has(v.section_code)) add(v.section_code, `Word the house style rules out: "${v.phrase}"`)
   }
   for (const c of validation.conflicts) {
-    for (const s of c.sections ?? []) {
-      add(s.section_code, `Figure that disagrees with another section: ${c.measure} (${s.value} here)`)
+    const readings = c.sections ?? []
+    const codes = new Set(readings.map((s) => s.section_code))
+    // One line per section, naming where the other number is. A section can
+    // also disagree with itself: both numbers are then "here".
+    for (const code of codes) {
+      const here = readings.filter((s) => s.section_code === code).map((s) => s.value)
+      const elsewhere = readings
+        .filter((s) => s.section_code !== code)
+        .map((s) => `${s.value} in ${s.title || validation.sections?.[s.section_code]?.title || s.section_code}`)
+      if (elsewhere.length === 0) {
+        add(code, `Figure that disagrees within this section: ${c.measure}, ${here.join(" vs ")}`)
+      } else {
+        add(code, `Figure that disagrees: ${c.measure}, ${here.join(" and ")} here vs ${elsewhere.join(", ")}`)
+      }
     }
   }
   for (const r of validation.redundancy) {

@@ -2,12 +2,25 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Check, ChevronDown, FileQuestion, Pencil, Sparkles } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import {
+  AlertTriangle,
+  Ban,
+  Check,
+  ChevronDown,
+  FileQuestion,
+  Loader2,
+  Pencil,
+  Sparkles,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ChooseSectionDialog } from "@/components/report/ChooseSectionDialog"
-import type { ReportValidation } from "@/lib/api/pm"
-import { cn } from "@/lib/utils"
+import { readError, type MutationError } from "@/hooks/useReportBuilder"
+import { pmApi, type ReportValidation } from "@/lib/api/pm"
+import { QUERY_KEYS } from "@/lib/constants"
+import { cn, formatDateTime } from "@/lib/utils"
 import {
   VALIDATION_SUMMARY_CODE,
   bannedWordsInstruction,
@@ -33,6 +46,7 @@ export function ValidationPanel({
   validation,
   cycleId,
   locked = false,
+  aiSections,
 }: {
   validation: ReportValidation
   /** Given on a cycle's own report: turns on the Fix buttons. The external
@@ -40,12 +54,37 @@ export function ValidationPanel({
   cycleId?: string
   /** Approved report: nothing can be edited, so no Fix buttons. */
   locked?: boolean
+  /** Sections the AI can refine (generate, analyze). Extract and manual
+   *  sections have no refine box, so their fixes open by hand with the
+   *  instruction as a to-do. Unknown (not loaded) = offer the AI fix. */
+  aiSections?: Set<string>
 }) {
   const canFix = !!cycleId && !locked
   // Sections the PM changed since this check: their findings are greyed until
   // the next validation says whether the change fixed them.
   const edited = new Set(validation.edited_since_check ?? [])
   const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
+  const queryClient = useQueryClient()
+  // The finding being marked or unmarked, so its button can show a spinner.
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+
+  // "Not a problem" and its Undo. The server takes the finding out of (or puts
+  // it back into) the stored result; refetching then redraws the cards and
+  // their counts.
+  const setDismissed = async (keys: string[], dismissed: boolean) => {
+    if (!cycleId || keys.length === 0) return
+    setBusyKey(keys[0])
+    try {
+      for (const key of keys) {
+        await pmApi.dismissFinding(cycleId, key, dismissed)
+      }
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+    } catch (err) {
+      toast.error(readError(err as MutationError, "Couldn't save that change"))
+    } finally {
+      setBusyKey(null)
+    }
+  }
   const {
     figures_total: total,
     figures_traced: traced,
@@ -87,6 +126,26 @@ export function ValidationPanel({
   const titleOf = (code: string) =>
     validation.sections?.[code]?.title || prettifyCode(code)
 
+  // The findings of one kind the PM marked "Not a problem", for the card's
+  // list at the bottom (where Undo lives).
+  const dismissedOf = (kind: "conflicts" | "redundancy"): DismissedRow[] =>
+    Object.entries(validation.dismissed ?? {})
+      .filter(([, entry]) => entry.kind === kind)
+      .map(([key, entry]) => {
+        const sections = (entry.finding.sections ?? []).map((s) =>
+          typeof s === "string" ? titleOf(s) : s.title || titleOf(s.section_code),
+        )
+        return {
+          key,
+          label: kind === "conflicts" ? entry.finding.measure || "Figure" : sections.join(", "),
+          detail: entry.finding.detail ?? "",
+          by: entry.by,
+          at: entry.at,
+        }
+      })
+  const notAProblem = (count: number) =>
+    count > 0 ? ` ${count} marked not a problem.` : ""
+
   const repeatedSections = new Set(
     validation.redundancy.flatMap((r) => r.sections),
   ).size
@@ -103,10 +162,13 @@ export function ValidationPanel({
   // `Group` shows instead).
   const editFix = (code: string, label = "Fix"): FixAction[] =>
     canFix && code !== VALIDATION_SUMMARY_CODE ? [{ kind: "edit", sectionCode: code, label }] : []
-  const aiFix = (code: string, instruction: string): FixAction[] =>
-    canFix && code !== VALIDATION_SUMMARY_CODE
-      ? [{ kind: "ai", sectionCode: code, label: "Fix with AI", instruction }]
-      : []
+  const aiFix = (code: string, instruction: string): FixAction[] => {
+    if (!canFix || code === VALIDATION_SUMMARY_CODE) return []
+    if (aiSections && !aiSections.has(code)) {
+      return [{ kind: "edit", sectionCode: code, label: "Fix", instruction }]
+    }
+    return [{ kind: "ai", sectionCode: code, label: "Fix with AI", instruction }]
+  }
   const chooseFix = (text: string, instruction: string, manual = false): FixAction[] =>
     canFix ? [{ kind: "choose", text, instruction, manual }] : []
   // An uncovered ask or message belongs to no section until the PM picks one
@@ -176,11 +238,13 @@ export function ValidationPanel({
       reason: measures
         ? `${validation.conflicts.length} of the ${measures} measures the check identified ${validation.conflicts.length === 1 ? "carries" : "carry"} more than one value.`
         : `${validation.conflicts.length} measure${validation.conflicts.length === 1 ? " carries" : "s carry"} more than one value across the report.`,
+      dismissed: dismissedOf("conflicts"),
       items: validation.conflicts.map((c) => ({
         where: c.measure,
         lead: [],
         detail: c.detail,
         codes: (c.sections ?? []).map((s) => s.section_code),
+        dismissKey: c.key,
         // One button per section involved: the PM decides which number is
         // right and fixes the other.
         fixes: (c.sections ?? []).flatMap((s) =>
@@ -220,6 +284,7 @@ export function ValidationPanel({
       reason: checked
         ? `${repeatedSections} of the ${checked} sections checked ${repeatedSections === 1 ? "repeats" : "repeat"} a point another section already makes.`
         : `${validation.redundancy.length} point${validation.redundancy.length === 1 ? " appears" : "s appear"} in more than one section.`,
+      dismissed: dismissedOf("redundancy"),
       items: validation.redundancy.map((r) => {
         // The later section gives the repeated point up; the first one to make
         // it keeps it.
@@ -231,6 +296,7 @@ export function ValidationPanel({
           detail: r.detail,
           codes: [target],
           fixes: aiFix(target, redundancyInstruction(others, r.detail)),
+          dismissKey: r.key,
         }
       }),
     },
@@ -288,8 +354,11 @@ export function ValidationPanel({
     .map((g) => ({
       ...g,
       items: g.items.map((item) => ({ ...item, detail: item.detail ?? "" })),
+      reason: g.reason && g.dismissed ? g.reason + notAProblem(g.dismissed.length) : g.reason,
     }))
-    .filter((g) => g.items.length > 0)
+    // A card whose findings were all marked "Not a problem" still shows, so
+    // they can be undone.
+    .filter((g) => g.items.length > 0 || (g.dismissed?.length ?? 0) > 0)
 
   const problems = groups.reduce((n, g) => n + (g.count ?? g.items.length), 0)
 
@@ -315,6 +384,7 @@ export function ValidationPanel({
         validation={validation}
         cycleId={canFix ? cycleId : undefined}
         edited={edited}
+        aiSections={aiSections}
       />
 
       <BriefCoverage validation={validation} />
@@ -327,6 +397,8 @@ export function ValidationPanel({
           canFix={canFix}
           edited={edited}
           onChoose={setChoosing}
+          busyKey={busyKey}
+          onDismiss={setDismissed}
         />
       ))}
 
@@ -483,11 +555,13 @@ function Coverage({
   validation,
   cycleId,
   edited,
+  aiSections,
 }: {
   validation: ReportValidation
   /** Set only when fixing is allowed: adds the "could carry it" fix line. */
   cycleId?: string
   edited: Set<string>
+  aiSections?: Set<string>
 }) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
@@ -544,6 +618,7 @@ function Coverage({
       <NotCarrying
         cycleId={cycleId}
         edited={edited}
+        aiSections={aiSections}
         rows={messages.map((m) => ({ message: m.title, sections: notCarrying(m.title) }))}
       />
     ) : null
@@ -562,6 +637,7 @@ function Coverage({
       <NotCarrying
         cycleId={cycleId}
         edited={edited}
+        aiSections={aiSections}
         rows={coverage.secondary.map((m) => ({
           message: m.title,
           sections: notCarrying(m.title).filter((s) => missingAll.has(s.code)),
@@ -1295,6 +1371,17 @@ interface FindingItem {
   codes?: string[]
   /** What the PM can do about it. Empty or absent = no button. */
   fixes?: FixAction[]
+  /** Set on findings the AI judged that the PM may mark "Not a problem". */
+  dismissKey?: string
+}
+
+/** A finding marked "Not a problem", as its card lists it. */
+interface DismissedRow {
+  key: string
+  label: string
+  detail: string
+  by: string
+  at: string
 }
 
 /* One row per sentence, carrying every untraced figure in it.
@@ -1335,6 +1422,8 @@ interface FindingGroup {
   /** How the count and the percentage were arrived at, in one sentence. A
    *  number the reader cannot reconstruct is a number they have to trust. */
   reason?: string
+  /** Findings of this kind marked "Not a problem". */
+  dismissed?: DismissedRow[]
 }
 
 /* Collapsed by default past a handful. One group ran to 364 rows on a real
@@ -1346,6 +1435,8 @@ function Group({
   canFix,
   edited,
   onChoose,
+  busyKey,
+  onDismiss,
 }: {
   group: FindingGroup
   cycleId?: string
@@ -1353,6 +1444,9 @@ function Group({
   /** Sections edited since the check. */
   edited: Set<string>
   onChoose: (target: ChooseTarget) => void
+  /** The finding whose "Not a problem" or Undo is saving. */
+  busyKey: string | null
+  onDismiss: (keys: string[], dismissed: boolean) => void
 }) {
   const total = group.count ?? group.items.length
   const blocks = byWhere(group.items)
@@ -1427,6 +1521,9 @@ function Group({
           // Greyed only when every section behind the block changed: a
           // contradiction across two sections is not fixed by editing one.
           const allEdited = codes.length > 0 && codes.every((code) => edited.has(code))
+          const dismissKeys = [
+            ...new Set(block.items.flatMap((item) => (item.dismissKey ? [item.dismissKey] : []))),
+          ]
           return (
           <li key={block.where} className={cn("px-5 py-3", allEdited && "bg-emerald-50/50")}>
             <div className="flex flex-wrap items-center gap-2">
@@ -1521,19 +1618,68 @@ function Group({
                 long section names pushed some buttons onto their own lines and
                 left others on the right. Shown even when the block is closed. */}
             {!allEdited && canFix && (
-              <div className="mt-2 pl-5">
+              <div className="mt-2 flex flex-wrap items-center gap-2 pl-5">
                 <FixButtons
                   fixes={uniqueFixes(block.items)}
                   cycleId={cycleId!}
                   onChoose={onChoose}
                   summary={codes.includes(VALIDATION_SUMMARY_CODE)}
                 />
+                {/* The AI's opinion can be wrong. Grey, after the fixes, so it
+                    never competes with them. */}
+                {dismissKeys.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-slate-600"
+                    disabled={busyKey !== null}
+                    onClick={() => onDismiss(dismissKeys, true)}
+                  >
+                    {busyKey === dismissKeys[0] ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Ban className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Not a problem
+                  </Button>
+                )}
               </div>
             )}
           </li>
           )
         })}
       </ul>
+
+      {(group.dismissed?.length ?? 0) > 0 && (
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            Marked not a problem
+          </p>
+          <ul className="mt-2 space-y-2">
+            {group.dismissed!.map((row) => (
+              <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+                <span className="font-semibold text-slate-500">{row.label}</span>
+                {row.detail && (
+                  <span className="text-slate-400 line-through">{row.detail}</span>
+                )}
+                <span className="text-slate-400">
+                  &middot; {row.by} &middot; {formatDateTime(row.at)}
+                </span>
+                {canFix && (
+                  <button
+                    type="button"
+                    className="font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
+                    disabled={busyKey !== null}
+                    onClick={() => onDismiss([row.key], false)}
+                  >
+                    {busyKey === row.key ? "Undoing…" : "Undo"}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
@@ -1545,10 +1691,13 @@ function Group({
 function NotCarrying({
   cycleId,
   edited,
+  aiSections,
   rows,
 }: {
   cycleId: string
   edited: Set<string>
+  /** As on ValidationPanel: a section outside it is fixed by hand. */
+  aiSections?: Set<string>
   rows: { message: string; sections: { code: string; title: string }[] }[]
 }) {
   const shown = rows.filter((row) => row.sections.length > 0)
@@ -1587,6 +1736,13 @@ function NotCarrying({
                       <Check className="h-3 w-3" strokeWidth={3} />
                       Fixed
                     </span>
+                  ) : aiSections && !aiSections.has(s.code) ? (
+                    <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
+                      <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message), true)}>
+                        <Pencil className="mr-1 h-3 w-3" />
+                        Fix
+                      </Link>
+                    </Button>
                   ) : (
                     <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
                       <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
@@ -1673,7 +1829,7 @@ function FixButtons({
         return (
           // Blue like the AI fix; the pencil (not the sparkle) says the PM does it.
           <Button key={`edit:${fix.sectionCode}`} size="sm" className="h-7" asChild>
-            <Link href={buildFixHref(cycleId, fix.sectionCode)} title={fix.label}>
+            <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction, true)} title={fix.label}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
               <span className="max-w-[16rem] truncate">{fix.label}</span>
             </Link>

@@ -62,6 +62,25 @@ assert.equal(found.executive_summary.length, 1)
 assert.equal(found.ceo.length, 1)
 assert.equal(found.strategy.length, 1)
 
+// A disagreeing figure names where the other number is.
+assert.equal(found.people[0], "Figure that disagrees: employees, 2380 here vs 2215 in Executive Summary")
+// A section that disagrees with itself gets one line saying so.
+const selfConflict = findingsBySection({
+  ...validation,
+  conflicts: [{
+    measure: "saudi value share",
+    detail: "",
+    sections: [
+      { section_code: "ops", title: "Operations", value: "50" },
+      { section_code: "ops", title: "Operations", value: "56" },
+    ],
+  }],
+} as ReportValidation)
+assert.equal(
+  selfConflict.ops.filter((line) => line.includes("saudi")).join("|"),
+  "Figure that disagrees within this section: saudi value share, 50 vs 56",
+)
+
 // A repetition names the other section it is shared with.
 assert.ok(found.ceo[0].includes("also made in strategy"))
 
