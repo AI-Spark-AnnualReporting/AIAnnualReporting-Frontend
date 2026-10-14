@@ -266,6 +266,19 @@ export async function renderSectionPages(
      * bytes of 2. Clamped to 1..4 server-side.
      */
     scale?: number
+    /**
+     * Draw a landscape template on the 16:9 presentation sheet. Sent by the
+     * screen so the sheet drawn always matches the cache key it is filed
+     * under, even mid-switch; absent, the backend uses the saved setting.
+     */
+    presentation?: boolean
+    /**
+     * Only with template_key "custom": which section's stored custom template
+     * to draw, and which of its two (portrait or landscape). The layout
+     * itself is read from the database server-side, never sent from here.
+     */
+    section_code?: string
+    orientation?: "portrait" | "landscape"
   },
 ): Promise<RenderedPages> {
   const { data } = await apiClient.post<RenderedPages>(
@@ -301,10 +314,12 @@ export interface RenderedBatchItem {
 export async function renderSectionPagesBatch(
   cycleId: string,
   items: Array<Record<string, unknown>>,
+  presentation?: boolean,
 ): Promise<{ items: RenderedBatchItem[] }> {
   const { data } = await apiClient.post(
     `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-pages`,
-    { items },
+    // The sheet for the whole batch, for the reason given on renderSectionPages.
+    presentation === undefined ? { items } : { items, presentation },
     // A batch is many renders; it needs many renders' worth of time.
     { timeout: 600000 },
   )

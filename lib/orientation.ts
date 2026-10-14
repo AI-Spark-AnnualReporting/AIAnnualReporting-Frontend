@@ -16,6 +16,28 @@ import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
 export type Orientation = "portrait" | "landscape"
 
 /**
+ * The sheet a LANDSCAPE report prints on: A4 landscape, or the 16:9
+ * presentation sheet (PowerPoint's 13.33 x 7.5 in). Both use the same
+ * landscape designs and the same landscape picks — only the paper differs.
+ */
+export type LandscapeFormat = "a4" | "presentation"
+
+/**
+ * The three choices on the Create Design switch: portrait A4, landscape A4,
+ * or landscape on the presentation sheet. Stored as two fields
+ * (`orientation` + `landscape_format`) so every landscape pick serves both
+ * landscape sheets — see selectionForPageFormat.
+ */
+export type PageFormat = "portrait" | "landscape" | "presentation"
+
+/** What the switch's three buttons say. */
+export const PAGE_FORMAT_LABELS: Record<PageFormat, string> = {
+  portrait: "Portrait (A4)",
+  landscape: "Landscape (A4)",
+  presentation: "Presentation (16:9)",
+}
+
+/**
  * The landscape section-page templates, default first. Mirrors the engine's
  * page_templates.LANDSCAPE_KEYS and the backend's
  * create_design_service.LANDSCAPE_TEMPLATE_KEYS.
@@ -94,6 +116,65 @@ export const LANDSCAPE_OPENER_NAMES: Record<string, string> = {
   landscape_numeral: "Giant numeral",
 }
 
+/**
+ * The sheet a landscape report prints on, from its saved design record.
+ *
+ * Anything other than "presentation" reads as "a4" — including a missing key,
+ * which is what every report saved before the format existed carries.
+ *
+ * @returns "presentation" only when the record says so, else "a4"
+ */
+export function landscapeFormatOf(
+  design?: { landscape_format?: string | null } | null,
+): LandscapeFormat {
+  if (design?.landscape_format === "presentation") return "presentation"
+  return "a4"
+}
+
+/**
+ * Which of the switch's three buttons a saved design record is.
+ *
+ * @returns "portrait", "landscape" (A4) or "presentation" (16:9)
+ */
+export function pageFormatOf(
+  design?: { orientation?: string | null; landscape_format?: string | null } | null,
+): PageFormat {
+  if (orientationOf(design) === "portrait") return "portrait"
+  if (landscapeFormatOf(design) === "presentation") return "presentation"
+  return "landscape"
+}
+
+/**
+ * The fields to save for one button of the switch.
+ *
+ * Portrait leaves the landscape sheet alone, so going back to landscape lands
+ * on the sheet the report was on before.
+ *
+ * @returns the design fields the backend's PATCH takes
+ */
+export function selectionForPageFormat(
+  next: PageFormat,
+): { orientation: Orientation; landscape_format?: LandscapeFormat } {
+  if (next === "portrait") return { orientation: "portrait" }
+  if (next === "presentation") return { orientation: "landscape", landscape_format: "presentation" }
+  return { orientation: "landscape", landscape_format: "a4" }
+}
+
+/**
+ * A render cache key or a preview query key for a design drawn on this sheet.
+ *
+ * Both landscape sheets draw the same template keys, so without this a 16:9
+ * screen would be handed the A4 picture of the same page. A4 keys come back
+ * unchanged, so nothing already cached moves; a presentation key gets a
+ * suffix after the template, which keeps every prefix the cache revokes by.
+ *
+ * @returns `key`, or `key@16:9` on the presentation sheet
+ */
+export function keyForFormat(key: string, format: LandscapeFormat): string {
+  if (format === "presentation") return `${key}@16:9`
+  return key
+}
+
 /** The two pick fields of a design page — all these helpers read from a unit. */
 export type UnitPicks = Pick<DesignUnit, "template_key" | "landscape_template_key">
 
@@ -158,12 +239,24 @@ export function countPicked(
 const A4_WIDTH_PT = 595.28
 const A4_HEIGHT_PT = 841.89
 
+// The presentation sheet, which the engine prints at exactly this size.
+const PRESENTATION_WIDTH_PT = 960
+const PRESENTATION_HEIGHT_PT = 540
+
 /**
  * The size of one printed page, for drawing previews the right shape.
  *
- * @returns width and height in points; landscape is portrait turned sideways
+ * @param format  the landscape sheet; ignored for portrait
+ * @returns width and height in points; landscape is portrait turned sideways,
+ *          or the 16:9 sheet when the format is "presentation"
  */
-export function pageSize(orientation: Orientation): { width: number; height: number } {
+export function pageSize(
+  orientation: Orientation,
+  format: LandscapeFormat = "a4",
+): { width: number; height: number } {
+  if (orientation === "landscape" && format === "presentation") {
+    return { width: PRESENTATION_WIDTH_PT, height: PRESENTATION_HEIGHT_PT }
+  }
   if (orientation === "landscape") {
     return { width: A4_HEIGHT_PT, height: A4_WIDTH_PT }
   }

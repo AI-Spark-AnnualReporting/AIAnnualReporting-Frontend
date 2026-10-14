@@ -30,7 +30,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
-  LANDSCAPE_COVER_NAMES, LANDSCAPE_DESIGN_KEY, LANDSCAPE_OPENER_NAMES, type Orientation,
+  keyForFormat, LANDSCAPE_COVER_NAMES, LANDSCAPE_DESIGN_KEY, LANDSCAPE_OPENER_NAMES,
+  type LandscapeFormat, type Orientation,
 } from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 import type { CoverDesign } from "@/types/report-design"
@@ -82,6 +83,7 @@ export function CoverDesignPanel({
   onChoose,
   saving,
   orientation = "portrait",
+  format = "a4",
 }: {
   cycleId: string
   /**
@@ -95,6 +97,8 @@ export function CoverDesignPanel({
   saving: boolean
   /** Portrait offers the four covers; landscape offers the three landscape ones. */
   orientation?: Orientation
+  /** The landscape sheet the preview is drawn on: A4 or 16:9. */
+  format?: LandscapeFormat
 }) {
   const [active, setActive] = useState<string | null>(null)
 
@@ -128,7 +132,9 @@ export function CoverDesignPanel({
   // in-flight flag, the error and the memo that makes re-picking a design
   // already looked at free — which is the whole point of comparing five.
   const previewQuery = useQuery({
-    queryKey: ["pm", "cycle", cycleId, "cover-preview", showing],
+    // keyForFormat, so the 16:9 sheet never shows the A4 picture of the same
+    // design. The same key PreviewAllPanel reads, so the two share one fetch.
+    queryKey: ["pm", "cycle", cycleId, "cover-preview", keyForFormat(showing, format)],
     queryFn: () => annualDesignApi.previewCover(cycleId, showing),
     // Landscape waits for the list, so an old engine is never asked to draw a
     // design it does not have.

@@ -10,7 +10,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { createDesignApi, type CycleDesign, type DesignEnvelope } from "@/lib/api/createDesign"
+import {
+  createDesignApi, type CustomPaper, type CycleDesign, type DesignEnvelope,
+} from "@/lib/api/createDesign"
 import { QUERY_KEYS } from "@/lib/constants"
 import type { Orientation } from "@/lib/orientation"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
@@ -103,6 +105,32 @@ export function useApplyLandscapeToAll(cycleId: string) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not apply that template to every section")),
+  })
+}
+
+/**
+ * Check a section's saved custom template against its current content (one
+ * render, no AI). A pass clears the "may no longer fit" note; a fail leaves
+ * the template where it is and says what the check found.
+ */
+export function useRecheckCustomTemplate(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sectionCode, paper }: { sectionCode: string; paper: CustomPaper }) =>
+      createDesignApi.recheckCustomTemplate(cycleId, sectionCode, paper),
+    onSuccess: (res, vars) => {
+      patchSection(qc, cycleId, vars.sectionCode, res.design)
+      if (res.ok) {
+        toast.success("The custom template still fits this section")
+      } else {
+        toast.error(
+          `The custom template no longer fits: ${res.problems[0]?.message ?? "the check failed"}. ` +
+            "Make a new one, or pick another template.",
+        )
+      }
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not check the custom template")),
   })
 }
 

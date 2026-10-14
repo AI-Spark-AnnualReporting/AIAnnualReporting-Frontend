@@ -21,15 +21,20 @@ import {
   LANDSCAPE_TEMPLATE_SHORT_NAMES,
   LANDSCAPE_TOC_KEYS,
   LANDSCAPE_TOC_NAMES,
+  PAGE_FORMAT_LABELS,
   countPicked,
   isLandscapeTemplateKey,
+  keyForFormat,
   landscapeCoverKey,
+  landscapeFormatOf,
   landscapeKeyToApply,
   landscapeOptions,
   landscapeTocKey,
   orientationOf,
+  pageFormatOf,
   pageSize,
   pickedKey,
+  selectionForPageFormat,
 } from "./orientation.ts"
 
 // Copied from the engine (Centriton/page_templates.py KEYS and the KEYS of
@@ -218,5 +223,56 @@ for (const portraitKey of PORTRAIT_PAGE_KEYS) {
 }
 const landscapeCacheKeys = LANDSCAPE_TEMPLATE_KEYS.map((key) => cacheKey("cyc", "ceo_review", 1, key))
 assert.equal(new Set(landscapeCacheKeys).size, LANDSCAPE_TEMPLATE_KEYS.length)
+
+// ── the page format: portrait A4, landscape A4, presentation 16:9 ──────────
+
+// The switch's three buttons, in the words agreed for them.
+assert.deepEqual(PAGE_FORMAT_LABELS, {
+  portrait: "Portrait (A4)",
+  landscape: "Landscape (A4)",
+  presentation: "Presentation (16:9)",
+})
+
+// Only an explicit "presentation" is the 16:9 sheet; a record from before the
+// format existed (no key) or anything else is A4.
+assert.equal(landscapeFormatOf({ landscape_format: "presentation" }), "presentation")
+assert.equal(landscapeFormatOf({ landscape_format: "a4" }), "a4")
+assert.equal(landscapeFormatOf({ landscape_format: "16:9" }), "a4")
+assert.equal(landscapeFormatOf({}), "a4")
+assert.equal(landscapeFormatOf(null), "a4")
+
+// Which button is pressed. A portrait report that once was a presentation is
+// portrait — the remembered sheet waits for the next landscape spell.
+assert.equal(pageFormatOf({ orientation: "portrait", landscape_format: "presentation" }), "portrait")
+assert.equal(pageFormatOf({ orientation: "landscape" }), "landscape")
+assert.equal(pageFormatOf({ orientation: "landscape", landscape_format: "a4" }), "landscape")
+assert.equal(pageFormatOf({ orientation: "landscape", landscape_format: "presentation" }), "presentation")
+assert.equal(pageFormatOf(undefined), "portrait")
+
+// What each button saves. Portrait leaves the landscape sheet alone.
+assert.deepEqual(selectionForPageFormat("portrait"), { orientation: "portrait" })
+assert.deepEqual(selectionForPageFormat("landscape"), { orientation: "landscape", landscape_format: "a4" })
+assert.deepEqual(selectionForPageFormat("presentation"),
+  { orientation: "landscape", landscape_format: "presentation" })
+// …and saving a button reads back as that button.
+for (const format of ["portrait", "landscape", "presentation"] as const) {
+  assert.equal(pageFormatOf(selectionForPageFormat(format)), format)
+}
+
+// The presentation sheet is PowerPoint's 16:9; A4 and portrait are unchanged.
+assert.deepEqual(pageSize("landscape", "presentation"), { width: 960, height: 540 })
+assert.deepEqual(pageSize("landscape", "a4"), pageSize("landscape"))
+assert.deepEqual(pageSize("portrait", "presentation"), pageSize("portrait"))
+
+// The same landscape page on the two sheets never shares a cache key, and an
+// A4 key is exactly what it was before the format existed.
+for (const key of LANDSCAPE_TEMPLATE_KEYS) {
+  assert.equal(keyForFormat(key, "a4"), key)
+  const a4 = cacheKey("cyc", "ceo_review", 1, keyForFormat(key, "a4"))
+  const wide = cacheKey("cyc", "ceo_review", 1, keyForFormat(key, "presentation"))
+  assert.notEqual(a4, wide, `${key} shares a render-cache key across the two sheets`)
+  // Still under the section's prefix, so revokeSection / revokeCycle reach it.
+  assert.ok(wide.startsWith("cyc|ceo_review|"))
+}
 
 console.log("orientation: all checks passed")

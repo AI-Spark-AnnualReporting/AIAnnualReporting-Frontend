@@ -79,9 +79,17 @@ const ruledColumn: React.CSSProperties = {
  * one row, the picture band, then prose in three columns. Its own shape
  * because a portrait-proportioned card would misdescribe the paper.
  */
-function LandscapeColumnsMini({ accent }: { accent: string }) {
+/**
+ * The shape of a landscape thumbnail: A4 on its side, or the wider 16:9
+ * presentation sheet.
+ */
+function landscapeRatio(presentation: boolean): string {
+  return presentation ? "16 / 9" : "1.414 / 1"
+}
+
+function LandscapeColumnsMini({ accent, presentation }: { accent: string; presentation: boolean }) {
   return (
-    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 9, gap: 4 }}>
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 4 }}>
       <div style={line("10%", accent, 3)} />
       <div style={line("46%", "#9AA0B4", 5)} />
       <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
@@ -124,9 +132,9 @@ const CORAL = "#F58675"
  * columns across the left two-thirds, and a tinted rail down the right holding
  * the picture, the key figures stacked one under another, then a quote.
  */
-function LandscapeRailMini({ accent }: { accent: string }) {
+function LandscapeRailMini({ accent, presentation }: { accent: string; presentation: boolean }) {
   return (
-    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 9, gap: 4 }}>
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 4 }}>
       <div style={line("10%", accent, 3)} />
       <div style={line("40%", "#9AA0B4", 5)} />
       <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
@@ -166,9 +174,9 @@ function LandscapeRailMini({ accent }: { accent: string }) {
  * the top carrying the title, one giant figure and a row of small ones; below
  * it prose in two wide columns with the picture beside them.
  */
-function LandscapeHeroMini({ accent }: { accent: string }) {
+function LandscapeHeroMini({ accent, presentation }: { accent: string; presentation: boolean }) {
   return (
-    <div style={{ ...shell, aspectRatio: "1.414 / 1", padding: 0, gap: 0 }}>
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 0, gap: 0 }}>
       <div
         style={{
           background: accent,
@@ -213,21 +221,56 @@ function LandscapeHeroMini({ accent }: { accent: string }) {
   )
 }
 
+/**
+ * A custom template has no fixed look, so its card shows the real first sheet
+ * when one has been drawn (see TemplateCardGrid). This is the stand-in until
+ * then: an off-grid composition, deliberately unlike the eight fixed designs.
+ */
+function CustomMini({ accent, landscape, presentation }: {
+  accent: string
+  landscape: boolean
+  presentation: boolean
+}) {
+  const ratio = landscape ? landscapeRatio(presentation) : "1 / 1.3"
+  return (
+    <div style={{ ...shell, aspectRatio: ratio, padding: 7, gap: 3 }}>
+      <div style={line("58%", accent, 4)} />
+      <div style={{ display: "flex", gap: 4, flex: 1 }}>
+        <div style={ph({ width: "46%", height: "62%" })} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 2.5, flex: 1, paddingTop: 6 }}>
+          <div style={line("70%", accent, 6)} />
+          <div style={line("40%")} />
+          {col(5)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TemplateMiniInner({
   templateKey,
   accent = "#3C0866",
+  presentation = false,
+  landscape = false,
 }: {
   templateKey: string
   accent?: string
+  /** Draw a landscape thumbnail the 16:9 presentation shape. */
+  presentation?: boolean
+  /** Only read by the custom thumbnail, which has no key to say its shape. */
+  landscape?: boolean
 }) {
+  if (templateKey === "custom") {
+    return <CustomMini accent={accent} landscape={landscape} presentation={presentation} />
+  }
   if (templateKey === "landscape_columns") {
-    return <LandscapeColumnsMini accent={accent} />
+    return <LandscapeColumnsMini accent={accent} presentation={presentation} />
   }
   if (templateKey === "landscape_rail") {
-    return <LandscapeRailMini accent={accent} />
+    return <LandscapeRailMini accent={accent} presentation={presentation} />
   }
   if (templateKey === "landscape_hero") {
-    return <LandscapeHeroMini accent={accent} />
+    return <LandscapeHeroMini accent={accent} presentation={presentation} />
   }
 
   if (templateKey === "kpi_stat_grid") {
@@ -501,7 +544,7 @@ function TemplateMiniInner({
 }
 
 /**
- * Both props are primitives, so the five minis on the card grid stop rebuilding
+ * Every prop is a primitive, so the five minis on the card grid stop rebuilding
  * their few dozen inline-style objects every time the selected card changes.
  * Cheap either way — this is tidiness, not a fix for anything measured.
  */
@@ -517,5 +560,6 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
   editorial_movements: "Editorial — movements",
+  custom: "Custom",
   ...LANDSCAPE_TEMPLATE_NAMES,
 }

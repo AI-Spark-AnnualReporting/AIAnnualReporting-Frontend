@@ -32,7 +32,8 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageLoader } from "@/components/ui/spinner"
 import {
-  useApplyLandscapeToAll, useCycleDesign, useExtractSection, useSetTemplate,
+  useApplyLandscapeToAll, useCycleDesign, useExtractSection, useRecheckCustomTemplate,
+  useSetTemplate,
 } from "@/hooks/useCreateDesign"
 import { useDesignPrewarm } from "@/hooks/useDesignPrewarm"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
@@ -40,10 +41,14 @@ import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
 import type { CycleDesign, DesignOption, DesignUnit } from "@/lib/api/createDesign"
-import { revokeCycle, revokeSection } from "@/lib/createDesignCache"
+import { cacheKey, peek, revokeCycle, revokeSection } from "@/lib/createDesignCache"
+import {
+  CUSTOM_TEMPLATE_KEY, customTemplateFor, paperFor, renderTemplateTag,
+} from "@/lib/customTemplate"
 import {
   countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
-  landscapeOptions, landscapeTocKey, orientationOf, pickedKey, type Orientation,
+  landscapeOptions, landscapeTocKey, orientationOf, pageFormatOf, pickedKey,
+  selectionForPageFormat, type LandscapeFormat, type Orientation, type PageFormat,
 } from "@/lib/orientation"
 import {
   DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey, type CustomizeTab,
@@ -52,6 +57,7 @@ import type { DesignSelection } from "@/types/report-design"
 
 import { CreateDesignExtractRun } from "./CreateDesignExtractRun"
 import { CreateDesignRail, type RailSelection } from "./CreateDesignRail"
+import { CustomTemplatePanel } from "./CustomTemplatePanel"
 import { OrientationToggle } from "./OrientationToggle"
 import { PageRenderPanel } from "./PageRenderPanel"
 import { PreviewAllPanel } from "./PreviewAllPanel"
@@ -94,10 +100,28 @@ function withEveryTemplate(options: DesignOption[]): DesignOption[] {
   return [...options, ...missing]
 }
 
-/** The cards the template column offers for a page in one orientation. */
-function cardsFor(unit: DesignUnit, orientation: Orientation): DesignOption[] {
-  if (orientation === "landscape") return landscapeOptions()
-  return withEveryTemplate(unit.options)
+/** The card for the page's own custom template. It holds everything by design. */
+const CUSTOM_OPTION: DesignOption = {
+  key: CUSTOM_TEMPLATE_KEY,
+  recommended: false,
+  reason: null,
+  counts: {},
+  dropped: {},
+}
+
+/**
+ * The cards the template column offers for a page in one orientation.
+ *
+ * The page's custom template comes first when it has one for the sheet on
+ * screen — it was made for this section, so it is the most specific choice.
+ */
+function cardsFor(
+  unit: DesignUnit,
+  orientation: Orientation,
+  format: LandscapeFormat,
+): DesignOption[] {
+  const fixed = orientation === "landscape" ? landscapeOptions() : withEveryTemplate(unit.options)
+  return customTemplateFor(unit, orientation, format) ? [CUSTOM_OPTION, ...fixed] : fixed
 }
 
 /**
@@ -115,9 +139,16 @@ function templateToShow(
   unit: DesignUnit | null,
   previewKey: string | null,
   orientation: Orientation,
+  format: LandscapeFormat,
 ): string | null {
   if (orientation === "landscape") {
-    return previewKey ?? unit?.landscape_template_key ?? null
+    const picked = unit?.landscape_template_key ?? null
+    // A custom layout made for the other landscape sheet does not print on
+    // this one, so it is not the page to draw.
+    const usable = picked === CUSTOM_TEMPLATE_KEY && !customTemplateFor(unit, orientation, format)
+      ? null
+      : picked
+    return previewKey ?? usable
   }
   return (
     previewKey ??
@@ -134,6 +165,7 @@ function optionFor(
   orientation: Orientation,
 ): DesignOption | null {
   if (!unit) return null
+  if (templateKey === CUSTOM_TEMPLATE_KEY) return CUSTOM_OPTION
   const options = orientation === "landscape" ? landscapeOptions() : unit.options
   return options.find((o) => o.key === templateKey) ?? null
 }
@@ -188,6 +220,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const setTemplate = useSetTemplate(cycleId)
   const applyLandscape = useApplyLandscapeToAll(cycleId)
   const extract = useExtractSection(cycleId)
+  const recheckCustom = useRecheckCustomTemplate(cycleId)
 
   const [selected, setSelected] = useState<RailSelection | null>(null)
   // The contents page is a REPORT-level choice, so it gets its own bit of
@@ -207,6 +240,8 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // for is the thing in front of them.
   const [customizeTab, setCustomizeTab] = useState<CustomizeTab>("brand")
   const [previewKey, setPreviewKey] = useState<string | null>(null)
+  // The "create a custom template" panel, in place of the page on the right.
+  const [customOpen, setCustomOpen] = useState(false)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
   // Collapsed to a sliver so the preview gets the screen. Driven from the
@@ -281,15 +316,21 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
       toast.error(readError(err, "Could not save that contents page")),
   })
   // Report-level like the two above. Nothing to revoke afterwards: every
-  // render cache key names its template, and the two orientations never share
-  // a template, so neither set of pictures can be served as the other.
+  // render cache key names its template, the two orientations never share a
+  // template, and the two landscape sheets — which do — are told apart by
+  // keyForFormat. So no set of pictures can be served as another.
   const saveOrientation = useMutation({
-    mutationFn: (next: Orientation) => annualDesignApi.save(cycleId, { orientation: next }),
+    mutationFn: (next: PageFormat) =>
+      annualDesignApi.save(cycleId, selectionForPageFormat(next)),
     onSuccess: (fresh) => qc.setQueryData(designKey, fresh),
     onError: (err: MutationError) =>
-      toast.error(readError(err, "Could not switch the page orientation")),
+      toast.error(readError(err, "Could not switch the page format")),
   })
   const orientation = orientationOf(reportDesign.data)
+  const pageFormat = pageFormatOf(reportDesign.data)
+  // The sheet the pages on screen print on. "a4" for portrait too, so every
+  // render key outside the presentation sheet stays what it always was.
+  const format: LandscapeFormat = pageFormat === "presentation" ? "presentation" : "a4"
   const saveBrand = useMutation({
     // The modal sends `{ brand }` alone. Omitted fields are left alone
     // server-side, so this cannot clobber the cover or contents keys picked in
@@ -360,6 +401,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     selected?.code ?? null,
     !run && !isFetching && !reportDesign.isPending,
     orientation,
+    format,
   )
 
   if (isLoading && !data) return <PageLoader />
@@ -419,8 +461,15 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     : null
   const unit = section?.design?.units.find((u) => u.index === active?.unit) ?? null
   const landscape = orientation === "landscape"
-  const effectivePreview = templateToShow(unit, previewKey, orientation)
+  const effectivePreview = templateToShow(unit, previewKey, orientation, format)
   const option = optionFor(unit, effectivePreview, orientation)
+  const customPaper = paperFor(orientation, format)
+  const customTemplate = customTemplateFor(unit, orientation, format)
+  // The custom card shows its real first sheet once one has been drawn.
+  const customThumb = section && unit && customTemplate
+    ? peek(cacheKey(cycleId, section.section_code, unit.index,
+      renderTemplateTag(CUSTOM_TEMPLATE_KEY, unit, orientation, format)))?.[0] ?? null
+    : null
 
   // The cover and contents design in use in the orientation on screen. In
   // landscape that is the saved landscape pick, else the default — never the
@@ -480,8 +529,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // previewKey is cleared HERE, in the handler, not in an effect watching the
   // orientation: a card looked at in one orientation means nothing in the
   // other, and this repo's lint rejects setState inside effects anyway.
-  const switchOrientation = (next: Orientation) => {
+  const switchOrientation = (next: PageFormat) => {
     setPreviewKey(null)
+    setCustomOpen(false)
     saveOrientation.mutate(next)
   }
 
@@ -526,7 +576,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
             here that changes the whole document, and it was being missed
             among the ghost buttons. */}
         <OrientationToggle
-          value={orientation}
+          value={pageFormat}
           onChange={switchOrientation}
           disabled={!reportDesign.data || reportDesign.data.locked || saveOrientation.isPending}
           saving={saveOrientation.isPending}
@@ -647,6 +697,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                   setCoverOpen(false)
                   setSelected(next)
                   setPreviewKey(null)
+                  setCustomOpen(false)
                 }}
                 busyCode={extract.isPending ? extract.variables?.sectionCode : null}
                 failed={failures}
@@ -665,38 +716,41 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
           {previewMode ? (
-            // Keyed on the orientation so a switch made while previewing
+            // Keyed on the page format so a switch made while previewing
             // starts a fresh run: the panel only starts its run on mount.
             <PreviewAllPanel
-              key={orientation}
+              key={pageFormat}
               cycleId={cycleId}
               design={data}
               coverKey={coverInUse}
               tocKey={tocInUse}
               onExit={exitPreview}
               orientation={orientation}
+              format={format}
             />
           ) : coverOpen ? (
             // Keyed on the orientation so a design inspected in one
             // orientation is not left on screen in the other.
             <CoverDesignPanel
-              key={orientation}
+              key={pageFormat}
               cycleId={cycleId}
               chosen={coverInUse}
               locked={reportDesign.data?.locked ?? false}
               saving={coverSaving}
               onChoose={chooseCover}
               orientation={orientation}
+              format={format}
             />
           ) : tocOpen ? (
             <TocDesignPanel
-              key={orientation}
+              key={pageFormat}
               cycleId={cycleId}
               chosen={tocInUse}
               locked={reportDesign.data?.locked ?? false}
               saving={tocSaving}
               onChoose={chooseToc}
               orientation={orientation}
+              format={format}
             />
           ) : !section || !unit ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-slate-400">
@@ -795,14 +849,43 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                       any the section was extracted too early to list — and
                       all of them when the recommendation lookup failed. */}
                   <TemplateCardGrid
-                    options={cardsFor(unit, orientation)}
-                    previewKey={effectivePreview}
+                    options={cardsFor(unit, orientation, format)}
+                    previewKey={customOpen ? null : effectivePreview}
                     chosenKey={pickedKey(unit, orientation)}
-                    onPreview={setPreviewKey}
+                    onPreview={(key) => {
+                      setCustomOpen(false)
+                      setPreviewKey(key)
+                    }}
                     disabled={setTemplate.isPending}
+                    presentation={format === "presentation"}
+                    landscape={landscape}
+                    customThumb={customThumb}
+                    onCreateCustom={() => setCustomOpen(true)}
+                    customPanelOpen={customOpen}
                   />
                 </div>
                 <div className="min-h-0 flex-1">
+                  {customOpen ? (
+                    <CustomTemplatePanel
+                      key={`${section.section_code}|${customPaper}`}
+                      cycleId={cycleId}
+                      sectionCode={section.section_code}
+                      sectionTitle={section.title}
+                      unit={unit}
+                      paper={customPaper}
+                      hasExisting={Boolean(customTemplate)}
+                      onClose={() => setCustomOpen(false)}
+                      onDone={() => {
+                        // The server saved it and selected it; read it back,
+                        // then show it.
+                        void refetch().then(() => {
+                          setCustomOpen(false)
+                          setPreviewKey(CUSTOM_TEMPLATE_KEY)
+                          toast.success("Custom template ready. It's now used for this section.")
+                        })
+                      }}
+                    />
+                  ) : (
                   <PageRenderPanel
                     cycleId={cycleId}
                     sectionCode={section.section_code}
@@ -812,6 +895,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                     option={option}
                     choosing={setTemplate.isPending}
                     orientation={orientation}
+                    format={format}
                     onChoose={(key) =>
                       setTemplate.mutate({
                         sectionCode: section.section_code,
@@ -820,7 +904,15 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                         orientation,
                       })
                     }
+                    onRecheck={() =>
+                      recheckCustom.mutate({
+                        sectionCode: section.section_code,
+                        paper: customPaper,
+                      })
+                    }
+                    rechecking={recheckCustom.isPending}
                   />
+                  )}
                 </div>
               </div>
             </>

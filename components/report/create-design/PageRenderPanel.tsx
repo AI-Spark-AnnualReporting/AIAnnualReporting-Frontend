@@ -21,19 +21,25 @@ import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
 import { losesContent, lossText, placementText } from "@/lib/createDesignLoss"
-import { pageSize, pickedKey, type Orientation } from "@/lib/orientation"
+import {
+  CUSTOM_TEMPLATE_KEY, customRenderFields, customTemplateFor, renderTemplateTag,
+} from "@/lib/customTemplate"
+import {
+  pageSize, pickedKey, type LandscapeFormat, type Orientation,
+} from "@/lib/orientation"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
 
 /**
- * How wide the page may be drawn. A landscape sheet gets the same type size a
- * portrait one does at 520px — 520 scaled by the long edge over the short —
- * or turning the paper sideways would quietly shrink every word on it.
+ * How wide the page may be drawn. Every sheet gets the same type size a
+ * portrait one does at 520px — 520 scaled by the sheet's width over the
+ * portrait width — or turning the paper sideways (or onto the wider 16:9
+ * sheet) would quietly shrink every word on it.
  */
-function maxPageWidth(orientation: Orientation): number {
+function maxPageWidth(orientation: Orientation, format: LandscapeFormat = "a4"): number {
   if (orientation === "portrait") return 520
   const portrait = pageSize("portrait")
-  return Math.round((520 * portrait.height) / portrait.width)
+  return Math.round((520 * pageSize(orientation, format).width) / portrait.width)
 }
 
 /**
@@ -54,13 +60,13 @@ function placementLine(option: DesignOption | null, orientation: Orientation): s
  * Drawn the shape of the sideways sheet, so the panel does not change size
  * the moment a template is picked.
  */
-function NoLandscapePickCard() {
-  const { width, height } = pageSize("landscape")
+function NoLandscapePickCard({ format }: { format: LandscapeFormat }) {
+  const { width, height } = pageSize("landscape", format)
   return (
     <div className="flex h-full items-start justify-center overflow-y-auto bg-slate-100 p-5">
       <div
         className="flex w-full flex-col items-center justify-center gap-2 rounded-[6px] border border-dashed border-slate-300 bg-white p-8 text-center"
-        style={{ maxWidth: maxPageWidth("landscape"), aspectRatio: `${width} / ${height}` }}
+        style={{ maxWidth: maxPageWidth("landscape", format), aspectRatio: `${width} / ${height}` }}
       >
         <p className="text-sm font-medium text-slate-700">No landscape template yet</p>
         <p className="max-w-md text-[12px] leading-relaxed text-slate-500">
@@ -82,6 +88,9 @@ export function PageRenderPanel({
   onChoose,
   choosing,
   orientation = "portrait",
+  format = "a4",
+  onRecheck,
+  rechecking = false,
 }: {
   cycleId: string
   sectionCode: string
@@ -93,6 +102,11 @@ export function PageRenderPanel({
   choosing: boolean
   /** Which way the page prints — sets the reserved shape and the pick compared against. */
   orientation?: Orientation
+  /** The landscape sheet: A4 or the 16:9 presentation sheet. */
+  format?: LandscapeFormat
+  /** Check the custom template against the section's current content. */
+  onRecheck?: () => void
+  rechecking?: boolean
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -117,7 +131,8 @@ export function PageRenderPanel({
   // looked at must appear immediately, and routing it through state would
   // flash a spinner on every hit.
   const key = templateKey
-    ? cacheKey(cycleId, sectionCode, unit.index, templateKey)
+    ? cacheKey(cycleId, sectionCode, unit.index,
+      renderTemplateTag(templateKey, unit, orientation, format))
     : null
   const cached = key ? peek(key) : undefined
   const pages = cached ?? (fetched && fetched.key === key ? fetched.pages : null)
@@ -137,6 +152,8 @@ export function PageRenderPanel({
         running_label: "Annual Report",
         template_key: templateKey ?? undefined,
         breaks: unit.breaks,
+        presentation: format === "presentation",
+        ...customRenderFields(templateKey, sectionCode, orientation),
       }).then((r) => r.pages),
     )
       .then((next) => {
@@ -154,17 +171,17 @@ export function PageRenderPanel({
     return () => {
       alive = false
     }
-  }, [key, cached, cycleId, sectionTitle, unit, templateKey, attempt])
+  }, [key, cached, cycleId, sectionCode, sectionTitle, unit, templateKey, attempt, format, orientation])
 
   // Clamp rather than reset, so flipping templates keeps you roughly where
   // you were in a multi-page unit.
   const total = pages?.length ?? 0
   const current = total ? Math.min(page, total - 1) : 0
-  const paper = pageSize(orientation)
+  const paper = pageSize(orientation, format)
   const height = width ? (paper.height / paper.width) * width : 0
 
   if (!templateKey && orientation === "landscape") {
-    return <NoLandscapePickCard />
+    return <NoLandscapePickCard format={format} />
   }
 
   if (!templateKey) {
@@ -176,6 +193,9 @@ export function PageRenderPanel({
   }
 
   const chosen = pickedKey(unit, orientation) === templateKey
+  const custom = templateKey === CUSTOM_TEMPLATE_KEY
+    ? customTemplateFor(unit, orientation, format)
+    : null
 
   return (
     <div className="flex h-full flex-col">
@@ -198,6 +218,27 @@ export function PageRenderPanel({
           {option && losesContent(option.dropped) && (
             <p className="mt-0.5 text-[11px] font-semibold text-red-700">
               Content missing: {lossText(option.dropped, option.counts)}
+            </p>
+          )}
+          {custom?.brief?.summary_for_pm && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] italic text-indigo-700">
+              {custom.brief.summary_for_pm}
+            </p>
+          )}
+          {custom?.needs_recheck && (
+            <p className="mt-1 flex items-center gap-2 text-[11px] text-amber-800">
+              This section was re-extracted after the layout was made, so it may no longer fit.
+              {onRecheck && (
+                <button
+                  type="button"
+                  onClick={onRecheck}
+                  disabled={rechecking}
+                  className="inline-flex items-center gap-1 font-semibold text-amber-900 underline underline-offset-2 disabled:opacity-60"
+                >
+                  {rechecking && <Loader2 className="h-3 w-3 animate-spin" />}
+                  Check it again
+                </button>
+              )}
             </p>
           )}
         </div>
@@ -264,7 +305,7 @@ export function PageRenderPanel({
         <div
           ref={wrapRef}
           className="mx-auto w-full"
-          style={{ maxWidth: maxPageWidth(orientation) }}
+          style={{ maxWidth: maxPageWidth(orientation, format) }}
         >
           <div
             className="relative w-full overflow-hidden rounded-[6px] border border-slate-200 bg-white shadow-sm"

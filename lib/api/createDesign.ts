@@ -31,6 +31,47 @@ export interface DesignOption {
   }
 }
 
+/** The sheet a custom template was designed for. It prints only on that one. */
+export type CustomPaper = "portrait" | "landscape" | "presentation"
+
+/**
+ * A page layout an AI designer wrote for this one section.
+ *
+ * Only ever saved after the engine filled it with the section's real content
+ * and checked the printed result, so a stored one is known to fit.
+ */
+export interface CustomTemplate {
+  html: string
+  css: string
+  notes: string
+  paper: CustomPaper
+  /** The art director's brief it was built from; `summary_for_pm` is for people. */
+  brief: { summary_for_pm?: string; cannot_do?: string[]; [k: string]: unknown }
+  /** What the PM typed, or "" when they let the designer choose. */
+  instructions: string
+  model: string
+  /** How many checks it took to pass (1 = first try). */
+  rounds: number
+  /** True after the section was re-extracted: it may no longer fit. */
+  needs_recheck: boolean
+  created_at: string
+}
+
+/** Progress of a custom template run, read from the server's memory. */
+export interface CustomTemplateStatus {
+  status: "idle" | "running" | "done" | "failed"
+  step?: "queued" | "brief" | "build" | "check" | "fix" | "explain"
+  round?: number
+  message?: string
+  ok?: boolean
+  brief?: CustomTemplate["brief"]
+  /** On failure: what went wrong, in plain words. */
+  summary?: string
+  problems?: { code: string; message: string; where?: string }[]
+  started_at?: number
+  finished_at?: number
+}
+
 /** One page of a section. */
 export interface DesignUnit {
   index: number
@@ -55,6 +96,10 @@ export interface DesignUnit {
   landscape_chosen_at?: string | null
   /** True when the art director chose this template and nobody has overridden it. */
   template_auto?: boolean
+  /** The portrait custom template, when one was made. Picked as "custom". */
+  custom_template?: CustomTemplate | null
+  /** The landscape (A4 or 16:9) custom template, when one was made. */
+  landscape_custom_template?: CustomTemplate | null
   /** block id -> the emphasis the art director gave it. */
   roles?: Record<string, string>
   /**
@@ -210,6 +255,66 @@ export const createDesignApi = {
       )}/create-design-template`,
       { unit_index: unitIndex, template_key: templateKey, orientation },
       { timeout: 60000 },
+    )
+    return data
+  },
+
+  /**
+   * Start designing a custom page template for one section. Answers at once;
+   * the run takes a few minutes on the server — poll `customTemplateStatus`.
+   *
+   * @returns already_running true when this section was already being designed
+   */
+  startCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    instructions: string,
+  ): Promise<{ already_running: boolean }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template`,
+      { paper, instructions },
+      { timeout: 60000 },
+    )
+    return { already_running: Boolean(data?.already_running) }
+  },
+
+  /** Where the latest custom template run for this section and sheet has got to. */
+  customTemplateStatus: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+  ): Promise<CustomTemplateStatus> => {
+    const { data } = await apiClient.get(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/status`,
+      { params: { paper }, timeout: 30000 },
+    )
+    return data
+  },
+
+  /**
+   * Check a saved custom template against the section's current content.
+   * No AI call — one render on the server.
+   */
+  recheckCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+  ): Promise<{
+    ok: boolean
+    problems: { code: string; message: string; where?: string }[]
+    design: DesignEnvelope
+  }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/recheck`,
+      { paper },
+      { timeout: 120000 },
     )
     return data
   },

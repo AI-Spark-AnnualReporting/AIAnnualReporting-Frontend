@@ -27,7 +27,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
-  LANDSCAPE_DESIGN_KEY, LANDSCAPE_TOC_NAMES, type Orientation,
+  keyForFormat, LANDSCAPE_DESIGN_KEY, LANDSCAPE_TOC_NAMES,
+  type LandscapeFormat, type Orientation,
 } from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 import type { TocDesign } from "@/types/report-design"
@@ -66,6 +67,7 @@ export function TocDesignPanel({
   onChoose,
   saving,
   orientation = "portrait",
+  format = "a4",
 }: {
   cycleId: string
   /**
@@ -80,6 +82,8 @@ export function TocDesignPanel({
   saving: boolean
   /** Portrait offers the five designs; landscape offers the three landscape ones. */
   orientation?: Orientation
+  /** The landscape sheet the preview is drawn on: A4 or 16:9. */
+  format?: LandscapeFormat
 }) {
   const [active, setActive] = useState<string | null>(null)
 
@@ -113,7 +117,8 @@ export function TocDesignPanel({
   // in-flight flag, the error and the memo that makes re-picking a design
   // already looked at free — which is the whole point of comparing five.
   const previewQuery = useQuery({
-    queryKey: ["pm", "cycle", cycleId, "toc-preview", showing],
+    // See CoverDesignPanel: the same key PreviewAllPanel reads.
+    queryKey: ["pm", "cycle", cycleId, "toc-preview", keyForFormat(showing, format)],
     queryFn: () => annualDesignApi.previewToc(cycleId, showing),
     // Landscape waits for the list, so an old engine is never asked to draw a
     // design it does not have.

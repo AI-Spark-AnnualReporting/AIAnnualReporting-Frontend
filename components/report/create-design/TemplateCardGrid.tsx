@@ -13,10 +13,11 @@
  * Tailwind v3/v4 drift.
  */
 
-import { Check, Star, TriangleAlert } from "lucide-react"
+import { Check, Sparkles, Star, TriangleAlert } from "lucide-react"
 
 import type { DesignOption } from "@/lib/api/createDesign"
 import { losesContent, lossText, placedText } from "@/lib/createDesignLoss"
+import { CUSTOM_TEMPLATE_KEY } from "@/lib/customTemplate"
 import { isLandscapeTemplateKey } from "@/lib/orientation"
 
 import { TEMPLATE_NAMES, TemplateMini } from "./TemplateMini"
@@ -33,6 +34,7 @@ const CARD_NOTES: Record<string, string> = {
   landscape_columns: "Figures in a strip, a picture band, then three columns of text.",
   landscape_rail: "Two columns of text beside a tinted rail: the picture, the key figures, a quote.",
   landscape_hero: "A brand band with one big figure and a row of small ones, then two columns of text beside the picture.",
+  custom: "Designed for this section. Every figure, paragraph, quote and table prints.",
 }
 
 /**
@@ -54,6 +56,11 @@ export function TemplateCardGrid({
   accent,
   onPreview,
   disabled,
+  presentation = false,
+  landscape = false,
+  customThumb = null,
+  onCreateCustom,
+  customPanelOpen = false,
 }: {
   options: DesignOption[]
   previewKey: string | null
@@ -61,7 +68,18 @@ export function TemplateCardGrid({
   accent?: string
   onPreview: (key: string) => void
   disabled?: boolean
+  /** Draw the landscape thumbnails the 16:9 presentation shape. */
+  presentation?: boolean
+  /** The sheet is sideways — read by the custom card, whose key cannot say so. */
+  landscape?: boolean
+  /** The custom template's real first sheet, when it has been drawn already. */
+  customThumb?: string | null
+  /** Open the "create a custom template" panel. No card when absent. */
+  onCreateCustom?: () => void
+  /** The create panel is the thing on screen, so its card reads as selected. */
+  customPanelOpen?: boolean
 }) {
+  const hasCustom = options.some((option) => option.key === CUSTOM_TEMPLATE_KEY)
   // Recommended first; everything else keeps the engine's order, so the grid
   // is identical on every visit.
   const ordered = [...options].sort(
@@ -77,6 +95,7 @@ export function TemplateCardGrid({
         // A sideways thumbnail takes the full row, or it would be drawn at
         // half the height of its portrait neighbours and read as a sliver.
         const wide = isLandscapeTemplateKey(option.key)
+          || (landscape && option.key === CUSTOM_TEMPLATE_KEY)
         return (
           <button
             key={option.key}
@@ -93,7 +112,23 @@ export function TemplateCardGrid({
             }
           >
             <div className={`relative mb-2 overflow-hidden ${THUMB}`}>
-              <TemplateMini templateKey={option.key} accent={accent} />
+              {option.key === CUSTOM_TEMPLATE_KEY && customThumb ? (
+                /* The real page, not a schematic: a custom layout has no
+                   fixed look to draw bars for. */
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={customThumb}
+                  alt=""
+                  className="block w-full border border-[#E5E7EF] bg-white"
+                />
+              ) : (
+                <TemplateMini
+                  templateKey={option.key}
+                  accent={accent}
+                  presentation={presentation}
+                  landscape={landscape}
+                />
+              )}
               {chosen && (
                 <span
                   aria-label="Chosen"
@@ -127,6 +162,35 @@ export function TemplateCardGrid({
           </button>
         )
       })}
+
+      {onCreateCustom && (
+        <button
+          type="button"
+          onClick={onCreateCustom}
+          aria-pressed={customPanelOpen}
+          disabled={disabled}
+          className={
+            `col-span-2 flex cursor-pointer items-start gap-3 ${TILE} border-2 border-dashed p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ` +
+            (customPanelOpen
+              ? "border-[#6366F1] bg-[#EEF2FF]"
+              : "border-[#C7D2FE] bg-white hover:border-[#818CF8] hover:bg-[#F5F7FF]")
+          }
+        >
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEF2FF] text-[#4F46E5]">
+            <Sparkles className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[12px] font-bold text-[#3730A3]">
+              {hasCustom ? "Make a new custom template" : "Create a custom template"}
+            </span>
+            <span className="mt-0.5 block text-[10.5px] leading-snug text-[#64748B]">
+              {hasCustom
+                ? "Replaces the current custom layout once the new one passes its check."
+                : "A layout designed for this section's own content and your brand. Describe it, or let the designer choose."}
+            </span>
+          </span>
+        </button>
+      )}
     </div>
   )
 }

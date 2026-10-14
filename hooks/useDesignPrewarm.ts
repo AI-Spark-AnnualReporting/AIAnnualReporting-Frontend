@@ -27,9 +27,12 @@
 import { useEffect, useRef } from "react"
 
 import { renderSectionPagesBatch } from "@/lib/api/sectionBlocks"
+import {
+  CUSTOM_TEMPLATE_KEY, customRenderFields, customTemplateFor, renderTemplateTag,
+} from "@/lib/customTemplate"
 import { cacheKey, has, prime } from "@/lib/createDesignCache"
 import type { DesignSection, DesignUnit } from "@/lib/api/createDesign"
-import type { Orientation } from "@/lib/orientation"
+import type { LandscapeFormat, Orientation } from "@/lib/orientation"
 
 // How many pages go in one request. Large enough that browser startup is
 // amortised, small enough that the first pages appear early rather than the
@@ -61,6 +64,8 @@ interface Job {
     running_label: string
     template_key: string
     breaks?: Record<string, number[]>
+    section_code?: string
+    orientation?: Orientation
   }
 }
 
@@ -91,6 +96,7 @@ export function useDesignPrewarm(
   active: string | null,
   enabled: boolean,
   orientation: Orientation = "portrait",
+  format: LandscapeFormat = "a4",
 ) {
   // The section on screen, readable from inside the loop without making it a
   // dependency — re-running the whole pre-warm on every click would restart
@@ -132,7 +138,13 @@ export function useDesignPrewarm(
         // of the same page never overwrite each other.
         const template = templateToDraw(unit, orientation)
         if (!template) continue
-        const key = cacheKey(cycleId, section.section_code, unit.index, template)
+        // A custom layout made for the other landscape sheet does not print
+        // on this one, so there is nothing to draw.
+        if (template === CUSTOM_TEMPLATE_KEY && !customTemplateFor(unit, orientation, format)) continue
+        // The two landscape sheets draw the same template keys, so the tag
+        // carries the sheet (see renderTemplateTag).
+        const key = cacheKey(cycleId, section.section_code, unit.index,
+          renderTemplateTag(template, unit, orientation, format))
         if (has(key)) continue
         jobs.push({
           key,
@@ -144,6 +156,7 @@ export function useDesignPrewarm(
             running_label: "Annual Report",
             template_key: template,
             breaks: unit.breaks,
+            ...customRenderFields(template, section.section_code, orientation),
           },
         })
       }
@@ -170,6 +183,7 @@ export function useDesignPrewarm(
           const res = await renderSectionPagesBatch(
             cycleId,
             chunk.map((j) => j.body),
+            format === "presentation",
           )
           // Banked before the liveness check, not after. A chunk that landed
           // after this loop was superseded still holds correct pictures of
@@ -204,5 +218,5 @@ export function useDesignPrewarm(
     return () => {
       alive = false
     }
-  }, [cycleId, sections, enabled, orientation])
+  }, [cycleId, sections, enabled, orientation, format])
 }

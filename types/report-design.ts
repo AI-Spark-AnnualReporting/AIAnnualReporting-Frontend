@@ -7,11 +7,11 @@
  * of those lists so a bad value fails at save rather than at download.
  */
 
-import type { Orientation } from "@/lib/orientation"
+import type { LandscapeFormat, Orientation } from "@/lib/orientation"
 
 // Defined once, in lib/orientation.ts beside the helpers that read it, and
 // re-exported so anything already importing design types finds it here too.
-export type { Orientation }
+export type { LandscapeFormat, Orientation }
 
 export type TypographyFamily =
   | "DejaVu Sans"
@@ -165,6 +165,12 @@ export interface AnnualDesign {
   landscape_cover_template_key?: string | null
   /** The cycle's OWN landscape contents pick. Same rules — read it through `landscapeTocKey()`. */
   landscape_toc_template_key?: string | null
+  /**
+   * The sheet a landscape report prints on: "a4" or the 16:9 "presentation"
+   * sheet. Kept while the report is portrait. Read it through
+   * `landscapeFormatOf()`: a backend deployed before the format existed omits it.
+   */
+  landscape_format?: LandscapeFormat | null
 }
 
 /** Which of the three running-band looks the renderer draws. */
@@ -247,6 +253,11 @@ export interface DesignSelection {
   landscape_cover_template_key?: string
   /** Which of the three landscape contents pages a landscape report prints. Same rules. */
   landscape_toc_template_key?: string
+  /**
+   * The sheet a landscape report prints on. Sent with `orientation:
+   * "landscape"` by the page-format switch; absent leaves it alone.
+   */
+  landscape_format?: LandscapeFormat
 }
 
 /** One contents-page design, as the engine that owns them describes it. */

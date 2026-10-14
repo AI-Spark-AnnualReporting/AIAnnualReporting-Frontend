@@ -34,9 +34,12 @@ import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import type { CycleDesign } from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
+import { customRenderFields, renderTemplateTag } from "@/lib/customTemplate"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
-import { pageSize, pickedKey, type Orientation } from "@/lib/orientation"
+import {
+  keyForFormat, pageSize, pickedKey, type LandscapeFormat, type Orientation,
+} from "@/lib/orientation"
 
 import { clampZoom, PreviewZoomBar, stepZoom } from "./PreviewZoomBar"
 
@@ -49,14 +52,14 @@ const GUTTER = 40
 const MAX_FIT_W = 1100
 
 /**
- * The same cap for the page actually on screen. A landscape sheet may grow by
- * its long edge over its short one, so it stops at the same type size a
- * portrait page does rather than at a narrower, smaller-print width.
+ * The same cap for the page actually on screen. A wider sheet may grow by its
+ * width over the portrait width, so it stops at the same type size a portrait
+ * page does rather than at a narrower, smaller-print width.
  */
-function maxFitWidth(orientation: Orientation): number {
+function maxFitWidth(orientation: Orientation, format: LandscapeFormat): number {
   if (orientation === "portrait") return MAX_FIT_W
   const portrait = pageSize("portrait")
-  return Math.round((MAX_FIT_W * portrait.height) / portrait.width)
+  return Math.round((MAX_FIT_W * pageSize(orientation, format).width) / portrait.width)
 }
 
 /**
@@ -74,11 +77,11 @@ const BASE_SCALE = 2
  * nobody can see. Capped at 4, which the engine enforces too — the pixmap
  * grows with the square of this number.
  */
-const scaleFor = (cssWidth: number, orientation: Orientation) => {
+const scaleFor = (cssWidth: number, orientation: Orientation, format: LandscapeFormat) => {
   const dpr = typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio || 1, 2)
   // The engine's scale multiplies the page's own width in points, which is
   // the long edge on a landscape sheet.
-  const needed = (cssWidth * dpr) / pageSize(orientation).width
+  const needed = (cssWidth * dpr) / pageSize(orientation, format).width
   if (needed <= BASE_SCALE + 0.05) return BASE_SCALE
   return Math.min(4, Math.ceil(needed))
 }
@@ -99,6 +102,7 @@ export function PreviewAllPanel({
   tocKey,
   onExit,
   orientation = "portrait",
+  format = "a4",
 }: {
   cycleId: string
   design: CycleDesign | undefined
@@ -112,11 +116,13 @@ export function PreviewAllPanel({
   onExit: () => void
   /** Which set of pages to show. */
   orientation?: Orientation
+  /** The landscape sheet: A4 or the 16:9 presentation sheet. */
+  format?: LandscapeFormat
 }) {
   const landscape = orientation === "landscape"
   const coverDesign = coverKey
   const tocDesign = tocKey
-  const paper = pageSize(orientation)
+  const paper = pageSize(orientation, format)
   const ratio = paper.height / paper.width
   const qc = useQueryClient()
   // One entry per page unit, each holding every sheet that unit produced.
@@ -148,7 +154,7 @@ export function PreviewAllPanel({
   // launch thrown away.
   const asked = useRef(new Set<string>())
 
-  const baseW = Math.max(240, Math.min(pane.w - GUTTER, maxFitWidth(orientation)))
+  const baseW = Math.max(240, Math.min(pane.w - GUTTER, maxFitWidth(orientation, format)))
   const pageW = pane.w ? baseW * zoom : 0
   const pageH = pageW * ratio
 
@@ -168,7 +174,7 @@ export function PreviewAllPanel({
     // collide with — revokeSection prefix-matches on the code, and no real
     // section_code begins with an underscore.
     {
-      key: cacheKey(cycleId, "__cover__", 0, coverDesign ?? "none"),
+      key: cacheKey(cycleId, "__cover__", 0, keyForFormat(coverDesign ?? "none", format)),
       caption: "Cover",
       missing: "No cover chosen",
       templateKey: coverDesign,
@@ -183,7 +189,9 @@ export function PreviewAllPanel({
             // The scale is appended only when there IS one: at base scale the
             // key must be exactly the picker's five-element key, or this is a
             // different cache entry and the reuse above never happens.
-            queryKey: ["pm", "cycle", cycleId, "cover-preview", coverDesign, ...(scale ? [scale] : [])],
+            // keyForFormat: the same as the picker's (see CoverDesignPanel).
+            queryKey: ["pm", "cycle", cycleId, "cover-preview",
+              keyForFormat(coverDesign as string, format), ...(scale ? [scale] : [])],
             queryFn: () =>
               annualDesignApi.previewCover(cycleId, coverDesign as string, scale),
             staleTime: Infinity,
@@ -192,7 +200,7 @@ export function PreviewAllPanel({
           .then((r) => r.pages),
     },
     {
-      key: cacheKey(cycleId, "__contents__", 0, tocDesign ?? "none"),
+      key: cacheKey(cycleId, "__contents__", 0, keyForFormat(tocDesign ?? "none", format)),
       caption: "Contents",
       missing: "No contents design chosen",
       templateKey: tocDesign,
@@ -201,7 +209,8 @@ export function PreviewAllPanel({
           .fetchQuery({
             // Same five-element shape as the contents picker at base scale —
             // see the note on the cover key above.
-            queryKey: ["pm", "cycle", cycleId, "toc-preview", tocDesign, ...(scale ? [scale] : [])],
+            queryKey: ["pm", "cycle", cycleId, "toc-preview",
+              keyForFormat(tocDesign as string, format), ...(scale ? [scale] : [])],
             queryFn: () => annualDesignApi.previewToc(cycleId, tocDesign as string, scale),
             staleTime: Infinity,
             retry: false,
@@ -219,7 +228,9 @@ export function PreviewAllPanel({
       // prints — in the plain two-column layout, which has no preview here.
       const picked = pickedKey(unit, orientation)
       pages.push({
-        key: cacheKey(cycleId, section.section_code, unit.index, picked ?? "none"),
+        key: cacheKey(cycleId, section.section_code, unit.index,
+          picked ? renderTemplateTag(picked, unit, orientation, format)
+            : keyForFormat("none", format)),
         caption:
           unit.total > 1
             ? `${section.title} · page ${unit.index} of ${unit.total}`
@@ -239,7 +250,9 @@ export function PreviewAllPanel({
             // SAME cache key, so omitting them here meant whichever drew first
             // won and the two could disagree about where a page broke.
             breaks: unit.breaks,
+            presentation: format === "presentation",
             scale,
+            ...customRenderFields(picked, section.section_code, orientation),
           }).then((r) => r.pages),
       })
     }
@@ -301,7 +314,7 @@ export function PreviewAllPanel({
   }, [pages.length])
 
   // ── sharpen what is on screen ─────────────────────────────────────────
-  const wantScale = scaleFor(pageW, orientation)
+  const wantScale = scaleFor(pageW, orientation, format)
   useEffect(() => {
     if (wantScale <= BASE_SCALE || !visible.length) return
     const queue = pages.filter(
