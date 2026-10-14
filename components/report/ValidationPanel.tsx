@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -17,8 +17,10 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { ChooseSectionDialog } from "@/components/report/ChooseSectionDialog"
+import { useAuth } from "@/contexts/AuthContext"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
-import { pmApi, type ReportValidation } from "@/lib/api/pm"
+import { pmApi, type IgnoredFinding, type ReportValidation } from "@/lib/api/pm"
+import type { FinalReport } from "@/types"
 import { QUERY_KEYS } from "@/lib/constants"
 import { cn, formatDateTime } from "@/lib/utils"
 import {
@@ -65,25 +67,41 @@ export function ValidationPanel({
   const edited = new Set(validation.edited_since_check ?? [])
   const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
   const queryClient = useQueryClient()
-  // The finding being marked or unmarked, so its button can show a spinner.
-  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const { user } = useAuth()
+  // Ignore is instant, so no button ever waits on a save.
+  const busyKey: string | null = null
+  // Saves run one after another: the server rewrites the whole stored result
+  // on each, so two at once would lose one of them.
+  const saving = useRef<Promise<void>>(Promise.resolve())
 
-  // "Not a problem" and its Undo. The server takes the finding out of (or puts
-  // it back into) the stored result; refetching then redraws the cards and
-  // their counts.
-  const setDismissed = async (keys: string[], dismissed: boolean) => {
+  // Ignore and its Undo. The screen changes at once (the cached result is
+  // edited in place, the same way the server will edit the stored one), and
+  // the save follows in the background. Waiting for the save and a reload of
+  // the whole report took 5-10 seconds a click. A failed save reloads the
+  // real result, so the screen never shows a change that didn't happen.
+  const setIgnored = (keys: string[], ignore: boolean) => {
     if (!cycleId || keys.length === 0) return
-    setBusyKey(keys[0])
-    try {
+    const queryKey = QUERY_KEYS.PM_FINAL_REPORT(cycleId)
+    queryClient.setQueryData<FinalReport>(queryKey, (old) => {
+      if (!old?.validation) return old
+      let next = old.validation as ReportValidation
       for (const key of keys) {
-        await pmApi.dismissFinding(cycleId, key, dismissed)
+        next = ignore
+          ? ignoreLocally(next, key, user?.full_name ?? "You")
+          : undoLocally(next, key)
       }
-      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
-    } catch (err) {
-      toast.error(readError(err as MutationError, "Couldn't save that change"))
-    } finally {
-      setBusyKey(null)
-    }
+      return { ...old, validation: next }
+    })
+    saving.current = saving.current.then(async () => {
+      try {
+        for (const key of keys) {
+          await pmApi.ignoreFinding(cycleId, key, ignore)
+        }
+      } catch (err) {
+        toast.error(readError(err as MutationError, "Couldn't save that change"))
+        await queryClient.invalidateQueries({ queryKey })
+      }
+    })
   }
   const {
     figures_total: total,
@@ -126,25 +144,39 @@ export function ValidationPanel({
   const titleOf = (code: string) =>
     validation.sections?.[code]?.title || prettifyCode(code)
 
-  // The findings of one kind the PM marked "Not a problem", for the card's
-  // list at the bottom (where Undo lives).
-  const dismissedOf = (kind: "conflicts" | "redundancy"): DismissedRow[] =>
-    Object.entries(validation.dismissed ?? {})
+  // The findings of one kind the PM ignored, for the card's list at the
+  // bottom (where Undo lives).
+  const ignored = validation.ignored ?? {}
+  // Ignored since this check ran, so still undoable on screen. Once the PM
+  // validates again, everything ignored before is simply gone - no list, no
+  // count, no trace.
+  const checkedAt = Date.parse(validation.validated_at)
+  const recentIgnored: Record<string, IgnoredFinding> = {}
+  for (const [key, entry] of Object.entries(ignored)) {
+    if (Date.parse(entry.at) > checkedAt) recentIgnored[key] = entry
+  }
+  const ignoredOf = (kind: string): IgnoredRow[] =>
+    Object.entries(recentIgnored)
       .filter(([, entry]) => entry.kind === kind)
       .map(([key, entry]) => {
-        const sections = (entry.finding.sections ?? []).map((s) =>
-          typeof s === "string" ? titleOf(s) : s.title || titleOf(s.section_code),
-        )
+        const finding = entry.findings?.[0] ?? {}
         return {
           key,
-          label: kind === "conflicts" ? entry.finding.measure || "Figure" : sections.join(", "),
-          detail: entry.finding.detail ?? "",
+          label: ignoredLabel(kind, key, finding, titleOf),
+          detail: finding.detail ?? "",
           by: entry.by,
           at: entry.at,
         }
       })
-  const notAProblem = (count: number) =>
-    count > 0 ? ` ${count} marked not a problem.` : ""
+  const ignoredNote = (count: number) => (count > 0 ? ` ${count} ignored.` : "")
+
+  // Concept messages no section carries, minus the ones the PM ignored. They
+  // have no list in the stored result (they are read off the coverage
+  // numbers), so the page leaves the ignored ones out itself.
+  const conceptKey = (title: string) => `concept:${title.trim()}`
+  const uncarried = (validation.coverage?.secondary ?? [])
+    .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
+    .filter((m) => m.sections === 0 && !ignored[conceptKey(m.title)])
 
   const repeatedSections = new Set(
     validation.redundancy.flatMap((r) => r.sections),
@@ -199,6 +231,7 @@ export function ValidationPanel({
       title: "Figures with no recorded source",
       why:
         "Not in any department's submission, and not in any document uploaded to this cycle.",
+      ignored: ignoredOf("untraced"),
       items: bySentence(validation.untraced).map((item) => ({
         ...item,
         fixes: editFix(item.codes?.[0] ?? ""),
@@ -220,12 +253,14 @@ export function ValidationPanel({
       reason: checked
         ? `${instructionSections} of the ${checked} sections checked still ${instructionSections === 1 ? "carries" : "carry"} ${validation.instruction_text.length} such line${validation.instruction_text.length === 1 ? "" : "s"}.`
         : `${validation.instruction_text.length} line${validation.instruction_text.length === 1 ? "" : "s"} describe what to write rather than what happened.`,
+      ignored: ignoredOf("instruction_text"),
       items: validation.instruction_text.map((i) => ({
         where: i.title || i.section_code,
         lead: [],
         detail: i.line,
         codes: [i.section_code],
         fixes: editFix(i.section_code),
+        ignoreKeys: keysOf(i.key),
       })),
     },
     {
@@ -238,13 +273,13 @@ export function ValidationPanel({
       reason: measures
         ? `${validation.conflicts.length} of the ${measures} measures the check identified ${validation.conflicts.length === 1 ? "carries" : "carry"} more than one value.`
         : `${validation.conflicts.length} measure${validation.conflicts.length === 1 ? " carries" : "s carry"} more than one value across the report.`,
-      dismissed: dismissedOf("conflicts"),
+      ignored: ignoredOf("conflicts"),
       items: validation.conflicts.map((c) => ({
         where: c.measure,
         lead: [],
         detail: c.detail,
         codes: (c.sections ?? []).map((s) => s.section_code),
-        dismissKey: c.key,
+        ignoreKeys: keysOf(c.key),
         // One button per section involved: the PM decides which number is
         // right and fixes the other.
         fixes: (c.sections ?? []).flatMap((s) =>
@@ -262,12 +297,14 @@ export function ValidationPanel({
       reason: validation.brief_asks_total
         ? `${validation.brief_gaps.length} of the ${validation.brief_asks_total} explicit asks in the strategic brief ${validation.brief_gaps.length === 1 ? "is" : "are"} covered by no section.`
         : `${validation.brief_gaps.length} thing${validation.brief_gaps.length === 1 ? "" : "s"} the brief asks for that no section covers.`,
+      ignored: ignoredOf("brief_gaps"),
       items: validation.brief_gaps.map((b) => ({
         where: b.ask,
         lead: [],
         detail: b.detail,
         codes: chosenFor(b.ask),
         fixes: chooseFix(b.ask, briefAskTodo(b.ask), true),
+        ignoreKeys: keysOf(b.key),
       })),
     },
     {
@@ -284,7 +321,7 @@ export function ValidationPanel({
       reason: checked
         ? `${repeatedSections} of the ${checked} sections checked ${repeatedSections === 1 ? "repeats" : "repeat"} a point another section already makes.`
         : `${validation.redundancy.length} point${validation.redundancy.length === 1 ? " appears" : "s appear"} in more than one section.`,
-      dismissed: dismissedOf("redundancy"),
+      ignored: ignoredOf("redundancy"),
       items: validation.redundancy.map((r) => {
         // The later section gives the repeated point up; the first one to make
         // it keeps it.
@@ -296,7 +333,7 @@ export function ValidationPanel({
           detail: r.detail,
           codes: [target],
           fixes: aiFix(target, redundancyInstruction(others, r.detail)),
-          dismissKey: r.key,
+          ignoreKeys: keysOf(r.key),
         }
       }),
     },
@@ -311,38 +348,31 @@ export function ValidationPanel({
       reason: toneBase
         ? `${voiceSections} of the ${toneBase} sections your house style governs ${voiceSections === 1 ? "uses" : "use"} a word its rules forbid.`
         : `${voiceFindings.length} use${voiceFindings.length === 1 ? "" : "s"} of a word the company's stored rules forbid.`,
+      ignored: ignoredOf("voice"),
       items: voiceFindings.map((v) => ({
         where: v.title || v.section_code,
         lead: [v.phrase],
         detail: "",
         codes: [v.section_code],
         fixes: aiFix(v.section_code, bannedWordsInstruction(bannedBySection.get(v.section_code) ?? [v.phrase])),
+        ignoreKeys: keysOf(v.key),
       })),
     },
     {
       key: "uncarried",
       title: "Concept messages no section carries",
       why: "Chosen for the report, then never picked up by any section.",
-      percent: messages
-        ? Math.round(
-            ((validation.coverage?.secondary ?? [])
-              .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
-              .filter((m) => m.sections === 0).length /
-              messages) *
-              100,
-          )
-        : null,
+      percent: messages ? Math.round((uncarried.length / messages) * 100) : null,
       reason: `Of the ${messages} concept message${messages === 1 ? "" : "s"} chosen for this report, these appear in none of the ${conceptBase} sections a concept message can apply to.`,
-      items: (validation.coverage?.secondary ?? [])
-        .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
-        .filter((m) => m.sections === 0)
-        .map((m) => ({
-          where: m.title,
-          lead: [],
-          detail: "",
-          codes: chosenFor(m.title),
-          fixes: chooseFix(m.title, conceptInstruction(m.title)),
-        })),
+      ignored: ignoredOf("concepts"),
+      items: uncarried.map((m) => ({
+        where: m.title,
+        lead: [],
+        detail: "",
+        codes: chosenFor(m.title),
+        fixes: chooseFix(m.title, conceptInstruction(m.title)),
+        ignoreKeys: [conceptKey(m.title)],
+      })),
     },
   ]
     // A finding whose `detail` never arrived. The strategic-brief judgement is
@@ -354,11 +384,11 @@ export function ValidationPanel({
     .map((g) => ({
       ...g,
       items: g.items.map((item) => ({ ...item, detail: item.detail ?? "" })),
-      reason: g.reason && g.dismissed ? g.reason + notAProblem(g.dismissed.length) : g.reason,
+      reason: g.reason && g.ignored ? g.reason + ignoredNote(g.ignored.length) : g.reason,
     }))
-    // A card whose findings were all marked "Not a problem" still shows, so
-    // they can be undone.
-    .filter((g) => g.items.length > 0 || (g.dismissed?.length ?? 0) > 0)
+    // A card whose findings were all ignored still shows, so they can be
+    // undone.
+    .filter((g) => g.items.length > 0 || (g.ignored?.length ?? 0) > 0)
 
   const problems = groups.reduce((n, g) => n + (g.count ?? g.items.length), 0)
 
@@ -385,6 +415,10 @@ export function ValidationPanel({
         cycleId={canFix ? cycleId : undefined}
         edited={edited}
         aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={setIgnored}
       />
 
       <BriefCoverage validation={validation} />
@@ -398,7 +432,7 @@ export function ValidationPanel({
           edited={edited}
           onChoose={setChoosing}
           busyKey={busyKey}
-          onDismiss={setDismissed}
+          onIgnore={setIgnored}
         />
       ))}
 
@@ -556,12 +590,21 @@ function Coverage({
   cycleId,
   edited,
   aiSections,
+  ignored,
+  recentIgnored,
+  busyKey,
+  onIgnore,
 }: {
   validation: ReportValidation
   /** Set only when fixing is allowed: adds the "could carry it" fix line. */
   cycleId?: string
   edited: Set<string>
   aiSections?: Set<string>
+  ignored: Record<string, IgnoredFinding>
+  /** Ignored since this check: still shown, with Undo. */
+  recentIgnored: Record<string, IgnoredFinding>
+  busyKey: string | null
+  onIgnore: (keys: string[], ignored: boolean) => void
 }) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
@@ -619,6 +662,10 @@ function Coverage({
         cycleId={cycleId}
         edited={edited}
         aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={onIgnore}
         rows={messages.map((m) => ({ message: m.title, sections: notCarrying(m.title) }))}
       />
     ) : null
@@ -638,6 +685,10 @@ function Coverage({
         cycleId={cycleId}
         edited={edited}
         aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={onIgnore}
         rows={coverage.secondary.map((m) => ({
           message: m.title,
           sections: notCarrying(m.title).filter((s) => missingAll.has(s.code)),
@@ -1371,17 +1422,94 @@ interface FindingItem {
   codes?: string[]
   /** What the PM can do about it. Empty or absent = no button. */
   fixes?: FixAction[]
-  /** Set on findings the AI judged that the PM may mark "Not a problem". */
-  dismissKey?: string
+  /** The finding's key(s), sent back to ignore it. A sentence with three
+   *  untraced figures is one row and three keys. */
+  ignoreKeys?: string[]
 }
 
-/** A finding marked "Not a problem", as its card lists it. */
-interface DismissedRow {
+/** A finding the PM ignored, as its card lists it. */
+interface IgnoredRow {
   key: string
   label: string
   detail: string
   by: string
   at: string
+}
+
+// The result list each key prefix lives in; the last two have no list.
+const IGNORE_KINDS: Record<string, string> = {
+  conflict: "conflicts",
+  redundancy: "redundancy",
+  voice: "voice",
+  untraced: "untraced",
+  instruction: "instruction_text",
+  brief: "brief_gaps",
+  concept: "concepts",
+  carry: "carrying",
+}
+
+/* The result with one finding ignored, as the server will store it: its
+   finding(s) leave their list and are kept under `ignored`. */
+function ignoreLocally(
+  validation: ReportValidation,
+  key: string,
+  by: string,
+): ReportValidation {
+  const kind = IGNORE_KINDS[key.slice(0, key.indexOf(":"))]
+  if (!kind || validation.ignored?.[key]) return validation
+  const lists = validation as unknown as Record<string, unknown>
+  const list = Array.isArray(lists[kind]) ? (lists[kind] as { key?: string }[]) : null
+  const findings = list ? list.filter((f) => f.key === key) : []
+  const next: Record<string, unknown> = {
+    ...validation,
+    ignored: {
+      ...validation.ignored,
+      [key]: { kind, findings, by, at: new Date().toISOString() },
+    },
+  }
+  if (list) next[kind] = list.filter((f) => f.key !== key)
+  return next as unknown as ReportValidation
+}
+
+/* The result with one ignore undone: its finding(s) go back to their list. */
+function undoLocally(validation: ReportValidation, key: string): ReportValidation {
+  const entry = validation.ignored?.[key]
+  if (!entry) return validation
+  const rest = { ...validation.ignored }
+  delete rest[key]
+  const next: Record<string, unknown> = { ...validation, ignored: rest }
+  const lists = validation as unknown as Record<string, unknown>
+  if (Array.isArray(lists[entry.kind])) {
+    next[entry.kind] = [...(lists[entry.kind] as unknown[]), ...(entry.findings ?? [])]
+  }
+  return next as unknown as ReportValidation
+}
+
+/** A finding's key as a list, empty on validations stored before keys. */
+function keysOf(key: string | undefined): string[] {
+  return key ? [key] : []
+}
+
+/* What an ignored finding is called in its card's "Ignored" list. */
+function ignoredLabel(
+  kind: string,
+  key: string,
+  finding: IgnoredFinding["findings"][number],
+  titleOf: (code: string) => string,
+): string {
+  const where = finding.title || (finding.section_code ? titleOf(finding.section_code) : "")
+  if (kind === "conflicts") return finding.measure || "Figure"
+  if (kind === "redundancy") {
+    return (finding.sections ?? [])
+      .map((s) => (typeof s === "string" ? titleOf(s) : s.title || titleOf(s.section_code)))
+      .join(", ")
+  }
+  if (kind === "voice") return `"${finding.phrase ?? ""}" in ${where}`
+  if (kind === "untraced") return `${finding.value ?? ""} in ${where}`
+  if (kind === "instruction_text") return `${where}: ${finding.line ?? ""}`
+  if (kind === "brief_gaps") return finding.ask ?? ""
+  // A concept message has no stored finding: its title is in the key.
+  return key.slice(key.indexOf(":") + 1)
 }
 
 /* One row per sentence, carrying every untraced figure in it.
@@ -1398,8 +1526,15 @@ function bySentence(
     const row = rows.get(key)
     if (row) {
       row.lead.push(u.value)
+      if (u.key) row.ignoreKeys?.push(u.key)
     } else {
-      rows.set(key, { where, lead: [u.value], detail, codes: [u.section_code] })
+      rows.set(key, {
+        where,
+        lead: [u.value],
+        detail,
+        codes: [u.section_code],
+        ignoreKeys: u.key ? [u.key] : [],
+      })
     }
   }
   return [...rows.values()]
@@ -1422,8 +1557,8 @@ interface FindingGroup {
   /** How the count and the percentage were arrived at, in one sentence. A
    *  number the reader cannot reconstruct is a number they have to trust. */
   reason?: string
-  /** Findings of this kind marked "Not a problem". */
-  dismissed?: DismissedRow[]
+  /** Findings of this kind the PM ignored. */
+  ignored?: IgnoredRow[]
 }
 
 /* Collapsed by default past a handful. One group ran to 364 rows on a real
@@ -1436,7 +1571,7 @@ function Group({
   edited,
   onChoose,
   busyKey,
-  onDismiss,
+  onIgnore,
 }: {
   group: FindingGroup
   cycleId?: string
@@ -1444,9 +1579,9 @@ function Group({
   /** Sections edited since the check. */
   edited: Set<string>
   onChoose: (target: ChooseTarget) => void
-  /** The finding whose "Not a problem" or Undo is saving. */
+  /** The finding whose Ignore or Undo is saving. */
   busyKey: string | null
-  onDismiss: (keys: string[], dismissed: boolean) => void
+  onIgnore: (keys: string[], ignored: boolean) => void
 }) {
   const total = group.count ?? group.items.length
   const blocks = byWhere(group.items)
@@ -1521,9 +1656,7 @@ function Group({
           // Greyed only when every section behind the block changed: a
           // contradiction across two sections is not fixed by editing one.
           const allEdited = codes.length > 0 && codes.every((code) => edited.has(code))
-          const dismissKeys = [
-            ...new Set(block.items.flatMap((item) => (item.dismissKey ? [item.dismissKey] : []))),
-          ]
+          const ignoreKeys = [...new Set(block.items.flatMap((item) => item.ignoreKeys ?? []))]
           return (
           <li key={block.where} className={cn("px-5 py-3", allEdited && "bg-emerald-50/50")}>
             <div className="flex flex-wrap items-center gap-2">
@@ -1625,22 +1758,22 @@ function Group({
                   onChoose={onChoose}
                   summary={codes.includes(VALIDATION_SUMMARY_CODE)}
                 />
-                {/* The AI's opinion can be wrong. Grey, after the fixes, so it
-                    never competes with them. */}
-                {dismissKeys.length > 0 && (
+                {/* Beside every Fix, for a finding the PM judges is not a
+                    problem. Grey, so it never competes with the fixes. */}
+                {ignoreKeys.length > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
                     className="h-7 text-slate-600"
                     disabled={busyKey !== null}
-                    onClick={() => onDismiss(dismissKeys, true)}
+                    onClick={() => onIgnore(ignoreKeys, true)}
                   >
-                    {busyKey === dismissKeys[0] ? (
+                    {busyKey === ignoreKeys[0] ? (
                       <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Ban className="mr-1 h-3.5 w-3.5" />
                     )}
-                    Not a problem
+                    Ignore
                   </Button>
                 )}
               </div>
@@ -1650,13 +1783,13 @@ function Group({
         })}
       </ul>
 
-      {(group.dismissed?.length ?? 0) > 0 && (
+      {(group.ignored?.length ?? 0) > 0 && (
         <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-            Marked not a problem
+            Ignored
           </p>
           <ul className="mt-2 space-y-2">
-            {group.dismissed!.map((row) => (
+            {group.ignored!.map((row) => (
               <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
                 <span className="font-semibold text-slate-500">{row.label}</span>
                 {row.detail && (
@@ -1670,7 +1803,7 @@ function Group({
                     type="button"
                     className="font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
                     disabled={busyKey !== null}
-                    onClick={() => onDismiss([row.key], false)}
+                    onClick={() => onIgnore([row.key], false)}
                   >
                     {busyKey === row.key ? "Undoing…" : "Undo"}
                   </button>
@@ -1692,15 +1825,34 @@ function NotCarrying({
   cycleId,
   edited,
   aiSections,
+  ignored,
+  recentIgnored,
+  busyKey,
+  onIgnore,
   rows,
 }: {
   cycleId: string
   edited: Set<string>
   /** As on ValidationPanel: a section outside it is fixed by hand. */
   aiSections?: Set<string>
+  ignored: Record<string, IgnoredFinding>
+  recentIgnored: Record<string, IgnoredFinding>
+  busyKey: string | null
+  onIgnore: (keys: string[], ignored: boolean) => void
   rows: { message: string; sections: { code: string; title: string }[] }[]
 }) {
-  const shown = rows.filter((row) => row.sections.length > 0)
+  // A suggestion ignored before this check is gone; one ignored since stays
+  // (crossed out, with Undo) until the next validation.
+  const keyOf = (message: string, code: string) => `carry:${message.trim()}|${code}`
+  const shown = rows
+    .map((row) => ({
+      ...row,
+      sections: row.sections.filter((s) => {
+        const key = keyOf(row.message, s.code)
+        return !ignored[key] || !!recentIgnored[key]
+      }),
+    }))
+    .filter((row) => row.sections.length > 0)
   if (shown.length === 0) return null
 
   return (
@@ -1723,12 +1875,32 @@ function NotCarrying({
           >
             <span className="pt-1 font-semibold text-[#1A1D2E]">{row.message}</span>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {row.sections.map((s) => (
-                <div key={s.code} className="flex w-[15rem] items-center justify-between gap-2">
-                  <span className="truncate text-slate-600" title={s.title}>
+              {row.sections.map((s) => {
+                // One suggestion, remembered by message and section.
+                const key = keyOf(row.message, s.code)
+                const isIgnored = !!recentIgnored[key]
+                return (
+                <div key={s.code} className="flex w-[20rem] items-center justify-between gap-2">
+                  <span
+                    className={cn("truncate", isIgnored ? "text-slate-300 line-through" : "text-slate-600")}
+                    title={s.title}
+                  >
                     {s.title}
                   </span>
-                  {edited.has(s.code) ? (
+                  <span className="flex shrink-0 items-center gap-1.5">
+                  {isIgnored ? (
+                    <>
+                      <span className="text-[11px] text-slate-400">Ignored</span>
+                      <button
+                        type="button"
+                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
+                        disabled={busyKey !== null}
+                        onClick={() => onIgnore([key], false)}
+                      >
+                        {busyKey === key ? "Undoing…" : "Undo"}
+                      </button>
+                    </>
+                  ) : edited.has(s.code) ? (
                     <span
                       title="This section was edited after the check. Re-assemble & validate to confirm."
                       className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
@@ -1736,23 +1908,43 @@ function NotCarrying({
                       <Check className="h-3 w-3" strokeWidth={3} />
                       Fixed
                     </span>
-                  ) : aiSections && !aiSections.has(s.code) ? (
-                    <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
-                      <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message), true)}>
-                        <Pencil className="mr-1 h-3 w-3" />
-                        Fix
-                      </Link>
-                    </Button>
                   ) : (
-                    <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
-                      <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
-                        <Sparkles className="mr-1 h-3 w-3" />
-                        Fix with AI
-                      </Link>
-                    </Button>
+                    <>
+                      {aiSections && !aiSections.has(s.code) ? (
+                        <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
+                          <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message), true)}>
+                            <Pencil className="mr-1 h-3 w-3" />
+                            Fix
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
+                          <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
+                            <Sparkles className="mr-1 h-3 w-3" />
+                            Fix with AI
+                          </Link>
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 shrink-0 px-2 text-[11px] text-slate-600"
+                        disabled={busyKey !== null}
+                        onClick={() => onIgnore([key], true)}
+                      >
+                        {busyKey === key ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Ban className="mr-1 h-3 w-3" />
+                        )}
+                        Ignore
+                      </Button>
+                    </>
                   )}
+                  </span>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </li>
         ))}

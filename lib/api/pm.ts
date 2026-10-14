@@ -65,9 +65,11 @@ export interface ReportValidation {
   } | null
   // context is the sentence the figure sits in. Optional: validations stored
   // before it was captured have the bare value only.
-  untraced: { section_code: string; title: string; value: string; context?: string }[]
-  instruction_text: { section_code: string; title: string; line: string; marker: string }[]
-  voice: { section_code: string; title: string; phrase: string }[]
+  // Every finding carries `key`, sent back to ignore it. Absent on
+  // validations stored before Ignore existed.
+  untraced: { section_code: string; title: string; value: string; context?: string; key?: string }[]
+  instruction_text: { section_code: string; title: string; line: string; marker: string; key?: string }[]
+  voice: { section_code: string; title: string; phrase: string; key?: string }[]
   preferred_words: Record<string, number>
   // The house style this run was judged against, kept with the verdict rather
   // than read back from the company later - brand_voice is edited over time,
@@ -89,11 +91,10 @@ export interface ReportValidation {
     measure: string
     detail: string
     sections?: { section_code: string; title: string; value: string }[]
-    // Sent back to mark it "Not a problem". Absent on older validations.
     key?: string
   }[]
   redundancy: { sections: string[]; detail: string; key?: string }[]
-  brief_gaps: { ask: string; detail: string }[]
+  brief_gaps: { ask: string; detail: string; key?: string }[]
   // How many explicit asks the brief made in all, so the gaps can be read as a
   // share. Null when the judgement gave no usable count, and on any validation
   // stored before it was asked for.
@@ -167,19 +168,27 @@ export interface ReportValidation {
   // The section the PM sent each uncovered brief ask or concept message to,
   // keyed by its text. Cleared by the next validation run.
   chosen_sections?: Record<string, string>
-  // Findings marked "Not a problem", by key.
-  dismissed?: Record<string, DismissedFinding>
+  // Findings the PM ignored, by key.
+  ignored?: Record<string, IgnoredFinding>
 }
 
-// A finding the PM marked "Not a problem", kept out of every later validation
-// until one of its sections is edited. `finding` is the finding as it stood.
-export interface DismissedFinding {
-  kind: "conflicts" | "redundancy"
-  finding: {
+// A finding the PM ignored, kept out of every later validation until one of
+// its sections is edited. `findings` are the finding(s) as they stood (a word
+// used twice in a section is one ignore, two findings); empty for a concept
+// message, which has no list in the result.
+export interface IgnoredFinding {
+  kind: string
+  findings: {
     measure?: string
     detail?: string
     sections?: (string | { section_code: string; title?: string })[]
-  }
+    section_code?: string
+    title?: string
+    phrase?: string
+    value?: string
+    line?: string
+    ask?: string
+  }[]
   by: string
   at: string
 }
@@ -1321,10 +1330,9 @@ export const pmApi = {
     return data.suggestions
   },
 
-  // Mark a "figures that disagree" or repeated-point finding "Not a problem"
-  // (dismissed=true), or undo it (false).
-  dismissFinding: async (cycleId: string, key: string, dismissed: boolean): Promise<void> => {
-    await apiClient.put(`/pm/cycles/${cycleId}/validation/dismiss`, { key, dismissed })
+  // Ignore a validation finding (ignored=true), or undo it (false).
+  ignoreFinding: async (cycleId: string, key: string, ignored: boolean): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { key, ignored })
   },
 
   chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {

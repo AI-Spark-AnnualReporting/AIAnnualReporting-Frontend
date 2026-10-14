@@ -169,13 +169,28 @@ function ValidationView({ cycleId }: { cycleId: string }) {
 
   // Prefer the run just finished; fall back to what the server stored. The
   // server has already discarded a validation that predates this assembly.
-  const validation = validate.data?.validation ?? reportQuery.data?.validation ?? null
+  // The run's own result only until the reloaded report catches up with it.
+  // After that the report's copy is shown: it is the one Ignore edits, so an
+  // Ignore made on the run's copy changed nothing on screen.
+  const fromRun = validate.data?.validation ?? null
+  const fromReport = reportQuery.data?.validation ?? null
+  const reportIsBehind =
+    !!fromRun &&
+    (!fromReport || Date.parse(fromReport.validated_at) < Date.parse(fromRun.validated_at))
+  const validation = reportIsBehind ? fromRun : fromReport
 
   if (reassembling) return <ReportValidateLoader stage="Re-assembling the report with your edits" />
   if (running) return <ReportValidateLoader stage={validate.stage} />
   if (reportQuery.isLoading) return <PageLoader />
 
   const editedCount = validation?.edited_since_check?.length ?? 0
+  // Findings ignored since this check. Some scores (house style) are worked
+  // out during validation, so the PM is told to validate again.
+  const ignoredCount = validation
+    ? Object.values(validation.ignored ?? {}).filter(
+        (entry) => Date.parse(entry.at) > Date.parse(validation.validated_at),
+      ).length
+    : 0
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
@@ -225,6 +240,23 @@ function ValidationView({ cycleId }: { cycleId: string }) {
             </p>
           </div>
           <Button onClick={reassembleAndValidate}>Re-assemble &amp; validate</Button>
+        </div>
+      )}
+
+      {/* Only when no section was edited: that notice's button already
+          validates again, and two blue boxes saying so is one too many. */}
+      {validation && ignoredCount > 0 && editedCount === 0 && !locked && (
+        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+          <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          <div className="min-w-0 flex-[999_1_320px]">
+            <p className="text-sm font-bold text-blue-900">
+              You ignored {ignoredCount} finding{ignoredCount === 1 ? "" : "s"} since this check
+            </p>
+            <p className="mt-0.5 text-sm text-blue-800">
+              Validate again to update the scores.
+            </p>
+          </div>
+          <Button onClick={run}>Validate again</Button>
         </div>
       )}
 
