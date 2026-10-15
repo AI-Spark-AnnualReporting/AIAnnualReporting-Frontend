@@ -43,7 +43,7 @@ import { isAuthError } from "@/lib/api/client"
 import type { CycleDesign, DesignOption, DesignUnit } from "@/lib/api/createDesign"
 import { cacheKey, peek, revokeCycle, revokeSection } from "@/lib/createDesignCache"
 import {
-  CUSTOM_TEMPLATE_KEY, customTemplateFor, paperFor, renderTemplateTag,
+  CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES, customTemplateFor, paperFor, renderTemplateTag,
 } from "@/lib/customTemplate"
 import {
   countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
@@ -121,6 +121,7 @@ function cardsFor(
   format: LandscapeFormat,
 ): DesignOption[] {
   const fixed = orientation === "landscape" ? landscapeOptions() : withEveryTemplate(unit.options)
+  if (!SHOW_CUSTOM_TEMPLATES) return fixed
   return customTemplateFor(unit, orientation, format) ? [CUSTOM_OPTION, ...fixed] : fixed
 }
 
@@ -144,15 +145,22 @@ function templateToShow(
   if (orientation === "landscape") {
     const picked = unit?.landscape_template_key ?? null
     // A custom layout made for the other landscape sheet does not print on
-    // this one, so it is not the page to draw.
-    const usable = picked === CUSTOM_TEMPLATE_KEY && !customTemplateFor(unit, orientation, format)
+    // this one, so it is not the page to draw. While custom templates are
+    // hidden, a saved custom pick is not drawn either.
+    const hidden = picked === CUSTOM_TEMPLATE_KEY && !SHOW_CUSTOM_TEMPLATES
+    const usable = (picked === CUSTOM_TEMPLATE_KEY && !customTemplateFor(unit, orientation, format)) || hidden
       ? null
       : picked
     return previewKey ?? usable
   }
+  // While custom templates are hidden, a saved custom pick falls through to
+  // the recommendation like a page with no pick.
+  const portraitPick = unit?.template_key === CUSTOM_TEMPLATE_KEY && !SHOW_CUSTOM_TEMPLATES
+    ? null
+    : unit?.template_key
   return (
     previewKey ??
-    unit?.template_key ??
+    portraitPick ??
     unit?.options.find((o) => o.recommended)?.key ??
     (unit ? FALLBACK_OPTIONS[0].key : null)
   )
@@ -860,7 +868,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                     presentation={format === "presentation"}
                     landscape={landscape}
                     customThumb={customThumb}
-                    onCreateCustom={() => setCustomOpen(true)}
+                    onCreateCustom={SHOW_CUSTOM_TEMPLATES ? () => setCustomOpen(true) : undefined}
                     customPanelOpen={customOpen}
                   />
                 </div>

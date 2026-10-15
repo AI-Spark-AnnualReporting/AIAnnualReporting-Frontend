@@ -13,6 +13,14 @@ import { keyForFormat, type LandscapeFormat, type Orientation } from "@/lib/orie
 
 export const CUSTOM_TEMPLATE_KEY = "custom"
 
+/**
+ * Whether Create Design shows custom templates at all: the "Create a custom
+ * template" button, the Custom card, and a saved custom pick in the page
+ * panel. Hidden on 2026-10-15 for a meeting because the feature is not ready;
+ * set back to true to bring it all back.
+ */
+export const SHOW_CUSTOM_TEMPLATES = false
+
 /** The sheet the screen is on, in the words the custom template API uses. */
 export function paperFor(orientation: Orientation, format: LandscapeFormat): CustomPaper {
   if (orientation === "portrait") return "portrait"

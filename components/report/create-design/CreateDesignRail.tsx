@@ -18,6 +18,7 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import type { DesignSection } from "@/lib/api/createDesign"
+import { CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES } from "@/lib/customTemplate"
 import {
   LANDSCAPE_COVER_NAMES, LANDSCAPE_TOC_NAMES, pickedKey, type Orientation,
 } from "@/lib/orientation"
@@ -196,7 +197,9 @@ export function CreateDesignRail({
         const active = selected?.code === section.section_code
         const busy = busyCode === section.section_code
         const only = units[0]
-        const onlyPick = only ? pickedKey(only, orientation) : null
+        const picked = only ? pickedKey(only, orientation) : null
+        // While custom templates are hidden, a saved custom pick shows no chip.
+        const onlyPick = picked === CUSTOM_TEMPLATE_KEY && !SHOW_CUSTOM_TEMPLATES ? null : picked
 
         return (
           <div key={section.section_code}>
