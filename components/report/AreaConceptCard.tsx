@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeletons"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { RoleToggle } from "@/components/report/RoleToggle"
 import { InlineRefineBox } from "@/components/report/InlineRefineBox"
@@ -34,6 +35,7 @@ export function AreaConceptCard({
   index,
   area,
   message,
+  messageLoading = false,
   roleGroup,
   readOnly = false,
   lockRole = false,
@@ -47,6 +49,10 @@ export function AreaConceptCard({
   area: AreaOfFocus
   /** Undefined while the messages are still being written. */
   message?: ConceptMessage
+  /** The messages are still on their way. Not the same as "none written":
+   *  without this the card says "No concept message yet" while the real one
+   *  is in flight, which reads as lost work. */
+  messageLoading?: boolean
   /** Shared across the list so the primary radios are mutually exclusive. */
   roleGroup: string
   readOnly?: boolean
@@ -172,6 +178,17 @@ export function AreaConceptCard({
           <MessageSquareQuote className="h-3.5 w-3.5" />
           Concept message for this area
         </div>
+        {messageLoading ? (
+          // Shaped like what is coming: a short title bar, then three lines
+          // of body, so the card does not jump when the real text lands.
+          <div aria-busy="true" aria-label="Loading concept message" className="space-y-2.5">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-[94%]" />
+            <Skeleton className="h-3.5 w-[72%]" />
+          </div>
+        ) : (
+        <>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             {readOnly || !editing ? (
@@ -231,6 +248,8 @@ export function AreaConceptCard({
             </p>
           )}
         </div>
+        </>
+        )}
 
         </div>
       </div>

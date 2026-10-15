@@ -4,10 +4,23 @@ import { createElement } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeRaw from "rehype-raw"
-import rehypeSanitize from "rehype-sanitize"
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import { cn } from "@/lib/utils"
 import { normalizeMarkdownTables } from "@/lib/report-format"
 import { headingAnchorId } from "@/lib/sectionOutline"
+
+/** The default schema drops `class` and `style`, which would flatten every
+ *  assembled report rendered through here — the report builder's HTML carries
+ *  both. They are added back deliberately: the vectors that actually execute
+ *  are script elements, `on*` handlers and `javascript:` URLs, and the schema
+ *  still removes all three. Presentation survives; code does not. */
+const SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes?.["*"] ?? []), "className", "style"],
+  },
+}
 
 interface ProsePreviewProps {
   content: string
@@ -77,12 +90,24 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
   const style = dir === "rtl" ? { textAlign: "right" as const } : undefined
   return looksLikeHtml ? (
-    <div
-      dir={dir}
-      style={style}
-      className={cn("prose prose-sm max-w-none", className)}
-      dangerouslySetInnerHTML={{ __html: content }}
-    />
+    // Through the SAME pipeline as the markdown branch, not
+    // dangerouslySetInnerHTML. rehypeRaw materialises the HTML and
+    // rehypeSanitize strips anything executable from it.
+    //
+    // This used to inject the string unchecked, which was safe only while
+    // every caller fed it our own AI's output. That stopped being true when
+    // the client sign-off let an outside party write the strategic brief:
+    // Spark's review screen renders that brief here, so a brief beginning
+    // with a tag would have run as script in a spark_internal session — the
+    // one account that can reach every company's cycles.
+    //
+    // normalizeMarkdownTables is deliberately NOT applied: it inserts GFM
+    // delimiter rows for pipe tables, which HTML content has no use for.
+    <div dir={dir} style={style} className={cn("prose prose-sm max-w-none", className)}>
+      <ReactMarkdown rehypePlugins={[rehypeRaw, [rehypeSanitize, SCHEMA]]}>
+        {content}
+      </ReactMarkdown>
+    </div>
   ) : (
     (() => {
       // Insert the GFM delimiter row the AI omits so pipe tables render as
@@ -95,7 +120,7 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
             // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)
             // into real elements; rehypeSanitize then strips anything unsafe so only
             // benign markup survives. Order matters: raw must run before sanitize.
-            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            rehypePlugins={[rehypeRaw, [rehypeSanitize, SCHEMA]]}
             components={makeHeadingRenderer(md)}
           >
             {md}

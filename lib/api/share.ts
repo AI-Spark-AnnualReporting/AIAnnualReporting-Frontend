@@ -27,9 +27,39 @@ const publicClient = axios.create({
   timeout: 30000,
 })
 
-export type ShareStage = "questionnaire" | "brief"
+export type ShareStage = "questionnaire" | "brief" | "areas"
 export type ShareStatus = "pending" | "responded" | "approved"
 export type ShareEmailStatus = "pending" | "sent" | "failed"
+
+/** One thing that happened to a gate — see the backend's history_service. */
+export interface KickoffHistoryEntry {
+  id: string
+  /** Which gate it belongs to. */
+  stage: ShareStage
+  /** "generated" = the AI wrote it; "refined" = the AI changed it on an
+   *  instruction, which is kept in `note`. */
+  action:
+    | "shared"
+    | "client_sent"
+    | "sent_back"
+    | "approved"
+    | "reminded"
+    | "edited"
+    | "generated"
+    | "refined"
+  actor_type: "spark" | "client"
+  actor_id?: string | null
+  /** A Spark user's name, or the client's email. */
+  actor_label?: string | null
+  /** The gate's content before and after, shaped per stage. */
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  /** Send-back comment, the client's note, or the address it was shared with. */
+  note?: string | null
+  at: string
+  /** Moves when Spark's autosaves are folded into one edit. */
+  updated_at: string
+}
 
 /** What the client sent back. Shape follows the stage. */
 export interface ShareResponsePayload {
@@ -37,6 +67,8 @@ export interface ShareResponsePayload {
   /** Questions the client wrote themselves. The server renumbers the ids and
    *  re-points their answers, so these are only ever a suggestion of an id. */
   added_questions?: { id: string; text: string }[]
+  /** Questions the client rejected, recorded on the server as theirs. */
+  rejected_question_ids?: string[]
   strategic_brief?: string
   areas_of_focus?: AreaOfFocus[]
   concept_messages?: ConceptMessage[]
@@ -64,9 +96,14 @@ export interface ShareRequest {
   /** The latest note sent back to the client, and how many rounds so far. */
   review_comment?: string | null
   revision_count: number
-  /** Their own note back to Spark. Bundle only. */
+  /** Their own note back to Spark. Brief and areas gates. */
   client_note?: string | null
   response: ShareResponsePayload
+  /** The file the client attached, on the questionnaire gate only. Carried
+   *  because it feeds the AI — the brief generator summarises its text — so
+   *  approving the client's answers approves its influence on the brief. */
+  document_name?: string | null
+  document_id?: string | null
   created_at?: string | null
   responded_at?: string | null
   approved_at?: string | null
@@ -77,6 +114,7 @@ export interface CycleShares {
   cycle_id: string
   questionnaire?: ShareRequest | null
   brief?: ShareRequest | null
+  areas?: ShareRequest | null
 }
 
 export interface ShareActionResult {
@@ -95,12 +133,17 @@ export interface ClientShareView {
   /** Set when their work came back for changes — shown at the top of the page. */
   review_comment?: string | null
   revision_count: number
+  /** The note they sent with their response, shown back to them read-only. */
+  client_note?: string | null
+  /** Who sent the link — shown as "Questions? <name> · <email>". */
+  contact_name?: string | null
+  contact_email?: string | null
   /** The file the client attached, if any. */
   document_name?: string | null
 }
 
 export const shareApi = {
-  /** Both gates' state. Readable by any PM, so a blocked screen can explain itself. */
+  /** Every gate's state. Readable by any PM, so a blocked screen can explain itself. */
   list: async (cycleId: string): Promise<CycleShares> => {
     const { data } = await apiClient.get<CycleShares>(`/pm/cycles/${cycleId}/shares`)
     return data
@@ -118,10 +161,43 @@ export const shareApi = {
     return data
   },
 
-  /** spark_internal only. This is what unblocks the wizard. */
+  /** spark_internal only. This is what unblocks the wizard.
+   *
+   *  Approving the BRIEF also builds the areas of focus and concept messages
+   *  from it, server-side — two LLM calls, so this one can take about a
+   *  minute. Callers must show a loader rather than assume a status flip. */
   approve: async (cycleId: string, stage: ShareStage): Promise<ShareActionResult> => {
     const { data } = await apiClient.post<ShareActionResult>(
       `/pm/cycles/${cycleId}/share/${stage}/approve`,
+      undefined,
+      // The client default of 30s would abort mid-generation on the brief
+      // gate, and the approval itself has already been written by then — the
+      // PM would see a failure for something that actually succeeded.
+      { timeout: 180000 },
+    )
+    return data
+  },
+
+  /** spark_internal only. Rebuilds the areas of focus and concept messages
+   *  from the signed-off brief.
+   *
+   *  Approving the brief normally does this. This is the retry for when that
+   *  generation failed: the approval cannot be repeated, so without it the PM
+   *  is stuck on an empty card. */
+  /** One gate's history, newest first. spark_internal only. */
+  history: async (cycleId: string, stage: ShareStage): Promise<KickoffHistoryEntry[]> => {
+    const { data } = await apiClient.get<{ entries: KickoffHistoryEntry[] }>(
+      `/pm/cycles/${cycleId}/history`,
+      { params: { stage } },
+    )
+    return data.entries
+  },
+
+  generateAreas: async (cycleId: string) => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/areas-of-focus/generate`,
+      undefined,
+      { timeout: 180000 },
     )
     return data
   },
@@ -149,7 +225,7 @@ export const shareApi = {
   },
 }
 
-/** The client's two calls. No auth anywhere. */
+/** The client's calls. No auth anywhere. */
 export const clientShareApi = {
   view: async (token: string): Promise<ClientShareView> => {
     const { data } = await publicClient.get<ClientShareView>(
