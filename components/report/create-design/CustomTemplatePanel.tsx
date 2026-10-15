@@ -27,11 +27,11 @@ import {
 /** How often the run's progress is read while it is going. */
 const POLL_MS = 3000
 /**
- * When the screen stops waiting. The server gives up well before this (three
- * rounds of about two minutes at worst); past it something is stuck, and a
- * spinner that never ends is worse than an honest "try again".
+ * When the screen stops waiting. A run is up to four rounds of designing,
+ * printing and reviewing, each a long reasoning call; past this something is
+ * stuck, and a spinner that never ends is worse than an honest "try again".
  */
-const GIVE_UP_MS = 8 * 60 * 1000
+const GIVE_UP_MS = 20 * 60 * 1000
 const MAX_CHARS = 2000
 
 /** Real things PMs ask for, as one-click starting points. */
@@ -48,19 +48,21 @@ const PAPER_NAMES: Record<CustomPaper, string> = {
   presentation: "16:9 presentation",
 }
 
-/** The four stages of a run, in order, as the PM should read them. */
+/** The stages of a run, in order, as the PM should read them. */
 const STAGES = [
   { step: "brief", label: "Reading your request" },
-  { step: "build", label: "Designing the page" },
-  { step: "check", label: "Checking it with your real content" },
-  { step: "fix", label: "Fixing what the check found" },
+  { step: "build", label: "Designing every sheet of the section" },
+  { step: "check", label: "Checking it prints with your real content" },
+  { step: "judge", label: "Checking it matches your request" },
+  { step: "fix", label: "Improving the design" },
 ] as const
 
 /** Which stage index a server step maps to. */
 function stageIndex(step: CustomTemplateStatus["step"]): number {
   if (step === "build") return 1
   if (step === "check") return 2
-  if (step === "fix" || step === "explain") return 3
+  if (step === "judge") return 3
+  if (step === "fix" || step === "explain") return 4
   return 0
 }
 
@@ -95,8 +97,8 @@ export function CustomTemplatePanel({
   paper: CustomPaper
   /** The page already has a custom template for this sheet. */
   hasExisting: boolean
-  /** A new template passed and was saved; the screen should show it. */
-  onDone: () => void
+  /** A new template was saved; the screen should show it. Gets the final status. */
+  onDone: (status: CustomTemplateStatus) => void
   onClose: () => void
 }) {
   const [instructions, setInstructions] = useState("")
@@ -137,7 +139,7 @@ export function CustomTemplatePanel({
     if (!running) return
     const poll = window.setInterval(async () => {
       const next = await readStatus()
-      if (next?.status === "done") doneRef.current()
+      if (next?.status === "done") doneRef.current(next)
     }, POLL_MS)
     const tick = window.setInterval(() => setNow(Date.now()), 1000)
     return () => {
@@ -291,7 +293,8 @@ export function CustomTemplatePanel({
                   {hasExisting ? "Design a new layout" : "Design this page"}
                 </Button>
                 <span className="text-[11px] leading-snug text-slate-500">
-                  Takes 1–3 minutes. You can keep working on other sections.
+                  Usually 3–8 minutes: it checks the printed result against your
+                  request and keeps improving it. You can work on other sections meanwhile.
                 </span>
               </div>
             </>
@@ -341,14 +344,14 @@ function RunProgress({
       <p className="mt-1 text-[12px] text-slate-500">
         {done
           ? "It passed the check with every paragraph, figure, quote and table on the page."
-          : `${minutes}:${seconds} so far · usually 1–3 minutes`}
+          : `${minutes}:${seconds} so far · usually 3–8 minutes`}
       </p>
 
       <ol className="mt-5 space-y-3">
         {STAGES.map((stage, index) => {
           const finished = index < current
           const active = index === current && !done
-          const round = stage.step === "check" || stage.step === "fix"
+          const round = stage.step === "check" || stage.step === "judge" || stage.step === "fix"
           return (
             <li key={stage.step} className="flex items-start gap-3">
               <span
@@ -374,6 +377,11 @@ function RunProgress({
                 </span>
                 {active && status.message && (
                   <span className="mt-0.5 block text-[11px] text-slate-500">{status.message}</span>
+                )}
+                {active && stage.step === "fix" && !!status.wishes_total && (
+                  <span className="mt-0.5 block text-[11px] text-slate-500">
+                    {status.wishes_met ?? 0} of {status.wishes_total} wishes met so far
+                  </span>
                 )}
               </span>
             </li>

@@ -19,7 +19,7 @@ export const CUSTOM_TEMPLATE_KEY = "custom"
  * panel. Hidden on 2026-10-15 for a meeting because the feature is not ready;
  * set back to true to bring it all back.
  */
-export const SHOW_CUSTOM_TEMPLATES = false
+export const SHOW_CUSTOM_TEMPLATES = true
 
 /** The sheet the screen is on, in the words the custom template API uses. */
 export function paperFor(orientation: Orientation, format: LandscapeFormat): CustomPaper {

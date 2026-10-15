@@ -40,7 +40,9 @@ import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import { isAuthError } from "@/lib/api/client"
-import type { CycleDesign, DesignOption, DesignUnit } from "@/lib/api/createDesign"
+import type {
+  CustomTemplateStatus, CycleDesign, DesignOption, DesignUnit,
+} from "@/lib/api/createDesign"
 import { cacheKey, peek, revokeCycle, revokeSection } from "@/lib/createDesignCache"
 import {
   CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES, customTemplateFor, paperFor, renderTemplateTag,
@@ -98,6 +100,15 @@ function withEveryTemplate(options: DesignOption[]): DesignOption[] {
   const listed = new Set(options.map((option) => option.key))
   const missing = FALLBACK_OPTIONS.filter((option) => !listed.has(option.key))
   return [...options, ...missing]
+}
+
+/** The toast after a custom template is saved: how many of the PM's wishes it met. */
+function customDoneMessage(status: CustomTemplateStatus): string {
+  const total = status.wishes_total ?? 0
+  const met = status.wishes_met ?? 0
+  if (!total) return "Custom template ready. It's now used for this section."
+  if (met >= total) return `Custom template ready: all ${total} of your wishes are met.`
+  return `Custom template ready: ${met} of ${total} wishes met. The page lists what it couldn't do.`
 }
 
 /** The card for the page's own custom template. It holds everything by design. */
@@ -883,13 +894,13 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                       paper={customPaper}
                       hasExisting={Boolean(customTemplate)}
                       onClose={() => setCustomOpen(false)}
-                      onDone={() => {
+                      onDone={(status) => {
                         // The server saved it and selected it; read it back,
                         // then show it.
                         void refetch().then(() => {
                           setCustomOpen(false)
                           setPreviewKey(CUSTOM_TEMPLATE_KEY)
-                          toast.success("Custom template ready. It's now used for this section.")
+                          toast.success(customDoneMessage(status))
                         })
                       }}
                     />

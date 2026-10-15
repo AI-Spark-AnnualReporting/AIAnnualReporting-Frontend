@@ -52,6 +52,14 @@ export interface CustomTemplate {
   model: string
   /** How many checks it took to pass (1 = first try). */
   rounds: number
+  /** "sheets": fixed sheet designs the content is dealt into; "flow": one flowing page. */
+  mode?: "flow" | "sheets"
+  /** Each of the PM's wishes and whether the printed result met it. */
+  requirements?: { wish: string; met: boolean }[]
+  /** The wishes this design does not meet, in plain words (empty when all are met). */
+  unmet?: string[]
+  /** The reviewer's one-line verdict on how well it matches the request. */
+  review_summary?: string
   /** True after the section was re-extracted: it may no longer fit. */
   needs_recheck: boolean
   created_at: string
@@ -60,13 +68,18 @@ export interface CustomTemplate {
 /** Progress of a custom template run, read from the server's memory. */
 export interface CustomTemplateStatus {
   status: "idle" | "running" | "done" | "failed"
-  step?: "queued" | "brief" | "build" | "check" | "fix" | "explain"
+  step?: "queued" | "brief" | "build" | "check" | "judge" | "fix" | "explain"
   round?: number
   message?: string
   ok?: boolean
   brief?: CustomTemplate["brief"]
   /** On failure: what went wrong, in plain words. */
   summary?: string
+  /** After a save: the wishes the design still misses, in plain words. */
+  unmet?: string[]
+  wishes_met?: number
+  wishes_total?: number
+  review_summary?: string
   problems?: { code: string; message: string; where?: string }[]
   started_at?: number
   finished_at?: number

@@ -225,6 +225,20 @@ export function PageRenderPanel({
               {custom.brief.summary_for_pm}
             </p>
           )}
+          {!!custom?.unmet?.length && (
+            <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+              <p className="text-[11px] font-semibold text-amber-900">
+                Couldn&apos;t fully do{custom.requirements?.length
+                  ? ` (${custom.requirements.length - custom.unmet.length} of ${custom.requirements.length} wishes met)`
+                  : ""}:
+              </p>
+              <ul className="mt-0.5 list-disc space-y-0.5 ps-4 text-[11px] leading-snug text-amber-900">
+                {custom.unmet.map((line, i) => (
+                  <li key={i} className="line-clamp-2">{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {custom?.needs_recheck && (
             <p className="mt-1 flex items-center gap-2 text-[11px] text-amber-800">
               This section was re-extracted after the layout was made, so it may no longer fit.
