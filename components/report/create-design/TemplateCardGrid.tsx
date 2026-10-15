@@ -34,6 +34,10 @@ const CARD_NOTES: Record<string, string> = {
   landscape_columns: "Figures in a strip, a picture band, then three columns of text.",
   landscape_rail: "Two columns of text beside a tinted rail: the picture, the key figures, a quote.",
   landscape_hero: "A brand band with one big figure and a row of small ones, then two columns of text beside the picture.",
+  landscape_picture: "A full-height picture beside the title, figures and text; the text then runs in two wide columns.",
+  landscape_statement: "A letter: a brand panel with the photo and one quote set large, then the salutation, the letter in columns and the signature.",
+  landscape_schedule: "Tables first, after the title and a short introduction. Wide tables run the full width.",
+  landscape_essay: "Long text in three columns, opened by a column with the title, the quotes and a picture.",
   custom: "Designed for this section. Every figure, paragraph, quote and table prints.",
 }
 

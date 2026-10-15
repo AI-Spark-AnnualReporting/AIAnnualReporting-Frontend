@@ -46,9 +46,13 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_columns",
   "landscape_rail",
   "landscape_hero",
+  "landscape_picture",
+  "landscape_statement",
+  "landscape_schedule",
+  "landscape_essay",
 ] as const
 
-/** The default landscape section-page template — the first of the three. */
+/** The default landscape section-page template — the first in the list. */
 export const LANDSCAPE_TEMPLATE_KEY = "landscape_columns"
 
 /**
@@ -79,6 +83,10 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_columns: "Landscape — figures + columns",
   landscape_rail: "Landscape — figure rail",
   landscape_hero: "Landscape — brand hero",
+  landscape_picture: "Landscape — picture spread",
+  landscape_statement: "Landscape — statement",
+  landscape_schedule: "Landscape — schedule",
+  landscape_essay: "Landscape — essay",
 }
 
 /**
@@ -89,6 +97,10 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_columns: "Figures + columns",
   landscape_rail: "Figure rail",
   landscape_hero: "Brand hero",
+  landscape_picture: "Picture spread",
+  landscape_statement: "Statement",
+  landscape_schedule: "Schedule",
+  landscape_essay: "Essay",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */
@@ -266,7 +278,7 @@ export function pageSize(
 /**
  * Whether a key is one of the landscape section-page templates.
  *
- * @returns true for the three landscape keys, false for anything else
+ * @returns true for a key in LANDSCAPE_TEMPLATE_KEYS, false for anything else
  */
 export function isLandscapeTemplateKey(key: string | null | undefined): boolean {
   if (!key) return false
@@ -274,7 +286,7 @@ export function isLandscapeTemplateKey(key: string | null | undefined): boolean 
 }
 
 /**
- * The template cards a page offers in landscape: the three landscape templates.
+ * The template cards a page offers in landscape: every landscape template.
  *
  * Shaped like the portrait fallback cards on the Create Design screen. Never
  * marked recommended and carries no counts, because the art director never

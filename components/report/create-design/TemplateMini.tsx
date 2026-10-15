@@ -222,6 +222,185 @@ function LandscapeHeroMini({ accent, presentation }: { accent: string; presentat
 }
 
 /**
+ * The picture-spread landscape page, drawn sideways like two facing magazine
+ * pages: a picture fills the left half to the trim, and the right half holds
+ * the title, the key figures three across, then the start of the text.
+ */
+function LandscapePictureMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 0, gap: 0 }}>
+      <div style={{ display: "flex", flex: 1 }}>
+        <div
+          style={ph({
+            flex: "0 0 50%",
+            borderRadius: 0,
+            border: "none",
+            borderRight: "1px solid #B8BCC8",
+          })}
+        />
+        <div style={{ flex: 1, padding: 9, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={line("14%", accent, 3)} />
+          <div style={line("70%", "#9AA0B4", 5)} />
+          <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 5,
+              flexShrink: 0,
+            }}
+          >
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i}>
+                <div style={line("60%", CORAL, 6)} />
+                <div style={{ ...line("85%"), marginTop: 2 }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ ...ruledColumn, marginTop: 2 }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The statement landscape page, drawn sideways: a brand-colour panel down the
+ * left third holding a small portrait and one quote set large, and on the
+ * right the title, the salutation, the letter in two columns and the
+ * signature at the end of the second column.
+ */
+function LandscapeStatementMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 0, gap: 0 }}>
+      <div style={{ display: "flex", flex: 1 }}>
+        <div
+          style={{
+            flex: "0 0 33%",
+            background: accent,
+            padding: 9,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <div style={ph({ width: "42%", aspectRatio: "3 / 4" })} />
+          <div style={{ flex: 1 }} />
+          <div style={line("12%", CORAL, 4)} />
+          <div style={line("92%", "rgba(255,255,255,0.85)", 5)} />
+          <div style={line("70%", "rgba(255,255,255,0.85)", 5)} />
+          <div style={{ ...line("45%", "rgba(255,255,255,0.55)", 2), marginTop: 2 }} />
+        </div>
+        <div style={{ flex: 1, padding: 9, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={line("10%", accent, 3)} />
+          <div style={line("50%", "#9AA0B4", 5)} />
+          <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
+          <div style={line("24%", "#6B7085", 3)} />
+          <div style={{ display: "flex", gap: 6, flex: 1 }}>
+            <div style={ruledColumn} />
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={ruledColumn} />
+              <div style={{ ...line("30%", accent, 2), marginTop: 2 }} />
+              <div style={line("55%", "#9AA0B4", 3)} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The schedule landscape page, drawn sideways: the title and a short
+ * introduction across the top, a brand rule, then one big table across the
+ * full width — the tables are the point of the page.
+ */
+function LandscapeScheduleMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  // One table row: the line label on the left, the figures right-aligned in
+  // their columns.
+  const tableRow = (shaded: boolean, index: number) => (
+    <div
+      key={index}
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "0 4px",
+        background: shaded ? "#F7F4F9" : "#fff",
+        borderBottom: "0.5px solid #EDEFF6",
+      }}
+    >
+      <div style={line("26%", "#C3C7D4", 2.5)} />
+      <div style={{ flex: 1 }} />
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} style={{ width: "9%", display: "flex", justifyContent: "flex-end" }}>
+          <div style={line("70%", "#AEB3C2", 2.5)} />
+        </div>
+      ))}
+    </div>
+  )
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 4 }}>
+      <div style={line("10%", accent, 3)} />
+      <div style={line("40%", "#9AA0B4", 5)} />
+      <div style={line("72%")} />
+      <div style={line("54%")} />
+      <div style={{ ...line("100%", accent, 1.5), marginTop: 2 }} />
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, marginTop: 2 }}>
+        <div
+          style={{
+            height: 8,
+            background: accent,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "0 4px",
+          }}
+        >
+          <div style={line("16%", "rgba(255,255,255,0.8)", 2)} />
+          <div style={{ flex: 1 }} />
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} style={{ width: "9%", display: "flex", justifyContent: "flex-end" }}>
+              <div style={line("60%", "rgba(255,255,255,0.8)", 2)} />
+            </div>
+          ))}
+        </div>
+        {Array.from({ length: 8 }, (_, i) => tableRow(i % 2 === 1, i))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The essay landscape page, drawn sideways: three columns, the first of them
+ * an opening column holding the title, the quotes in coral and a picture at
+ * its foot, the other two ruled with the text.
+ */
+function LandscapeEssayMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 4 }}>
+      <div style={{ display: "flex", gap: 8, flex: 1 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={line("24%", accent, 3)} />
+          <div style={line("90%", "#9AA0B4", 5)} />
+          <div style={line("65%", "#9AA0B4", 5)} />
+          <div style={{ ...line("30%", CORAL, 1.5), marginTop: 4 }} />
+          <div style={line("95%", CORAL, 3.5)} />
+          <div style={line("88%", CORAL, 3.5)} />
+          <div style={line("60%", CORAL, 3.5)} />
+          <div style={{ flex: 1 }} />
+          <div style={ph({ flex: "0 0 34%" })} />
+        </div>
+        <div style={ruledColumn} />
+        <div style={ruledColumn} />
+      </div>
+    </div>
+  )
+}
+
+/**
  * A custom template has no fixed look, so its card shows the real first sheet
  * when one has been drawn (see TemplateCardGrid). This is the stand-in until
  * then: an off-grid composition, deliberately unlike the eight fixed designs.
@@ -271,6 +450,18 @@ function TemplateMiniInner({
   }
   if (templateKey === "landscape_hero") {
     return <LandscapeHeroMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_picture") {
+    return <LandscapePictureMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_statement") {
+    return <LandscapeStatementMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_schedule") {
+    return <LandscapeScheduleMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_essay") {
+    return <LandscapeEssayMini accent={accent} presentation={presentation} />
   }
 
   if (templateKey === "kpi_stat_grid") {
