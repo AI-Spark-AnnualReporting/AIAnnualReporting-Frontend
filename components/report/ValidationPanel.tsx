@@ -204,14 +204,21 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
 
   return (
     <div className="space-y-5">
+      <SkippedNotice skipped={validation.skipped} />
+
       <Overall validation={validation} />
 
-      <Score
-        traced={traced}
-        total={total}
-        distinct={validation.untraced.length}
-        bySource={validation.figures_by_source}
-      />
+      {/* Off for an external report (Annual Report Validator): it has no
+          sources, so every figure would read as unsourced. Absent on older
+          results, which all traced figures. */}
+      {validation.figure_tracing !== false && (
+        <Score
+          traced={traced}
+          total={total}
+          distinct={validation.untraced.length}
+          bySource={validation.figures_by_source}
+        />
+      )}
 
       <Coverage validation={validation} />
 
@@ -227,7 +234,9 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
           <div>
             <p className="text-sm font-bold text-emerald-900">Nothing to fix</p>
             <p className="mt-0.5 text-sm text-emerald-800">
-              Every figure traces to a department, and no section contradicts another.
+              {validation.figure_tracing === false
+                ? "No part of the report contradicts another, and it follows the brief, concept messages and tone."
+                : "Every figure traces to a department, and no section contradicts another."}
             </p>
           </div>
         </div>
@@ -243,13 +252,10 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
               {unchecked.length} section{unchecked.length === 1 ? "" : "s"} could not be
               checked
             </p>
-            <p className="mt-0.5 text-sm text-slate-500">
-              Validate again to cover them:{" "}
-              {/* The raw code. These are the sections that came back with no
-                  verdict, and a title comes off the verdict - so there is
-                  nothing to look up and the code is tidied instead. */}
-              {unchecked.map(prettifyCode).join(", ")}
-            </p>
+            {/* The raw code. These are the sections that came back with no
+                verdict, and a title comes off the verdict - so there is
+                nothing to look up and the code is tidied instead. */}
+            <UncheckedList names={unchecked.map(prettifyCode)} />
           </div>
         </div>
       )}
@@ -361,6 +367,10 @@ function Coverage({
   if (!coverage || !coverage.sections_checked) return null
 
   const { sections_checked: checked, primary, secondary_any: secondary, tone } = coverage
+  // An input that held nothing usable (an external report's concepts or
+  // tone file) - its cards say "not checked" and why, not 0% or "none chosen".
+  const conceptSkip = skippedFor(validation, "concepts")
+  const toneSkip = skippedFor(validation, "tone")
   const count = coverage.secondary.length
   const reviews = validation.sections ?? {}
   // Each metric names the base it was actually scored over. Falling back to the
@@ -410,6 +420,10 @@ function Coverage({
       {/* Stacked, not side by side. Each card carries its own working now, and
           three columns of that is a wall - one full-width card per measure
           gives the evidence room to be read. */}
+      {conceptSkip ? (
+        <NotChecked label="Concept messages" reason={conceptSkip.reason} />
+      ) : (
+      <>
       <Stat
         label="Primary concept message"
         stat={primary}
@@ -440,6 +454,11 @@ function Coverage({
           sections: carriers(m.title),
         }))}
       />
+      </>
+      )}
+      {toneSkip ? (
+        <NotChecked label="Company tone" reason={toneSkip.reason} />
+      ) : (
       <Stat
         label="Company tone"
         stat={tone}
@@ -460,9 +479,13 @@ function Coverage({
         }
         footer={<ToneRules rules={validation.tone_rules} />}
       />
+      )}
       <p className="px-1 text-xs text-slate-400">
-        Judged by the model across {checked} section{checked === 1 ? "" : "s"}, and
-        printed in the report under &ldquo;Assessed&rdquo;.
+        Judged by the model across {checked} section{checked === 1 ? "" : "s"}
+        {/* An external report (figure tracing off) is never printed by us. */}
+        {validation.figure_tracing === false
+          ? "."
+          : <>, and printed in the report under &ldquo;Assessed&rdquo;.</>}
       </p>
     </div>
   )
@@ -889,6 +912,18 @@ function Overall({ validation }: { validation: ReportValidation }) {
               </span>
             </li>
           ))}
+          {(validation.skipped ?? []).map((skip) => (
+            <li key={`skipped-${skip.check}`} className="flex items-baseline gap-3 text-xs">
+              <span className="w-10 shrink-0 text-right font-bold tabular-nums text-slate-300">—</span>
+              <span className="min-w-0 flex-1 text-slate-400">
+                {SKIPPED_LABEL[skip.check] ?? skip.check}
+                <span className="ml-1.5 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  not checked
+                </span>
+              </span>
+              <span className="shrink-0 tabular-nums text-slate-300">—</span>
+            </li>
+          ))}
         </ul>
       </div>
     </div>
@@ -1272,5 +1307,100 @@ function Group({ group }: { group: FindingGroup }) {
         ))}
       </ul>
     </div>
+  )
+}
+
+/* Checks an external report's run skipped because their input held nothing
+   usable - e.g. a concepts file that explains what concept messages are
+   without containing any. The run still finishes; these say which check
+   didn't run and why, so a score built from the rest can't be misread. */
+
+const SKIPPED_LABEL: Record<string, string> = {
+  concepts: "Concept messages carried",
+  tone: "Company tone followed",
+}
+
+const SKIPPED_TITLE: Record<string, string> = {
+  concepts: "Concept messages",
+  tone: "Company tone",
+}
+
+/** The skipped entry for one check, if that check didn't run. */
+function skippedFor(
+  validation: ReportValidation,
+  check: "concepts" | "tone",
+): { check: string; file: string | null; reason: string } | undefined {
+  return (validation.skipped ?? []).find((s) => s.check === check)
+}
+
+/** "⚠ 1 check was not run", above Overall, with each reason in full. */
+function SkippedNotice({
+  skipped,
+}: {
+  skipped?: { check: string; file: string | null; reason: string }[]
+}) {
+  if (!skipped || skipped.length === 0) return null
+  const count = skipped.length
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+      <div className="min-w-0 space-y-2">
+        <p className="text-sm font-bold text-amber-900">
+          {count} check{count === 1 ? " was" : "s were"} not run
+        </p>
+        {skipped.map((skip) => (
+          <div key={skip.check}>
+            <p className="text-sm font-semibold text-amber-900">
+              {SKIPPED_TITLE[skip.check] ?? skip.check} — not checked
+            </p>
+            <p className="text-sm leading-relaxed text-amber-800">{skip.reason}</p>
+          </div>
+        ))}
+        <p className="text-xs text-amber-700">The Overall score below uses only the checks that ran.</p>
+      </div>
+    </div>
+  )
+}
+
+/** A greyed card in place of a check that didn't run, with the reason. */
+function NotChecked({ label, reason }: { label: string; reason: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-500">{label}</p>
+        <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+          Not checked
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-slate-500">{reason}</p>
+    </div>
+  )
+}
+
+// How many unchecked section names show before "Show all". One large report
+// listed 159 of them as a single paragraph that filled the screen.
+const UNCHECKED_PREVIEW = 5
+
+/** The sections nobody read: the first few, the rest behind "Show all". */
+function UncheckedList({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false)
+  const hidden = names.length - UNCHECKED_PREVIEW
+  const shown = open || hidden <= 0 ? names : names.slice(0, UNCHECKED_PREVIEW)
+  return (
+    <p className="mt-0.5 text-sm text-slate-500">
+      Validate again to cover them: {shown.join(", ")}
+      {hidden > 0 && (
+        <>
+          {open ? " " : "… "}
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            className="font-semibold text-[#4040C8] hover:underline"
+          >
+            {open ? "Show fewer" : `Show all (${names.length})`}
+          </button>
+        </>
+      )}
+    </p>
   )
 }

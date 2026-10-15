@@ -408,6 +408,10 @@ export function AiLoadingScreen({
 
         {headerExtra && <div style={{ marginBottom: 22 }}>{headerExtra}</div>}
 
+        {/* A caller with no fixed steps (the Annual Report Validator shows the
+            server's live stage instead) passes an empty list - skip the box
+            rather than draw it empty. Same change as Centriyon's copy. */}
+        {milestones.length > 0 && (
         <div
           style={{
             background: "#FAFBFE",
@@ -431,6 +435,7 @@ export function AiLoadingScreen({
             />
           ))}
         </div>
+        )}
 
         {showProgress ? (
           <>

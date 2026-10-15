@@ -137,6 +137,81 @@ export interface ReportValidation {
     figures?: { label?: string; value?: string; measure?: string }[]
   }>
   validated_at: string
+  // false on an external report (Annual Report Validator), which has no
+  // sources to trace figures to. Absent on older results, which all traced.
+  figure_tracing?: boolean
+  // External report only: checks that didn't run because their input held
+  // nothing usable (e.g. a concepts file with no messages), with the reason.
+  skipped?: { check: string; file: string | null; reason: string }[]
+  // The uploaded file's name, on an external report only.
+  filename?: string
+}
+
+// House-style rules, in the shape the backend stores as companies.brand_voice.
+export interface ToneRules {
+  person: string
+  register: string
+  sentence_style: string
+  tone_adjectives: string[]
+  banned_words: string[]
+  preferred_words: string[]
+  do: string[]
+  dont: string[]
+}
+
+// What the user gives the Annual Report Validator. Everything is required;
+// the brief, concept messages and tone may be typed/pasted or uploaded as a
+// file. Tone has no typed/structured path like concepts does - paste and
+// file both arrive as free text, which the server always reads with the
+// model (see ToneRules, the shape it comes back as once read).
+export interface ExternalReportInput {
+  report: File
+  brief: string
+  // Used by the server only when `brief` is empty.
+  briefFile: File | null
+  // No title to type - the server draws a short one from the message when
+  // none is given.
+  concepts: { message: string }[]
+  // Used by the server only when `concepts` is empty.
+  conceptFile: File | null
+  // A pasted house-style guide.
+  toneText: string
+  // Used by the server only when `toneText` is empty.
+  toneFile: File | null
+}
+
+// A validation running in the background (GET /pm/validation-jobs/{id}).
+export interface ValidationJob {
+  job_id: string
+  status: "running" | "completed" | "failed"
+  // What it is doing now, while running.
+  stage: string | null
+  validation: ReportValidation | null
+  error: string | null
+  // Whether "Validate again" can re-run it without a new upload. False for a
+  // run that failed while reading its inputs (nothing was saved to reuse).
+  retryable?: boolean
+}
+
+// One row of GET /pm/validation-jobs (list) - lightweight, so the list of
+// past runs doesn't pull the full validation payload for every one. `score`
+// is the same weighted "Overall" percentage the results panel shows,
+// computed server-side; null until the run completes.
+export interface ValidationJobSummary {
+  job_id: string
+  filename: string
+  status: "running" | "completed" | "failed"
+  created_at: string
+  score: number | null
+  error: string | null
+  // Same meaning as ValidationJob.retryable.
+  retryable?: boolean
+}
+
+const JOB_POLL_MS = 3000
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export interface DepartmentClaim {
@@ -1390,12 +1465,84 @@ export const pmApi = {
   // ~16 model calls server-side, so the 30s client default would abort a run
   // that was about to succeed — and the work is saved before the response is
   // sent, so an aborted request loses the answer while the server carries on.
-  validateReport: async (cycleId: string): Promise<{ validation: ReportValidation }> => {
+  //
+  // Now started in the background and polled, so a long report can never
+  // time out: each request is short, however long the run. Callers still get
+  // one promise that resolves with the validation. `onStage` hears the
+  // server's progress line on every poll.
+  validateReport: async (
+    cycleId: string,
+    onStage?: (stage: string | null) => void,
+  ): Promise<{ validation: ReportValidation }> => {
     const { data } = await apiClient.post(
       `/pm/cycles/${cycleId}/validate`,
       undefined,
-      { timeout: 180_000 },
+      { params: { background: true } },
     )
+    const validation = await pmApi.waitForValidationJob(data.job_id, onStage)
+    return { validation }
+  },
+
+  getValidationJob: async (jobId: string): Promise<ValidationJob> => {
+    const { data } = await apiClient.get(`/pm/validation-jobs/${jobId}`)
+    return data
+  },
+
+  // This admin's own past Annual Report Validator runs, newest first.
+  listExternalValidations: async (): Promise<ValidationJobSummary[]> => {
+    const { data } = await apiClient.get("/pm/validation-jobs")
+    return data.jobs ?? []
+  },
+
+  // Re-run a job with the report, brief, concepts and tone it already saved
+  // - no re-upload.
+  retryExternalValidation: async (jobId: string): Promise<{ job_id: string }> => {
+    const { data } = await apiClient.post(`/pm/validation-jobs/${jobId}/retry`)
+    return data
+  },
+
+  // Poll a validation job until it finishes. Resolves with the validation,
+  // or throws with the job's own error so the toast says what went wrong.
+  waitForValidationJob: async (
+    jobId: string,
+    onStage?: (stage: string | null) => void,
+  ): Promise<ReportValidation> => {
+    while (true) {
+      const job = await pmApi.getValidationJob(jobId)
+      if (job.status === "completed" && job.validation) return job.validation
+      if (job.status === "failed") {
+        throw new Error(job.error || "Validation failed. Please try again.")
+      }
+      onStage?.(job.stage)
+      await wait(JOB_POLL_MS)
+    }
+  },
+
+  // Same checks on any report the PM uploads, against the sources uploaded
+  // with it. Nothing is stored. Longer timeout than validateReport: department
+  // files go through the fact extractor first.
+  // Annual Report Validator: start validating an external report. Answers
+  // with a job id straight away; the run page polls it.
+  startExternalValidation: async (input: ExternalReportInput): Promise<{ job_id: string }> => {
+    const form = new FormData()
+    form.append("report", input.report)
+    form.append("brief", input.brief)
+    if (input.briefFile) {
+      form.append("brief_file", input.briefFile)
+    }
+    form.append("concepts", JSON.stringify(input.concepts))
+    if (input.conceptFile) {
+      form.append("concept_file", input.conceptFile)
+    }
+    form.append("tone_text", input.toneText)
+    if (input.toneFile) {
+      form.append("tone_file", input.toneFile)
+    }
+    const { data } = await apiClient.post("/pm/validate-upload", form, {
+      headers: { "Content-Type": undefined },
+      // Only the upload itself; the checks run after this answers.
+      timeout: 120_000,
+    })
     return data
   },
 

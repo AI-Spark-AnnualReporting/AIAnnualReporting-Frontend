@@ -81,22 +81,11 @@ function ValidationView({ cycleId }: { cycleId: string }) {
     validate.mutate(undefined, { onSettled: () => setRunning(false) })
   }
 
-  // A loader must never be able to outlive its request. Runs take 20-45s; if
-  // nothing has cleared this after three minutes then the settle never reached
-  // us — a dev-server restart killing the connection will do it — and the PM is
-  // left staring at a spinner for work that has already finished.
-  //
-  // The server stores the result before it answers, so refetching shows it
-  // whatever happened to the response.
-  useEffect(() => {
-    if (!running) return
-    const t = setTimeout(() => {
-      setRunning(false)
-      reportQuery.refetch()
-    }, 180_000)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running])
+  // No give-up timer any more. The run is polled (validateReport starts a job
+  // and re-reads it every few seconds), so the loader ends when the job does:
+  // completed, failed, or reported failed by the server after 20 minutes. A
+  // fixed three-minute cut-off would now stop a long report that is still
+  // being checked.
 
   useEffect(() => {
     if (started.current) return
@@ -113,7 +102,7 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // server has already discarded a validation that predates this assembly.
   const validation = validate.data?.validation ?? reportQuery.data?.validation ?? null
 
-  if (running) return <ReportValidateLoader />
+  if (running) return <ReportValidateLoader stage={validate.stage} />
   if (reportQuery.isLoading) return <PageLoader />
 
   return (

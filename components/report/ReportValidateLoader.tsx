@@ -38,7 +38,8 @@ const TIPS = [
   "Findings never block approval or export — they are for you to weigh.",
 ]
 
-export function ReportValidateLoader() {
+/** `stage` is the server's own progress line for the running job, when known. */
+export function ReportValidateLoader({ stage }: { stage?: string | null } = {}) {
   return (
     <PipelineLoader
       title="Validating your report"
@@ -46,6 +47,7 @@ export function ReportValidateLoader() {
       tips={TIPS}
       // ~30s across four stages, against the draft check's faster run.
       stageMs={7500}
+      live={stage}
     />
   )
 }

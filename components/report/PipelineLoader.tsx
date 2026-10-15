@@ -48,12 +48,16 @@ export function PipelineLoader({
   stages,
   tips,
   stageMs = 3200,
+  live,
 }: {
   title: string
   stages: PipelineStage[]
   tips: string[]
   /** How long each stage holds. Roughly total runtime ÷ stages. */
   stageMs?: number
+  /** What the server says it is doing right now, from a polled job. Shown in
+      place of the timed subtitle, because it is the true one. */
+  live?: string | null
 }) {
   const [stage, setStage] = useState(0)
   const [tip, setTip] = useState(0)
@@ -120,11 +124,15 @@ export function PipelineLoader({
 
         <h2 className="mt-4 text-xl font-bold text-[#1A1D2E]">{title}</h2>
         <p
-          key={`sub-${stage}-${finalizing}`}
+          key={`sub-${stage}-${finalizing}-${live ?? ""}`}
           className="mt-1 text-xs leading-relaxed text-slate-400"
           style={{ animation: "pl-fade 0.4s ease-out" }}
         >
-          {finalizing >= 0 ? FINALIZING[finalizing] : stages[stage].subtitle}
+          {live
+            ? live
+            : finalizing >= 0
+              ? FINALIZING[finalizing]
+              : stages[stage].subtitle}
         </p>
 
         <ul className="mt-6 space-y-3 rounded-xl bg-slate-50/80 px-4 py-4 text-left">
