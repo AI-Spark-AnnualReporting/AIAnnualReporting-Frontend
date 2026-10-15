@@ -1,10 +1,38 @@
 "use client"
 
-import { useState } from "react"
-import { AlertTriangle, Check, ChevronDown, FileQuestion } from "lucide-react"
+import { useRef, useState } from "react"
+import Link from "next/link"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import {
+  AlertTriangle,
+  Ban,
+  Check,
+  ChevronDown,
+  FileQuestion,
+  Loader2,
+  Pencil,
+  Sparkles,
+} from "lucide-react"
 
-import type { ReportValidation } from "@/lib/api/pm"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { ChooseSectionDialog } from "@/components/report/ChooseSectionDialog"
+import { useAuth } from "@/contexts/AuthContext"
+import { readError, type MutationError } from "@/hooks/useReportBuilder"
+import { pmApi, type IgnoredFinding, type ReportValidation } from "@/lib/api/pm"
+import type { FinalReport } from "@/types"
+import { QUERY_KEYS } from "@/lib/constants"
+import { cn, formatDateTime } from "@/lib/utils"
+import {
+  VALIDATION_SUMMARY_CODE,
+  bannedWordsInstruction,
+  briefAskTodo,
+  type ChooseTarget,
+  buildFixHref,
+  conceptInstruction,
+  redundancyInstruction,
+  type FixAction,
+} from "@/lib/validation-fixes"
 
 /* What the validation found, for the PM.
  *
@@ -16,7 +44,65 @@ import { cn } from "@/lib/utils"
 
 const SHOWN = 6
 
-export function ValidationPanel({ validation }: { validation: ReportValidation }) {
+export function ValidationPanel({
+  validation,
+  cycleId,
+  locked = false,
+  aiSections,
+}: {
+  validation: ReportValidation
+  /** Given on a cycle's own report: turns on the Fix buttons. The external
+   *  validator omits it - we don't own those documents. */
+  cycleId?: string
+  /** Approved report: nothing can be edited, so no Fix buttons. */
+  locked?: boolean
+  /** Sections the AI can refine (generate, analyze). Extract and manual
+   *  sections have no refine box, so their fixes open by hand with the
+   *  instruction as a to-do. Unknown (not loaded) = offer the AI fix. */
+  aiSections?: Set<string>
+}) {
+  const canFix = !!cycleId && !locked
+  // Sections the PM changed since this check: their findings are greyed until
+  // the next validation says whether the change fixed them.
+  const edited = new Set(validation.edited_since_check ?? [])
+  const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
+  const queryClient = useQueryClient()
+  const { user } = useAuth()
+  // Ignore is instant, so no button ever waits on a save.
+  const busyKey: string | null = null
+  // Saves run one after another: the server rewrites the whole stored result
+  // on each, so two at once would lose one of them.
+  const saving = useRef<Promise<void>>(Promise.resolve())
+
+  // Ignore and its Undo. The screen changes at once (the cached result is
+  // edited in place, the same way the server will edit the stored one), and
+  // the save follows in the background. Waiting for the save and a reload of
+  // the whole report took 5-10 seconds a click. A failed save reloads the
+  // real result, so the screen never shows a change that didn't happen.
+  const setIgnored = (keys: string[], ignore: boolean) => {
+    if (!cycleId || keys.length === 0) return
+    const queryKey = QUERY_KEYS.PM_FINAL_REPORT(cycleId)
+    queryClient.setQueryData<FinalReport>(queryKey, (old) => {
+      if (!old?.validation) return old
+      let next = old.validation as ReportValidation
+      for (const key of keys) {
+        next = ignore
+          ? ignoreLocally(next, key, user?.full_name ?? "You")
+          : undoLocally(next, key)
+      }
+      return { ...old, validation: next }
+    })
+    saving.current = saving.current.then(async () => {
+      try {
+        for (const key of keys) {
+          await pmApi.ignoreFinding(cycleId, key, ignore)
+        }
+      } catch (err) {
+        toast.error(readError(err as MutationError, "Couldn't save that change"))
+        await queryClient.invalidateQueries({ queryKey })
+      }
+    })
+  }
   const {
     figures_total: total,
     figures_traced: traced,
@@ -58,6 +144,40 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
   const titleOf = (code: string) =>
     validation.sections?.[code]?.title || prettifyCode(code)
 
+  // The findings of one kind the PM ignored, for the card's list at the
+  // bottom (where Undo lives).
+  const ignored = validation.ignored ?? {}
+  // Ignored since this check ran, so still undoable on screen. Once the PM
+  // validates again, everything ignored before is simply gone - no list, no
+  // count, no trace.
+  const checkedAt = Date.parse(validation.validated_at)
+  const recentIgnored: Record<string, IgnoredFinding> = {}
+  for (const [key, entry] of Object.entries(ignored)) {
+    if (Date.parse(entry.at) > checkedAt) recentIgnored[key] = entry
+  }
+  const ignoredOf = (kind: string): IgnoredRow[] =>
+    Object.entries(recentIgnored)
+      .filter(([, entry]) => entry.kind === kind)
+      .map(([key, entry]) => {
+        const finding = entry.findings?.[0] ?? {}
+        return {
+          key,
+          label: ignoredLabel(kind, key, finding, titleOf),
+          detail: finding.detail ?? "",
+          by: entry.by,
+          at: entry.at,
+        }
+      })
+  const ignoredNote = (count: number) => (count > 0 ? ` ${count} ignored.` : "")
+
+  // Concept messages no section carries, minus the ones the PM ignored. They
+  // have no list in the stored result (they are read off the coverage
+  // numbers), so the page leaves the ignored ones out itself.
+  const conceptKey = (title: string) => `concept:${title.trim()}`
+  const uncarried = (validation.coverage?.secondary ?? [])
+    .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
+    .filter((m) => m.sections === 0 && !ignored[conceptKey(m.title)])
+
   const repeatedSections = new Set(
     validation.redundancy.flatMap((r) => r.sections),
   ).size
@@ -69,13 +189,53 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
     ),
   ).size
 
+  // The Fix action for each finding. Empty when fixing is off. The Executive
+  // Summary never gets one: it is rewritten at every assembly (see the note
+  // `Group` shows instead).
+  const editFix = (code: string, label = "Fix"): FixAction[] =>
+    canFix && code !== VALIDATION_SUMMARY_CODE ? [{ kind: "edit", sectionCode: code, label }] : []
+  const aiFix = (code: string, instruction: string): FixAction[] => {
+    if (!canFix || code === VALIDATION_SUMMARY_CODE) return []
+    if (aiSections && !aiSections.has(code)) {
+      return [{ kind: "edit", sectionCode: code, label: "Fix", instruction }]
+    }
+    return [{ kind: "ai", sectionCode: code, label: "Fix with AI", instruction }]
+  }
+  const chooseFix = (text: string, instruction: string, manual = false): FixAction[] =>
+    canFix ? [{ kind: "choose", text, instruction, manual }] : []
+  // An uncovered ask or message belongs to no section until the PM picks one
+  // in the pop-up; that choice is saved, so the row can show Fixed once that
+  // section is edited.
+  const chosenFor = (text: string): string[] => {
+    const code = validation.chosen_sections?.[text.trim()]
+    return code ? [code] : []
+  }
+
+  // Every banned word in a section goes into one instruction, so one click
+  // fixes the lot rather than one word per refine.
+  const bannedBySection = new Map<string, string[]>()
+  for (const v of voiceFindings) {
+    const words = bannedBySection.get(v.section_code) ?? []
+    if (!words.includes(v.phrase)) words.push(v.phrase)
+    bannedBySection.set(v.section_code, words)
+  }
+
+  // What the "pick any section" list offers: every read section bar the summary.
+  const pickable = Object.entries(validation.sections ?? {})
+    .filter(([code]) => code !== VALIDATION_SUMMARY_CODE)
+    .map(([code, review]) => ({ section_code: code, title: review.title || prettifyCode(code) }))
+
   const groups: FindingGroup[] = [
     {
       key: "untraced",
       title: "Figures with no recorded source",
       why:
         "Not in any department's submission, and not in any document uploaded to this cycle.",
-      items: bySentence(validation.untraced),
+      ignored: ignoredOf("untraced"),
+      items: bySentence(validation.untraced).map((item) => ({
+        ...item,
+        fixes: editFix(item.codes?.[0] ?? ""),
+      })),
       count: validation.untraced.length,
       percent: bySource && total ? Math.round((bySource.neither / total) * 100) : null,
       reason: bySource
@@ -93,10 +253,14 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: checked
         ? `${instructionSections} of the ${checked} sections checked still ${instructionSections === 1 ? "carries" : "carry"} ${validation.instruction_text.length} such line${validation.instruction_text.length === 1 ? "" : "s"}.`
         : `${validation.instruction_text.length} line${validation.instruction_text.length === 1 ? "" : "s"} describe what to write rather than what happened.`,
+      ignored: ignoredOf("instruction_text"),
       items: validation.instruction_text.map((i) => ({
         where: i.title || i.section_code,
         lead: [],
         detail: i.line,
+        codes: [i.section_code],
+        fixes: editFix(i.section_code),
+        ignoreKeys: keysOf(i.key),
       })),
     },
     {
@@ -109,10 +273,18 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: measures
         ? `${validation.conflicts.length} of the ${measures} measures the check identified ${validation.conflicts.length === 1 ? "carries" : "carry"} more than one value.`
         : `${validation.conflicts.length} measure${validation.conflicts.length === 1 ? " carries" : "s carry"} more than one value across the report.`,
+      ignored: ignoredOf("conflicts"),
       items: validation.conflicts.map((c) => ({
         where: c.measure,
         lead: [],
         detail: c.detail,
+        codes: (c.sections ?? []).map((s) => s.section_code),
+        ignoreKeys: keysOf(c.key),
+        // One button per section involved: the PM decides which number is
+        // right and fixes the other.
+        fixes: (c.sections ?? []).flatMap((s) =>
+          editFix(s.section_code, `Fix ${s.title || prettifyCode(s.section_code)}`),
+        ),
       })),
     },
     {
@@ -125,10 +297,14 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: validation.brief_asks_total
         ? `${validation.brief_gaps.length} of the ${validation.brief_asks_total} explicit asks in the strategic brief ${validation.brief_gaps.length === 1 ? "is" : "are"} covered by no section.`
         : `${validation.brief_gaps.length} thing${validation.brief_gaps.length === 1 ? "" : "s"} the brief asks for that no section covers.`,
+      ignored: ignoredOf("brief_gaps"),
       items: validation.brief_gaps.map((b) => ({
         where: b.ask,
         lead: [],
         detail: b.detail,
+        codes: chosenFor(b.ask),
+        fixes: chooseFix(b.ask, briefAskTodo(b.ask), true),
+        ignoreKeys: keysOf(b.key),
       })),
     },
     {
@@ -145,11 +321,21 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: checked
         ? `${repeatedSections} of the ${checked} sections checked ${repeatedSections === 1 ? "repeats" : "repeat"} a point another section already makes.`
         : `${validation.redundancy.length} point${validation.redundancy.length === 1 ? " appears" : "s appear"} in more than one section.`,
-      items: validation.redundancy.map((r) => ({
-        where: r.sections.map(titleOf).join(", "),
-        lead: [],
-        detail: r.detail,
-      })),
+      ignored: ignoredOf("redundancy"),
+      items: validation.redundancy.map((r) => {
+        // The later section gives the repeated point up; the first one to make
+        // it keeps it.
+        const target = r.sections[r.sections.length - 1] ?? ""
+        const others = r.sections.filter((code) => code !== target).map(titleOf)
+        return {
+          where: r.sections.map(titleOf).join(", "),
+          lead: [],
+          detail: r.detail,
+          codes: [target],
+          fixes: aiFix(target, redundancyInstruction(others, r.detail)),
+          ignoreKeys: keysOf(r.key),
+        }
+      }),
     },
     {
       key: "voice",
@@ -162,30 +348,31 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
       reason: toneBase
         ? `${voiceSections} of the ${toneBase} sections your house style governs ${voiceSections === 1 ? "uses" : "use"} a word its rules forbid.`
         : `${voiceFindings.length} use${voiceFindings.length === 1 ? "" : "s"} of a word the company's stored rules forbid.`,
+      ignored: ignoredOf("voice"),
       items: voiceFindings.map((v) => ({
         where: v.title || v.section_code,
         lead: [v.phrase],
         detail: "",
+        codes: [v.section_code],
+        fixes: aiFix(v.section_code, bannedWordsInstruction(bannedBySection.get(v.section_code) ?? [v.phrase])),
+        ignoreKeys: keysOf(v.key),
       })),
     },
     {
       key: "uncarried",
       title: "Concept messages no section carries",
       why: "Chosen for the report, then never picked up by any section.",
-      percent: messages
-        ? Math.round(
-            ((validation.coverage?.secondary ?? [])
-              .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
-              .filter((m) => m.sections === 0).length /
-              messages) *
-              100,
-          )
-        : null,
+      percent: messages ? Math.round((uncarried.length / messages) * 100) : null,
       reason: `Of the ${messages} concept message${messages === 1 ? "" : "s"} chosen for this report, these appear in none of the ${conceptBase} sections a concept message can apply to.`,
-      items: (validation.coverage?.secondary ?? [])
-        .concat(validation.coverage?.primary ? [validation.coverage.primary] : [])
-        .filter((m) => m.sections === 0)
-        .map((m) => ({ where: m.title, lead: [], detail: "" })),
+      ignored: ignoredOf("concepts"),
+      items: uncarried.map((m) => ({
+        where: m.title,
+        lead: [],
+        detail: "",
+        codes: chosenFor(m.title),
+        fixes: chooseFix(m.title, conceptInstruction(m.title)),
+        ignoreKeys: [conceptKey(m.title)],
+      })),
     },
   ]
     // A finding whose `detail` never arrived. The strategic-brief judgement is
@@ -197,8 +384,11 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
     .map((g) => ({
       ...g,
       items: g.items.map((item) => ({ ...item, detail: item.detail ?? "" })),
+      reason: g.reason && g.ignored ? g.reason + ignoredNote(g.ignored.length) : g.reason,
     }))
-    .filter((g) => g.items.length > 0)
+    // A card whose findings were all ignored still shows, so they can be
+    // undone.
+    .filter((g) => g.items.length > 0 || (g.ignored?.length ?? 0) > 0)
 
   const problems = groups.reduce((n, g) => n + (g.count ?? g.items.length), 0)
 
@@ -220,13 +410,40 @@ export function ValidationPanel({ validation }: { validation: ReportValidation }
         />
       )}
 
-      <Coverage validation={validation} />
+      <Coverage
+        validation={validation}
+        cycleId={canFix ? cycleId : undefined}
+        edited={edited}
+        aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={setIgnored}
+      />
 
       <BriefCoverage validation={validation} />
 
       {groups.map((g) => (
-        <Group key={g.key} group={g} />
+        <Group
+          key={g.key}
+          group={g}
+          cycleId={cycleId}
+          canFix={canFix}
+          edited={edited}
+          onChoose={setChoosing}
+          busyKey={busyKey}
+          onIgnore={setIgnored}
+        />
       ))}
+
+      {cycleId && (
+        <ChooseSectionDialog
+          cycleId={cycleId}
+          target={choosing}
+          sections={pickable}
+          onClose={() => setChoosing(null)}
+        />
+      )}
 
       {problems === 0 && unchecked.length === 0 && (
         <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-5 py-4">
@@ -338,6 +555,16 @@ function Score({
             {bySource.document.toLocaleString()}
           </strong>{" "}
           from a filed document
+          {/* Shown only when there are any, so a report without them reads as before. */}
+          {!!bySource.pm && (
+            <>
+              {" "}&middot;{" "}
+              <strong className="font-semibold text-[#1A1D2E]">
+                {bySource.pm.toLocaleString()}
+              </strong>{" "}
+              entered by the PM
+            </>
+          )}
         </p>
       )}
 
@@ -360,8 +587,24 @@ function Score({
    section as not carrying the message when nobody looked at it. */
 function Coverage({
   validation,
+  cycleId,
+  edited,
+  aiSections,
+  ignored,
+  recentIgnored,
+  busyKey,
+  onIgnore,
 }: {
   validation: ReportValidation
+  /** Set only when fixing is allowed: adds the "could carry it" fix line. */
+  cycleId?: string
+  edited: Set<string>
+  aiSections?: Set<string>
+  ignored: Record<string, IgnoredFinding>
+  /** Ignored since this check: still shown, with Undo. */
+  recentIgnored: Record<string, IgnoredFinding>
+  busyKey: string | null
+  onIgnore: (keys: string[], ignored: boolean) => void
 }) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
@@ -393,6 +636,65 @@ function Coverage({
         (review.concepts ?? []).some((c) => (c ?? "").trim().toLowerCase() === wanted),
       )
       .map(([code, review]) => review.title || prettifyCode(code))
+  }
+
+  // The sections a concept message applies to but that don't carry it - the
+  // gap between "7 of 9" and 9 of 9. Unread and table-only sections are left
+  // out (nobody looked / nothing to add to), and so is the Executive Summary,
+  // which is rewritten at assembly rather than edited.
+  const notCarrying = (title: string) => {
+    const wanted = title.trim().toLowerCase()
+    const conceptExempt = new Set(excluded.filter((e) => !e.concept).map((e) => e.section_code))
+    return Object.entries(reviews)
+      .filter(
+        ([code, review]) =>
+          code !== VALIDATION_SUMMARY_CODE &&
+          !review.data_only &&
+          !conceptExempt.has(code) &&
+          review.applies?.concept !== false &&
+          !(review.concepts ?? []).some((c) => (c ?? "").trim().toLowerCase() === wanted),
+      )
+      .map(([code, review]) => ({ code, title: review.title || prettifyCode(code) }))
+  }
+  const fixLine = (messages: { title: string }[]) =>
+    cycleId ? (
+      <NotCarrying
+        cycleId={cycleId}
+        edited={edited}
+        aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={onIgnore}
+        rows={messages.map((m) => ({ message: m.title, sections: notCarrying(m.title) }))}
+      />
+    ) : null
+
+  // A section passes the secondary score by carrying any one secondary
+  // message, so only a section missing every one of them is a gap. Offering a
+  // fix for a section that already carries another one read as an error on a
+  // 100% card.
+  const secondaryFixLine = () => {
+    const missingAll = new Set(
+      Object.keys(reviews).filter((code) =>
+        coverage.secondary.every((m) => notCarrying(m.title).some((s) => s.code === code)),
+      ),
+    )
+    return cycleId ? (
+      <NotCarrying
+        cycleId={cycleId}
+        edited={edited}
+        aiSections={aiSections}
+        ignored={ignored}
+        recentIgnored={recentIgnored}
+        busyKey={busyKey}
+        onIgnore={onIgnore}
+        rows={coverage.secondary.map((m) => ({
+          message: m.title,
+          sections: notCarrying(m.title).filter((s) => missingAll.has(s.code)),
+        }))}
+      />
+    ) : null
   }
 
   // Sections a tone rule was broken in, by either check - and only sections
@@ -438,6 +740,7 @@ function Coverage({
         }
         evidence={primary ? [{ label: primary.title, sections: carriers(primary.title) }] : []}
         excluded={notCounted("concept")}
+        footer={primary ? fixLine([primary]) : null}
       />
       <Stat
         label="Secondary concept messages"
@@ -453,6 +756,7 @@ function Coverage({
           label: m.title,
           sections: carriers(m.title),
         }))}
+        footer={count ? secondaryFixLine() : null}
       />
       </>
       )}
@@ -1114,6 +1418,98 @@ interface FindingItem {
   /** Short values shown as chips, when the finding is about particular ones. */
   lead: string[]
   detail: string
+  /** The section(s) the finding is in, for the "edited since" check. */
+  codes?: string[]
+  /** What the PM can do about it. Empty or absent = no button. */
+  fixes?: FixAction[]
+  /** The finding's key(s), sent back to ignore it. A sentence with three
+   *  untraced figures is one row and three keys. */
+  ignoreKeys?: string[]
+}
+
+/** A finding the PM ignored, as its card lists it. */
+interface IgnoredRow {
+  key: string
+  label: string
+  detail: string
+  by: string
+  at: string
+}
+
+// The result list each key prefix lives in; the last two have no list.
+const IGNORE_KINDS: Record<string, string> = {
+  conflict: "conflicts",
+  redundancy: "redundancy",
+  voice: "voice",
+  untraced: "untraced",
+  instruction: "instruction_text",
+  brief: "brief_gaps",
+  concept: "concepts",
+  carry: "carrying",
+}
+
+/* The result with one finding ignored, as the server will store it: its
+   finding(s) leave their list and are kept under `ignored`. */
+function ignoreLocally(
+  validation: ReportValidation,
+  key: string,
+  by: string,
+): ReportValidation {
+  const kind = IGNORE_KINDS[key.slice(0, key.indexOf(":"))]
+  if (!kind || validation.ignored?.[key]) return validation
+  const lists = validation as unknown as Record<string, unknown>
+  const list = Array.isArray(lists[kind]) ? (lists[kind] as { key?: string }[]) : null
+  const findings = list ? list.filter((f) => f.key === key) : []
+  const next: Record<string, unknown> = {
+    ...validation,
+    ignored: {
+      ...validation.ignored,
+      [key]: { kind, findings, by, at: new Date().toISOString() },
+    },
+  }
+  if (list) next[kind] = list.filter((f) => f.key !== key)
+  return next as unknown as ReportValidation
+}
+
+/* The result with one ignore undone: its finding(s) go back to their list. */
+function undoLocally(validation: ReportValidation, key: string): ReportValidation {
+  const entry = validation.ignored?.[key]
+  if (!entry) return validation
+  const rest = { ...validation.ignored }
+  delete rest[key]
+  const next: Record<string, unknown> = { ...validation, ignored: rest }
+  const lists = validation as unknown as Record<string, unknown>
+  if (Array.isArray(lists[entry.kind])) {
+    next[entry.kind] = [...(lists[entry.kind] as unknown[]), ...(entry.findings ?? [])]
+  }
+  return next as unknown as ReportValidation
+}
+
+/** A finding's key as a list, empty on validations stored before keys. */
+function keysOf(key: string | undefined): string[] {
+  return key ? [key] : []
+}
+
+/* What an ignored finding is called in its card's "Ignored" list. */
+function ignoredLabel(
+  kind: string,
+  key: string,
+  finding: IgnoredFinding["findings"][number],
+  titleOf: (code: string) => string,
+): string {
+  const where = finding.title || (finding.section_code ? titleOf(finding.section_code) : "")
+  if (kind === "conflicts") return finding.measure || "Figure"
+  if (kind === "redundancy") {
+    return (finding.sections ?? [])
+      .map((s) => (typeof s === "string" ? titleOf(s) : s.title || titleOf(s.section_code)))
+      .join(", ")
+  }
+  if (kind === "voice") return `"${finding.phrase ?? ""}" in ${where}`
+  if (kind === "untraced") return `${finding.value ?? ""} in ${where}`
+  if (kind === "instruction_text") return `${where}: ${finding.line ?? ""}`
+  if (kind === "brief_gaps") return finding.ask ?? ""
+  // A concept message has no stored finding: its title is in the key.
+  return key.slice(key.indexOf(":") + 1)
 }
 
 /* One row per sentence, carrying every untraced figure in it.
@@ -1130,8 +1526,15 @@ function bySentence(
     const row = rows.get(key)
     if (row) {
       row.lead.push(u.value)
+      if (u.key) row.ignoreKeys?.push(u.key)
     } else {
-      rows.set(key, { where, lead: [u.value], detail })
+      rows.set(key, {
+        where,
+        lead: [u.value],
+        detail,
+        codes: [u.section_code],
+        ignoreKeys: u.key ? [u.key] : [],
+      })
     }
   }
   return [...rows.values()]
@@ -1154,12 +1557,32 @@ interface FindingGroup {
   /** How the count and the percentage were arrived at, in one sentence. A
    *  number the reader cannot reconstruct is a number they have to trust. */
   reason?: string
+  /** Findings of this kind the PM ignored. */
+  ignored?: IgnoredRow[]
 }
 
 /* Collapsed by default past a handful. One group ran to 364 rows on a real
    report, which buried the other five groups entirely — the PM could not see
    there was anything else wrong. */
-function Group({ group }: { group: FindingGroup }) {
+function Group({
+  group,
+  cycleId,
+  canFix,
+  edited,
+  onChoose,
+  busyKey,
+  onIgnore,
+}: {
+  group: FindingGroup
+  cycleId?: string
+  canFix: boolean
+  /** Sections edited since the check. */
+  edited: Set<string>
+  onChoose: (target: ChooseTarget) => void
+  /** The finding whose Ignore or Undo is saving. */
+  busyKey: string | null
+  onIgnore: (keys: string[], ignored: boolean) => void
+}) {
   const total = group.count ?? group.items.length
   const blocks = byWhere(group.items)
 
@@ -1228,25 +1651,45 @@ function Group({ group }: { group: FindingGroup }) {
       {/* Capped and scrolled rather than allowed to run: one card held 80
           findings and pushed every other card off the screen. */}
       <ul className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto">
-        {blocks.map((block) => (
-          <li key={block.where} className="px-5 py-3">
-            <button
-              onClick={() => toggle(block.where)}
-              className="flex w-full items-center gap-1.5 text-left"
-            >
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform",
-                  !openSections.has(block.where) && "-rotate-90",
-                )}
-              />
-              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                {block.where}
-              </span>
-              <span className="text-[11px] font-semibold text-slate-300">
-                {block.items.length}
-              </span>
-            </button>
+        {blocks.map((block) => {
+          const codes = [...new Set(block.items.flatMap((item) => item.codes ?? []))]
+          // Greyed only when every section behind the block changed: a
+          // contradiction across two sections is not fixed by editing one.
+          const allEdited = codes.length > 0 && codes.every((code) => edited.has(code))
+          const ignoreKeys = [...new Set(block.items.flatMap((item) => item.ignoreKeys ?? []))]
+          return (
+          <li key={block.where} className={cn("px-5 py-3", allEdited && "bg-emerald-50/50")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => toggle(block.where)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform",
+                    !openSections.has(block.where) && "-rotate-90",
+                  )}
+                />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  {block.where}
+                </span>
+                <span className="text-[11px] font-semibold text-slate-300">
+                  {block.items.length}
+                </span>
+              </button>
+              {allEdited ? (
+                // "Fixed" by request, but it only means the section changed
+                // since the check - the hover says so, and the next validation
+                // is what confirms it.
+                <span
+                  title="This section was edited after the check. Re-assemble & validate to confirm."
+                  className="inline-flex cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800"
+                >
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                  Fixed
+                </span>
+              ) : null}
+            </div>
 
             <div
               className={cn(
@@ -1303,9 +1746,288 @@ function Group({ group }: { group: FindingGroup }) {
                 )
               })}
             </div>
+
+            {/* Under the finding, always in the same place. Beside the title,
+                long section names pushed some buttons onto their own lines and
+                left others on the right. Shown even when the block is closed. */}
+            {!allEdited && canFix && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 pl-5">
+                <FixButtons
+                  fixes={uniqueFixes(block.items)}
+                  cycleId={cycleId!}
+                  onChoose={onChoose}
+                  summary={codes.includes(VALIDATION_SUMMARY_CODE)}
+                />
+                {/* Beside every Fix, for a finding the PM judges is not a
+                    problem. Grey, so it never competes with the fixes. */}
+                {ignoreKeys.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-slate-600"
+                    disabled={busyKey !== null}
+                    onClick={() => onIgnore(ignoreKeys, true)}
+                  >
+                    {busyKey === ignoreKeys[0] ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Ban className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Ignore
+                  </Button>
+                )}
+              </div>
+            )}
+          </li>
+          )
+        })}
+      </ul>
+
+      {(group.ignored?.length ?? 0) > 0 && (
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            Ignored
+          </p>
+          <ul className="mt-2 space-y-2">
+            {group.ignored!.map((row) => (
+              <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+                <span className="font-semibold text-slate-500">{row.label}</span>
+                {row.detail && (
+                  <span className="text-slate-400 line-through">{row.detail}</span>
+                )}
+                <span className="text-slate-400">
+                  &middot; {row.by} &middot; {formatDateTime(row.at)}
+                </span>
+                {canFix && (
+                  <button
+                    type="button"
+                    className="font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
+                    disabled={busyKey !== null}
+                    onClick={() => onIgnore([row.key], false)}
+                  >
+                    {busyKey === row.key ? "Undoing…" : "Undo"}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* "Not carrying it" on a concept card: the sections a message applies to but
+   doesn't appear in, each with a Fix with AI button. Optional by design - a
+   section need not carry every message, and forcing one in reads as filler -
+   so it is worded as "could carry it", never as an error. */
+function NotCarrying({
+  cycleId,
+  edited,
+  aiSections,
+  ignored,
+  recentIgnored,
+  busyKey,
+  onIgnore,
+  rows,
+}: {
+  cycleId: string
+  edited: Set<string>
+  /** As on ValidationPanel: a section outside it is fixed by hand. */
+  aiSections?: Set<string>
+  ignored: Record<string, IgnoredFinding>
+  recentIgnored: Record<string, IgnoredFinding>
+  busyKey: string | null
+  onIgnore: (keys: string[], ignored: boolean) => void
+  rows: { message: string; sections: { code: string; title: string }[] }[]
+}) {
+  // A suggestion ignored before this check is gone; one ignored since stays
+  // (crossed out, with Undo) until the next validation.
+  const keyOf = (message: string, code: string) => `carry:${message.trim()}|${code}`
+  const shown = rows
+    .map((row) => ({
+      ...row,
+      sections: row.sections.filter((s) => {
+        const key = keyOf(row.message, s.code)
+        return !ignored[key] || !!recentIgnored[key]
+      }),
+    }))
+    .filter((row) => row.sections.length > 0)
+  if (shown.length === 0) return null
+
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        Not carrying it
+        <span className="ml-1.5 font-semibold normal-case tracking-normal text-slate-300">
+          optional, these sections could carry it
+        </span>
+      </p>
+      {/* A grid, not one running sentence per message: a longer message name
+          wrapped its sections onto the next line, so no two rows lined up.
+          Message names share one column; each section gets a fixed-width
+          slot, so the buttons fall into columns. */}
+      <ul className="mt-2 space-y-2">
+        {shown.map((row) => (
+          <li
+            key={row.message}
+            className="grid gap-x-3 gap-y-1.5 text-xs sm:grid-cols-[11rem_minmax(0,1fr)]"
+          >
+            <span className="pt-1 font-semibold text-[#1A1D2E]">{row.message}</span>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {row.sections.map((s) => {
+                // One suggestion, remembered by message and section.
+                const key = keyOf(row.message, s.code)
+                const isIgnored = !!recentIgnored[key]
+                return (
+                <div key={s.code} className="flex w-[20rem] items-center justify-between gap-2">
+                  <span
+                    className={cn("truncate", isIgnored ? "text-slate-300 line-through" : "text-slate-600")}
+                    title={s.title}
+                  >
+                    {s.title}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                  {isIgnored ? (
+                    <>
+                      <span className="text-[11px] text-slate-400">Ignored</span>
+                      <button
+                        type="button"
+                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
+                        disabled={busyKey !== null}
+                        onClick={() => onIgnore([key], false)}
+                      >
+                        {busyKey === key ? "Undoing…" : "Undo"}
+                      </button>
+                    </>
+                  ) : edited.has(s.code) ? (
+                    <span
+                      title="This section was edited after the check. Re-assemble & validate to confirm."
+                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
+                    >
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                      Fixed
+                    </span>
+                  ) : (
+                    <>
+                      {aiSections && !aiSections.has(s.code) ? (
+                        <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
+                          <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message), true)}>
+                            <Pencil className="mr-1 h-3 w-3" />
+                            Fix
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" className="h-6 shrink-0 px-2 text-[11px]" asChild>
+                          <Link href={buildFixHref(cycleId, s.code, conceptInstruction(row.message))}>
+                            <Sparkles className="mr-1 h-3 w-3" />
+                            Fix with AI
+                          </Link>
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 shrink-0 px-2 text-[11px] text-slate-600"
+                        disabled={busyKey !== null}
+                        onClick={() => onIgnore([key], true)}
+                      >
+                        {busyKey === key ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Ban className="mr-1 h-3 w-3" />
+                        )}
+                        Ignore
+                      </Button>
+                    </>
+                  )}
+                  </span>
+                </div>
+                )
+              })}
+            </div>
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+/** One copy of each distinct action across a block's findings - five figures
+ *  in one section are still one "Fix". */
+function uniqueFixes(items: FindingItem[]): FixAction[] {
+  const seen = new Set<string>()
+  const out: FixAction[] = []
+  for (const fix of items.flatMap((item) => item.fixes ?? [])) {
+    const key = fix.kind === "choose" ? `choose:${fix.text}` : `${fix.kind}:${fix.sectionCode}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(fix)
+  }
+  return out
+}
+
+/* The buttons on one section row of a finding card. "Fix with AI" is the
+   filled one: the AI can do it. The rest need the PM. */
+function FixButtons({
+  fixes,
+  cycleId,
+  onChoose,
+  summary,
+}: {
+  fixes: FixAction[]
+  cycleId: string
+  onChoose: (target: ChooseTarget) => void
+  /** The finding involves the Executive Summary, which has no edit screen. */
+  summary: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {summary && (
+        <span className="text-xs text-slate-500">
+          Executive Summary: rewritten when you re-assemble
+        </span>
+      )}
+      {fixes.map((fix) => {
+        if (fix.kind === "choose") {
+          return (
+            <Button
+              key={`choose:${fix.text}`}
+              size="sm"
+              className="h-7"
+              onClick={() =>
+                onChoose({ text: fix.text, instruction: fix.instruction, manual: fix.manual })
+              }
+            >
+              {fix.manual ? (
+                <Pencil className="mr-1 h-3.5 w-3.5" />
+              ) : (
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+              )}
+              Choose section &amp; fix
+            </Button>
+          )
+        }
+        if (fix.kind === "ai") {
+          return (
+            <Button key={`ai:${fix.sectionCode}`} size="sm" className="h-7" asChild>
+              <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction)} title={fix.label}>
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                <span className="max-w-[16rem] truncate">{fix.label}</span>
+              </Link>
+            </Button>
+          )
+        }
+        return (
+          // Blue like the AI fix; the pencil (not the sparkle) says the PM does it.
+          <Button key={`edit:${fix.sectionCode}`} size="sm" className="h-7" asChild>
+            <Link href={buildFixHref(cycleId, fix.sectionCode, fix.instruction, true)} title={fix.label}>
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              <span className="max-w-[16rem] truncate">{fix.label}</span>
+            </Link>
+          </Button>
+        )
+      })}
     </div>
   )
 }

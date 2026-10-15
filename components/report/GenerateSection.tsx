@@ -284,7 +284,7 @@ function DraftingView({
           textarea mid-edit. */}
       {!editing && (
         <>
-          <SectionChat refining={refining} onRefine={onRefine} />
+          <SectionChat refining={refining} onRefine={onRefine} sectionCode={sectionCode} />
 
           <div className="flex items-center justify-end gap-2">
             <Button

@@ -1,6 +1,6 @@
 "use client"
 
-import { createElement } from "react"
+import { createContext, createElement, useContext } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeRaw from "rehype-raw"
@@ -50,6 +50,59 @@ function flattenText(node: React.ReactNode): string {
   return ""
 }
 
+/** Text to highlight in every preview below it. Only the Build page provides
+ *  one (the open section's validation findings); everywhere else it is null
+ *  and previews render exactly as before. */
+export const ProseHighlightContext = createContext<RegExp | null>(null)
+
+// Minimal hast shapes - just what the highlighter walks.
+type HastText = { type: "text"; value: string }
+type HastNode = { type: string; value?: string; children?: HastNode[] }
+
+/** Split one text node's value into plain text and <mark> pieces. */
+function splitOnMatches(value: string, pattern: RegExp): HastNode[] {
+  const pieces: HastNode[] = []
+  let last = 0
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index ?? 0
+    if (!match[0]) continue
+    if (start > last) pieces.push({ type: "text", value: value.slice(last, start) } as HastText)
+    pieces.push({
+      type: "element",
+      tagName: "mark",
+      properties: { className: ["rounded", "bg-amber-200", "px-0.5", "text-inherit"] },
+      children: [{ type: "text", value: match[0] } as HastText],
+    } as HastNode)
+    last = start + match[0].length
+  }
+  if (pieces.length === 0) return [{ type: "text", value } as HastText]
+  if (last < value.length) pieces.push({ type: "text", value: value.slice(last) } as HastText)
+  return pieces
+}
+
+/** Wrap matches in every text node under `node`, in place. */
+function highlightTree(node: HastNode, pattern: RegExp): void {
+  if (!node.children) return
+  const next: HastNode[] = []
+  for (const child of node.children) {
+    if (child.type === "text") {
+      next.push(...splitOnMatches(child.value ?? "", pattern))
+    } else {
+      highlightTree(child, pattern)
+      next.push(child)
+    }
+  }
+  node.children = next
+}
+
+/* A rehype step that marks matches AFTER sanitizing. Adding <mark> tags to the
+ * markdown instead would need the sanitizer to allow them, and could land
+ * inside markdown syntax (a link, a table cell's pipes). Touching only text
+ * nodes cannot break either. */
+function rehypeHighlight(options: { pattern: RegExp }) {
+  return (tree: HastNode) => highlightTree(tree, options.pattern)
+}
+
 // Build a heading-demotion renderer for the given content. The shallowest
 // heading the author used is mapped to <h3> so section content never out-sizes
 // the section title above it; deeper headings step down from there (capped at
@@ -89,6 +142,7 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
   const trimmed = content.trim()
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
   const style = dir === "rtl" ? { textAlign: "right" as const } : undefined
+  const highlight = useContext(ProseHighlightContext)
   return looksLikeHtml ? (
     // Through the SAME pipeline as the markdown branch, not
     // dangerouslySetInnerHTML. rehypeRaw materialises the HTML and
@@ -120,7 +174,11 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
             // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)
             // into real elements; rehypeSanitize then strips anything unsafe so only
             // benign markup survives. Order matters: raw must run before sanitize.
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, SCHEMA]]}
+            rehypePlugins={
+              highlight
+                ? [rehypeRaw, [rehypeSanitize, SCHEMA], [rehypeHighlight, { pattern: highlight }]]
+                : [rehypeRaw, [rehypeSanitize, SCHEMA]]
+            }
             components={makeHeadingRenderer(md)}
           >
             {md}

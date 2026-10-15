@@ -2,7 +2,9 @@
 
 import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, ShieldCheck } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { ArrowLeft, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
@@ -12,12 +14,46 @@ import { PageLoader } from "@/components/ui/spinner"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import { ValidationPanel } from "@/components/report/ValidationPanel"
 import {
+  readError,
   useFinalReport,
+  usePMCycleSections,
   useReportApproval,
   useValidateReport,
+  type MutationError,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { pmApi } from "@/lib/api/pm"
+import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
+import type { FinalReport } from "@/types"
+
+// Same pace and patience as the builder's Assemble button (AssembleEntry).
+const POLL_INTERVAL_MS = 3_000
+const POLL_GIVE_UP_MS = 8 * 60_000
+
+/**
+ * Wait for a re-assembly started in the background to save its report.
+ *
+ * @param previousGeneratedAt The report's `generated_at` before the run started.
+ * @returns The newly saved report.
+ * @throws When no new report appears in time.
+ */
+async function waitForNewAssembly(
+  cycleId: string,
+  previousGeneratedAt: string | null,
+): Promise<FinalReport> {
+  const giveUpAt = Date.now() + POLL_GIVE_UP_MS
+  while (Date.now() < giveUpAt) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+    try {
+      const report = await pmApi.getFinalReport(cycleId)
+      if (report.generated_at && report.generated_at !== previousGeneratedAt) return report
+    } catch {
+      // not saved yet
+    }
+  }
+  throw new Error("Re-assembling didn't finish. Please try again.")
+}
 
 /* The validation findings, on their own page.
  *
@@ -48,6 +84,16 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // Report page states. Overwriting it would leave the file and the screen
   // disagreeing about a document nobody can change.
   const locked = !!approval?.locked
+  // Sections with an AI refine box. Extract and manual sections have none, so
+  // their fixes open by hand. Undefined until loaded, which offers the AI fix.
+  const sectionsQuery = usePMCycleSections(cycleId)
+  const aiSections = sectionsQuery.data
+    ? new Set(
+        sectionsQuery.data
+          .filter((s) => s.mode === "generate" || s.mode === "analyze")
+          .map((s) => s.section_code),
+      )
+    : undefined
 
   // Fire once. The ref, not isPending: pending is still false on the render
   // that schedules the call, and React runs effects twice in dev — without it
@@ -81,6 +127,29 @@ function ValidationView({ cycleId }: { cycleId: string }) {
     validate.mutate(undefined, { onSettled: () => setRunning(false) })
   }
 
+  // After fixes: rebuild the report from the edited sections (which also
+  // rewrites the Executive Summary), then check it again. Two existing steps
+  // in one click - refresh: true is what makes assembling a rebuild.
+  const qc = useQueryClient()
+  const [reassembling, setReassembling] = useState(false)
+  const reassembleAndValidate = async () => {
+    setReassembling(true)
+    const previousGeneratedAt = reportQuery.data?.generated_at ?? null
+    try {
+      await pmApi.startAssemble(cycleId, true)
+      const report = await waitForNewAssembly(cycleId, previousGeneratedAt)
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+    } catch (err) {
+      toast.error(readError(err as MutationError, "Couldn't re-assemble the report."))
+      setReassembling(false)
+      return
+    }
+    setReassembling(false)
+    run()
+  }
+
   // No give-up timer any more. The run is polled (validateReport starts a job
   // and re-reads it every few seconds), so the loader ends when the job does:
   // completed, failed, or reported failed by the server after 20 minutes. A
@@ -100,10 +169,28 @@ function ValidationView({ cycleId }: { cycleId: string }) {
 
   // Prefer the run just finished; fall back to what the server stored. The
   // server has already discarded a validation that predates this assembly.
-  const validation = validate.data?.validation ?? reportQuery.data?.validation ?? null
+  // The run's own result only until the reloaded report catches up with it.
+  // After that the report's copy is shown: it is the one Ignore edits, so an
+  // Ignore made on the run's copy changed nothing on screen.
+  const fromRun = validate.data?.validation ?? null
+  const fromReport = reportQuery.data?.validation ?? null
+  const reportIsBehind =
+    !!fromRun &&
+    (!fromReport || Date.parse(fromReport.validated_at) < Date.parse(fromRun.validated_at))
+  const validation = reportIsBehind ? fromRun : fromReport
 
+  if (reassembling) return <ReportValidateLoader stage="Re-assembling the report with your edits" />
   if (running) return <ReportValidateLoader stage={validate.stage} />
   if (reportQuery.isLoading) return <PageLoader />
+
+  const editedCount = validation?.edited_since_check?.length ?? 0
+  // Findings ignored since this check. Some scores (house style) are worked
+  // out during validation, so the PM is told to validate again.
+  const ignoredCount = validation
+    ? Object.values(validation.ignored ?? {}).filter(
+        (entry) => Date.parse(entry.at) > Date.parse(validation.validated_at),
+      ).length
+    : 0
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
@@ -141,8 +228,45 @@ function ValidationView({ cycleId }: { cycleId: string }) {
         />
       </div>
 
+      {validation && editedCount > 0 && !locked && (
+        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+          <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          <div className="min-w-0 flex-[999_1_320px]">
+            <p className="text-sm font-bold text-blue-900">
+              You edited {editedCount} section{editedCount === 1 ? "" : "s"} since this check
+            </p>
+            <p className="mt-0.5 text-sm text-blue-800">
+              These results describe the report before your edits. Re-assemble and validate to see the new score.
+            </p>
+          </div>
+          <Button onClick={reassembleAndValidate}>Re-assemble &amp; validate</Button>
+        </div>
+      )}
+
+      {/* Only when no section was edited: that notice's button already
+          validates again, and two blue boxes saying so is one too many. */}
+      {validation && ignoredCount > 0 && editedCount === 0 && !locked && (
+        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
+          <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          <div className="min-w-0 flex-[999_1_320px]">
+            <p className="text-sm font-bold text-blue-900">
+              You ignored {ignoredCount} finding{ignoredCount === 1 ? "" : "s"} since this check
+            </p>
+            <p className="mt-0.5 text-sm text-blue-800">
+              Validate again to update the scores.
+            </p>
+          </div>
+          <Button onClick={run}>Validate again</Button>
+        </div>
+      )}
+
       {validation ? (
-        <ValidationPanel validation={validation} />
+        <ValidationPanel
+          validation={validation}
+          cycleId={cycleId}
+          locked={locked}
+          aiSections={aiSections}
+        />
       ) : (
         <EmptyState
           icon={ShieldCheck}
