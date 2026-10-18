@@ -8,6 +8,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import { cn } from "@/lib/utils"
 import { normalizeMarkdownTables } from "@/lib/report-format"
 import { headingAnchorId } from "@/lib/sectionOutline"
+import { rehypeChangeMarks } from "@/lib/undo-diff"
 
 /** The default schema drops `class` and `style`, which would flatten every
  *  assembled report rendered through here — the report builder's HTML carries
@@ -30,6 +31,9 @@ interface ProsePreviewProps {
   // which lets the browser pick per content when the caller has no cycle
   // language to hand.
   dir?: "ltr" | "rtl" | "auto"
+  /** The content carries markChanges' marks (the Undo pop-up): show them as
+   *  green / red-crossed-out text. */
+  changeMarks?: boolean
 }
 
 // Crude detector — same pattern as the dept draft + PM session pages. If the
@@ -138,7 +142,12 @@ function makeHeadingRenderer(content: string): Components {
   }
 }
 
-export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewProps) {
+export function ProsePreview({
+  content,
+  className,
+  dir = "auto",
+  changeMarks = false,
+}: ProsePreviewProps) {
   const trimmed = content.trim()
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
   const style = dir === "rtl" ? { textAlign: "right" as const } : undefined
@@ -175,9 +184,11 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
             // into real elements; rehypeSanitize then strips anything unsafe so only
             // benign markup survives. Order matters: raw must run before sanitize.
             rehypePlugins={
-              highlight
-                ? [rehypeRaw, [rehypeSanitize, SCHEMA], [rehypeHighlight, { pattern: highlight }]]
-                : [rehypeRaw, [rehypeSanitize, SCHEMA]]
+              changeMarks
+                ? [rehypeRaw, [rehypeSanitize, SCHEMA], rehypeChangeMarks]
+                : highlight
+                  ? [rehypeRaw, [rehypeSanitize, SCHEMA], [rehypeHighlight, { pattern: highlight }]]
+                  : [rehypeRaw, [rehypeSanitize, SCHEMA]]
             }
             components={makeHeadingRenderer(md)}
           >

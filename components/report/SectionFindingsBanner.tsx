@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, ArrowLeft } from "lucide-react"
 
 /* What the last validation found in the section open on the Build page.
  *
@@ -59,8 +59,9 @@ export function SectionFindingsBanner({
         </div>
         <Link
           href={`/pm/cycles/${cycleId}/validation`}
-          className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
         >
+          <ArrowLeft className="h-3.5 w-3.5" />
           Back to validation
         </Link>
       </div>

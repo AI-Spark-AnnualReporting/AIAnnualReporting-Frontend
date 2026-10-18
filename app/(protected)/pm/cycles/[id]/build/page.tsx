@@ -292,6 +292,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
                   cycleId={cycleId}
                   stale={stale}
                   reportLocked={reportLocked}
+                  hasFindings={!!effectiveCode && (findings[effectiveCode]?.length ?? 0) > 0}
                   contentLanguage={contentLanguage}
                   isRtl={isRtl}
                 />

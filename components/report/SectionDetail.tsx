@@ -278,6 +278,7 @@ export function SectionDetail({
   cycleId,
   stale = false,
   reportLocked = false,
+  hasFindings = false,
   contentLanguage = "english",
   isRtl = false,
 }: {
@@ -289,6 +290,10 @@ export function SectionDetail({
   // The report has been signed off. Every write path 409s, so nothing is
   // editable.
   reportLocked?: boolean
+  // The last validation found something in this section. It is being fixed,
+  // so the start-over buttons (Regenerate, Re-run Analysis) are hidden: a
+  // fresh draft would make the findings meaningless.
+  hasFindings?: boolean
   contentLanguage?: ContentLanguage
   isRtl?: boolean
 }) {
@@ -322,6 +327,7 @@ export function SectionDetail({
     <SectionPanel
       section={section}
       cycleId={cycleId}
+      hasFindings={hasFindings}
       contentLanguage={contentLanguage}
       isRtl={isRtl}
     />
@@ -361,11 +367,13 @@ function StaleReportNotice() {
 function SectionPanel({
   section,
   cycleId,
+  hasFindings,
   contentLanguage,
   isRtl,
 }: {
   section: CycleReportSection
   cycleId: string
+  hasFindings: boolean
   contentLanguage: ContentLanguage
   isRtl?: boolean
 }) {
@@ -382,7 +390,7 @@ function SectionPanel({
   // Analyze-mode: structured Markdown findings from the analyze agent. No
   // document — department digests are the source. Locks like generate.
   if (section.mode === "analyze") {
-    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
+    return <AnalyzeSection section={section} cycleId={cycleId} hasFindings={hasFindings} contentLanguage={contentLanguage} isRtl={isRtl} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based
@@ -414,7 +422,7 @@ function SectionPanel({
   // branch above catches every manual section.
   switch (section.mode) {
     case "generate":
-      return <GenerateSection section={section} cycleId={cycleId} isRtl={isRtl} />
+      return <GenerateSection section={section} cycleId={cycleId} hasFindings={hasFindings} isRtl={isRtl} />
     case "attach":
       return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
     case "auto":

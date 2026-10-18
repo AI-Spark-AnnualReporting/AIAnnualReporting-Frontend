@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { AlertTriangle, FileCheck, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
@@ -113,7 +112,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
     qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
     qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-    toast.success("Report assembled")
+    // No toast: the loader's own "Your report is assembled" already says it.
     setPhase("done")
   }
 
@@ -212,7 +211,9 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     )
   }
 
-  if (readinessQuery.isLoading) {
+  // Wait for both: without the final report we can't tell "Assemble Report"
+  // from "View Report", and guessing showed the wrong button while it loaded.
+  if (readinessQuery.isLoading || finalReportQuery.isLoading) {
     return (
       <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
@@ -223,9 +224,11 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   const { can_assemble, ready, total, incomplete_sections, stale } = readiness
 
-  // Use the final-report query as the source of truth for whether a report
-  // exists — assembly-readiness may not return has_final_report reliably.
-  const hasReport = finalReportQuery.isSuccess
+  // A report exists if it loaded, or if readiness calls it stale: the server
+  // only says stale when there is an assembled report to be out of date. The
+  // second half keeps this button in step with the builder's "Assemble again"
+  // banner (same `stale` flag) even when the final-report fetch failed.
+  const hasReport = finalReportQuery.isSuccess || stale
 
   // A report exists and nothing has changed since → nothing to do but read it.
   if (hasReport && !stale) {

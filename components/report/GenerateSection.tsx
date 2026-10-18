@@ -16,6 +16,7 @@ import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { SectionUndo } from "@/components/report/UndoChangeButton"
 import {
   useGenerateSection,
   usePlan,
@@ -34,10 +35,13 @@ interface DashboardData {
 export function GenerateSection({
   section,
   cycleId,
+  hasFindings = false,
   isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  /** Being fixed from validation findings: no Regenerate (see SectionDetail). */
+  hasFindings?: boolean
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
@@ -90,7 +94,7 @@ export function GenerateSection({
               regenerating={generate.isPending}
               refining={refine.isPending}
               isRtl={isRtl}
-              onRegenerate={() => setRegenOpen(true)}
+              onRegenerate={hasFindings ? undefined : () => setRegenOpen(true)}
               onRefine={(instruction) =>
                 refine.mutate({ sectionCode, instruction })
               }
@@ -203,7 +207,8 @@ function DraftingView({
   regenerating: boolean
   refining: boolean
   isRtl: boolean
-  onRegenerate: () => void
+  /** Left out while the section is being fixed: Regenerate is hidden. */
+  onRegenerate?: () => void
   onRefine: (instruction: string) => void
 }) {
   const save = useSaveGenerateContent(cycleId)
@@ -227,17 +232,20 @@ function DraftingView({
           {editing ? "Editing section" : "Draft"}
         </p>
         {!editing && (
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setEditing(true)}
-            disabled={busy}
-            title="Edit this section"
-            aria-label="Edit this section"
-            className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <SectionUndo cycleId={cycleId} sectionCode={sectionCode} disabled={busy} />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setEditing(true)}
+              disabled={busy}
+              title="Edit this section"
+              aria-label="Edit this section"
+              className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         )}
       </div>
 
@@ -286,6 +294,7 @@ function DraftingView({
         <>
           <SectionChat refining={refining} onRefine={onRefine} sectionCode={sectionCode} />
 
+          {onRegenerate && (
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
@@ -301,6 +310,7 @@ function DraftingView({
               Regenerate
             </Button>
           </div>
+          )}
         </>
       )}
     </div>

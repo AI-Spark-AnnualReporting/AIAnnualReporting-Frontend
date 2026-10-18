@@ -1,10 +1,10 @@
 "use client"
 
-import { use, useEffect, useRef, useState } from "react"
+import { use, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { ArrowLeft, RefreshCw, ShieldCheck } from "lucide-react"
+import { ArrowLeft, Check, Lock, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
@@ -121,6 +121,16 @@ function ValidationView({ cycleId }: { cycleId: string }) {
       new URLSearchParams(window.location.search).get("run") === "1",
   )
   const started = useRef(false)
+  // Findings still showing Fix / Ignore, as the panel counts them. Validating
+  // again is locked until every one is Fixed or Ignored, so the PM works
+  // through the whole list before spending another run.
+  const [openFindings, setOpenFindings] = useState(0)
+  const [fixedFindings, setFixedFindings] = useState(0)
+  // Stable, so the panel's effect doesn't re-run on every render.
+  const onProgress = useCallback((open: number, fixed: number) => {
+    setOpenFindings(open)
+    setFixedFindings(fixed)
+  }, [])
 
   const run = () => {
     setRunning(true)
@@ -184,6 +194,10 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   if (reportQuery.isLoading) return <PageLoader />
 
   const editedCount = validation?.edited_since_check?.length ?? 0
+  const mustFixFirst = !!validation && !locked && openFindings > 0
+  const fixFirstText = `Fix or ignore the ${openFindings} open finding${
+    openFindings === 1 ? "" : "s"
+  } before validating again.`
   // Findings ignored since this check. Some scores (house style) are worked
   // out during validation, so the PM is told to validate again.
   const ignoredCount = validation
@@ -191,6 +205,15 @@ function ValidationView({ cycleId }: { cycleId: string }) {
         (entry) => Date.parse(entry.at) > Date.parse(validation.validated_at),
       ).length
     : 0
+  // The progress box replaces the top-right button while findings are open
+  // (even "0 of N done" right after a check), or once the PM has fixed,
+  // ignored or edited something (an edit needs a rebuild).
+  const doneCount = fixedFindings + ignoredCount
+  const totalCount = doneCount + openFindings
+  const showProgress =
+    !!validation &&
+    !locked &&
+    (openFindings > 0 || doneCount > 0 || editedCount > 0 || ignoredCount > 0)
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
@@ -211,52 +234,82 @@ function ValidationView({ cycleId }: { cycleId: string }) {
               : `${cycleName ?? "This report"} — not checked yet`
           }
           action={
+            showProgress ? null : (
             <Button
               variant="outline"
               onClick={run}
-              disabled={running || locked}
+              disabled={running || locked || mustFixFirst}
               title={
                 locked
                   ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
-                  : undefined
+                  : mustFixFirst
+                    ? fixFirstText
+                    : undefined
               }
             >
-              <ShieldCheck className="mr-2 h-4 w-4" />
+              {mustFixFirst ? (
+                <Lock className="mr-2 h-4 w-4" />
+              ) : (
+                <ShieldCheck className="mr-2 h-4 w-4" />
+              )}
               {validation ? "Validate again" : "Validate report"}
             </Button>
+            )
           }
         />
       </div>
 
-      {validation && editedCount > 0 && !locked && (
+      {/* One box, one button, once the PM has started working through the
+          findings. The button stays locked until every finding is Fixed or
+          Ignored; it rebuilds first when a section was edited. */}
+      {showProgress && (
         <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-          <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          {openFindings === 0 ? (
+            <Check className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" strokeWidth={3} />
+          ) : (
+            <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          )}
           <div className="min-w-0 flex-[999_1_320px]">
             <p className="text-sm font-bold text-blue-900">
-              You edited {editedCount} section{editedCount === 1 ? "" : "s"} since this check
+              {openFindings === 0 ? "All findings dealt with" : "Work through the findings"}
+              {totalCount > 0 && (
+                <span className="font-semibold tabular-nums text-blue-800">
+                  {" "}· {doneCount} of {totalCount} done
+                </span>
+              )}
             </p>
+            {totalCount > 0 && (
+              <>
+                <div className="mb-1.5 mt-2 h-1.5 max-w-[520px] overflow-hidden rounded-full bg-blue-100">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-[width]"
+                    style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs tabular-nums text-blue-800">
+                  {fixedFindings} fixed · {ignoredCount} ignored
+                  {openFindings > 0 && ` · ${openFindings} still open`}
+                </p>
+              </>
+            )}
             <p className="mt-0.5 text-sm text-blue-800">
-              These results describe the report before your edits. Re-assemble and validate to see the new score.
+              {openFindings > 0
+                ? `${openFindings} finding${openFindings === 1 ? "" : "s"} still need${
+                    openFindings === 1 ? "s" : ""
+                  } Fix or Ignore. When they're all done, you can re-assemble and check the report again.`
+                : editedCount > 0
+                  ? "Re-assemble and validate to see the new score."
+                  : "Validate again to update the scores."}
             </p>
           </div>
-          <Button onClick={reassembleAndValidate}>Re-assemble &amp; validate</Button>
-        </div>
-      )}
-
-      {/* Only when no section was edited: that notice's button already
-          validates again, and two blue boxes saying so is one too many. */}
-      {validation && ignoredCount > 0 && editedCount === 0 && !locked && (
-        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-          <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
-          <div className="min-w-0 flex-[999_1_320px]">
-            <p className="text-sm font-bold text-blue-900">
-              You ignored {ignoredCount} finding{ignoredCount === 1 ? "" : "s"} since this check
-            </p>
-            <p className="mt-0.5 text-sm text-blue-800">
-              Validate again to update the scores.
-            </p>
-          </div>
-          <Button onClick={run}>Validate again</Button>
+          <Button
+            onClick={editedCount > 0 ? reassembleAndValidate : run}
+            disabled={mustFixFirst}
+            title={mustFixFirst ? fixFirstText : undefined}
+          >
+            {mustFixFirst && <Lock className="mr-1.5 h-4 w-4" />}
+            {editedCount > 0 ? "Re-assemble & validate" : "Validate again"}
+          </Button>
         </div>
       )}
 
@@ -266,6 +319,7 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           cycleId={cycleId}
           locked={locked}
           aiSections={aiSections}
+          onProgress={onProgress}
         />
       ) : (
         <EmptyState

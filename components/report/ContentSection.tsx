@@ -21,6 +21,7 @@ import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { SectionUndo } from "@/components/report/UndoChangeButton"
 import {
   isAssistedStatement,
   StatementSourcePicker,
@@ -640,6 +641,7 @@ export function ContentSection({
               {/* Writing lane. Always on screen too — a PM who never uploads
                   can write the section here. */}
               <ContentBody
+                undoSlot={<SectionUndo cycleId={cycleId} sectionCode={sectionCode} disabled={busy} />}
                 uploadSlot={
                   attachment ? null : (
                     <UploadButton dz={dz} uploading={uploading} />
@@ -771,6 +773,7 @@ function ContentBody({
   isRtl,
   uploadSlot,
   assistedSlot,
+  undoSlot,
 }: {
   saved: string
   seed: string | null
@@ -788,6 +791,8 @@ function ContentBody({
   uploadSlot?: React.ReactNode
   /** Draft / change-source controls — only the two assisted statements. */
   assistedSlot?: React.ReactNode
+  /** Undo the last change since the validation, beside Saved. */
+  undoSlot?: React.ReactNode
 }) {
   const busy = saving || uploading
 
@@ -809,6 +814,7 @@ function ContentBody({
                 Saved
               </span>
             ) : null}
+            {undoSlot}
             {assistedSlot}
             {uploadSlot}
             <Button

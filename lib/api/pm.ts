@@ -186,6 +186,15 @@ export interface UndoChange {
   at: string | null
 }
 
+// One kept change in the Undo pop-up, with the section text from just before
+// it. Loaded only when the pop-up opens.
+export interface UndoHistoryEntry {
+  what: string
+  by: string
+  at: string | null
+  text: string | null
+}
+
 // A finding the PM ignored, kept out of every later validation until one of
 // its sections is edited. `findings` are the finding(s) as they stood (a word
 // used twice in a section is one ignore, two findings); empty for a concept
@@ -1368,14 +1377,33 @@ export const pmApi = {
     await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { key, ignored })
   },
 
-  // Undo the last change to a section since the validation. Returns how many
-  // changes are still to undo there.
-  undoSectionChange: async (cycleId: string, sectionCode: string): Promise<number> => {
+  // Undo the latest `steps` changes to a section since the validation. Returns
+  // how many changes are still to undo there.
+  undoSectionChange: async (
+    cycleId: string,
+    sectionCode: string,
+    steps = 1,
+  ): Promise<number> => {
     const { data } = await apiClient.post<{ section_code: string; remaining: number }>(
       `/pm/cycles/${cycleId}/validation/undo-change`,
-      { section_code: sectionCode },
+      { section_code: sectionCode, steps },
     )
     return data.remaining
+  },
+
+  // A section's kept changes since the validation, newest first, each with the
+  // text from just before it.
+  /** The section's kept changes (newest first) and its text as it is now. */
+  getUndoHistory: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<{ changes: UndoHistoryEntry[]; current_text: string }> => {
+    const { data } = await apiClient.get<{
+      section_code: string
+      changes: UndoHistoryEntry[]
+      current_text: string
+    }>(`/pm/cycles/${cycleId}/validation/undo-history/${sectionCode}`)
+    return { changes: data.changes, current_text: data.current_text ?? "" }
   },
 
   chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {

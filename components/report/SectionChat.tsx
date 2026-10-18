@@ -91,7 +91,9 @@ export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProp
           rows={2}
           placeholder="Try: 'make this more concise' or 'add the cost-reduction figure'"
           disabled={refining}
-          className="resize-none rounded-xl"
+          // Grows to fit, so a Fix button's long instruction shows in full.
+          // field-sizing is Chrome/Edge only; elsewhere it stays 2 rows.
+          className="max-h-48 resize-none rounded-xl [field-sizing:content]"
         />
         <Button
           onClick={send}
