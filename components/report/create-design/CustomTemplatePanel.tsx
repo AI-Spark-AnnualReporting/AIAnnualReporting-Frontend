@@ -15,32 +15,56 @@
  * that finished while nobody was looking is picked up the same way.
  */
 
-import { AlertTriangle, Check, Loader2, Sparkles } from "lucide-react"
+import { AlertTriangle, Check, Loader2, Sparkles, Undo2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import {
   createDesignApi, type CustomPaper, type CustomTemplateStatus, type DesignUnit,
 } from "@/lib/api/createDesign"
+import {
+  activeCardId, countContent, hasSentence, ideaRowsFor, presetCardsFor, toggleIdea,
+  type ContentCounts, type IdeaRow, type PresetCard,
+} from "@/lib/customTemplateStartingPoints"
 
 /** How often the run's progress is read while it is going. */
 const POLL_MS = 3000
 /**
  * When the screen stops waiting. A run is up to four rounds of designing,
- * printing and reviewing, each a long reasoning call; past this something is
- * stuck, and a spinner that never ends is worse than an honest "try again".
+ * printing and reviewing, each a long reasoning call. The backend starts no
+ * new round after 12 minutes (custom_template_time_budget_seconds), and the
+ * round already going may take a few more; past this something is stuck, and
+ * a spinner that never ends is worse than an honest "try again".
  */
-const GIVE_UP_MS = 20 * 60 * 1000
+const GIVE_UP_MS = 25 * 60 * 1000
 const MAX_CHARS = 2000
 
-/** Real things PMs ask for, as one-click starting points. */
-const EXAMPLES = [
-  "A big image area on the left of the first page, with two text columns on the right.",
-  "Key figures set large in a brand-coloured band across the top.",
-  "Calm and minimal: lots of white space, one column of text, quotes in the margin.",
-  "Open with the main quote across the full page, then the text in two columns.",
-]
+/**
+ * A request that is safe for any section: no figures, quotes or "every page"
+ * promise the section might not be able to keep.
+ */
+const PLACEHOLDER =
+  "For example: Open with a wide image area across the top half of the first page. " +
+  "Set the text in two columns with a thin brand-colour rule between them. " +
+  "Keep the design calm and premium, with lots of white space."
+
+// Copied from DesignDialog.tsx (TAB_LIST / TAB_TRIGGER) and TemplateCardGrid.tsx
+// (TILE and the tile colours), as literal hexes for the reason given there, so
+// the starting points read as the same family as the template cards beside them.
+const TAB_LIST = "h-auto gap-1 rounded-full bg-[#F1F5F9] p-1"
+const TAB_TRIGGER =
+  "rounded-full px-3 py-1.5 text-[12px] font-semibold text-[#64748B] " +
+  "data-[state=active]:bg-white data-[state=active]:text-[#0F172A] data-[state=active]:shadow-sm"
+const TILE = "rounded-[10px]"
+// Not rounded-full: a long idea wraps to two lines, and a two-line pill looks broken.
+const IDEA_CHIP =
+  "inline-flex items-start gap-1 rounded-[12px] border px-2.5 py-1 text-start text-[11px] leading-snug " +
+  "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 " +
+  "disabled:cursor-not-allowed disabled:opacity-50 "
+const IDEA_CHIP_ON = "border-indigo-400 bg-indigo-50 text-indigo-700"
+const IDEA_CHIP_OFF = "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
 
 const PAPER_NAMES: Record<CustomPaper, string> = {
   portrait: "A4 portrait",
@@ -66,17 +90,16 @@ function stageIndex(step: CustomTemplateStatus["step"]): number {
   return 0
 }
 
-/** "Paragraphs 14 · figures 6" for the content the designer will lay out. */
-function contentFacts(unit: DesignUnit): { label: string; value: number }[] {
-  const paras = (unit.blocks.narrative_blocks ?? []).length
-  const figures = (unit.blocks.numeric_data ?? []).length
-  const quotes = (unit.blocks.pull_quotes ?? []).length
-  const tables = (unit.blocks.tables ?? []).length
+/**
+ * "Paragraphs 14 · figures 6" for the content the designer will lay out —
+ * counted as it prints, the same numbers the starting points are chosen by.
+ */
+function contentFacts(counts: ContentCounts): { label: string; value: number }[] {
   return [
-    { label: paras === 1 ? "paragraph" : "paragraphs", value: paras },
-    { label: figures === 1 ? "figure" : "figures", value: figures },
-    { label: quotes === 1 ? "quote" : "quotes", value: quotes },
-    { label: tables === 1 ? "table" : "tables", value: tables },
+    { label: counts.paragraphs === 1 ? "paragraph" : "paragraphs", value: counts.paragraphs },
+    { label: counts.figures === 1 ? "figure" : "figures", value: counts.figures },
+    { label: counts.quotes === 1 ? "quote" : "quotes", value: counts.quotes },
+    { label: counts.tables === 1 ? "table" : "tables", value: counts.tables },
   ]
 }
 
@@ -102,22 +125,37 @@ export function CustomTemplatePanel({
   onClose: () => void
 }) {
   const [instructions, setInstructions] = useState("")
+  /** What "Undo" brings back after a complete design replaced the PM's text. */
+  const [replacedText, setReplacedText] = useState<string | null>(null)
   const [status, setStatus] = useState<CustomTemplateStatus | null>(null)
   const [starting, setStarting] = useState(false)
   const [requestError, setRequestError] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const askRef = useRef<HTMLTextAreaElement>(null)
   const doneRef = useRef(onDone)
   useEffect(() => {
     doneRef.current = onDone
   }, [onDone])
+
+  // Worked out on every render, never stored: a re-extract can change the
+  // section's content while this panel stays open.
+  const counts = countContent(unit.blocks, paper)
+  const designCards = presetCardsFor(paper, counts)
+  const ideaRows = ideaRowsFor(counts)
 
   const running = status?.status === "running"
 
   const readStatus = useCallback(async () => {
     try {
       const next = await createDesignApi.customTemplateStatus(cycleId, sectionCode, paper)
-      setStatus(next)
+      // A run's progress lives in the memory of the server process running
+      // it, and the backend runs several processes: a poll answered by
+      // another one says "idle" while the run goes on. Dropping the run then
+      // stopped the polling, and the PM never saw it finish. Keep showing it
+      // until it says done or failed, or the screen gives up.
+      setStatus((previous) =>
+        previous?.status === "running" && next.status === "idle" ? previous : next)
       if (next.status === "running" && next.started_at) {
         setStartedAt((s) => s ?? next.started_at! * 1000)
       }
@@ -154,6 +192,7 @@ export function CustomTemplatePanel({
   const start = async () => {
     setStarting(true)
     setRequestError(null)
+    setReplacedText(null)
     try {
       await createDesignApi.startCustomTemplate(cycleId, sectionCode, paper, instructions.trim())
       setStartedAt(Date.now())
@@ -166,11 +205,42 @@ export function CustomTemplatePanel({
     }
   }
 
-  const addExample = (text: string) => {
-    setInstructions((current) => {
-      const joined = current.trim() ? `${current.trim()} ${text}` : text
-      return joined.slice(0, MAX_CHARS)
+  /** Focus the request with the caret at the end, after this click has rendered. */
+  const focusRequestEnd = () => {
+    requestAnimationFrame(() => {
+      const box = askRef.current
+      if (!box) return
+      box.focus()
+      box.setSelectionRange(box.value.length, box.value.length)
+      box.scrollTop = box.scrollHeight
     })
+  }
+
+  const typeInstructions = (value: string) => {
+    setReplacedText(null)
+    setInstructions(value.slice(0, MAX_CHARS))
+  }
+
+  /** A complete design replaces the request; Undo keeps the PM's own words. */
+  const chooseDesign = (text: string) => {
+    // Going from one design to the next keeps Undo pointing at what the PM
+    // had written, not at the design they looked at first.
+    const showingADesign = activeCardId(instructions, designCards) !== null
+    if (!showingADesign) setReplacedText(instructions.trim() ? instructions : null)
+    setInstructions(text)
+    focusRequestEnd()
+  }
+
+  const undoDesign = () => {
+    if (replacedText === null) return
+    setInstructions(replacedText)
+    setReplacedText(null)
+    focusRequestEnd()
+  }
+
+  const changeIdeas = (next: string) => {
+    setReplacedText(null)
+    setInstructions(next)
   }
 
   return (
@@ -234,39 +304,48 @@ export function CustomTemplatePanel({
                 Describe the page you want
               </label>
               <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-                Say where things should go and how it should feel. Leave it empty
-                and the designer picks a layout that suits this section.
+                Say where things should go and how it should feel. Each sentence is
+                checked against the printed pages, so one idea per sentence works best.
+                Leave it empty and the designer picks a layout that suits this section.
               </p>
               <textarea
                 id="custom-template-ask"
+                ref={askRef}
                 value={instructions}
-                onChange={(e) => setInstructions(e.target.value.slice(0, MAX_CHARS))}
+                onChange={(e) => typeInstructions(e.target.value)}
                 rows={5}
-                placeholder="For example: a large image area across the top half of the first page, the three key figures below it, then the text in two columns."
+                placeholder={PLACEHOLDER}
                 className="mt-3 w-full resize-y rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-[13px] leading-relaxed text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               />
-              <div className="mt-1 text-end text-[10.5px] tabular-nums text-slate-400">
-                {instructions.length} / {MAX_CHARS}
+              <div className="mt-1 flex items-center justify-end gap-3 text-[10.5px] text-slate-400">
+                {replacedText !== null && (
+                  <button
+                    type="button"
+                    onClick={undoDesign}
+                    title="Bring back the text you had before this design"
+                    className="inline-flex items-center gap-1 rounded-sm text-[11px] font-medium text-indigo-600 hover:text-indigo-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+                  >
+                    <Undo2 className="h-3 w-3" aria-hidden />
+                    Undo
+                  </button>
+                )}
+                <span className="tabular-nums">
+                  {instructions.length} / {MAX_CHARS}
+                </span>
               </div>
 
-              <p className="mt-2 text-[11px] font-medium text-slate-500">Start from an idea</p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {EXAMPLES.map((text) => (
-                  <button
-                    key={text}
-                    type="button"
-                    onClick={() => addExample(text)}
-                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-start text-[11px] leading-snug text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-                  >
-                    {text}
-                  </button>
-                ))}
-              </div>
+              <StartingPoints
+                request={instructions}
+                cards={designCards}
+                rows={ideaRows}
+                onChooseDesign={chooseDesign}
+                onChangeIdeas={changeIdeas}
+              />
 
               <div className="mt-6 rounded-[10px] border border-slate-200 bg-white p-4">
                 <p className="text-[12px] font-semibold text-slate-900">What the designer lays out</p>
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
-                  {contentFacts(unit).map((fact) => (
+                  {contentFacts(counts).map((fact) => (
                     <span key={fact.label} className="text-[12px] text-slate-600">
                       <span className="font-semibold tabular-nums text-slate-900">{fact.value}</span>{" "}
                       {fact.label}
@@ -293,7 +372,7 @@ export function CustomTemplatePanel({
                   {hasExisting ? "Design a new layout" : "Design this page"}
                 </Button>
                 <span className="text-[11px] leading-snug text-slate-500">
-                  Usually 3–8 minutes: it checks the printed result against your
+                  Usually 5–15 minutes: it checks the printed result against your
                   request and keeps improving it. You can work on other sections meanwhile.
                 </span>
               </div>
@@ -302,6 +381,113 @@ export function CustomTemplatePanel({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * "Need a starting point?": complete designs that fill in the whole request,
+ * and single ideas that add (or take out) one sentence. Holds no state of its
+ * own — what is chosen is read from the request itself, so typing over a
+ * design or an idea simply un-highlights it.
+ */
+function StartingPoints({
+  request,
+  cards,
+  rows,
+  onChooseDesign,
+  onChangeIdeas,
+}: {
+  request: string
+  cards: PresetCard[]
+  rows: IdeaRow[]
+  onChooseDesign: (text: string) => void
+  onChangeIdeas: (next: string) => void
+}) {
+  const activeId = activeCardId(request, cards)
+  return (
+    <section aria-labelledby="custom-template-starts" className="mt-4">
+      <p id="custom-template-starts" className="text-[12px] font-semibold text-slate-900">
+        Need a starting point?
+      </p>
+      <Tabs defaultValue="designs" className="mt-2">
+        <TabsList className={TAB_LIST}>
+          <TabsTrigger value="designs" className={TAB_TRIGGER}>Complete designs</TabsTrigger>
+          <TabsTrigger value="ideas" className={TAB_TRIGGER}>Ideas to add</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="designs" className="mt-3">
+          <p className="text-[11px] leading-snug text-slate-500">
+            Fills in a complete request, written for this section&apos;s content. Change
+            any of it before you start.
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {cards.map((card) => {
+              const active = card.id === activeId
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  aria-pressed={active}
+                  title={card.text}
+                  onClick={() => onChooseDesign(card.text)}
+                  className={
+                    `cursor-pointer ${TILE} border-2 px-3 py-2 text-left transition-colors ` +
+                    (active
+                      ? "border-[#6366F1] bg-[#EEF2FF]"
+                      : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
+                  }
+                >
+                  <span className={"block text-[12.5px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
+                    {card.name}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-[#64748B]">
+                    {card.tagline}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="ideas" className="mt-3">
+          <p className="text-[11px] leading-snug text-slate-500">
+            Each idea adds one sentence to your request. Click it again to take it out.
+          </p>
+          <div className="mt-2 space-y-3">
+            {rows.map((row) => (
+              <div key={row.id} role="group" aria-label={row.label}>
+                <p className="text-[11px] font-medium text-slate-500">
+                  {row.label}
+                  {row.pickOne && <span className="font-normal text-slate-400"> · pick one</span>}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {row.ideas.map((idea) => {
+                    const present = hasSentence(request, idea)
+                    const next = toggleIdea(request, row, idea, MAX_CHARS)
+                    return (
+                      <button
+                        key={idea}
+                        type="button"
+                        aria-pressed={present}
+                        disabled={next === null}
+                        title={next === null ? "No room left in the request for this idea" : undefined}
+                        onClick={() => {
+                          if (next !== null) onChangeIdeas(next)
+                        }}
+                        className={IDEA_CHIP + (present ? IDEA_CHIP_ON : IDEA_CHIP_OFF)}
+                      >
+                        {present && <Check className="mt-px h-3 w-3 shrink-0" aria-hidden />}
+                        {idea}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
+    </section>
   )
 }
 
@@ -327,7 +513,9 @@ function RunProgress({
       <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4">
         <p className="text-[13px] font-semibold text-amber-900">This is taking longer than it should</p>
         <p className="mt-1 text-[12px] leading-relaxed text-amber-900">
-          The designer hasn&apos;t answered in 8 minutes. Your current template is unchanged.
+          The designer hasn&apos;t finished in {GIVE_UP_MS / 60000} minutes. Your current
+          template is unchanged. Try again, or come back later: if the run does
+          finish, the new design appears on this section.
         </p>
         <Button variant="outline" size="sm" className="mt-3 h-8" onClick={onRetry}>
           Try again
@@ -344,7 +532,7 @@ function RunProgress({
       <p className="mt-1 text-[12px] text-slate-500">
         {done
           ? "It passed the check with every paragraph, figure, quote and table on the page."
-          : `${minutes}:${seconds} so far · usually 3–8 minutes`}
+          : `${minutes}:${seconds} so far · usually 5–15 minutes`}
       </p>
 
       <ol className="mt-5 space-y-3">
