@@ -1372,9 +1372,10 @@ export const pmApi = {
     return data.suggestions
   },
 
-  // Ignore a validation finding (ignored=true), or undo it (false).
-  ignoreFinding: async (cycleId: string, key: string, ignored: boolean): Promise<void> => {
-    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { key, ignored })
+  // Ignore validation findings (ignored=true), or undo that (false). Several
+  // keys go in one save.
+  ignoreFindings: async (cycleId: string, keys: string[], ignored: boolean): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { keys, ignored })
   },
 
   // Undo the latest `steps` changes to a section since the validation. Returns
@@ -1701,17 +1702,25 @@ export const pmApi = {
   },
 
   // Start assembling in the background — answers in about a second, so the
-  // normal timeout is plenty. The builder then polls getFinalReport until a
-  // newer report appears. already_running = this server was already
-  // assembling the cycle (a double click) and nothing new was started.
+  // normal timeout is plenty. The caller then polls getAssembleJob(job_id)
+  // (see waitForAssembleJob). already_running = the cycle was already
+  // assembling (a double click); job_id is that run's job.
   startAssemble: async (
     cycleId: string,
     refresh = false,
-  ): Promise<{ status: "running"; already_running: boolean }> => {
+  ): Promise<{ status: "running"; job_id: string; already_running: boolean }> => {
     const params = refresh ? "background=true&refresh=true" : "background=true"
     const { data } = await apiClient.post(
       `/pm/cycles/${cycleId}/assemble?${params}`,
     )
+    return data
+  },
+
+  /** A background assemble's state; `error` is set when it failed. */
+  getAssembleJob: async (
+    jobId: string,
+  ): Promise<{ status: "running" | "completed" | "failed"; error: string | null }> => {
+    const { data } = await apiClient.get(`/pm/assemble-jobs/${jobId}`)
     return data
   },
 

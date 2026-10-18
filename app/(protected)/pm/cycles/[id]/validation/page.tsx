@@ -23,37 +23,10 @@ import {
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { pmApi } from "@/lib/api/pm"
+import { waitForAssembleJob } from "@/lib/assemble-job"
 import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { FinalReport } from "@/types"
-
-// Same pace and patience as the builder's Assemble button (AssembleEntry).
-const POLL_INTERVAL_MS = 3_000
-const POLL_GIVE_UP_MS = 8 * 60_000
-
-/**
- * Wait for a re-assembly started in the background to save its report.
- *
- * @param previousGeneratedAt The report's `generated_at` before the run started.
- * @returns The newly saved report.
- * @throws When no new report appears in time.
- */
-async function waitForNewAssembly(
-  cycleId: string,
-  previousGeneratedAt: string | null,
-): Promise<FinalReport> {
-  const giveUpAt = Date.now() + POLL_GIVE_UP_MS
-  while (Date.now() < giveUpAt) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-    try {
-      const report = await pmApi.getFinalReport(cycleId)
-      if (report.generated_at && report.generated_at !== previousGeneratedAt) return report
-    } catch {
-      // not saved yet
-    }
-  }
-  throw new Error("Re-assembling didn't finish. Please try again.")
-}
 
 /* The validation findings, on their own page.
  *
@@ -126,6 +99,8 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // through the whole list before spending another run.
   const [openFindings, setOpenFindings] = useState(0)
   const [fixedFindings, setFixedFindings] = useState(0)
+  // Ignore clicks still being saved. Validate again waits for them.
+  const [savingIgnores, setSavingIgnores] = useState(false)
   // Stable, so the panel's effect doesn't re-run on every render.
   const onProgress = useCallback((open: number, fixed: number) => {
     setOpenFindings(open)
@@ -144,10 +119,12 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   const [reassembling, setReassembling] = useState(false)
   const reassembleAndValidate = async () => {
     setReassembling(true)
-    const previousGeneratedAt = reportQuery.data?.generated_at ?? null
     try {
-      await pmApi.startAssemble(cycleId, true)
-      const report = await waitForNewAssembly(cycleId, previousGeneratedAt)
+      // Waits on the server's job, so the check below never starts on the old
+      // report while the new one is still being built.
+      const { job_id } = await pmApi.startAssemble(cycleId, true)
+      await waitForAssembleJob(job_id)
+      const report = await pmApi.getFinalReport(cycleId)
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
@@ -238,7 +215,7 @@ function ValidationView({ cycleId }: { cycleId: string }) {
             <Button
               variant="outline"
               onClick={run}
-              disabled={running || locked || mustFixFirst}
+              disabled={running || locked || mustFixFirst || savingIgnores}
               title={
                 locked
                   ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
@@ -304,11 +281,15 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           </div>
           <Button
             onClick={editedCount > 0 ? reassembleAndValidate : run}
-            disabled={mustFixFirst}
+            disabled={mustFixFirst || savingIgnores}
             title={mustFixFirst ? fixFirstText : undefined}
           >
             {mustFixFirst && <Lock className="mr-1.5 h-4 w-4" />}
-            {editedCount > 0 ? "Re-assemble & validate" : "Validate again"}
+            {savingIgnores
+              ? "Saving your changes…"
+              : editedCount > 0
+                ? "Re-assemble & validate"
+                : "Validate again"}
           </Button>
         </div>
       )}
@@ -320,6 +301,7 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           locked={locked}
           aiSections={aiSections}
           onProgress={onProgress}
+          onSaving={setSavingIgnores}
         />
       ) : (
         <EmptyState

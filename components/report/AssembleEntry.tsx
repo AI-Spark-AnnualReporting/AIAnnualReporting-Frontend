@@ -22,6 +22,7 @@ import {
   type MutationError,
 } from "@/hooks/useReportBuilder"
 import { pmApi } from "@/lib/api/pm"
+import { waitForAssembleJob } from "@/lib/assemble-job"
 import { QUERY_KEYS, SECTION_LAYERS } from "@/lib/constants"
 import type { FinalReport } from "@/types"
 
@@ -50,20 +51,6 @@ const ASSEMBLE_TIPS = [
 // real run if reports get much longer — a bar that parks at 90% for a minute
 // looks broken.
 const ASSEMBLE_ESTIMATE_MS = 60_000
-
-// Assembling runs in the background on the server: the click only STARTS it,
-// then the builder checks every POLL_INTERVAL_MS whether a newer report has
-// been saved. No request waits for the whole assemble, so none can time out
-// halfway — which is what used to drop the PM back on the builder while the
-// server finished anyway.
-const POLL_INTERVAL_MS = 3_000
-// The server stores nothing about a run, so a failed one is only noticed by
-// no report ever appearing. A normal run takes one to two minutes.
-const POLL_GIVE_UP_MS = 8 * 60_000
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 interface AssembleEntryProps {
   cycleId: string
@@ -116,42 +103,19 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     setPhase("done")
   }
 
-  // Is `report` one saved by this run, rather than the one already there?
-  // generated_at is the row's updated_at, stamped by a DB trigger on every
-  // save, so this compares two server timestamps — never the browser clock.
-  // With no report before the click, any report at all is new.
-  const isNewReport = (
-    previousGeneratedAt: string | null,
-    report: FinalReport,
-  ): boolean => {
-    if (previousGeneratedAt == null) return true
-    return !!report.generated_at && report.generated_at !== previousGeneratedAt
-  }
-
-  // Check for a newer report until one appears. A failed check — 404 before
-  // the first report is saved, a network blip, the dev server restarting —
-  // is just "not yet": the run lives on the server, not in this request.
-  const pollUntilFinished = async (previousGeneratedAt: string | null) => {
+  // Wait on the server's job (running -> completed / failed), then load the
+  // report it saved. A failed job shows its reason straight away.
+  const pollUntilFinished = async (jobId: string) => {
     if (pollingRef.current) return
     pollingRef.current = true
-    const giveUpAt = Date.now() + POLL_GIVE_UP_MS
     try {
-      while (Date.now() < giveUpAt) {
-        await wait(POLL_INTERVAL_MS)
-        if (!mountedRef.current) return
-        try {
-          const report = await pmApi.getFinalReport(cycleId)
-          if (isNewReport(previousGeneratedAt, report)) {
-            finishWithReport(report)
-            return
-          }
-        } catch {
-          // not saved yet
-        }
+      const finished = await waitForAssembleJob(jobId, () => !mountedRef.current)
+      if (!finished) return
+      finishWithReport(await pmApi.getFinalReport(cycleId))
+    } catch (err) {
+      if (mountedRef.current) {
+        showFailure(err instanceof Error ? err.message : "Assembling failed. Please try again.")
       }
-      showFailure(
-        "Assembling didn't finish. It may have hit an error — please try again.",
-      )
     } finally {
       pollingRef.current = false
     }
@@ -161,13 +125,11 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     setConfirmOpen(false)
     setLastRefresh(refresh)
     setPhase("running")
-    // The report as it was before this click, so the one THIS run saves can be
-    // told apart from it.
-    const previousGeneratedAt = finalReportQuery.data?.generated_at ?? null
+    let jobId: string
     try {
       // Answers straight away. If a run is already going it joins that one
       // instead of starting another, so polling below covers both.
-      await pmApi.startAssemble(cycleId, refresh)
+      jobId = (await pmApi.startAssemble(cycleId, refresh)).job_id
     } catch (err) {
       // A refusal (locked, nothing to assemble, no access) or no server.
       showFailure(
@@ -175,7 +137,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
       )
       return
     }
-    await pollUntilFinished(previousGeneratedAt)
+    await pollUntilFinished(jobId)
   }
 
   if (phase === "failed") {

@@ -37,6 +37,7 @@ import {
   briefAskTodo,
   type ChooseTarget,
   buildFixHref,
+  anyConceptInstruction,
   conceptInstruction,
   redundancyInstruction,
   type FixAction,
@@ -58,6 +59,7 @@ export function ValidationPanel({
   locked = false,
   aiSections,
   onProgress,
+  onSaving,
 }: {
   validation: ReportValidation
   /** Given on a cycle's own report: turns on the Fix buttons. The external
@@ -72,6 +74,10 @@ export function ValidationPanel({
   /** Told how many finding rows still wait for a Fix or an Ignore, and how
    *  many show Fixed. */
   onProgress?: (open: number, fixed: number) => void
+  /** Told when Ignore saves start (true) and when the last one is done
+   *  (false), so Validate again can wait: a check that finishes before an
+   *  ignore is saved replaces the result and that ignore is lost. */
+  onSaving?: (saving: boolean) => void
 }) {
   const canFix = !!cycleId && !locked
   // Sections the PM changed since this check: their findings are greyed until
@@ -97,9 +103,13 @@ export function ValidationPanel({
   const { user } = useAuth()
   // Ignore is instant, so no button ever waits on a save.
   const busyKey: string | null = null
-  // Saves run one after another: the server rewrites the whole stored result
-  // on each, so two at once would lose one of them.
-  const saving = useRef<Promise<void>>(Promise.resolve())
+  // Ignore clicks waiting to be saved: key -> ignore (true) or undo (false),
+  // the latest click winning. Saves run one at a time (the server rewrites the
+  // whole stored result on each, so two at once would lose one), and every
+  // click made while a save runs goes in the next save together - each save
+  // takes a few seconds however many findings it carries.
+  const pending = useRef(new Map<string, boolean>())
+  const savingNow = useRef(false)
 
   // Ignore and its Undo. The screen changes at once (the cached result is
   // edited in place, the same way the server will edit the stored one), and
@@ -119,17 +129,34 @@ export function ValidationPanel({
       }
       return { ...old, validation: next }
     })
-    saving.current = saving.current.then(async () => {
-      try {
-        for (const key of keys) {
-          await pmApi.ignoreFinding(cycleId, key, ignore)
-        }
-      } catch (err) {
-        toast.error(readError(err as MutationError, "Couldn't save that change"))
-        await queryClient.invalidateQueries({ queryKey })
-      }
-    })
+    for (const key of keys) pending.current.set(key, ignore)
+    onSaving?.(true)
+    if (!savingNow.current) void saveIgnores(cycleId)
   }
+
+  /** Save the waiting Ignore clicks, in batches, until none are left. */
+  const saveIgnores = async (cycleId: string) => {
+    savingNow.current = true
+    try {
+      while (pending.current.size > 0) {
+        const batch = [...pending.current]
+        pending.current.clear()
+        const toIgnore = batch.filter(([, ignore]) => ignore).map(([key]) => key)
+        const toUndo = batch.filter(([, ignore]) => !ignore).map(([key]) => key)
+        try {
+          if (toIgnore.length) await pmApi.ignoreFindings(cycleId, toIgnore, true)
+          if (toUndo.length) await pmApi.ignoreFindings(cycleId, toUndo, false)
+        } catch (err) {
+          toast.error(readError(err as MutationError, "Couldn't save that change"))
+          await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+        }
+      }
+    } finally {
+      savingNow.current = false
+      onSaving?.(false)
+    }
+  }
+
   const {
     figures_total: total,
     figures_traced: traced,
@@ -430,6 +457,14 @@ export function ValidationPanel({
       else openFindings += 1
     }
   }
+  // "Not carrying it" rows on the concept cards count the same way. One
+  // ignored before this check is gone; one ignored since is done.
+  const carryRows = canFix ? notCarryingRows(validation, ignored, recentIgnored) : []
+  for (const row of carryRows) {
+    if (row.keys.every((key) => !!recentIgnored[key])) continue
+    if (edited.has(row.code)) fixedFindings += 1
+    else openFindings += 1
+  }
   useEffect(() => {
     onProgress?.(openFindings, fixedFindings)
   }, [onProgress, openFindings, fixedFindings])
@@ -452,7 +487,22 @@ export function ValidationPanel({
         />
       )}
 
-      <Coverage validation={validation} />
+      <Coverage
+        validation={validation}
+        carry={
+          canFix && cycleId
+            ? {
+                cycleId,
+                rows: carryRows,
+                edited,
+                aiSections,
+                recentIgnored,
+                onIgnore: setIgnored,
+                undo,
+              }
+            : undefined
+        }
+      />
 
       <BriefCoverage validation={validation} />
 
@@ -627,7 +677,14 @@ function Score({
    Every figure is over the sections that were actually read. A batch whose
    model call failed is reported as unchecked, and folding those in would mark a
    section as not carrying the message when nobody looked at it. */
-function Coverage({ validation }: { validation: ReportValidation }) {
+function Coverage({
+  validation,
+  carry,
+}: {
+  validation: ReportValidation
+  /** Set only when fixing is allowed: the "Not carrying it" rows. */
+  carry?: CarryProps
+}) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
 
@@ -703,6 +760,15 @@ function Coverage({ validation }: { validation: ReportValidation }) {
         }
         evidence={primary ? [{ label: primary.title, sections: carriers(primary.title) }] : []}
         excluded={notCounted("concept")}
+        footer={
+          carry && primary ? (
+            <NotCarrying
+              {...carry}
+              rows={carry.rows.filter((r) => r.primary)}
+              summary={sectionsText(carry.rows.filter((r) => r.primary).length, `don't carry “${primary.title}”`, `doesn't carry “${primary.title}”`)}
+            />
+          ) : null
+        }
       />
       <Stat
         label="Secondary concept messages"
@@ -718,6 +784,19 @@ function Coverage({ validation }: { validation: ReportValidation }) {
           label: m.title,
           sections: carriers(m.title),
         }))}
+        footer={
+          carry && count ? (
+            <NotCarrying
+              {...carry}
+              rows={carry.rows.filter((r) => !r.primary)}
+              summary={sectionsText(
+                carry.rows.filter((r) => !r.primary).length,
+                `carry none of the ${count} secondary messages`,
+                `carries none of the ${count} secondary messages`,
+              )}
+            />
+          ) : null
+        }
       />
       </>
       )}
@@ -1417,6 +1496,7 @@ const IGNORE_KINDS: Record<string, string> = {
   instruction: "instruction_text",
   brief: "brief_gaps",
   concept: "concepts",
+  carry: "carrying",
 }
 
 /* The result with one finding ignored, as the server will store it: its
@@ -1816,6 +1896,228 @@ function Group({
       )}
     </div>
   )
+}
+
+/** One "Not carrying it" row: a section, and the concept messages it should
+ *  carry but doesn't (one for the primary card, the secondary ones it has
+ *  none of for the secondary card). */
+type CarryRow = {
+  primary: boolean
+  code: string
+  title: string
+  /** Still to deal with: ignored-before-this-check messages left out. */
+  messages: string[]
+  /** One Ignore key per message, `carry:<message>|<code>`. */
+  keys: string[]
+}
+
+type CarryProps = {
+  cycleId: string
+  rows: CarryRow[]
+  edited: Set<string>
+  /** As on ValidationPanel: a section outside it is edited by hand. */
+  aiSections?: Set<string>
+  recentIgnored: Record<string, IgnoredFinding>
+  onIgnore: (keys: string[], ignored: boolean) => void
+  undo?: UndoProps
+}
+
+/**
+ * The sections each concept message applies to but doesn't appear in, one row
+ * per section.
+ *
+ * Unread and table-only sections are left out (nobody looked / nothing to add
+ * to), and so is the Executive Summary, which is rewritten at assembly rather
+ * than edited. For the secondary messages a section passes by carrying any
+ * one of them, so only a section missing every one gets a row - listing it
+ * under each message repeated the same fix four times.
+ *
+ * @param ignored Every stored ignore. A message ignored before this check is
+ *                dropped from its row; a row with none left is dropped.
+ * @param recentIgnored Ignored since this check: kept, so it can be undone.
+ */
+function notCarryingRows(
+  validation: ReportValidation,
+  ignored: Record<string, IgnoredFinding>,
+  recentIgnored: Record<string, IgnoredFinding>,
+): CarryRow[] {
+  const coverage = validation.coverage
+  if (!coverage) return []
+  const reviews = validation.sections ?? {}
+  const exempt = new Set(
+    (coverage.excluded ?? []).filter((e) => !e.concept).map((e) => e.section_code),
+  )
+  const missing = (title: string) => {
+    const wanted = title.trim().toLowerCase()
+    return Object.entries(reviews)
+      .filter(
+        ([code, review]) =>
+          code !== VALIDATION_SUMMARY_CODE &&
+          !review.data_only &&
+          !exempt.has(code) &&
+          review.applies?.concept !== false &&
+          !(review.concepts ?? []).some((c) => (c ?? "").trim().toLowerCase() === wanted),
+      )
+      .map(([code]) => code)
+  }
+  const keyOf = (message: string, code: string) => `carry:${message.trim()}|${code}`
+  const row = (primary: boolean, code: string, messages: string[]): CarryRow | null => {
+    const open = messages.filter((m) => {
+      const key = keyOf(m, code)
+      return !ignored[key] || !!recentIgnored[key]
+    })
+    if (open.length === 0) return null
+    return {
+      primary,
+      code,
+      title: reviews[code]?.title || prettifyCode(code),
+      messages: open,
+      keys: open.map((m) => keyOf(m, code)),
+    }
+  }
+
+  const rows: CarryRow[] = []
+  if (coverage.primary) {
+    for (const code of missing(coverage.primary.title)) {
+      const r = row(true, code, [coverage.primary.title])
+      if (r) rows.push(r)
+    }
+  }
+  const secondary = (coverage.secondary ?? []).map((m) => m.title)
+  if (secondary.length > 0) {
+    const missingBy = secondary.map((title) => new Set(missing(title)))
+    for (const code of Object.keys(reviews)) {
+      if (!missingBy.every((set) => set.has(code))) continue
+      const r = row(false, code, secondary)
+      if (r) rows.push(r)
+    }
+  }
+  return rows
+}
+
+/* "Not carrying it" under a concept card: one row per section, with the same
+   Fix / Ignore / Fixed / Undo as every other finding. They count toward the
+   progress box, so Validate again waits for them too. */
+function NotCarrying({
+  cycleId,
+  rows,
+  edited,
+  aiSections,
+  recentIgnored,
+  onIgnore,
+  undo,
+  summary,
+}: CarryProps & { summary: string }) {
+  if (rows.length === 0) return null
+
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-1.5">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+          Not carrying it
+        </p>
+        <p className="text-xs text-slate-500">{summary}</p>
+      </div>
+      <ul className="mt-2 space-y-2">
+        {rows.map((r) => {
+          const isIgnored = r.keys.every((key) => !!recentIgnored[key])
+          const isFixed = !isIgnored && edited.has(r.code)
+          return (
+            <li
+              key={r.code}
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-2.5 rounded-xl border px-3 py-2.5",
+                isFixed ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200",
+              )}
+            >
+              <div className="min-w-0 flex-[1_1_16rem]">
+                <p
+                  className={cn(
+                    "text-[13px] font-semibold",
+                    isIgnored ? "text-slate-300 line-through" : "text-[#1A1D2E]",
+                  )}
+                >
+                  {r.title}
+                </p>
+                {!r.primary && (
+                  <>
+                    <p className="text-xs text-slate-500">Carries none of:</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {r.messages.map((m) => (
+                        <span
+                          key={m}
+                          className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                        >
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {isIgnored ? (
+                  <>
+                    <span className="text-xs text-slate-400">Ignored</span>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+                      onClick={() => onIgnore(r.keys, false)}
+                    >
+                      Undo
+                    </button>
+                  </>
+                ) : isFixed ? (
+                  <>
+                    <span
+                      title="This section was edited after the check. Re-assemble & validate to confirm."
+                      className="inline-flex cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800"
+                    >
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                      Fixed
+                    </span>
+                    {undo && <UndoButton sectionCode={r.code} undo={undo} />}
+                  </>
+                ) : (
+                  <>
+                    {aiSections && !aiSections.has(r.code) ? (
+                      <Button size="sm" className="h-8 px-3 text-xs" asChild>
+                        <Link href={buildFixHref(cycleId, r.code, anyConceptInstruction(r.messages), true)}>
+                          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                          Edit by hand
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button size="sm" className="h-8 px-3 text-xs" asChild>
+                        <Link href={buildFixHref(cycleId, r.code, anyConceptInstruction(r.messages))}>
+                          <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                          Fix with AI
+                        </Link>
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-3 text-xs text-slate-600"
+                      onClick={() => onIgnore(r.keys, true)}
+                    >
+                      <Ban className="mr-1.5 h-3.5 w-3.5" />
+                      Ignore
+                    </Button>
+                  </>
+                )}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/** "3 sections don't carry …" / "1 section doesn't carry …". */
+function sectionsText(count: number, plural: string, single: string): string {
+  return count === 1 ? `1 section ${single}` : `${count} sections ${plural}`
 }
 
 /** What the Undo buttons need: each section's undoable changes, and how to ask. */

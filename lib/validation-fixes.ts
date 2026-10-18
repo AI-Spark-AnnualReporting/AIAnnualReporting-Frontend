@@ -73,6 +73,14 @@ export function conceptInstruction(title: string): string {
   return `Add a sentence that carries the concept message "${title}", where it fits naturally. Do not invent facts. Keep everything else unchanged.`
 }
 
+/** The fix for a section that carries none of several concept messages: any
+ *  one of them is enough, so the AI picks the one that fits. */
+export function anyConceptInstruction(titles: string[]): string {
+  if (titles.length === 1) return conceptInstruction(titles[0])
+  const names = titles.map((t) => `"${t}"`).join(", ")
+  return `Add a sentence that carries one of these concept messages: ${names}, whichever fits naturally. Do not invent facts. Keep everything else unchanged.`
+}
+
 /** A string matched literally inside a regular expression. */
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
