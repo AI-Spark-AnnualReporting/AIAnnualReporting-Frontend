@@ -170,6 +170,20 @@ export interface ReportValidation {
   chosen_sections?: Record<string, string>
   // Findings the PM ignored, by key.
   ignored?: Record<string, IgnoredFinding>
+  // Sections with changes since this check that Undo can take back, by
+  // section code. The old texts stay on the server. Cleared by the next
+  // validation run.
+  undo_changes?: Record<string, UndoChange>
+}
+
+// The changes Undo can take back in one section, and the last of them.
+export interface UndoChange {
+  // How many changes are kept (at most 10).
+  count: number
+  // The last change, e.g. "Refined with AI" or "Edited by hand".
+  what: string
+  by: string
+  at: string | null
 }
 
 // A finding the PM ignored, kept out of every later validation until one of
@@ -1352,6 +1366,16 @@ export const pmApi = {
   // Ignore a validation finding (ignored=true), or undo it (false).
   ignoreFinding: async (cycleId: string, key: string, ignored: boolean): Promise<void> => {
     await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { key, ignored })
+  },
+
+  // Undo the last change to a section since the validation. Returns how many
+  // changes are still to undo there.
+  undoSectionChange: async (cycleId: string, sectionCode: string): Promise<number> => {
+    const { data } = await apiClient.post<{ section_code: string; remaining: number }>(
+      `/pm/cycles/${cycleId}/validation/undo-change`,
+      { section_code: sectionCode },
+    )
+    return data.remaining
   },
 
   chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {

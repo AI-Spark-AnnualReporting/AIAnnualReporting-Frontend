@@ -12,14 +12,21 @@ import {
   FileQuestion,
   Loader2,
   Pencil,
+  RotateCcw,
   Sparkles,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ChooseSectionDialog } from "@/components/report/ChooseSectionDialog"
+import { UndoChangeDialog, type UndoTarget } from "@/components/report/UndoChangeDialog"
 import { useAuth } from "@/contexts/AuthContext"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
-import { pmApi, type IgnoredFinding, type ReportValidation } from "@/lib/api/pm"
+import {
+  pmApi,
+  type IgnoredFinding,
+  type ReportValidation,
+  type UndoChange,
+} from "@/lib/api/pm"
 import type { FinalReport } from "@/types"
 import { QUERY_KEYS } from "@/lib/constants"
 import { cn, formatDateTime } from "@/lib/utils"
@@ -66,6 +73,21 @@ export function ValidationPanel({
   // the next validation says whether the change fixed them.
   const edited = new Set(validation.edited_since_check ?? [])
   const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
+  // Undo last change: the section asked about in the "Are you sure?" pop-up.
+  const [undoTarget, setUndoTarget] = useState<UndoTarget | null>(null)
+  const sectionTitle = (sectionCode: string) =>
+    validation.sections?.[sectionCode]?.title || prettifyCode(sectionCode)
+  const undo: UndoProps | undefined = canFix
+    ? {
+        changes: validation.undo_changes ?? {},
+        ask: (sectionCode) => {
+          const change = validation.undo_changes?.[sectionCode]
+          if (!change) return
+          setUndoTarget({ sectionCode, title: sectionTitle(sectionCode), change })
+        },
+        titleOf: sectionTitle,
+      }
+    : undefined
   const queryClient = useQueryClient()
   const { user } = useAuth()
   // Ignore is instant, so no button ever waits on a save.
@@ -419,6 +441,7 @@ export function ValidationPanel({
         recentIgnored={recentIgnored}
         busyKey={busyKey}
         onIgnore={setIgnored}
+        undo={undo}
       />
 
       <BriefCoverage validation={validation} />
@@ -433,6 +456,7 @@ export function ValidationPanel({
           onChoose={setChoosing}
           busyKey={busyKey}
           onIgnore={setIgnored}
+          undo={undo}
         />
       ))}
 
@@ -442,6 +466,14 @@ export function ValidationPanel({
           target={choosing}
           sections={pickable}
           onClose={() => setChoosing(null)}
+        />
+      )}
+
+      {cycleId && (
+        <UndoChangeDialog
+          cycleId={cycleId}
+          target={undoTarget}
+          onClose={() => setUndoTarget(null)}
         />
       )}
 
@@ -594,6 +626,7 @@ function Coverage({
   recentIgnored,
   busyKey,
   onIgnore,
+  undo,
 }: {
   validation: ReportValidation
   /** Set only when fixing is allowed: adds the "could carry it" fix line. */
@@ -605,6 +638,7 @@ function Coverage({
   recentIgnored: Record<string, IgnoredFinding>
   busyKey: string | null
   onIgnore: (keys: string[], ignored: boolean) => void
+  undo?: UndoProps
 }) {
   const coverage = validation.coverage
   if (!coverage || !coverage.sections_checked) return null
@@ -666,6 +700,7 @@ function Coverage({
         recentIgnored={recentIgnored}
         busyKey={busyKey}
         onIgnore={onIgnore}
+        undo={undo}
         rows={messages.map((m) => ({ message: m.title, sections: notCarrying(m.title) }))}
       />
     ) : null
@@ -689,6 +724,7 @@ function Coverage({
         recentIgnored={recentIgnored}
         busyKey={busyKey}
         onIgnore={onIgnore}
+        undo={undo}
         rows={coverage.secondary.map((m) => ({
           message: m.title,
           sections: notCarrying(m.title).filter((s) => missingAll.has(s.code)),
@@ -1572,6 +1608,7 @@ function Group({
   onChoose,
   busyKey,
   onIgnore,
+  undo,
 }: {
   group: FindingGroup
   cycleId?: string
@@ -1582,6 +1619,7 @@ function Group({
   /** The finding whose Ignore or Undo is saving. */
   busyKey: string | null
   onIgnore: (keys: string[], ignored: boolean) => void
+  undo?: UndoProps
 }) {
   const total = group.count ?? group.items.length
   const blocks = byWhere(group.items)
@@ -1689,6 +1727,18 @@ function Group({
                   Fixed
                 </span>
               ) : null}
+              {/* One per section: a disagreement across two sections names
+                  which one each button puts back. */}
+              {allEdited &&
+                undo &&
+                codes.map((code) => (
+                  <UndoButton
+                    key={code}
+                    sectionCode={code}
+                    undo={undo}
+                    label={codes.length > 1 ? `Undo last change to ${undo.titleOf(code)}` : undefined}
+                  />
+                ))}
             </div>
 
             <div
@@ -1829,6 +1879,7 @@ function NotCarrying({
   recentIgnored,
   busyKey,
   onIgnore,
+  undo,
   rows,
 }: {
   cycleId: string
@@ -1839,6 +1890,7 @@ function NotCarrying({
   recentIgnored: Record<string, IgnoredFinding>
   busyKey: string | null
   onIgnore: (keys: string[], ignored: boolean) => void
+  undo?: UndoProps
   rows: { message: string; sections: { code: string; title: string }[] }[]
 }) {
   // A suggestion ignored before this check is gone; one ignored since stays
@@ -1901,13 +1953,18 @@ function NotCarrying({
                       </button>
                     </>
                   ) : edited.has(s.code) ? (
-                    <span
-                      title="This section was edited after the check. Re-assemble & validate to confirm."
-                      className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
-                    >
-                      <Check className="h-3 w-3" strokeWidth={3} />
-                      Fixed
-                    </span>
+                    <>
+                      <span
+                        title="This section was edited after the check. Re-assemble & validate to confirm."
+                        className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800"
+                      >
+                        <Check className="h-3 w-3" strokeWidth={3} />
+                        Fixed
+                      </span>
+                      {undo && (
+                        <UndoButton sectionCode={s.code} undo={undo} label="Undo" compact />
+                      )}
+                    </>
                   ) : (
                     <>
                       {aiSections && !aiSections.has(s.code) ? (
@@ -1955,6 +2012,49 @@ function NotCarrying({
 
 /** One copy of each distinct action across a block's findings - five figures
  *  in one section are still one "Fix". */
+/** What the Undo buttons need: each section's undoable changes, and how to ask. */
+type UndoProps = {
+  changes: Record<string, UndoChange>
+  /** Opens the "Are you sure?" pop-up for a section. */
+  ask: (sectionCode: string) => void
+  titleOf: (sectionCode: string) => string
+}
+
+/* "Undo last change (2)" beside a Fixed label. Nothing when the section has
+   no change kept to undo (e.g. one edited before this feature, or by a path
+   that keeps nothing). */
+function UndoButton({
+  sectionCode,
+  undo,
+  label = "Undo last change",
+  compact = false,
+}: {
+  sectionCode: string
+  undo: UndoProps
+  label?: string
+  /** The narrow "Not carrying it" slots: smaller text. */
+  compact?: boolean
+}) {
+  const change = undo.changes[sectionCode]
+  if (!change) return null
+  const changes = change.count === 1 ? "1 change" : `${change.count} changes`
+  return (
+    <button
+      type="button"
+      title={`${changes} since the check. Last: ${change.what}`}
+      onClick={() => undo.ask(sectionCode)}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-700 hover:underline",
+        compact ? "text-[11px]" : "text-xs",
+      )}
+    >
+      <RotateCcw className="h-3 w-3" />
+      {label}
+      <span className="font-normal tabular-nums text-slate-400">({change.count})</span>
+    </button>
+  )
+}
+
 function uniqueFixes(items: FindingItem[]): FixAction[] {
   const seen = new Set<string>()
   const out: FixAction[] = []
