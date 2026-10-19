@@ -84,6 +84,7 @@ export function ValidationPanel({
   // Sections the PM changed since this check: their findings are greyed until
   // the next validation says whether the change fixed them.
   const edited = new Set(validation.edited_since_check ?? [])
+  const voiceLeft = validation.voice_left ?? {}
   const [choosing, setChoosing] = useState<ChooseTarget | null>(null)
   // Undo last change: the section asked about in the "Are you sure?" pop-up.
   const [undoTarget, setUndoTarget] = useState<UndoTarget | null>(null)
@@ -408,6 +409,7 @@ export function ValidationPanel({
       items: voiceFindings.map((v) => ({
         where: v.title || v.section_code,
         lead: [v.phrase],
+        phrase: v.phrase,
         detail: "",
         codes: [v.section_code],
         fixes: aiFix(v.section_code, bannedWordsInstruction(bannedBySection.get(v.section_code) ?? [v.phrase])),
@@ -455,7 +457,7 @@ export function ValidationPanel({
   let fixedFindings = 0
   for (const g of groups) {
     for (const block of byWhere(g.items)) {
-      if (isFixed(sectionsOf(block.items), edited)) fixedFindings += 1
+      if (blockIsFixed(block.items, edited, voiceLeft)) fixedFindings += 1
       else openFindings += 1
     }
   }
@@ -515,6 +517,7 @@ export function ValidationPanel({
           cycleId={cycleId}
           canFix={canFix}
           edited={edited}
+          voiceLeft={voiceLeft}
           onChoose={setChoosing}
           busyKey={busyKey}
           onIgnore={setIgnored}
@@ -1123,6 +1126,30 @@ function isFixed(codes: string[], edited: Set<string>): boolean {
   return codes.length > 0 && codes.every((code) => edited.has(code))
 }
 
+/** House-style rows whose phrase is still in the edited text. */
+function phrasesStillThere(
+  items: FindingItem[],
+  voiceLeft: Record<string, string[]>,
+): FindingItem[] {
+  const out: FindingItem[] = []
+  for (const item of items) {
+    if (!item.phrase) continue
+    const left = voiceLeft[item.codes?.[0] ?? ""] ?? []
+    if (left.includes(item.phrase.trim().toLowerCase())) out.push(item)
+  }
+  return out
+}
+
+/* Fixed = every section behind the row was edited and, for house style, every
+   banned phrase is gone. Edited alone showed Fixed with a phrase still there. */
+function blockIsFixed(
+  items: FindingItem[],
+  edited: Set<string>,
+  voiceLeft: Record<string, string[]>,
+): boolean {
+  return isFixed(sectionsOf(items), edited) && phrasesStillThere(items, voiceLeft).length === 0
+}
+
 function byWhere(items: FindingItem[]): { where: string; items: FindingItem[] }[] {
   const blocks: { where: string; items: FindingItem[] }[] = []
   for (const item of items) {
@@ -1478,6 +1505,8 @@ interface FindingItem {
   /** The finding's key(s), sent back to ignore it. A sentence with three
    *  untraced figures is one row and three keys. */
   ignoreKeys?: string[]
+  /** House-style findings only: the banned phrase, checked after an edit. */
+  phrase?: string
 }
 
 /** A finding the PM ignored, as its card lists it. */
@@ -1669,6 +1698,7 @@ function Group({
   cycleId,
   canFix,
   edited,
+  voiceLeft,
   onChoose,
   busyKey,
   onIgnore,
@@ -1679,6 +1709,8 @@ function Group({
   canFix: boolean
   /** Sections edited since the check. */
   edited: Set<string>
+  /** House-style phrases still in the edited sections. */
+  voiceLeft: Record<string, string[]>
   onChoose: (target: ChooseTarget) => void
   /** The finding whose Ignore or Undo is saving. */
   busyKey: string | null
@@ -1755,7 +1787,12 @@ function Group({
       <ul className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto">
         {blocks.map((block) => {
           const codes = sectionsOf(block.items)
-          const allEdited = isFixed(codes, edited)
+          const sectionEdited = isFixed(codes, edited)
+          const allEdited = blockIsFixed(block.items, edited, voiceLeft)
+          // House style, edited but a phrase is still there: "1 of 2 fixed".
+          const phraseItems = block.items.filter((item) => item.phrase)
+          const leftItems = phrasesStillThere(block.items, voiceLeft)
+          const partlyFixed = sectionEdited && !allEdited && phraseItems.length > 0
           const openCode = codes.find((code) => code !== VALIDATION_SUMMARY_CODE)
           const ignoreKeys = [...new Set(block.items.flatMap((item) => item.ignoreKeys ?? []))]
           return (
@@ -1788,6 +1825,13 @@ function Group({
                 >
                   <Check className="h-3 w-3" strokeWidth={3} />
                   Fixed
+                </span>
+              ) : partlyFixed ? (
+                <span
+                  title="This section was edited, but some of these words are still in it."
+                  className="inline-flex cursor-help items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold text-blue-800"
+                >
+                  {phraseItems.length - leftItems.length} of {phraseItems.length} fixed
                 </span>
               ) : null}
               {/* One per section: a disagreement across two sections names
@@ -1853,6 +1897,7 @@ function Group({
                   )
                 }
 
+                const phraseLeft = leftItems.includes(item)
                 return (
                   <div key={i}>
                     {item.lead.length > 0 && (
@@ -1862,6 +1907,15 @@ function Group({
                             key={value}
                             className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700"
                           >
+                            {/* House style, once edited: is this phrase gone? */}
+                            {sectionEdited && item.phrase && (
+                              <span
+                                className={cn("mr-1", phraseLeft ? "text-rose-600" : "text-emerald-600")}
+                                aria-label={phraseLeft ? "still there" : "removed"}
+                              >
+                                {phraseLeft ? "✗" : "✓"}
+                              </span>
+                            )}
                             {asWritten(value, item.detail)}
                           </span>
                         ))}

@@ -266,6 +266,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const allDone =
     departments.length > 0 &&
     departments.every((d) => ["submitted", "approved"].includes(d.status))
+  const approvedCount = departments.filter((d) => d.status === "approved").length
+  const allApproved = departments.length > 0 && approvedCount === departments.length
 
   // Deadline urgency — drives the nudge's default priority + the dialog/banner chip.
   const deadlineDate = submissionDeadline ? new Date(submissionDeadline) : null
@@ -1163,17 +1165,29 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       )}
 
       {/* ── Completion Banner ── */}
-      {allDone && (
+      {/* Follows approval, not just submission: it used to say "waiting for
+          approval" even with every department already approved. */}
+      {allApproved ? (
         <div className="flex gap-3 rounded-xl border-2 border-green-300 bg-green-50 p-5">
           <Trophy className="h-6 w-6 text-green-600 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-green-900 text-base">All departments have submitted!</p>
+            <p className="font-semibold text-green-900 text-base">Every department is approved</p>
             <p className="text-sm text-green-800 mt-0.5">
-              Now with their Department Leads for approval — the report builder unlocks once every department&apos;s Lead has approved.
+              The report builder is open. Analyze the drafts to continue.
             </p>
           </div>
         </div>
-      )}
+      ) : allDone ? (
+        <div className="flex gap-3 rounded-xl border border-blue-200 bg-blue-50 p-5">
+          <Clock className="h-6 w-6 text-blue-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-blue-900 text-base">All departments have submitted</p>
+            <p className="text-sm text-blue-800 mt-0.5">
+              {approvedCount} of {departments.length} approved by their Department Lead. The report builder unlocks once all are approved.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* ── Overdue Alert ── */}
       {overdueRows.length > 0 && (

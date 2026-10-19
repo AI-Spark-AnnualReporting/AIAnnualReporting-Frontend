@@ -163,6 +163,9 @@ export interface ReportValidation {
   // Sections the PM edited since this check (own report, from the stored
   // per-section fingerprints). Absent on older validations and fresh runs.
   edited_since_check?: string[]
+  // House-style phrases still in those edited sections, lowercased. A
+  // house-style row shows Fixed only when none of its phrases is left.
+  voice_left?: Record<string, string[]>
   // A fingerprint of each section's text when checked (own report only).
   section_hashes?: Record<string, string>
   // The section the PM sent each uncovered brief ask or concept message to,

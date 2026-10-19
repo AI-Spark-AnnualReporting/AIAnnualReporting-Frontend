@@ -329,13 +329,18 @@ export default function ClientSharePage({
   // An area they started and left blank would reach Spark as an empty card and
   // steer nothing. Name it or take it out.
   const blankAreas = areas.some((a) => !a.slogan.trim())
+  // Same for the message under it: a named area with nothing written beneath
+  // reached Spark as an empty card. The server refuses it too.
+  const blankMessages = areas.some(
+    (_, i) => !concepts[i]?.title?.trim() || !concepts[i]?.description?.trim(),
+  )
 
   const canSubmit = editable && !submitting && (
     view?.stage === "questionnaire"
       ? isComplete(questions, answers)
       : view?.stage === "brief"
         ? brief.trim().length > 0
-        : areasValid && !blankAreas
+        : areasValid && !blankAreas && !blankMessages
   )
 
   /** Their own area, with an empty concept message to write underneath it. */
@@ -743,6 +748,11 @@ export default function ClientSharePage({
               {editable && blankAreas && (
                 <p className="mt-2 text-sm font-medium text-amber-700">
                   Give every area a name before sending.
+                </p>
+              )}
+              {editable && !blankAreas && blankMessages && (
+                <p className="mt-2 text-sm font-medium text-amber-700">
+                  Give every area a concept message (a title and its text) before sending.
                 </p>
               )}
               {editable && !areasValid && (
