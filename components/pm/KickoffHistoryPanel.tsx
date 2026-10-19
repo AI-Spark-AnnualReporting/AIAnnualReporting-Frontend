@@ -166,77 +166,127 @@ function BriefChange({ before, after }: { before: Loose; after: Loose }) {
   return <TextChange before={text(before?.strategic_brief)} after={text(after?.strategic_brief)} />
 }
 
-/** Each area compared by position: its name, summary, role and message. */
+const ROLE_ICON: Record<string, string> = { Lead: "★", Used: "✓", "Not used": "○" }
+
+/** An area's name as a matching key: case and spacing don't make it new. */
+function areaKey(area: Record<string, unknown> | undefined): string {
+  return text(area?.slogan).trim().toLowerCase()
+}
+
+/** The concept message written for an area: linked by its `area_slogan`, or
+ *  failing that (a message saved without the link) by the same name. */
+function messageFor(
+  area: Record<string, unknown>,
+  messages: Record<string, unknown>[],
+): Record<string, unknown> | undefined {
+  const key = areaKey(area)
+  return (
+    messages.find((m) => text(m.area_slogan).trim().toLowerCase() === key) ??
+    messages.find((m) => text(m.title).trim().toLowerCase() === key)
+  )
+}
+
+/** The wording behind a link, so long messages don't fill the panel. */
+function MoreText({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <details className="mt-1 text-sm">
+      <summary className="cursor-pointer text-xs font-semibold text-primary">{label}</summary>
+      <div className="mt-2 space-y-2">{children}</div>
+    </details>
+  )
+}
+
+/** Areas matched by name, not position: removing one area used to shift every
+ *  later one up, so each read as "replaced entirely" by its neighbour and an
+ *  added area never showed as added. One line per change. */
 function AreasChange({ before, after }: { before: Loose; after: Loose }) {
   const oldAreas = list(before?.areas_of_focus)
   const newAreas = list(after?.areas_of_focus)
   const oldMessages = list(before?.concept_messages)
   const newMessages = list(after?.concept_messages)
-  const count = Math.max(oldAreas.length, newAreas.length)
+  const oldByName = new Map(oldAreas.map((a) => [areaKey(a), a]))
+  const newNames = new Set(newAreas.map(areaKey))
 
   const rows = []
-  for (let i = 0; i < count; i++) {
-    const oldArea = oldAreas[i]
-    const newArea = newAreas[i]
-    const name = text(newArea?.slogan) || text(oldArea?.slogan) || `Area ${i + 1}`
+  let unchanged = 0
+  for (const area of newAreas) {
+    const name = text(area.slogan).trim() || "Untitled"
+    const message = messageFor(area, newMessages)
+    const old = oldByName.get(areaKey(area))
 
-    if (!oldArea) {
-      const message = newMessages[i]
+    if (!old) {
       rows.push(
-        <div key={i} className="space-y-2 rounded-lg border border-green-200 bg-green-50/50 p-3">
-          <p className="text-sm">
-            <span className="font-semibold text-green-700">+ Added:</span> {name}{" "}
-            <span className="text-muted-foreground">({roleOf(newArea)})</span>
-          </p>
-          {text(newArea?.summary) && <p className="text-sm text-muted-foreground">{text(newArea?.summary)}</p>}
-          {(text(message?.title) || text(message?.description)) && (
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Concept message</p>
-              {text(message?.title) && <p className="text-sm font-semibold text-foreground">{text(message?.title)}</p>}
+        <li key={`add-${name}`} className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-2 text-sm">
+          <span className="font-bold text-green-700">+</span> <span className="font-semibold">{name}</span>{" "}
+          <span className="text-muted-foreground">added · {roleOf(area)}</span>
+          {(text(message?.title) || text(message?.description) || text(area.summary)) && (
+            <MoreText label="Show message">
+              {text(area.summary) && <p className="text-muted-foreground">{text(area.summary)}</p>}
+              {text(message?.title) && <p className="font-semibold text-foreground">{text(message?.title)}</p>}
               {text(message?.description) && (
-                <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{text(message?.description)}</p>
+                <p className="whitespace-pre-line leading-relaxed text-foreground">{text(message?.description)}</p>
               )}
-            </div>
+            </MoreText>
           )}
-        </div>,
+        </li>,
       )
       continue
     }
-    if (!newArea) {
-      rows.push(<p key={i} className="text-sm"><span className="font-semibold text-red-700">− Removed:</span> {name}</p>)
+
+    const oldMessage = messageFor(old, oldMessages)
+    const roleChanged = roleOf(old) !== roleOf(area)
+    const wordingChanged =
+      text(old.summary) !== text(area.summary) ||
+      text(oldMessage?.title) !== text(message?.title) ||
+      text(oldMessage?.description) !== text(message?.description)
+    if (!roleChanged && !wordingChanged) {
+      unchanged += 1
       continue
     }
-
-    const oldMessage = oldMessages[i]
-    const newMessage = newMessages[i]
-    const changed =
-      text(oldArea.slogan) !== text(newArea.slogan) ||
-      text(oldArea.summary) !== text(newArea.summary) ||
-      roleOf(oldArea) !== roleOf(newArea) ||
-      text(oldMessage?.title) !== text(newMessage?.title) ||
-      text(oldMessage?.description) !== text(newMessage?.description)
-    if (!changed) continue
-
     rows.push(
-      <div key={i} className="space-y-2 rounded-lg border border-border bg-background p-3">
-        <p className="text-sm font-semibold text-foreground">{name}</p>
-        {roleOf(oldArea) !== roleOf(newArea) && (
-          <p className="text-sm text-muted-foreground">
-            Role: {roleOf(oldArea)} → <span className="font-semibold text-foreground">{roleOf(newArea)}</span>
-          </p>
+      <li key={`chg-${name}`} className="rounded-lg border border-border px-3 py-2 text-sm">
+        <span className="font-bold text-muted-foreground">{ROLE_ICON[roleOf(area)]}</span>{" "}
+        <span className="font-semibold">{name}</span>{" "}
+        {roleChanged ? (
+          <span className="text-muted-foreground">
+            {roleOf(old)} → <span className="font-semibold text-foreground">{roleOf(area)}</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">wording changed</span>
         )}
-        <TextChange label="Name" before={text(oldArea.slogan)} after={text(newArea.slogan)} />
-        <TextChange label="Summary" before={text(oldArea.summary)} after={text(newArea.summary)} />
-        <TextChange label="Message title" before={text(oldMessage?.title)} after={text(newMessage?.title)} />
-        <TextChange label="Concept message" before={text(oldMessage?.description)} after={text(newMessage?.description)} />
-      </div>,
+        {wordingChanged && (
+          <MoreText label="Show wording changes">
+            <TextChange label="Summary" before={text(old.summary)} after={text(area.summary)} />
+            <TextChange label="Message title" before={text(oldMessage?.title)} after={text(message?.title)} />
+            <TextChange
+              label="Concept message"
+              before={text(oldMessage?.description)}
+              after={text(message?.description)}
+            />
+          </MoreText>
+        )}
+      </li>,
+    )
+  }
+  for (const area of oldAreas) {
+    if (newNames.has(areaKey(area))) continue
+    const name = text(area.slogan).trim() || "Untitled"
+    rows.push(
+      <li key={`rm-${name}`} className="rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-sm">
+        <span className="font-bold text-red-700">−</span>{" "}
+        <span className="font-semibold text-red-700 line-through">{name}</span>{" "}
+        <span className="text-muted-foreground">removed</span>
+      </li>,
     )
   }
   if (rows.length === 0) return null
   return (
     <div className="space-y-2">
-      <AreasResult areas={newAreas} />
-      {rows}
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Changes</p>
+      <ul className="space-y-1.5">{rows}</ul>
+      {/* Only when some areas didn't change: they aren't in the list above,
+          and without this they'd look gone. */}
+      {unchanged > 0 && <AreasResult areas={newAreas} />}
     </div>
   )
 }

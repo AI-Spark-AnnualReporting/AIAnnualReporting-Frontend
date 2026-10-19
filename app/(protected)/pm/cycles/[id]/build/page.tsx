@@ -145,7 +145,13 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   if (readinessQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
 
-  if (readinessQuery.isError || sectionsQuery.isError) {
+  // Only when there is nothing to show. A failed RELOAD (after a save, say)
+  // keeps the builder on screen with what it has; replacing it with this page
+  // made one dropped connection look like losing access.
+  if (
+    (readinessQuery.isError && !readinessQuery.data) ||
+    (sectionsQuery.isError && !sectionsQuery.data)
+  ) {
     return (
       <EmptyState
         icon={ShieldAlert}

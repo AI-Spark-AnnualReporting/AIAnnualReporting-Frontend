@@ -14,6 +14,7 @@ import {
   Loader2,
   Pencil,
   Sparkles,
+  X,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -220,6 +221,7 @@ export function ValidationPanel({
           detail: finding.detail ?? "",
           by: entry.by,
           at: entry.at,
+          ...ignoredParts(kind, key, finding, titleOf),
         }
       })
   const ignoredNote = (count: number) => (count > 0 ? ` ${count} ignored.` : "")
@@ -1485,6 +1487,12 @@ interface IgnoredRow {
   detail: string
   by: string
   at: string
+  /** The section(s) it is grouped under in the Ignored list. */
+  group: string
+  /** What it is, without the section: a figure, a phrase, a sentence. */
+  short: string
+  /** Short enough to show as a chip (a figure or a phrase). */
+  chip: boolean
 }
 
 // The result list each key prefix lives in; the last two have no list.
@@ -1561,6 +1569,47 @@ function ignoredLabel(
   if (kind === "brief_gaps") return finding.ask ?? ""
   // A concept message has no stored finding: its title is in the key.
   return key.slice(key.indexOf(":") + 1)
+}
+
+/** Where an ignored finding is grouped in the Ignored list, and what it is
+ *  without the section's name - the name is the group's heading. */
+function ignoredParts(
+  kind: string,
+  key: string,
+  finding: IgnoredFinding["findings"][number],
+  titleOf: (code: string) => string,
+): { group: string; short: string; chip: boolean } {
+  const where = finding.title || (finding.section_code ? titleOf(finding.section_code) : "")
+  const sectionsOfFinding = (finding.sections ?? [])
+    .map((s) => (typeof s === "string" ? titleOf(s) : s.title || titleOf(s.section_code)))
+    .join(" & ")
+  if (kind === "untraced") {
+    const value = finding.value ?? ""
+    const n = Number(value)
+    const shown = value && Number.isFinite(n) && !value.includes(".") ? n.toLocaleString("en-US") : value
+    return { group: where || "Other", short: shown, chip: true }
+  }
+  if (kind === "voice") return { group: where || "Other", short: `"${finding.phrase ?? ""}"`, chip: true }
+  if (kind === "instruction_text") return { group: where || "Other", short: finding.line ?? "", chip: false }
+  if (kind === "conflicts") {
+    return { group: sectionsOfFinding || "Figures", short: finding.measure || "Figure", chip: true }
+  }
+  if (kind === "redundancy") {
+    return { group: sectionsOfFinding || "Sections", short: finding.detail || "The same point", chip: false }
+  }
+  if (kind === "brief_gaps") return { group: "Strategic brief", short: finding.ask ?? "", chip: false }
+  return { group: "Concept messages", short: key.slice(key.indexOf(":") + 1), chip: false }
+}
+
+/** The ignored rows of one card, grouped by section in first-seen order. */
+function groupIgnored(rows: IgnoredRow[]): { name: string; rows: IgnoredRow[] }[] {
+  const groups: { name: string; rows: IgnoredRow[] }[] = []
+  for (const row of rows) {
+    const found = groups.find((g) => g.name === row.group)
+    if (found) found.rows.push(row)
+    else groups.push({ name: row.group, rows: [row] })
+  }
+  return groups
 }
 
 /* One row per sentence, carrying every untraced figure in it.
@@ -1867,31 +1916,85 @@ function Group({
       {(group.ignored?.length ?? 0) > 0 && (
         <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-            Ignored
+            Ignored · {group.ignored!.length}
           </p>
-          <ul className="mt-2 space-y-2">
-            {group.ignored!.map((row) => (
-              <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-                <span className="font-semibold text-slate-500">{row.label}</span>
-                {row.detail && (
-                  <span className="text-slate-400 line-through">{row.detail}</span>
-                )}
-                <span className="text-slate-400">
-                  &middot; {row.by} &middot; {formatDateTime(row.at)}
-                </span>
-                {canFix && (
-                  <button
-                    type="button"
-                    className="font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
-                    disabled={busyKey !== null}
-                    onClick={() => onIgnore([row.key], false)}
-                  >
-                    {busyKey === row.key ? "Undoing…" : "Undo"}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          {/* Grouped by section: the section's name once, then what was ignored
+              in it - each with its own undo, and Undo all for the section. */}
+          <div className="mt-1 divide-y divide-slate-200/70">
+            {groupIgnored(group.ignored!).map((section) => {
+              const latest = section.rows.reduce((a, b) => (Date.parse(b.at) > Date.parse(a.at) ? b : a))
+              const count = section.rows.length
+              return (
+                <div key={section.name} className="py-2.5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-4 text-xs">
+                    <span className="min-w-0">
+                      <span className="font-semibold text-slate-600">{section.name}</span>
+                      <span className="text-slate-400"> · {count}</span>
+                    </span>
+                    <span className="whitespace-nowrap text-right tabular-nums text-slate-400">
+                      {latest.by} &middot; {formatDateTime(latest.at)}
+                    </span>
+                    {canFix ? (
+                      <button
+                        type="button"
+                        className="whitespace-nowrap font-semibold text-indigo-600 hover:text-indigo-700"
+                        onClick={() => onIgnore(section.rows.map((r) => r.key), false)}
+                      >
+                        {count === 1 ? "Undo" : "Undo all"}
+                      </button>
+                    ) : (
+                      <span />
+                    )}
+                  </div>
+                  {section.rows.every((r) => r.chip) ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {section.rows.map((row) => (
+                        <span
+                          key={row.key}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white py-0.5 pl-2.5 pr-1 text-xs tabular-nums text-slate-500"
+                        >
+                          {row.short}
+                          {canFix && (
+                            <button
+                              type="button"
+                              title="Undo"
+                              aria-label={`Undo ignore: ${row.label}`}
+                              className="flex h-4 w-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
+                              onClick={() => onIgnore([row.key], false)}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <ul className="mt-1.5 space-y-1">
+                      {section.rows.map((row) => (
+                        <li
+                          key={row.key}
+                          className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 text-xs"
+                        >
+                          <span className="min-w-0 text-slate-400 line-through">{row.short}</span>
+                          {canFix && (
+                            <button
+                              type="button"
+                              title="Undo"
+                              aria-label={`Undo ignore: ${row.label}`}
+                              className="flex h-4 w-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
+                              onClick={() => onIgnore([row.key], false)}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

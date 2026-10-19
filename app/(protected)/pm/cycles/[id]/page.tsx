@@ -7,7 +7,15 @@ import {
   useSubmitKickoff, useUploadKickoffDoc, useCreateEscalation,
   useEscalations, useBulkReminder, usePreviousBrief, useSetQuestionsDeadline,
 } from "@/hooks/useSessions"
-import { useBuildReadiness, useCheckDrafts, useDraftFindings, usePlan } from "@/hooks/useReportBuilder"
+import {
+  departmentsWithShortFacts,
+  possessiveNames,
+  useBuildReadiness,
+  useCheckDrafts,
+  useDepartmentClaims,
+  useDraftFindings,
+  usePlan,
+} from "@/hooks/useReportBuilder"
 import { DraftCheckLoader } from "@/components/report/DraftCheckLoader"
 import { PageHeader } from "@/components/ui/page-header"
 import { KickoffLoader } from "@/components/pm/kickoff-loader"
@@ -85,6 +93,9 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const { data: escalationsData } = useEscalations(id)
   const bulkReminder = useBulkReminder()
   const { data: readiness } = useBuildReadiness(id)
+  // Departments whose facts look short: warned on the Department Claims button.
+  const { data: claimsData } = useDepartmentClaims(id, (readiness?.departments_approved ?? 0) > 0)
+  const shortFacts = departmentsWithShortFacts(claimsData)
   // Only to decide where "Open Report Builder" goes. Once the plan is locked
   // the plan screen has nothing left to do, so the builder is the resume point.
   const { data: plan } = usePlan(id)
@@ -767,14 +778,16 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
       {checkDrafts.isPending && <DraftCheckLoader />}
 
       {/* ── Header ── */}
-      <div className="flex items-center gap-3">
+      {/* Title on its own line, buttons in a row under it: up to six buttons
+          on one row with the title squeezed the name into a narrow column. */}
+      <div className="flex items-start gap-3">
         <Link href="/pm">
           <Button variant="ghost" size="icon">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <PageHeader
-          className="flex-1"
+          className="min-w-0 flex-1 flex-col"
           title={cycleName}
           description="Track department progress, review submissions, and generate the final report"
           action={
@@ -832,9 +845,22 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   read — before then the page has nothing to show. */}
               {(readiness?.departments_approved ?? 0) > 0 && (
                 <Link href={`/pm/cycles/${id}/claims`}>
-                  <Button variant="outline">
+                  <Button
+                    variant="outline"
+                    className="relative"
+                    title={
+                      shortFacts.length > 0
+                        ? `${possessiveNames(shortFacts)} facts look incomplete. Read them again before analyzing.`
+                        : undefined
+                    }
+                  >
                     <ListTree className="mr-2 h-4 w-4" />
                     Department Claims
+                    {shortFacts.length > 0 && (
+                      <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-extrabold text-white">
+                        !
+                      </span>
+                    )}
                   </Button>
                 </Link>
               )}
@@ -893,14 +919,15 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             const total = readiness?.departments_total ?? 0
             const approved = readiness?.departments_approved ?? 0
 
-            // Gated on an approval existing, NOT on can_build. Analysing reads
-            // approved department drafts; report sections are about assembling
-            // the report afterwards and have nothing to do with it. Tying this
-            // to can_build hid the button on every cycle whose sections were
-            // not resolved, leaving real approved drafts uncheckable.
-            // Open Report Builder keeps the full can_build gate, on the
-            // findings page.
-            if (approved > 0) {
+            // Gated on EVERY department being approved, NOT on can_build. The
+            // check sits at the builder gate (agreed when it was planned): run
+            // once, over all the drafts, just before building. Offering it
+            // after the first approval checked only some of them (2026-10-19).
+            // Not can_build: report sections are about assembling afterwards,
+            // and tying this to them hid the button on cycles whose sections
+            // were not resolved. Open Report Builder keeps the full can_build
+            // gate, on the findings page.
+            if (total > 0 && approved === total) {
               // The route to the builder runs through the findings page, so the
               // PM cannot assemble a report without first seeing what the
               // analysis found. Open Report Builder lives there, not here.
@@ -973,9 +1000,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 ? "No departments assigned to this cycle yet"
                 : `Available once every department's Lead has approved (${approved} of ${total} so far)`
 
+            // Greyed, named after the next step: analysing the drafts is how
+            // the PM reaches the builder (via the findings page).
             return (
               <Button disabled title={tooltip}>
-                Open Report Builder
+                Analyze Department Drafts
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             )

@@ -22,6 +22,29 @@ export function useSession(sessionId: string) {
   })
 }
 
+/**
+ * Load a session from the server into the cache, replacing any older copy.
+ *
+ * Used after answer extraction, before the workspace is shown: the workspace
+ * otherwise opened on the copy from before extraction (no answers) and the
+ * drafted answers popped in seconds later. If the load fails the old copy is
+ * dropped, so the workspace shows its loader rather than empty answers.
+ */
+export async function loadFreshSession(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+): Promise<void> {
+  try {
+    await qc.fetchQuery({
+      queryKey: ["session", sessionId],
+      queryFn: () => departmentApi.getSession(sessionId),
+      staleTime: 0,
+    })
+  } catch {
+    qc.removeQueries({ queryKey: ["session", sessionId], exact: true })
+  }
+}
+
 /** PM-scoped session fetch — uses server-side impersonation proxy. */
 export function usePMSession(sessionId: string) {
   return useQuery({
@@ -55,9 +78,12 @@ export function useGenerateDraft() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (sessionId: string) => departmentApi.generateDraft(sessionId),
-    onSuccess: (_, sessionId) => {
+    // Awaited by mutateAsync: callers open the draft page right after, and it
+    // showed the copy from before the draft ("No draft yet") until a refetch.
+    onSuccess: async (_, sessionId) => {
       qc.invalidateQueries({ queryKey: ["session", sessionId] })
-      toast.success("Draft generated successfully")
+      // No success toast: the new draft on screen says it.
+      await loadFreshSession(qc, sessionId)
     },
     onError: (err: { message?: string }) => {
       toast.error(err?.message || "Failed to generate draft")

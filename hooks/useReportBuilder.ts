@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
@@ -72,11 +72,13 @@ export function useValidateReport(cycleId: string) {
     // No success toast. The result is a panel and a statement page on screen,
     // both of which say more than a count in a corner, and the toast landed on
     // top of them the moment they appeared.
-    onSuccess: () => {
+    onSuccess: async () => {
       // The assembled report now carries a validation, which changes both what
       // the document prints and what the report page shows beneath it.
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+      // Awaited, so the loader closes on the result: it used to close first
+      // and show the old copy ("Not checked yet") until the reload landed.
+      await qc.refetchQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Couldn't validate the report")),
@@ -177,13 +179,35 @@ export function useCheckDrafts(cycleId: string) {
 // What each approved department stated. Read-only — landing on the claims page
 // costs nothing. A department with an empty list and a null extracted_at never
 // had its claims read, which the page turns into its Extract-claims state.
-export function useDepartmentClaims(cycleId: string) {
+export function useDepartmentClaims(cycleId: string, enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId),
     queryFn: () => pmApi.departmentClaims(cycleId),
-    enabled: !!cycleId,
+    enabled: !!cycleId && enabled,
     staleTime: 0,
   })
+}
+
+// A department's facts look short when this many figures in its answers are
+// in no fact. Below it, a figure the department repeated in passing is not
+// worth a warning.
+export const FACTS_SHORT_AT = 5
+
+/** Departments whose fact list looks short, by name. The draft check trusts
+ *  that list, so their "unsupported claim" findings may be wrong. */
+export function departmentsWithShortFacts(data: DepartmentClaimsResponse | undefined): string[] {
+  return (data?.departments ?? [])
+    // A department already read again is not warned about twice: the re-read
+    // filled what it could, and the draft check allows for the rest.
+    .filter((d) => !d.facts_reread && (d.figures_not_in_facts ?? 0) >= FACTS_SHORT_AT)
+    .map((d) => d.department)
+}
+
+/** "Human Resources'" / "Human Resources' and Finance's" */
+export function possessiveNames(names: string[]): string {
+  const owned = names.map((n) => (n.endsWith("s") ? `${n}'` : `${n}'s`))
+  if (owned.length <= 1) return owned.join("")
+  return `${owned.slice(0, -1).join(", ")} and ${owned[owned.length - 1]}`
 }
 
 // Fill in claims for departments missing them. One model call per missing
@@ -908,6 +932,10 @@ export function usePlan(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
     retry: false, // 404 / 422 are meaningful — drive empty/error states from them
+    // Not on tab focus: Start Building keeps the server busy for minutes, a
+    // reload then could fail, and a failed reload used to replace the whole
+    // plan page - loader included - with "no plan".
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -1261,9 +1289,14 @@ export function useAddCustomSection(cycleId: string) {
   })
 }
 
+/** Shared by every section removal on a cycle, so a card can tell it is being
+ *  removed (useIsRemoving) and the list reloads once the last one settles. */
+export const REMOVE_SECTION_KEY = (cycleId: string) => ["pm", "cycle", cycleId, "remove-section"]
+
 export function useRemoveOptional(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
+    mutationKey: REMOVE_SECTION_KEY(cycleId),
     mutationFn: ({
       sectionCode,
       force = false,
@@ -1271,13 +1304,30 @@ export function useRemoveOptional(cycleId: string) {
       sectionCode: string
       force?: boolean
     }) => pmApi.removeOptionalSection(cycleId, sectionCode, force),
+    // No success toast: the card disappearing says it.
     onSuccess: (sections) => {
       setSectionsCache(qc, cycleId, sections)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
-      toast.success("Section removed")
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to remove section")),
+    // Two removals in a row can answer out of order, and the earlier answer's
+    // list still holds the later section, so it briefly came back. Reload the
+    // list once, when the last removal has settled (1 = this one).
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: REMOVE_SECTION_KEY(cycleId) }) <= 1) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      }
+    },
   })
+}
+
+/** Whether this section's removal is in flight, for its card to fade. */
+export function useIsRemoving(cycleId: string, sectionCode: string): boolean {
+  const pending = useMutationState({
+    filters: { mutationKey: REMOVE_SECTION_KEY(cycleId), status: "pending" },
+    select: (m) => (m.state.variables as { sectionCode?: string } | undefined)?.sectionCode,
+  })
+  return pending.includes(sectionCode)
 }

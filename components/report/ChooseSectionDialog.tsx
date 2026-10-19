@@ -84,7 +84,10 @@ export function ChooseSectionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <fieldset className="space-y-2">
+        {/* min-w-0: a fieldset never shrinks below its widest child, and the
+            dropdown is as wide as its longest section name - it pushed the
+            cards and buttons out past the dialog. */}
+        <fieldset className="min-w-0 space-y-2">
           <legend className="mb-2 text-xs text-slate-500">
             Suggested from what each section is about. You choose.
           </legend>
@@ -135,7 +138,7 @@ export function ChooseSectionDialog({
               // Locked until the suggestions arrive: a pick made meanwhile was
               // hard to tell apart from the best match that then appeared.
               disabled={suggestions.isLoading}
-              className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-10 w-full min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="">All sections…</option>
               {sections.map((s) => (

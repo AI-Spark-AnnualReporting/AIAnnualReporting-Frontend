@@ -315,6 +315,11 @@ export interface DepartmentClaimsGroup {
   // null means this department's claims were never read - extraction failed, or
   // the cycle predates the feature. The page offers Extract claims.
   extracted_at: string | null
+  /** Distinct figures in the answers that no fact carries; above 0 = the
+   *  fact list may be short. */
+  figures_not_in_facts?: number
+  /** Read again after approval: the page stops offering another re-read. */
+  facts_reread?: boolean
 }
 
 export interface DepartmentClaimsResponse {
@@ -1189,8 +1194,14 @@ export const pmApi = {
   // draft — one call per department for unsupported claims, plus one across all
   // of them for figures that disagree. Slow by nature (it is N+1 model calls run
   // concurrently server-side), so the caller shows a pending state.
+  // Up to 3 minutes: the check reads any missing facts and runs one AI call
+  // per department, and took ~57 s on a 3-department test cycle. The 30 s
+  // default gave up while the server finished, and the PM landed on "Not
+  // analyzed yet" with the result already saved.
   checkDrafts: async (cycleId: string): Promise<DraftFindingsResponse> => {
-    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/check-drafts`)
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/check-drafts`, undefined, {
+      timeout: 180_000,
+    })
     return data
   },
 
@@ -1508,6 +1519,9 @@ export const pmApi = {
         departments: departmentCodes,
         ...(writingStyle ? { writing_style: writingStyle } : {}),
       },
+      // An analyze section re-runs its analysis on this call; and Start
+      // Building saves many sections at once on a server that is often slow.
+      { timeout: 120_000 },
     )
     return data.plan ?? data
   },
@@ -1523,6 +1537,8 @@ export const pmApi = {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
       `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/source-mode`,
       { mode },
+      // Start Building saves many of these at once; 30 s timed one out.
+      { timeout: 120_000 },
     )
     return data.section
   },

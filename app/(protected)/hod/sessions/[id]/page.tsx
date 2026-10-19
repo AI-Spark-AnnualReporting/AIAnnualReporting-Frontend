@@ -15,7 +15,8 @@ import {
 } from "@/hooks/useHod"
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
-import type { AssignableUser, HODQuestion } from "@/lib/api/hod"
+import { formatDateTime } from "@/lib/utils"
+import type { AssignableUser, HODQuestion, HODSession } from "@/lib/api/hod"
 import { QuestionTag } from "@/components/ui/question-text"
 import { QUESTION_PLACEHOLDER, TOPIC_PLACEHOLDER, joinQuestion, splitQuestion } from "@/lib/questionText"
 import { dirOf } from "@/lib/lang"
@@ -30,6 +31,7 @@ export default function HODCuratePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { data: session, isLoading, isError } = useHODSession(id)
+  const { user: me } = useAuth()
 
   const review = useReviewQuestion(id)
   const addQ = useAddQuestion(id)
@@ -111,6 +113,23 @@ export default function HODCuratePage() {
 
   const deptName = session.departments?.department_name || "Department"
   const cycleName = session.reporting_cycles?.cycle_name || "Cycle"
+
+  // Once Assign & send has run the questions have left review: the server
+  // refuses every change here, so the page says where they went instead of
+  // offering Assign & send again (reached by Back, a link or a refresh).
+  if (session.status !== "hod_curation") {
+    return (
+      <SentView
+        session={session}
+        questions={questions}
+        title={`${deptName} · ${cycleName}`}
+        mine={!!me && session.user_id === me.user_id}
+        onBack={() => router.push("/hod")}
+        onAnswer={() => router.push("/department")}
+        onReview={() => router.push(`/hod/sessions/${id}/review`)}
+      />
+    )
+  }
 
   return (
     <div className="mx-auto max-w-3xl pb-28">
@@ -314,6 +333,142 @@ export default function HODCuratePage() {
   )
 }
 
+/** The page after the questions were sent: read-only, saying to whom and
+ *  when, with the way on. */
+function SentView({ session, questions, title, mine, onBack, onAnswer, onReview }: {
+  session: HODSession
+  questions: HODQuestion[]
+  title: string
+  /** Sent to the person viewing: they answer them next. */
+  mine: boolean
+  onBack: () => void
+  onAnswer: () => void
+  onReview: () => void
+}) {
+  const sent = questions.filter((q) => reviewOf(q) !== "rejected")
+  // Assign & send may move rejected questions out to `rejected_questions`.
+  const rejected = questions.length - sent.length + (session.rejected_questions?.length ?? 0)
+  const to = mine ? "you" : session.users?.full_name || "a team member"
+  const on = (iso?: string | null) => (iso ? ` on ${formatDateTime(iso)}` : "")
+  const stage = sentStage(session.status)
+
+  // What the bar says and offers follows where the answers are now: being
+  // written, waiting for the lead's review, approved, or sent back.
+  const bar =
+    stage === "submitted"
+      ? {
+          badge: "Answers submitted",
+          title: `Answers submitted${on(session.submitted_at)}`,
+          text: "They're waiting for your review.",
+          button: "Review answers →",
+          onClick: onReview,
+        }
+      : stage === "approved"
+        ? {
+            badge: "Approved",
+            title: `Answers approved${on(session.reviewed_at)}`,
+            text: "Nothing more to do on this session.",
+            button: "View answers",
+            onClick: onReview,
+          }
+        : {
+            badge: stage === "reopened" ? "Sent back" : "Questions sent",
+            title:
+              stage === "reopened"
+                ? "Sent back for changes"
+                : `Questions sent to ${to}${on(session.routed_at)}`,
+            text:
+              stage === "reopened"
+                ? "They're being updated."
+                : mine
+                  ? "They can't be changed any more. Answer them in your workspace."
+                  : "They can't be changed any more. They're being answered now.",
+            button: mine ? "Go to answering →" : "Back to dashboard",
+            onClick: mine ? onAnswer : onBack,
+          }
+
+  return (
+    <div className="mx-auto max-w-3xl pb-16">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <button onClick={onBack} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-extrabold text-[#1A1D2E]">{title}</h1>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {bar.badge}
+        </span>
+        <span className="ml-auto text-xs font-semibold text-slate-500">
+          {sent.length} sent · {rejected} rejected
+        </span>
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-bold text-[#1A1D2E]">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" /> {bar.title}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-600">{bar.text}</p>
+        </div>
+        <button
+          onClick={bar.onClick}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[#4040c8] px-4 py-2 text-xs font-bold text-white hover:bg-[#3535b5]"
+        >
+          {bar.button}
+        </button>
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-3">
+        <Stat n={sent.length} label="Sent" tone="green" />
+        <Stat n={rejected} label="Rejected" tone="red" />
+      </div>
+
+      <div className="space-y-3">
+        {questions.map((q) => {
+          const isRejected = reviewOf(q) === "rejected"
+          const { topic, question } = splitQuestion(q.question)
+          return (
+            <div
+              key={q.question_id}
+              dir={dirOf(question)}
+              className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-4 ${isRejected ? "border-l-rose-400" : "border-l-emerald-400"}`}
+            >
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[11px] font-bold text-slate-500">
+                  {q.order}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    {topic ? <QuestionTag topic={topic} /> : <span />}
+                    <span
+                      className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${isRejected ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-700"}`}
+                    >
+                      {isRejected ? "REJECTED" : "SENT"}
+                    </span>
+                  </div>
+                  <p className={`mt-2 text-sm leading-relaxed ${isRejected ? "text-slate-400 line-through" : "text-[#1A1D2E]"}`}>
+                    {question}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Where a sent session's answers are: being written, submitted for the
+ *  lead's review, approved, or sent back. */
+function sentStage(status: string): "answering" | "submitted" | "approved" | "reopened" {
+  if (status === "submitted") return "submitted"
+  if (status === "approved") return "approved"
+  if (status === "reopened") return "reopened"
+  return "answering"
+}
+
 function Stat({ n, label, tone, highlight }: { n: number; label: string; tone: "amber" | "green" | "red" | "indigo"; highlight?: boolean }) {
   const color = { amber: "text-amber-600", green: "text-emerald-600", red: "text-rose-600", indigo: "text-[#4040c8]" }[tone]
   return (
@@ -375,9 +530,17 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
 
   const self = !!me && effectiveUserId === me.user_id
 
+  // Stays true from the first click on, success included: the modal is still
+  // open while the page moves away, and a second click then was refused by
+  // the server ("not awaiting question review").
+  const [sending, setSending] = useState(false)
   const send = () => {
-    if (!effectiveUserId) return
-    assign.mutate({ user_id: effectiveUserId, note: note.trim() || undefined }, { onSuccess: () => onAssigned(self) })
+    if (!effectiveUserId || sending) return
+    setSending(true)
+    assign.mutate(
+      { user_id: effectiveUserId, note: note.trim() || undefined },
+      { onSuccess: () => onAssigned(self), onError: () => setSending(false) },
+    )
   }
 
   return (
@@ -439,11 +602,11 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
           <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
           <button
             onClick={send}
-            disabled={!effectiveUserId || assign.isPending}
+            disabled={!effectiveUserId || sending}
             className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
           >
-            {assign.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-            {self ? "Start answering" : "Send questions"}
+            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            {sending ? "Sending…" : self ? "Start answering" : "Send questions"}
           </button>
         </div>
       </div>
