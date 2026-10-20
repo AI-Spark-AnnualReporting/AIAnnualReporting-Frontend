@@ -70,3 +70,24 @@ export function customRenderFields(
   if (templateKey !== CUSTOM_TEMPLATE_KEY) return {}
   return { section_code: sectionCode, orientation }
 }
+
+/**
+ * The render-cache tag for one version of the custom template, by its
+ * created_at. The version in use gets exactly the tag renderTemplateTag gives
+ * it, so its pictures are shared with the normal preview; an older version
+ * (an adjustment's "Before") gets its own.
+ */
+export function versionRenderTag(createdAt: string, format: LandscapeFormat): string {
+  return keyForFormat(`${CUSTOM_TEMPLATE_KEY}:${createdAt}`, format)
+}
+
+/** The kept older versions of the page's custom template for the sheet on screen. */
+export function customTemplateHistory(
+  unit: Pick<DesignUnit, "custom_template_history" | "landscape_custom_template_history"> | null,
+  orientation: Orientation,
+  format: LandscapeFormat,
+): CustomTemplate[] {
+  if (!unit) return []
+  const kept = orientation === "portrait" ? unit.custom_template_history : unit.landscape_custom_template_history
+  return (kept ?? []).filter((version) => version.paper === paperFor(orientation, format))
+}

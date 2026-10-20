@@ -62,6 +62,10 @@ export interface CustomTemplate {
   unchecked?: string[]
   /** The approved sketch version it was built from, when it was built from one. */
   sketch_version?: number
+  /** The `created_at` of the version this one was adjusted from (its "Before"). */
+  adjusted_from?: string | null
+  /** What the latest adjustment did, note by note (absent until the PM adjusts). */
+  adjustment?: CustomAdjustment
   /** The reviewer's one-line verdict on how well it matches the request. */
   review_summary?: string
   /** True after the section was re-extracted: it may no longer fit. */
@@ -69,8 +73,33 @@ export interface CustomTemplate {
   created_at: string
 }
 
+/** One note of an adjustment, as the result shows it. */
+export interface AdjustedNote {
+  number: number
+  /** The template page (1 = the first page after the title page), or null for the whole template. */
+  page: number | null
+  note: string
+  /** The designer's answer: what it changed, or why it could not. */
+  answer: string
+  /** The reviewer's verdict; null when the reviewer did not answer. */
+  done: boolean | null
+  evidence: string
+}
+
+/** What one adjustment of a custom template did. */
+export interface CustomAdjustment {
+  at: string
+  /** Whether the PM's preview showed the section's title page first (for sheet numbers). */
+  title_page: boolean
+  notes: AdjustedNote[]
+}
+
 /** Progress of a custom template run, read from the server's memory. */
 export interface CustomTemplateStatus {
+  /** "adjust" for an adjustment run; absent for a design run. */
+  kind?: "adjust"
+  /** When an adjustment is done: what it did. */
+  adjustment?: CustomAdjustment
   status: "idle" | "running" | "done" | "failed"
   /**
    * The run's ticket. Progress lives in one server process's memory, and
@@ -78,7 +107,7 @@ export interface CustomTemplateStatus {
    * screen only believes "done" or "failed" for the ticket it is following.
    */
   run_id?: string
-  step?: "queued" | "brief" | "build" | "check" | "judge" | "fix" | "explain"
+  step?: "queued" | "brief" | "build" | "check" | "judge" | "fix" | "explain" | "look" | "adjust"
   round?: number
   message?: string
   ok?: boolean
@@ -206,6 +235,10 @@ export interface DesignUnit {
   custom_template?: CustomTemplate | null
   /** The landscape (A4 or 16:9) custom template, when one was made. */
   landscape_custom_template?: CustomTemplate | null
+  /** Older versions of the portrait custom template (newest first, at most 3). */
+  custom_template_history?: CustomTemplate[]
+  /** Older versions of the landscape custom template. */
+  landscape_custom_template_history?: CustomTemplate[]
   /** The portrait layout sketch, while the PM shapes one before it is built. */
   custom_sketch?: CustomSketchRecord | null
   /** The landscape (A4 or 16:9) layout sketch. */
@@ -434,6 +467,48 @@ export const createDesignApi = {
       { timeout: 120000 },
     )
     return data
+  },
+
+  /**
+   * Change a finished custom template from the PM's notes, page by page.
+   * Answers at once with the run's ticket; follow it on `customTemplateStatus`.
+   *
+   * `pageNotes` are keyed by TEMPLATE page (1 = the first page after the
+   * section's title page); `titlePage` says whether the preview showed one.
+   */
+  adjustCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    pageNotes: Record<number, string>,
+    templateNotes: string[],
+    titlePage: boolean,
+  ): Promise<{ already_running: boolean; run_id: string | null }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/adjust`,
+      { paper, page_notes: pageNotes, template_notes: templateNotes, title_page: titlePage },
+      { timeout: 60000 },
+    )
+    return { already_running: Boolean(data?.already_running), run_id: data?.run_id ?? null }
+  },
+
+  /** Make a kept version of the custom template the one in use again (Undo). */
+  switchCustomTemplateVersion: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    createdAt: string,
+  ): Promise<{ design: DesignEnvelope }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/version`,
+      { paper, created_at: createdAt },
+      { timeout: 60000 },
+    )
+    return { design: data.design }
   },
 
   /**

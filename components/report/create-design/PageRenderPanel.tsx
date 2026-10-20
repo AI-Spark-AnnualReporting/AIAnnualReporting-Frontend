@@ -10,24 +10,35 @@
  * Renders are cached per section, page and template, so returning to a
  * template you already looked at costs nothing. Every render is a cold
  * browser launch on the server, which is why that matters.
+ *
+ * A custom template can be adjusted here too: "Adjust" swaps the panel for
+ * the Adjust view (CustomAdjustView), and once a template has been adjusted
+ * its result, Before | After and Undo sit under its name.
  */
 
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, SlidersHorizontal } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { usePatchSectionDesign } from "@/hooks/useCreateDesign"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
-import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
+import {
+  createDesignApi, type CustomAdjustment, type DesignOption, type DesignUnit,
+} from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
 import { losesContent, lossText, placementText } from "@/lib/createDesignLoss"
+import { adjustResultSummary, retryNote, type AdjustResultLine } from "@/lib/customAdjust"
 import {
-  CUSTOM_TEMPLATE_KEY, customRenderFields, customTemplateFor, renderTemplateTag,
+  CUSTOM_TEMPLATE_KEY, customRenderFields, customTemplateFor, customTemplateHistory, paperFor,
+  renderTemplateTag, versionRenderTag,
 } from "@/lib/customTemplate"
 import {
   pageSize, pickedKey, type LandscapeFormat, type Orientation,
 } from "@/lib/orientation"
 
+import { AdjustResult, CustomAdjustView, TemplateVersions, type AdjustNotes } from "./CustomAdjustView"
 import { TEMPLATE_NAMES } from "./TemplateMini"
 
 /**
@@ -78,6 +89,12 @@ function NoLandscapePickCard({ format }: { format: LandscapeFormat }) {
   )
 }
 
+/** An open Adjust view: the page it is for, and its notes so far. */
+interface AdjustOpening extends AdjustNotes {
+  /** Section, page and sheet, so the view shows only on the page it was opened on. */
+  id: string
+}
+
 export function PageRenderPanel({
   cycleId,
   sectionCode,
@@ -91,6 +108,7 @@ export function PageRenderPanel({
   format = "a4",
   onRecheck,
   rechecking = false,
+  onAdjusted,
 }: {
   cycleId: string
   sectionCode: string
@@ -107,6 +125,8 @@ export function PageRenderPanel({
   /** Check the custom template against the section's current content. */
   onRecheck?: () => void
   rechecking?: boolean
+  /** Read the screen's data again after an adjustment; resolves when it is in. */
+  onAdjusted?: () => Promise<unknown>
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -114,10 +134,31 @@ export function PageRenderPanel({
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [page, setPage] = useState(0)
+  const [adjusting, setAdjusting] = useState<AdjustOpening | null>(null)
+  /** The template version whose "Before" is on screen (its created_at); null shows After. */
+  const [beforeOf, setBeforeOf] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const patchDesign = usePatchSectionDesign(cycleId)
+
+  const custom = templateKey === CUSTOM_TEMPLATE_KEY
+    ? customTemplateFor(unit, orientation, format)
+    : null
+  const history = custom ? customTemplateHistory(unit, orientation, format) : []
+  // The version this one was adjusted from, while it is still kept: what
+  // Before draws and Undo brings back.
+  const before = custom?.adjusted_from
+    ? history.find((version) => version.created_at === custom.adjusted_from) ?? null
+    : null
+  const showingBefore = Boolean(custom && before && beforeOf === custom.created_at)
+  const renderVersion = showingBefore && before ? before.created_at : null
+  const customPaper = paperFor(orientation, format)
+  const pageId = `${sectionCode}|${unit.index}|${customPaper}`
+  const adjustOpen = Boolean(custom && adjusting?.id === pageId)
 
   // Re-attached whenever the page box comes back. A landscape section with no
-  // pick renders the placeholder card INSTEAD of that box, so observing only
-  // on mount would leave a later pick measuring nothing and drawn at 320px.
+  // pick renders the placeholder card INSTEAD of that box, and the Adjust view
+  // replaces it too, so observing only on mount would leave the box measuring
+  // nothing and drawn at 320px.
   const hasPage = Boolean(templateKey)
   useEffect(() => {
     const el = wrapRef.current
@@ -125,14 +166,15 @@ export function PageRenderPanel({
     const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
     observer.observe(el)
     return () => observer.disconnect()
-  }, [hasPage])
+  }, [hasPage, adjustOpen])
 
   // Read the cache during render, not in an effect: a page you have already
   // looked at must appear immediately, and routing it through state would
   // flash a spinner on every hit.
   const key = templateKey
-    ? cacheKey(cycleId, sectionCode, unit.index,
-      renderTemplateTag(templateKey, unit, orientation, format))
+    ? cacheKey(cycleId, sectionCode, unit.index, renderVersion
+      ? versionRenderTag(renderVersion, format)
+      : renderTemplateTag(templateKey, unit, orientation, format))
     : null
   const cached = key ? peek(key) : undefined
   const pages = cached ?? (fetched && fetched.key === key ? fetched.pages : null)
@@ -154,6 +196,7 @@ export function PageRenderPanel({
         breaks: unit.breaks,
         presentation: format === "presentation",
         ...customRenderFields(templateKey, sectionCode, orientation),
+        ...(renderVersion ? { custom_version: renderVersion } : {}),
       }).then((r) => r.pages),
     )
       .then((next) => {
@@ -171,7 +214,7 @@ export function PageRenderPanel({
     return () => {
       alive = false
     }
-  }, [key, cached, cycleId, sectionCode, sectionTitle, unit, templateKey, attempt, format, orientation])
+  }, [key, cached, cycleId, sectionCode, sectionTitle, unit, templateKey, attempt, format, orientation, renderVersion])
 
   // Clamp rather than reset, so flipping templates keeps you roughly where
   // you were in a multi-page unit.
@@ -193,9 +236,68 @@ export function PageRenderPanel({
   }
 
   const chosen = pickedKey(unit, orientation) === templateKey
-  const custom = templateKey === CUSTOM_TEMPLATE_KEY
-    ? customTemplateFor(unit, orientation, format)
-    : null
+
+  const openAdjust = (pageNotes: Record<number, string> = {}, templateNotes: string[] = []) => {
+    setBeforeOf(null)
+    setAdjusting({ id: pageId, pageNotes, templateNotes })
+  }
+
+  /** "Try again" on a note that isn't quite done: the same note, on the same page. */
+  const tryNoteAgain = (line: AdjustResultLine) => {
+    if (line.page === null) openAdjust({}, [retryNote(line.note)])
+    else openAdjust({ [line.page]: line.note })
+  }
+
+  /** The adjustment is saved: read it back, then close the view on the new version. */
+  const finishAdjust = (adjustment: CustomAdjustment | undefined) => {
+    const close = () => {
+      setAdjusting(null)
+      toast.success("Template adjusted", {
+        description: adjustment ? adjustResultSummary(adjustment) : undefined,
+      })
+    }
+    if (onAdjusted) void onAdjusted().then(close, close)
+    else close()
+  }
+
+  /** Make a kept version the one in use (Undo, or any earlier version). */
+  const switchVersion = async (createdAt: string, done: string) => {
+    setSwitching(true)
+    try {
+      const { design } = await createDesignApi.switchCustomTemplateVersion(cycleId, sectionCode, customPaper, createdAt)
+      patchDesign(sectionCode, design)
+      setBeforeOf(null)
+      toast.success(done)
+    } catch (e) {
+      toast.error(readError(e as MutationError, "Could not switch to that version"))
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  if (custom && adjusting && adjustOpen) {
+    return (
+      <CustomAdjustView
+        key={pageId}
+        cycleId={cycleId}
+        sectionCode={sectionCode}
+        sectionTitle={sectionTitle}
+        unit={unit}
+        template={custom}
+        versions={[custom, ...history]}
+        orientation={orientation}
+        format={format}
+        maxWidth={maxPageWidth(orientation, format)}
+        sheet={page}
+        onSheetChange={setPage}
+        notes={adjusting}
+        onNotesChange={(notes) => setAdjusting({ ...notes, id: pageId })}
+        onClose={() => setAdjusting(null)}
+        onDone={finishAdjust}
+        onStale={() => void onAdjusted?.()}
+      />
+    )
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -225,6 +327,19 @@ export function PageRenderPanel({
               {custom.brief.summary_for_pm}
             </p>
           )}
+          {custom?.adjustment && (
+            <AdjustResult
+              adjustment={custom.adjustment}
+              canCompare={Boolean(before)}
+              showingBefore={showingBefore}
+              onShowBefore={(on) => setBeforeOf(on ? custom.created_at : null)}
+              undoing={switching}
+              onUndo={() => {
+                if (before) void switchVersion(before.created_at, "Change undone: the version before it is back")
+              }}
+              onTryAgain={tryNoteAgain}
+            />
+          )}
           {!!custom?.unmet?.length && (
             <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
               <p className="text-[11px] font-semibold text-amber-900">
@@ -232,12 +347,28 @@ export function PageRenderPanel({
                   ? ` (${custom.requirements.length - custom.unmet.length} of ${custom.requirements.length} wishes met)`
                   : ""}:
               </p>
-              <ul className="mt-0.5 list-disc space-y-0.5 ps-4 text-[11px] leading-snug text-amber-900">
+              <ul className="mt-0.5 space-y-0.5 text-[11px] leading-snug text-amber-900">
                 {custom.unmet.map((line, i) => (
-                  <li key={i} className="line-clamp-2">{line}</li>
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="line-clamp-2 min-w-0 flex-1">{line}</span>
+                    <button
+                      type="button"
+                      onClick={() => openAdjust({}, [retryNote(line)])}
+                      className="shrink-0 font-semibold underline underline-offset-2 hover:text-amber-950"
+                    >
+                      Try again
+                    </button>
+                  </li>
                 ))}
               </ul>
             </div>
+          )}
+          {custom && (
+            <TemplateVersions
+              versions={history}
+              switching={switching}
+              onUse={(version) => void switchVersion(version.created_at, "Switched to that version")}
+            />
           )}
           {!!custom?.unchecked?.length && (
             <p className="mt-1 text-[11px] text-slate-500">
@@ -263,6 +394,12 @@ export function PageRenderPanel({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {custom && (
+            <Button variant="outline" size="sm" className="h-8" onClick={() => openAdjust()}>
+              <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+              Adjust
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -335,9 +472,15 @@ export function PageRenderPanel({
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={pages[current]}
-                alt={`${unit.title} as ${TEMPLATE_NAMES[templateKey] ?? templateKey}, sheet ${current + 1}`}
+                alt={`${unit.title} as ${TEMPLATE_NAMES[templateKey] ?? templateKey}, sheet ${current + 1}` +
+                  (showingBefore ? ", before your changes" : "")}
                 className="block h-full w-full object-contain"
               />
+            )}
+            {showingBefore && (
+              <span className="absolute start-2 top-2 rounded-full bg-slate-900/80 px-2 py-0.5 text-[10.5px] font-semibold text-white">
+                Before your changes
+              </span>
             )}
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-slate-400">

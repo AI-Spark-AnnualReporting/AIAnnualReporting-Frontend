@@ -104,6 +104,8 @@ function withEveryTemplate(options: DesignOption[]): DesignOption[] {
 
 /** The toast after a custom template is saved: how many of the PM's wishes it met. */
 function customDoneMessage(status: CustomTemplateStatus): string {
+  // The panel also follows an adjustment that was going when it opened.
+  if (status.kind === "adjust") return "Template adjusted. It's now used for this section."
   const total = status.wishes_total ?? 0
   const met = status.wishes_met ?? 0
   if (!total) return "Custom template ready. It's now used for this section."
@@ -930,6 +932,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                       })
                     }
                     rechecking={recheckCustom.isPending}
+                    onAdjusted={() => refetch()}
                   />
                   )}
                 </div>
