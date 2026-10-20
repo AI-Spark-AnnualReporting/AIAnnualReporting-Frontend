@@ -239,6 +239,12 @@ export function PageRenderPanel({
               </ul>
             </div>
           )}
+          {!!custom?.unchecked?.length && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Not checked against your request: the reviewer didn&apos;t respond
+              ({custom.unchecked.length} {custom.unchecked.length === 1 ? "wish" : "wishes"}).
+            </p>
+          )}
           {custom?.needs_recheck && (
             <p className="mt-1 flex items-center gap-2 text-[11px] text-amber-800">
               This section was re-extracted after the layout was made, so it may no longer fit.

@@ -8,6 +8,7 @@
  * the updated envelope.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback } from "react"
 import { toast } from "sonner"
 
 import {
@@ -106,6 +107,30 @@ export function useApplyLandscapeToAll(cycleId: string) {
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not apply that template to every section")),
   })
+}
+
+/**
+ * Put one section's freshly saved envelope into the screen's data, and nothing
+ * else.
+ *
+ * For a saved layout sketch. Unlike patchSection it leaves `extracted` and
+ * `stale` alone: a sketch says nothing about whether the section's content is
+ * up to date, so it must not clear a "content changed" mark.
+ */
+export function usePatchSectionDesign(cycleId: string) {
+  const qc = useQueryClient()
+  // Stable across renders: the sketch poll lists it as an effect dependency,
+  // and a new function every render would restart the poll every second.
+  return useCallback(
+    (sectionCode: string, design: DesignEnvelope) => {
+      qc.setQueryData<CycleDesign>(QUERY_KEYS.PM_CYCLE_CREATE_DESIGN(cycleId), (old) => {
+        if (!old) return old
+        const sections = old.sections.map((s) => (s.section_code === sectionCode ? { ...s, design } : s))
+        return { ...old, sections }
+      })
+    },
+    [qc, cycleId],
+  )
 }
 
 /**

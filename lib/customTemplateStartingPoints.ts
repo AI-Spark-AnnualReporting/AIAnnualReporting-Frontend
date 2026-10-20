@@ -111,6 +111,19 @@ function tablePrints(table: SectionTableBlock | null | undefined): boolean {
 }
 
 /**
+ * Characters of body text (subheadings left out): the backend's
+ * prose_characters, which its page estimate divides by.
+ */
+export function proseCharacters(blocks: SectionBlocks | null | undefined): number {
+  let total = 0
+  for (const block of blocks?.narrative_blocks ?? []) {
+    const text = cleanText(block?.text)
+    if (text && block.kind !== "heading") total += text.length
+  }
+  return total
+}
+
+/**
  * Count what the section prints, with the engine's filters (page_filler._blocks):
  * a figure needs a value, a quote needs text, a table needs columns and rows.
  */
@@ -119,12 +132,8 @@ export function countContent(
   paper: CustomPaper,
 ): ContentCounts {
   let paragraphs = 0
-  let proseCharacters = 0
   for (const block of blocks?.narrative_blocks ?? []) {
-    const text = cleanText(block?.text)
-    if (!text) continue
-    paragraphs += 1
-    if (block.kind !== "heading") proseCharacters += text.length
+    if (cleanText(block?.text)) paragraphs += 1
   }
 
   let figures = 0
@@ -143,7 +152,7 @@ export function countContent(
   }
 
   const perPage = paper === "presentation" ? CHARS_PER_PRESENTATION_PAGE : CHARS_PER_PAGE
-  const pages = Math.max(1, Math.ceil(proseCharacters / perPage))
+  const pages = Math.max(1, Math.ceil(proseCharacters(blocks) / perPage))
   return { paragraphs, figures, quotes, tables, pages }
 }
 

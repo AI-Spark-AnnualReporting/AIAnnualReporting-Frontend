@@ -13,21 +13,36 @@
  * The run lives on the server, not in this component. Leaving the section and
  * coming back finds it still going (the status is read on mount), and a run
  * that finished while nobody was looking is picked up the same way.
+ *
+ * SKETCH FIRST. Before that long run, the PM can ask for a quick sketch: the
+ * section's page layouts as simple boxes (CustomSketchReview), which they
+ * adjust with a note on any layout until it is right. A sketch run is found by
+ * its ticket in the database, so the poll gets the same answer from every
+ * server process; the ticket and unsent notes are kept in the browser tab
+ * (lib/customSketchDrafts.ts), because this panel remounts empty whenever it
+ * closes.
  */
 
-import { AlertTriangle, Check, Loader2, Sparkles, Undo2 } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, Loader2, PenLine, Sparkles, Undo2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { usePatchSectionDesign } from "@/hooks/useCreateDesign"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import {
   createDesignApi, type CustomPaper, type CustomTemplateStatus, type DesignUnit,
 } from "@/lib/api/createDesign"
 import {
-  activeCardId, countContent, hasSentence, ideaRowsFor, presetCardsFor, toggleIdea,
+  latestVersion, notesPayload, sketchRecordFor, versionByNumber, type SketchDraft,
+} from "@/lib/customSketch"
+import { readSketchDraft, writeSketchDraft } from "@/lib/customSketchDrafts"
+import {
+  activeCardId, countContent, hasSentence, ideaRowsFor, presetCardsFor, proseCharacters, toggleIdea,
   type ContentCounts, type IdeaRow, type PresetCard,
 } from "@/lib/customTemplateStartingPoints"
+
+import { CustomSketchReview } from "./CustomSketchReview"
 
 /** How often the run's progress is read while it is going. */
 const POLL_MS = 3000
@@ -39,6 +54,12 @@ const POLL_MS = 3000
  * a spinner that never ends is worse than an honest "try again".
  */
 const GIVE_UP_MS = 25 * 60 * 1000
+/**
+ * When the screen says a sketch is taking too long. The backend gives a sketch
+ * run 6 minutes (custom_sketch_time_budget_seconds). The poll carries on
+ * behind the message, so a late sketch still opens here.
+ */
+const SKETCH_GIVE_UP_MS = 7 * 60 * 1000
 const MAX_CHARS = 2000
 
 /**
@@ -144,27 +165,70 @@ export function CustomTemplatePanel({
   const designCards = presetCardsFor(paper, counts)
   const ideaRows = ideaRowsFor(counts)
 
+  // The layout sketch for this sheet, read from the screen's data on every
+  // render: a newly saved version arrives by patching that data.
+  const record = sketchRecordFor(unit, paper)
+  // Without text the engine prints no designed pages, so there is nothing to sketch.
+  const hasText = counts.paragraphs > 0
+  const [sketchView, setSketchView] = useState<"request" | "review">(() => (record ? "review" : "request"))
+  const [shownVersion, setShownVersion] = useState<number | null>(null)
+  // What the browser tab remembers (a sketch being waited for, unsent notes):
+  // read once when the panel opens, written back whenever it changes. The
+  // panel remounts empty every time it closes, so this is what survives.
+  const [savedDraft] = useState<SketchDraft>(() => readSketchDraft(cycleId, sectionCode, paper))
+  const [pending, setPending] = useState(savedDraft.pending)
+  const [notesDraft, setNotesDraft] = useState(savedDraft.notes)
+  const [sketchStarting, setSketchStarting] = useState(false)
+  const [sketchError, setSketchError] = useState<string | null>(null)
+  const patchDesign = usePatchSectionDesign(cycleId)
+
+  const shown = (shownVersion !== null ? versionByNumber(record, shownVersion) : null) ?? latestVersion(record)
+  const shownNotes = notesDraft && shown && notesDraft.version === shown.version ? notesDraft : null
+
   const running = status?.status === "running"
 
+  // The build run this panel follows, by its ticket. An answer about any other
+  // run (an older one another server process still remembers) is ignored.
+  const runIdRef = useRef<string | null>(null)
+
+  /** The latest status of the run this panel follows; null when the answer was about another. */
   const readStatus = useCallback(async () => {
     try {
       const next = await createDesignApi.customTemplateStatus(cycleId, sectionCode, paper)
+      // Reopened on a run already going: follow that one from now on.
+      if (next.status === "running" && next.run_id && !runIdRef.current) {
+        runIdRef.current = next.run_id
+      }
+      const followed = runIdRef.current
+      const aboutThisRun = !followed || next.run_id === followed
       // A run's progress lives in the memory of the server process running
       // it, and the backend runs several processes: a poll answered by
-      // another one says "idle" while the run goes on. Dropping the run then
-      // stopped the polling, and the PM never saw it finish. Keep showing it
-      // until it says done or failed, or the screen gives up.
+      // another one says "idle", or reports an OLDER run of this section as
+      // done, while ours goes on. Keep showing ours until IT says done or
+      // failed, or the screen gives up.
       setStatus((previous) =>
-        previous?.status === "running" && next.status === "idle" ? previous : next)
-      if (next.status === "running" && next.started_at) {
+        previous?.status === "running" && (next.status === "idle" || !aboutThisRun) ? previous : next)
+      if (next.status === "running" && next.started_at && aboutThisRun) {
         setStartedAt((s) => s ?? next.started_at! * 1000)
       }
-      return next
+      return aboutThisRun ? next : null
     } catch (e) {
       setRequestError(readError(e as MutationError, "Could not read the progress."))
       return null
     }
   }, [cycleId, sectionCode, paper])
+
+  /**
+   * Follow a run that has just started. It shows as running at once: the
+   * first status answer may come from a process that never heard of it, and
+   * waiting for that answer left the panel looking as if nothing had started.
+   */
+  const followRun = (runId: string | null) => {
+    runIdRef.current = runId
+    setStartedAt(Date.now())
+    setNow(Date.now())
+    setStatus({ status: "running", step: "queued", round: 0, message: "Waiting to start", run_id: runId ?? undefined })
+  }
 
   // On opening: is a run already going (started before a refresh, or from
   // another tab)? Reading it here is what lets the PM leave and come back.
@@ -189,17 +253,127 @@ export function CustomTemplatePanel({
   const elapsed = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
   const timedOut = running && startedAt !== null && now - startedAt > GIVE_UP_MS
 
+  // Keep the tab's copy of the draft in step with the screen.
+  useEffect(() => {
+    writeSketchDraft(cycleId, sectionCode, paper, { pending, notes: notesDraft })
+  }, [cycleId, sectionCode, paper, pending, notesDraft])
+
+  // While a sketch is being made: poll its ticket and tick the clock. "done"
+  // comes from the database, so it is right whichever server process answers;
+  // "unknown" (another process is running it) just means keep waiting.
+  useEffect(() => {
+    if (!pending) return
+    let stopped = false
+    const poll = window.setInterval(async () => {
+      let next
+      try {
+        next = await createDesignApi.customSketchStatus(cycleId, sectionCode, paper, pending.runId)
+      } catch {
+        return // a failed read counts as "not yet"
+      }
+      if (stopped) return
+      if (next.status === "done") {
+        if (next.design) patchDesign(sectionCode, next.design)
+        setPending(null)
+        setNotesDraft(null)
+        setShownVersion(next.version ?? null)
+        setSketchView("review")
+        setSketchError(null)
+      } else if (next.status === "failed") {
+        setPending(null)
+        setSketchError(next.summary || next.message || "The sketch could not be made. Please try again.")
+      }
+    }, POLL_MS)
+    const tick = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => {
+      stopped = true
+      window.clearInterval(poll)
+      window.clearInterval(tick)
+    }
+  }, [pending, cycleId, sectionCode, paper, patchDesign])
+
+  const sketchElapsed = pending ? Math.max(0, Math.round((now - pending.startedAt) / 1000)) : 0
+  const sketchTimedOut = pending !== null && now - pending.startedAt > SKETCH_GIVE_UP_MS
+
+  const startSketch = async () => {
+    setSketchStarting(true)
+    setSketchError(null)
+    setReplacedText(null)
+    try {
+      const { run_id } = await createDesignApi.startCustomSketch(cycleId, sectionCode, paper, instructions.trim())
+      setNow(Date.now())
+      setPending({ runId: run_id, startedAt: Date.now() })
+    } catch (e) {
+      setSketchError(readError(e as MutationError, "The sketch could not be started."))
+    } finally {
+      setSketchStarting(false)
+    }
+  }
+
+  const sendNotes = async () => {
+    if (!shown) return
+    const layoutIds = shown.sketch.layouts.map((layout) => layout.id)
+    const payload = notesPayload(shownNotes?.layouts ?? {}, shownNotes?.allPages ?? "", layoutIds)
+    setSketchStarting(true)
+    setSketchError(null)
+    try {
+      const { run_id } = await createDesignApi.updateCustomSketch(cycleId, sectionCode, paper, shown.version, payload)
+      setNow(Date.now())
+      setPending({ runId: run_id, startedAt: Date.now() })
+    } catch (e) {
+      setSketchError(readError(e as MutationError, "Your notes could not be sent."))
+    } finally {
+      setSketchStarting(false)
+    }
+  }
+
+  const changeNotes = (layouts: Record<string, string>, allPages: string) => {
+    if (!shown) return
+    setNotesDraft({ version: shown.version, layouts, allPages })
+  }
+
+  const showVersion = (number: number) => {
+    setShownVersion(number)
+    setSketchError(null)
+  }
+
+  /** Back to the request, with the sketch's own request in the box to start from. */
+  const startOver = () => {
+    setSketchView("request")
+    setShownVersion(null)
+    setNotesDraft(null)
+    setSketchError(null)
+    if (!instructions.trim() && shown?.request) setInstructions(shown.request)
+  }
+
   const start = async () => {
     setStarting(true)
     setRequestError(null)
     setReplacedText(null)
     try {
-      await createDesignApi.startCustomTemplate(cycleId, sectionCode, paper, instructions.trim())
-      setStartedAt(Date.now())
-      setNow(Date.now())
+      const { run_id } = await createDesignApi.startCustomTemplate(cycleId, sectionCode, paper, instructions.trim())
+      followRun(run_id)
       await readStatus()
     } catch (e) {
       setRequestError(readError(e as MutationError, "The designer could not be started."))
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  /** "Build this design": the shown sketch version goes to the full design run. */
+  const buildFromSketch = async () => {
+    if (!shown) return
+    setStarting(true)
+    setRequestError(null)
+    setSketchError(null)
+    try {
+      const { run_id } = await createDesignApi.startCustomTemplate(
+        cycleId, sectionCode, paper, shown.request, shown.version)
+      followRun(run_id)
+      await readStatus()
+    } catch (e) {
+      setSketchError(readError(e as MutationError, "The design could not be started."))
     } finally {
       setStarting(false)
     }
@@ -256,7 +430,7 @@ export function CustomTemplatePanel({
           </p>
         </div>
         <Button variant="ghost" size="sm" className="h-8" onClick={onClose}>
-          {running ? "Keep working elsewhere" : "Back to templates"}
+          {running || pending ? "Keep working elsewhere" : "Back to templates"}
         </Button>
       </div>
 
@@ -271,6 +445,30 @@ export function CustomTemplatePanel({
               elapsed={elapsed}
               timedOut={timedOut}
               onRetry={() => setStatus(null)}
+            />
+          ) : pending ? (
+            <SketchProgress elapsed={sketchElapsed} timedOut={sketchTimedOut} onBack={() => setPending(null)} />
+          ) : sketchView === "review" && record && shown ? (
+            <CustomSketchReview
+              record={record}
+              version={shown}
+              content={{
+                proseCharacters: proseCharacters(unit.blocks),
+                figures: counts.figures,
+                quotes: counts.quotes,
+                tables: counts.tables,
+              }}
+              rtl={record.language === "arabic"}
+              notes={shownNotes?.layouts ?? {}}
+              allPages={shownNotes?.allPages ?? ""}
+              busy={sketchStarting}
+              building={starting}
+              error={sketchError}
+              onNotesChange={changeNotes}
+              onShowVersion={showVersion}
+              onUpdate={sendNotes}
+              onBuild={buildFromSketch}
+              onStartOver={startOver}
             />
           ) : (
             <>
@@ -361,21 +559,52 @@ export function CustomTemplatePanel({
               {requestError && (
                 <p className="mt-4 text-[12px] text-red-700">{requestError}</p>
               )}
+              {sketchError && (
+                <p className="mt-4 text-[12px] text-red-700">{sketchError}</p>
+              )}
 
-              <div className="mt-6 flex items-center gap-3">
-                <Button variant="brand" onClick={start} disabled={starting}>
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                {hasText && (
+                  <Button variant="brand" onClick={startSketch} disabled={sketchStarting || starting}>
+                    {sketchStarting ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <PenLine className="mr-1.5 h-4 w-4" />
+                    )}
+                    Sketch it first
+                  </Button>
+                )}
+                <Button
+                  variant={hasText ? "ghost" : "brand"}
+                  size={hasText ? "sm" : "default"}
+                  className={hasText ? "h-8" : undefined}
+                  onClick={start}
+                  disabled={starting || sketchStarting}
+                >
                   {starting ? (
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                   ) : (
                     <Sparkles className="mr-1.5 h-4 w-4" />
                   )}
-                  {hasExisting ? "Design a new layout" : "Design this page"}
+                  {hasText
+                    ? "Skip the sketch and design it now"
+                    : hasExisting ? "Design a new layout" : "Design this page"}
                 </Button>
-                <span className="text-[11px] leading-snug text-slate-500">
-                  Usually 5–15 minutes: it checks the printed result against your
-                  request and keeps improving it. You can work on other sections meanwhile.
-                </span>
+                {record && shown && (
+                  <Button variant="ghost" size="sm" className="h-8" onClick={() => setSketchView("review")}>
+                    <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                    Back to your sketch
+                  </Button>
+                )}
               </div>
+              <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                {hasText
+                  ? "A sketch takes a minute or two: your page layouts as simple boxes, which you adjust " +
+                    "with a note on any layout before anything is built. Designing it now skips that and " +
+                    "takes 5–15 minutes. You can work on other sections meanwhile."
+                  : "This section has no text, so there are no pages to sketch. Designing it takes 5–15 " +
+                    "minutes: it checks the printed result against your request and keeps improving it."}
+              </p>
             </>
           )}
         </div>
@@ -488,6 +717,52 @@ function StartingPoints({
         </TabsContent>
       </Tabs>
     </section>
+  )
+}
+
+/** A sketch being made: a short wait, with an honest way out if it stalls. */
+function SketchProgress({
+  elapsed,
+  timedOut,
+  onBack,
+}: {
+  elapsed: number
+  timedOut: boolean
+  onBack: () => void
+}) {
+  const minutes = Math.floor(elapsed / 60)
+  const seconds = String(elapsed % 60).padStart(2, "0")
+
+  if (timedOut) {
+    return (
+      <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4" aria-live="polite">
+        <p className="text-[13px] font-semibold text-amber-900">This sketch is taking longer than it should</p>
+        <p className="mt-1 text-[12px] leading-relaxed text-amber-900">
+          It hasn&apos;t come back in {SKETCH_GIVE_UP_MS / 60000} minutes. You can keep waiting here
+          (it opens as soon as it arrives), or go back and try again.
+        </p>
+        <Button variant="outline" size="sm" className="mt-3 h-8" onClick={onBack}>
+          Back
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div aria-live="polite">
+      <p className="flex items-center gap-2 text-[13px] font-semibold text-slate-900">
+        <Loader2 className="h-4 w-4 animate-spin text-indigo-600 motion-reduce:animate-none" />
+        Sketching your page layouts
+      </p>
+      <p className="mt-1 text-[12px] text-slate-500">
+        {minutes}:{seconds} so far · usually a minute or two
+      </p>
+      <p className="mt-3 text-[12px] leading-relaxed text-slate-600">
+        You&apos;ll see each page layout as simple boxes: where the text, image areas, figures and
+        quotes go. Then you can leave a note on any layout and get a new version, before anything
+        is built.
+      </p>
+    </div>
   )
 }
 
