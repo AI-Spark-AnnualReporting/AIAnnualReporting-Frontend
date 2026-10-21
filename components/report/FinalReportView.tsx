@@ -264,7 +264,10 @@ function CoverBlock({
     // a type size on screen is the type size in the file.
     const scale = SHEET_W / PAGE_W
     return (
-      <section className="print:break-after-page"
+      // dir="ltr": the cover is a fixed-size page scaled from its left edge.
+      // Inside a right-to-left page it would start at the right edge and be
+      // pushed off the sheet. CoverPreview sets its own text direction.
+      <section className="print:break-after-page" dir="ltr"
                style={{ height: PAGE_H * scale, width: SHEET_W,
                         marginInline: -SHEET_PAD, overflow: "hidden" }}>
         <div style={{ width: PAGE_W, height: PAGE_H,

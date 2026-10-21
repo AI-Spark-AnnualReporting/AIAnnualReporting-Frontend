@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -10,6 +10,7 @@ import {
   FileDown,
   FileCheck,
   FileText,
+  Languages,
   Loader2,
   Lock,
   RefreshCw,
@@ -17,9 +18,8 @@ import {
   Sparkles,
   Palette,
 } from "lucide-react"
-// Hidden 2026-09-24 with the Design button — the dialog's onSaved was the only
-// thing in this file that invalidated a query.
-// import { useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
@@ -34,21 +34,28 @@ import { PageLoader } from "@/components/ui/spinner"
 // Hidden 2026-09-24 with the Design button — see the comment beside it below.
 // import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
+import {
+  ArabicEdition,
+  TranslationRun,
+  withArabicCover,
+} from "@/components/report/ArabicTranslation"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import {
+  readError,
   useApproveReport,
+  useArabicReport,
   useAssembleReport,
   useAssembledReport,
   useFinalReport,
   useRenderReport,
   useReportApproval,
+  useStartTranslation,
   useValidateReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-// Hidden 2026-09-24 with the Design button — see the note on useQueryClient above.
-// import { QUERY_KEYS } from "@/lib/constants"
+import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -77,8 +84,6 @@ interface DashboardData {
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
-  // Hidden 2026-09-24 with the Design button — see the note on its import above.
-  // const qc = useQueryClient()
   const reportQuery = useFinalReport(cycleId)
   const validate = useValidateReport(cycleId)
   // The document as the engine will print it. Only once there is something to
@@ -105,6 +110,29 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // Hidden 2026-09-24 with the Design button — see the comment beside it below.
   // const [designOpen, setDesignOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
+
+  // Arabic translation. Only an English cycle's report can be translated.
+  const qc = useQueryClient()
+  const isEnglishCycle = pmData?.cycle?.content_language === "english"
+  const arabicQuery = useArabicReport(cycleId, reportQuery.isSuccess && isEnglishCycle)
+  const arabicReport = arabicQuery.data
+  const startTranslation = useStartTranslation(cycleId)
+  const [translationJobId, setTranslationJobId] = useState<string | null>(null)
+  const [showArabic, setShowArabic] = useState(false)
+
+  const translate = () => {
+    startTranslation.mutate(undefined, {
+      onSuccess: (started) => setTranslationJobId(started.job_id),
+      onError: (err) => toast.error(readError(err, "Couldn't start the translation")),
+    })
+  }
+
+  // Stable: the loader re-runs its finish animation whenever onDone changes.
+  const finishTranslation = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId) })
+    setTranslationJobId(null)
+    setShowArabic(true)
+  }, [qc, cycleId])
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -283,6 +311,43 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                       : "Validate report"}
                 </Button>
                 )}
+            {/* Translate to Arabic, and once a translation exists, a switch
+                between the two. English cycles only. */}
+            {isEnglishCycle && arabicReport && (
+              <div className="flex h-8 items-center rounded-md border p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowArabic(false)}
+                  className={`rounded px-2.5 py-1 ${!showArabic ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  lang="ar"
+                  onClick={() => setShowArabic(true)}
+                  className={`rounded px-2.5 py-1 ${showArabic ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                >
+                  العربية
+                </button>
+              </div>
+            )}
+            {isEnglishCycle && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={translate}
+                disabled={startTranslation.isPending || !!translationJobId}
+                className="h-8"
+              >
+                {startTranslation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Languages className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {arabicReport ? "Translate again" : "Translate to Arabic"}
+              </Button>
+            )}
             {/* Not gated on completeness — the confirm dialog is where the
                 one-way consequence gets spelled out. Same as the board report. */}
             {approval?.can_approve && (
@@ -393,10 +458,29 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
       {validate.isPending && <ReportValidateLoader stage={validate.stage} />}
 
+      {translationJobId && (
+        <TranslationRun
+          jobId={translationJobId}
+          onFinished={finishTranslation}
+          onRetry={() => {
+            setTranslationJobId(null)
+            translate()
+          }}
+          onClose={() => setTranslationJobId(null)}
+        />
+      )}
+
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
           {reportMissing ? (
             <EmptyReport cycleId={cycleId} />
+          ) : showArabic && arabicReport ? (
+            <ArabicEdition>
+              <FinalReportView report={arabicReport}
+                               cycle={{ ...pmData?.cycle, content_language: "arabic" }}
+                               assembled={withArabicCover(assembled, arabicReport.cover_values)}
+                               assembledPending={assembledQuery.isPending} />
+            </ArabicEdition>
           ) : (
             <FinalReportView report={report} cycle={pmData?.cycle}
                              assembled={assembled}

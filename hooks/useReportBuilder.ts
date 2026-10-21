@@ -804,6 +804,36 @@ export function useFinalReport(cycleId: string) {
   })
 }
 
+// The Arabic translation of the report. 404 = not translated yet, which the
+// page reads as "show the Translate button", so no retry.
+export function useArabicReport(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId),
+    queryFn: () => pmApi.getArabicReport(cycleId),
+    enabled: !!cycleId && enabled,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+// Starts a translation; the page then follows it with useTranslationJob.
+export function useStartTranslation(cycleId: string) {
+  return useMutation({
+    mutationFn: () => pmApi.startTranslation(cycleId),
+  })
+}
+
+// A translation job, re-read every 3s until it finishes. Off while jobId is null.
+export function useTranslationJob(jobId: string | null) {
+  return useQuery({
+    queryKey: ["translation-job", jobId],
+    queryFn: () => pmApi.getTranslationJob(jobId as string),
+    enabled: !!jobId,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" || !query.state.data ? 3000 : false,
+  })
+}
+
 /**
  * The document as the export engine will print it — the same payload the
  * download is built from.

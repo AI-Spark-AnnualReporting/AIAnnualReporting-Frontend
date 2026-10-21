@@ -138,6 +138,7 @@ export const QUERY_KEYS = {
   PM_ASSEMBLY_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "assembly-readiness"],
   PM_FINAL_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report"],
   PM_ASSEMBLED_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "assembled"],
+  PM_ARABIC_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report-arabic"],
   PM_REPORT_APPROVAL: (cycleId: string) => ["pm", "cycle", cycleId, "approval"],
   PM_CYCLE_CREATE_DESIGN: (cycleId: string) => ["pm", "cycle", cycleId, "create-design"],
   PM_COMPANY_PREV_MANUAL: (companyId: string, contentLanguage?: string) => ["pm", "company", companyId, "manual-sections", "previous", contentLanguage ?? "any"],

@@ -287,6 +287,19 @@ export interface ValidationJobSummary {
   retryable?: boolean
 }
 
+// An Arabic translation running in the background (GET /pm/translation-jobs/{id}).
+export interface TranslationJob {
+  job_id: string
+  // "timeout" = the run was stuck for over 15 minutes and was given up.
+  status: "running" | "completed" | "failed" | "timeout"
+  // "brief" while the shared instruction sheet is written, then "translate".
+  stage: "brief" | "translate" | null
+  // Sections finished / in all, while translating.
+  done: number | null
+  total: number | null
+  error: string | null
+}
+
 const JOB_POLL_MS = 3000
 
 function wait(ms: number): Promise<void> {
@@ -1748,6 +1761,30 @@ export const pmApi = {
       { report: FinalReport } | FinalReport
     >(`/pm/cycles/${cycleId}/final-report`)
     return (data as { report?: FinalReport }).report ?? (data as FinalReport)
+  },
+
+  // Start translating the assembled report into Arabic. Answers at once; the
+  // caller polls getTranslationJob(job_id). already_running = a translation
+  // was already going (a double click); job_id is that run's job.
+  startTranslation: async (
+    cycleId: string,
+  ): Promise<{ status: "running"; job_id: string; already_running: boolean }> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/translate`)
+    return data
+  },
+
+  /** A translation's state: "brief" first, then "translate" with done/total. */
+  getTranslationJob: async (jobId: string): Promise<TranslationJob> => {
+    const { data } = await apiClient.get(`/pm/translation-jobs/${jobId}`)
+    return data
+  },
+
+  /** The Arabic translation of the assembled report. 404 if never translated. */
+  getArabicReport: async (cycleId: string): Promise<FinalReport> => {
+    const { data } = await apiClient.get<FinalReport>(
+      `/pm/cycles/${cycleId}/final-report/arabic`,
+    )
+    return data
   },
 
   // Stage 9a — render the assembled report to a downloadable file.
