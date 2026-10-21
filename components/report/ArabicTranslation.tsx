@@ -54,7 +54,9 @@ export function withArabicCover(
   coverValues: Record<string, string> | null | undefined,
 ): AssembledReport | undefined {
   if (!assembled?.cover || !coverValues) return assembled
-  const today = new Date().toLocaleDateString("ar-EG", {
+  // Arabic month name, Western digits ("21 أكتوبر 2026"): the translated
+  // edition writes every number as the English report does.
+  const today = new Date().toLocaleDateString("ar-EG-u-nu-latn", {
     day: "numeric",
     month: "long",
     year: "numeric",
