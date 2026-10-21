@@ -196,10 +196,12 @@ export const annualDesignApi = {
  * failed every real report while looking like a network fault.
  */
 export async function downloadAnnualReport(
-  cycleId: string, format: "pdf" | "docx" | "idml",
+  cycleId: string, format: "pdf" | "docx" | "idml", arabic = false,
 ): Promise<{ blob: Blob; filename: string }> {
+  // arabic: the cycle's Arabic edition (Word or PDF only), from its own page.
+  const path = arabic ? "render/arabic" : "render"
   const res = await apiClient.post(
-    `/pm/cycles/${encodeURIComponent(cycleId)}/render`,
+    `/pm/cycles/${encodeURIComponent(cycleId)}/${path}`,
     null,
     { params: { format }, responseType: "blob", timeout: 180000 },
   )

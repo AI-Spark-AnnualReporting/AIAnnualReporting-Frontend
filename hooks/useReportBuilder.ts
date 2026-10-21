@@ -922,14 +922,14 @@ export function useApproveReport(cycleId: string) {
 // pdf in 9b). On success, triggers a browser save via anchor-click; pmApi's
 // renderReport already decodes blob error bodies so toast messages are
 // meaningful.
-export function useRenderReport(cycleId: string) {
+export function useRenderReport(cycleId: string, arabic = false) {
   return useMutation({
     // Typeset by the shared export engine on the Centriyon side, not by this
     // app's own renderer — that is where the engine lives, and it is the only
     // way the cover, colours and type chosen in the design controls reach the
     // file. The document that comes back is the one the preview showed.
     mutationFn: ({ format }: { format: "docx" | "pdf" | "idml" }) =>
-      downloadAnnualReport(cycleId, format),
+      downloadAnnualReport(cycleId, format, arabic),
     onSuccess: ({ blob: rendered, filename }) => {
       // An IDML is a zip inside. Left typed as such, the browser sniffs it and
       // saves "Annual_Report.idml.zip", which then gets unpacked into a folder

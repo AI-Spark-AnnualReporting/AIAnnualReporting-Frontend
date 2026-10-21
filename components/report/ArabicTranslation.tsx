@@ -1,12 +1,19 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { Noto_Naskh_Arabic } from "next/font/google"
 import { AlertTriangle, RefreshCw } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import { Button } from "@/components/ui/button"
-import { useTranslationJob } from "@/hooks/useReportBuilder"
+import {
+  readError,
+  useStartTranslation,
+  useTranslationJob,
+} from "@/hooks/useReportBuilder"
 import type { AssembledReport } from "@/lib/api/annual-design"
+import { QUERY_KEYS } from "@/lib/constants"
 
 // The Arabic edition's font. The report's own design fonts are Latin-only, so
 // Arabic text otherwise falls back to whatever the browser has.
@@ -76,7 +83,8 @@ export function withArabicCover(
 }
 
 interface TranslationRunProps {
-  jobId: string
+  /** null while the start request is still on its way: the loader shows at once. */
+  jobId: string | null
   /** The run completed and the loader finished; must be stable (useCallback). */
   onFinished: () => void
   /** Start again from the beginning. */
@@ -108,7 +116,7 @@ export function TranslationRun({ jobId, onFinished, onRetry, onClose }: Translat
   return (
     <div className="fixed inset-0 z-[1400] overflow-y-auto">
       <AiLoadingScreen
-        title="Translating your report into Arabic"
+        title="Creating your Arabic report"
         subtitle={
           translating
             ? "Each section is translated with the same terms and style."
@@ -168,4 +176,58 @@ function TranslationFailedCard({ message, onRetry, onClose }: TranslationFailedC
       </div>
     </div>
   )
+}
+
+/**
+ * Create Arabic (or Create again): starts the translation and runs the loader.
+ *
+ * The loader opens on the click, before the server has answered with a job id;
+ * it used to wait for the id, so the PM saw only a small spinner for a few
+ * seconds. A start that fails closes it again and shows the error.
+ *
+ * Shared by the English report page (Create Arabic) and the Arabic page
+ * (Create again).
+ *
+ * Args:
+ *   cycleId: The English cycle.
+ *   onCreated: Called once the new Arabic version is saved and re-read. Must be
+ *     stable (useCallback): the loader re-runs its finish when it changes.
+ *
+ * Returns: `create` to call on click, `running`, and `loader` to render.
+ */
+export function useCreateArabic(cycleId: string, onCreated: () => void) {
+  const qc = useQueryClient()
+  const start = useStartTranslation(cycleId)
+  const [running, setRunning] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
+
+  const create = () => {
+    setJobId(null)
+    setRunning(true)
+    start.mutate(undefined, {
+      onSuccess: (started) => setJobId(started.job_id),
+      onError: (err) => {
+        setRunning(false)
+        toast.error(readError(err, "Couldn't create the Arabic report"))
+      },
+    })
+  }
+
+  const finish = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId) })
+    setRunning(false)
+    setJobId(null)
+    onCreated()
+  }, [qc, cycleId, onCreated])
+
+  const close = () => {
+    setRunning(false)
+    setJobId(null)
+  }
+
+  const loader = running ? (
+    <TranslationRun jobId={jobId} onFinished={finish} onRetry={create} onClose={close} />
+  ) : null
+
+  return { create, running, loader }
 }

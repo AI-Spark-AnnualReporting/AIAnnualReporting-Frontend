@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   ChevronDown,
   FileDown,
   FileCheck,
@@ -18,8 +19,6 @@ import {
   Sparkles,
   Palette,
 } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
@@ -34,16 +33,11 @@ import { PageLoader } from "@/components/ui/spinner"
 // Hidden 2026-09-24 with the Design button — see the comment beside it below.
 // import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
-import {
-  ArabicEdition,
-  TranslationRun,
-  withArabicCover,
-} from "@/components/report/ArabicTranslation"
+import { useCreateArabic } from "@/components/report/ArabicTranslation"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import {
-  readError,
   useApproveReport,
   useArabicReport,
   useAssembleReport,
@@ -51,11 +45,9 @@ import {
   useFinalReport,
   useRenderReport,
   useReportApproval,
-  useStartTranslation,
   useValidateReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -111,28 +103,15 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // const [designOpen, setDesignOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
 
-  // Arabic translation. Only an English cycle's report can be translated.
-  const qc = useQueryClient()
+  // The Arabic edition lives on its own page (/report/arabic). This page only
+  // creates it the first time, then links to it. English cycles only.
   const isEnglishCycle = pmData?.cycle?.content_language === "english"
   const arabicQuery = useArabicReport(cycleId, reportQuery.isSuccess && isEnglishCycle)
   const arabicReport = arabicQuery.data
-  const startTranslation = useStartTranslation(cycleId)
-  const [translationJobId, setTranslationJobId] = useState<string | null>(null)
-  const [showArabic, setShowArabic] = useState(false)
-
-  const translate = () => {
-    startTranslation.mutate(undefined, {
-      onSuccess: (started) => setTranslationJobId(started.job_id),
-      onError: (err) => toast.error(readError(err, "Couldn't start the translation")),
-    })
-  }
-
-  // Stable: the loader re-runs its finish animation whenever onDone changes.
-  const finishTranslation = useCallback(async () => {
-    await qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId) })
-    setTranslationJobId(null)
-    setShowArabic(true)
-  }, [qc, cycleId])
+  const arabicPage = `/pm/cycles/${cycleId}/report/arabic`
+  // Stable: the loader re-runs its finish when this changes.
+  const openArabic = useCallback(() => router.push(arabicPage), [router, arabicPage])
+  const createArabic = useCreateArabic(cycleId, openArabic)
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -311,43 +290,29 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                       : "Validate report"}
                 </Button>
                 )}
-            {/* Translate to Arabic, and once a translation exists, a switch
-                between the two. English cycles only. */}
+            {/* Create Arabic the first time; afterwards it opens the Arabic
+                page, which has its own Create again and Export. */}
             {isEnglishCycle && arabicReport && (
-              <div className="flex h-8 items-center rounded-md border p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setShowArabic(false)}
-                  className={`rounded px-2.5 py-1 ${!showArabic ? "bg-muted font-medium" : "text-muted-foreground"}`}
-                >
-                  English
-                </button>
-                <button
-                  type="button"
-                  lang="ar"
-                  onClick={() => setShowArabic(true)}
-                  className={`rounded px-2.5 py-1 ${showArabic ? "bg-muted font-medium" : "text-muted-foreground"}`}
-                >
-                  العربية
-                </button>
-              </div>
+              <Link href={arabicPage} className="shrink-0">
+                <Button variant="outline" size="sm" className="h-8">
+                  <Languages className="h-3.5 w-3.5 mr-1.5" />
+                  Open Arabic
+                  <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                </Button>
+              </Link>
             )}
-            {isEnglishCycle && (
+            {isEnglishCycle && !arabicReport && (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={translate}
+                onClick={createArabic.create}
                 // Only a signed-off report is translated; the server refuses too.
-                disabled={!locked || startTranslation.isPending || !!translationJobId}
-                title={locked ? undefined : "Approve the report before translating it."}
+                disabled={!locked || createArabic.running || arabicQuery.isLoading}
+                title={locked ? undefined : "Approve the report before creating the Arabic version."}
                 className="h-8"
               >
-                {startTranslation.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Languages className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                {arabicReport ? "Translate again" : "Translate to Arabic"}
+                <Languages className="h-3.5 w-3.5 mr-1.5" />
+                Create Arabic
               </Button>
             )}
             {/* Not gated on completeness — the confirm dialog is where the
@@ -460,30 +425,12 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
       {validate.isPending && <ReportValidateLoader stage={validate.stage} />}
 
-      {translationJobId && (
-        <TranslationRun
-          jobId={translationJobId}
-          onFinished={finishTranslation}
-          onRetry={() => {
-            setTranslationJobId(null)
-            translate()
-          }}
-          onClose={() => setTranslationJobId(null)}
-        />
-      )}
+      {createArabic.loader}
 
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
           {reportMissing ? (
             <EmptyReport cycleId={cycleId} />
-          ) : showArabic && arabicReport ? (
-            <ArabicEdition>
-              <FinalReportView report={arabicReport}
-                               cycle={{ ...pmData?.cycle, content_language: "arabic" }}
-                               assembled={withArabicCover(assembled, arabicReport.cover_values)}
-                               assembledPending={assembledQuery.isPending}
-                               westernDigits />
-            </ArabicEdition>
           ) : (
             <FinalReportView report={report} cycle={pmData?.cycle}
                              assembled={assembled}
