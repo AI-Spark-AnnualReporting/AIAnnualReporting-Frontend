@@ -65,10 +65,16 @@ interface FinalReportViewProps {
    * "it went white, then ten seconds later it turned yellow" this page did.
    */
   assembledPending?: boolean
+  /**
+   * Keep section numbers in Western digits ("1.") even though the report is
+   * Arabic. The translated Arabic edition writes every figure as the English
+   * did, so its section numbers match; Arabic-language cycles leave this off.
+   */
+  westernDigits?: boolean
 }
 
 export function FinalReportView({
-  report, cycle, assembled, assembledPending = false,
+  report, cycle, assembled, assembledPending = false, westernDigits = false,
 }: FinalReportViewProps) {
   // Skip the auto cover/TOC sections from the body list — we render bespoke
   // treatments for those.
@@ -78,6 +84,7 @@ export function FinalReportView({
 
   // Same flag the backend uses to right-align Arabic headings & numbers.
   const isArabic = cycle?.content_language === "arabic"
+  const arabicDigits = isArabic && !westernDigits
 
   // Resolve every section's canonical number (and its sub-heading numbers) from
   // the backend outline, so the preview matches the DOCX/PDF exactly. Falls back
@@ -194,6 +201,7 @@ export function FinalReportView({
         content={report.executive_summary}
         number={execNumber}
         isArabic={isArabic}
+        arabicDigits={arabicDigits}
       />
       {bodySections.map((section, i) => {
         const n = numbering.get(section.section_code)
@@ -209,6 +217,7 @@ export function FinalReportView({
             // means none — the same thing the PDF does with the option set.
             subNumbers={sub.numbering === "plain" ? [] : (n?.subNumbers ?? [])}
             isArabic={isArabic}
+            arabicDigits={arabicDigits}
           />
         )
       })}
@@ -330,11 +339,14 @@ function ExecutiveSummary({
   content,
   number,
   isArabic,
+  arabicDigits,
 }: {
   content: string | null
   // Canonical number ("1"); null only if the outline is absent.
   number: string | null
   isArabic: boolean
+  // Write the number in Arabic-Indic digits.
+  arabicDigits: boolean
 }) {
   if (!content || !content.trim()) return null
   return (
@@ -345,7 +357,7 @@ function ExecutiveSummary({
       >
         {number != null && (
           <span className="text-muted-foreground tabular-nums text-base font-normal">
-            {isArabic ? toArabicDigits(number) : number}
+            {arabicDigits ? toArabicDigits(number) : number}
           </span>
         )}
         {/* Must stay identical to EXEC_SUMMARY_LABEL_AR in the backend's

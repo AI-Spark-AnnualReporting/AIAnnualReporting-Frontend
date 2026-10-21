@@ -337,7 +337,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 variant="ghost"
                 size="sm"
                 onClick={translate}
-                disabled={startTranslation.isPending || !!translationJobId}
+                // Only a signed-off report is translated; the server refuses too.
+                disabled={!locked || startTranslation.isPending || !!translationJobId}
+                title={locked ? undefined : "Approve the report before translating it."}
                 className="h-8"
               >
                 {startTranslation.isPending ? (
@@ -479,7 +481,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               <FinalReportView report={arabicReport}
                                cycle={{ ...pmData?.cycle, content_language: "arabic" }}
                                assembled={withArabicCover(assembled, arabicReport.cover_values)}
-                               assembledPending={assembledQuery.isPending} />
+                               assembledPending={assembledQuery.isPending}
+                               westernDigits />
             </ArabicEdition>
           ) : (
             <FinalReportView report={report} cycle={pmData?.cycle}

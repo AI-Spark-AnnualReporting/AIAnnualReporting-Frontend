@@ -24,6 +24,9 @@ interface ReportSectionRendererProps {
   subNumbers: string[]
   // True for Arabic cycles — lay out headings/numbers RTL to match the report.
   isArabic?: boolean
+  // Write section numbers in Arabic-Indic digits. Defaults to isArabic; the
+  // translated Arabic edition turns it off to keep Western digits.
+  arabicDigits?: boolean
 }
 
 // Renders one body section of the final report. Switches on section.type:
@@ -36,6 +39,7 @@ export function ReportSectionRenderer({
   number,
   subNumbers,
   isArabic = false,
+  arabicDigits = isArabic,
 }: ReportSectionRendererProps) {
   // Mirror the backend dedup: the stored content leads with its own heading that
   // repeats the section title (already shown by SectionTitle), so strip it.
@@ -49,7 +53,7 @@ export function ReportSectionRenderer({
     stripped != null
       ? prefixHeadingNumbers(
           stripped,
-          isArabic ? subNumbers.map(toArabicDigits) : subNumbers,
+          arabicDigits ? subNumbers.map(toArabicDigits) : subNumbers,
         )
       : stripped
   return (
@@ -60,7 +64,8 @@ export function ReportSectionRenderer({
         index > 0 && "print:break-before-page",
       )}
     >
-      <SectionTitle title={section.title} number={number} isArabic={isArabic} />
+      <SectionTitle title={section.title} number={number} isArabic={isArabic}
+                    arabicDigits={arabicDigits} />
       {section.type === "narrative" ? (
         body && body.trim() ? (
           <ProsePreview content={body} dir={isArabic ? "rtl" : "ltr"} />
@@ -84,11 +89,13 @@ function SectionTitle({
   title,
   number,
   isArabic,
+  arabicDigits,
 }: {
   title: string
   // Authoritative number from the backend ("9"); null → render no prefix.
   number: string | null
   isArabic?: boolean
+  arabicDigits?: boolean
 }) {
   const num = number
   // dir="rtl" reverses the flex row so the number (first in DOM) sits on the
@@ -100,7 +107,7 @@ function SectionTitle({
     >
       {num != null && (
         <span className="text-muted-foreground tabular-nums text-base font-normal">
-          {isArabic ? toArabicDigits(num) : num}
+          {arabicDigits ? toArabicDigits(num) : num}
         </span>
       )}
       <span>{title}</span>
