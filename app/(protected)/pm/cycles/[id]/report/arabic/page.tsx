@@ -1,7 +1,8 @@
 "use client"
 
-import { use, useCallback, useEffect } from "react"
+import { use, useCallback, useEffect, useRef } from "react"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft,
   ChevronDown,
@@ -79,6 +80,27 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   const stayHere = useCallback(() => {}, [])
   const createArabic = useCreateArabic(cycleId, stayHere)
   const englishPage = `/pm/cycles/${cycleId}/report`
+
+  // Create Arabic on the English page opens this page in a new tab with
+  // ?create=1, and the translation starts here. Started at most once, and the
+  // flag is taken off the address so a refresh doesn't start a second one.
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const askedToCreate = searchParams.get("create") === "1"
+  const createStarted = useRef(false)
+  const arabicLoaded = !arabicQuery.isLoading
+  const approvalLoaded = approval !== undefined
+  const startCreate = createArabic.create
+
+  useEffect(() => {
+    if (!askedToCreate || createStarted.current) return
+    if (!arabicLoaded || !approvalLoaded) return
+    createStarted.current = true
+    router.replace(`/pm/cycles/${cycleId}/report/arabic`)
+    // Only when there is no Arabic version yet and the English is approved;
+    // otherwise the page just shows as usual.
+    if (!arabicReport && approval?.locked) startCreate()
+  }, [askedToCreate, arabicLoaded, approvalLoaded, arabicReport, approval, router, cycleId, startCreate])
 
   // Same full-width document as the English report page.
   useEffect(() => {
@@ -224,14 +246,6 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
             }}
           >
             <ArabicStatusCard />
-            <div style={{ ...CARD, padding: "14px 16px" }}>
-              <div style={RAIL_LABEL}>In the export</div>
-              <p className="text-xs text-slate-600">
-                Arabic cover, right-to-left layout, numbers as in the English
-                report. No validation page: the validation was run on the
-                English report.
-              </p>
-            </div>
           </aside>
         )}
       </div>

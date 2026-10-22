@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useCallback, useEffect, useState } from "react"
+import { use, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -33,7 +33,6 @@ import { PageLoader } from "@/components/ui/spinner"
 // Hidden 2026-09-24 with the Design button — see the comment beside it below.
 // import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
-import { useCreateArabic } from "@/components/report/ArabicTranslation"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
@@ -103,15 +102,18 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // const [designOpen, setDesignOpen] = useState(false)
   const [approveOpen, setApproveOpen] = useState(false)
 
-  // The Arabic edition lives on its own page (/report/arabic). This page only
-  // creates it the first time, then links to it. English cycles only.
+  // The Arabic edition lives on its own page (/report/arabic), always opened in
+  // a new tab so the English report stays open here. English cycles only.
   const isEnglishCycle = pmData?.cycle?.content_language === "english"
   const arabicQuery = useArabicReport(cycleId, reportQuery.isSuccess && isEnglishCycle)
   const arabicReport = arabicQuery.data
   const arabicPage = `/pm/cycles/${cycleId}/report/arabic`
-  // Stable: the loader re-runs its finish when this changes.
-  const openArabic = useCallback(() => router.push(arabicPage), [router, arabicPage])
-  const createArabic = useCreateArabic(cycleId, openArabic)
+
+  /** Opens the Arabic page in a new tab, which starts the translation itself.
+   *  The tab must open on the click: browsers block tabs opened later. */
+  const createArabicInNewTab = () => {
+    window.open(`${arabicPage}?create=1`, "_blank", "noopener")
+  }
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -291,9 +293,15 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </Button>
                 )}
             {/* Create Arabic the first time; afterwards it opens the Arabic
-                page, which has its own Create again and Export. */}
+                page, which has its own Create again and Export. Both open a
+                new tab. */}
             {isEnglishCycle && arabicReport && (
-              <Link href={arabicPage} className="shrink-0">
+              <Link
+                href={arabicPage}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0"
+              >
                 <Button variant="outline" size="sm" className="h-8">
                   <Languages className="h-3.5 w-3.5 mr-1.5" />
                   Open Arabic
@@ -305,9 +313,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={createArabic.create}
+                onClick={createArabicInNewTab}
                 // Only a signed-off report is translated; the server refuses too.
-                disabled={!locked || createArabic.running || arabicQuery.isLoading}
+                disabled={!locked || arabicQuery.isLoading}
                 title={locked ? undefined : "Approve the report before creating the Arabic version."}
                 className="h-8"
               >
@@ -424,8 +432,6 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
       )}
 
       {validate.isPending && <ReportValidateLoader stage={validate.stage} />}
-
-      {createArabic.loader}
 
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
