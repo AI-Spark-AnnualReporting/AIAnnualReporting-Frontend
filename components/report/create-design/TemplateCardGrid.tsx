@@ -38,6 +38,8 @@ const CARD_NOTES: Record<string, string> = {
   landscape_statement: "A letter: a brand panel with the photo and one quote set large, then the salutation, the letter in columns and the signature.",
   landscape_schedule: "Tables first, after the title and a short introduction. Wide tables run the full width.",
   landscape_essay: "Long text in three columns, opened by a column with the title, the quotes and a picture.",
+  landscape_tiles: "Each figure in its own tile, eight to a sheet, four on each half, the right half in the brand colour. The text and tables follow.",
+  landscape_tables: "Tables in two half-page columns under their titles: group rows in a brand bar, the current year in bold. Wide tables span both.",
   custom: "Designed for this section. Every figure, paragraph, quote and table prints.",
 }
 

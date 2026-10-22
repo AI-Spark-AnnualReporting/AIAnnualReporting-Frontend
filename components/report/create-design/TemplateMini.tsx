@@ -400,6 +400,226 @@ function LandscapeEssayMini({ accent, presentation }: { accent: string; presenta
   )
 }
 
+/** The inks of a group of stat tiles: one set on white, one on the brand colour. */
+interface TileInks {
+  label: string
+  figure: string
+  unit: string
+  hairline: string
+}
+
+/**
+ * The stat-tiles landscape page, drawn sideways like two facing pages: the
+ * title and four figure tiles two by two on the white left half, four more on
+ * the right half in the brand colour, hairlines between the tiles and nothing
+ * in the fold. The text follows on a later sheet, so it is not drawn.
+ */
+function LandscapeTilesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  const whiteHalf: TileInks = { label: "#C3C7D4", figure: CORAL, unit: accent, hairline: "#E4E6F1" }
+  const brandHalf: TileInks = {
+    label: "rgba(255,255,255,0.55)",
+    figure: "rgba(255,255,255,0.95)",
+    unit: "rgba(255,255,255,0.75)",
+    hairline: "rgba(255,255,255,0.3)",
+  }
+  // The band above the tiles. Both halves keep one of the same depth, so the
+  // tile rows stay level across the fold as on the page.
+  const header: React.CSSProperties = {
+    flex: "0 0 22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  }
+  // One tile: the label over two lines, the figure, the unit line, then the
+  // comparison with the year before. Its lower part stays empty, as on the page.
+  const tile = (inks: TileInks) => (
+    <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={line("78%", inks.label, 2)} />
+      <div style={line("52%", inks.label, 2)} />
+      <div style={{ ...line("60%", inks.figure, 9), marginTop: 1 }} />
+      <div style={line("34%", inks.unit, 2.5)} />
+      <div style={{ ...line("70%", inks.label, 2), marginTop: 2 }} />
+    </div>
+  )
+  // Four tiles two by two, on a three-by-three grid: the tiles in the corners,
+  // the hairlines in the 1px middle tracks and the centre cell left empty, so
+  // the lines stop short of each other where they cross, as on the page.
+  const tileGroup = (inks: TileInks) => (
+    <div
+      style={{
+        flex: 1,
+        display: "grid",
+        gridTemplateColumns: "1fr 1px 1fr",
+        gridTemplateRows: "1fr 1px 1fr",
+        gap: 5,
+      }}
+    >
+      {tile(inks)}
+      <div style={{ background: inks.hairline }} />
+      {tile(inks)}
+      <div style={{ background: inks.hairline }} />
+      <div />
+      <div style={{ background: inks.hairline }} />
+      {tile(inks)}
+      <div style={{ background: inks.hairline }} />
+      {tile(inks)}
+    </div>
+  )
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 0,
+        gap: 0,
+      }}
+    >
+      {/* The fold is split at the middle of the sheet: half of it white, half
+          in the brand colour. Together the two insets give the same fold as
+          the data-tables card, about a tenth of the width. */}
+      <div
+        style={{
+          flex: 1,
+          padding: "9px 5.5% 9px 9px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+        }}
+      >
+        <div style={header}>
+          <div style={line("16%", accent, 3)} />
+          <div style={line("64%", "#9AA0B4", 5)} />
+        </div>
+        {tileGroup(whiteHalf)}
+      </div>
+      {/* The brand half starts at the safe top, beside the title, and bleeds
+          to the side trim only: the page never runs it under the stamped
+          header or footer. */}
+      <div
+        style={{
+          flex: 1,
+          margin: "9px 0",
+          padding: "0 9px 0 5.5%",
+          background: accent,
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+        }}
+      >
+        <div style={header} />
+        {tileGroup(brandHalf)}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The data-tables landscape page, drawn sideways like two facing pages with
+ * the fold between them: on the left the subheading after its small square,
+ * the opening text and a long table; on the right two more tables. Each table
+ * sits under its title, with a short line at the start of each column head,
+ * group rows in a brand bar and every other row tinted.
+ */
+function LandscapeTablesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  // One head of the header row, with the page's short accent line on its
+  // start edge. The head text sits at the bottom of the row.
+  const headCell = (width: string, ink: string) => (
+    <div
+      style={{
+        width,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "flex-end",
+        borderLeft: `1px solid ${CORAL}`,
+        padding: "0 0 1px 2px",
+      }}
+    >
+      <div style={line("60%", ink, 2)} />
+    </div>
+  )
+  // One cell of a body row. It starts where its head's text starts, just
+  // after the short line, as the figures do on the page.
+  const bodyCell = (width: string, ink: string) => (
+    <div style={{ width, flexShrink: 0, paddingLeft: 3 }}>
+      <div style={line("60%", ink, 2)} />
+    </div>
+  )
+  // One body row: the line label, the current year (bold on the page, so
+  // darker here), then the year before it.
+  const bodyRow = (shaded: boolean, index: number) => (
+    <div
+      key={index}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        alignItems: "center",
+        background: shaded ? "#F7F4F9" : "#fff",
+      }}
+    >
+      {bodyCell("52%", "#C3C7D4")}
+      {bodyCell("24%", "#6B7085")}
+      {bodyCell("24%", "#AEB3C2")}
+    </div>
+  )
+  // One table under its title (the lead-in, in the brand colour): the white
+  // header row, a group row as a brand bar when asked, then the rows, every
+  // other one tinted starting with the first.
+  const table = (rows: number, withGroupBar: boolean) => (
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={line("58%", accent, 2.5)} />
+      <div style={{ height: 8, marginTop: 3, flexShrink: 0, display: "flex" }}>
+        {headCell("52%", "#6B7085")}
+        {headCell("24%", "#6B7085")}
+        {headCell("24%", "#AEB3C2")}
+      </div>
+      {withGroupBar && (
+        <div
+          style={{
+            height: 6,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: 3,
+            background: accent,
+          }}
+        >
+          <div style={line("20%", "rgba(255,255,255,0.85)", 2)} />
+        </div>
+      )}
+      {Array.from({ length: rows }, (_, i) => bodyRow(i % 2 === 0, i))}
+    </div>
+  )
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 9,
+        gap: 0,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+          <div style={{ width: 4, height: 4, background: CORAL, flexShrink: 0 }} />
+          <div style={line("56%", accent, 3.5)} />
+        </div>
+        <div style={line("100%")} />
+        <div style={{ ...line("72%"), marginBottom: 5 }} />
+        {table(16, true)}
+      </div>
+      {/* The fold: nothing is drawn in it on the page either. */}
+      <div style={{ flex: "0 0 11%" }} />
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+        {table(8, false)}
+        {table(8, true)}
+      </div>
+    </div>
+  )
+}
+
 /**
  * A custom template has no fixed look, so its card shows the real first sheet
  * when one has been drawn (see TemplateCardGrid). This is the stand-in until
@@ -462,6 +682,12 @@ function TemplateMiniInner({
   }
   if (templateKey === "landscape_essay") {
     return <LandscapeEssayMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_tiles") {
+    return <LandscapeTilesMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_tables") {
+    return <LandscapeTablesMini accent={accent} presentation={presentation} />
   }
 
   if (templateKey === "kpi_stat_grid") {

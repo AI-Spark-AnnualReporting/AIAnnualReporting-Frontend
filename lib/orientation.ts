@@ -50,6 +50,8 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_statement",
   "landscape_schedule",
   "landscape_essay",
+  "landscape_tiles",
+  "landscape_tables",
 ] as const
 
 /** The default landscape section-page template — the first in the list. */
@@ -59,8 +61,8 @@ export const LANDSCAPE_TEMPLATE_KEY = "landscape_columns"
  * The default landscape cover, contents and section-opener design.
  *
  * One key for all three defaults: a landscape report prints these until a
- * person picks another cover or contents page. The openers have no picker of
- * their own — they follow the cover, as in portrait.
+ * person picks another cover or contents page. The section opener follows the
+ * cover unless one is chosen on its own (see LANDSCAPE_OPENER_KEYS).
  */
 export const LANDSCAPE_DESIGN_KEY = "landscape"
 
@@ -87,6 +89,8 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_statement: "Landscape — statement",
   landscape_schedule: "Landscape — schedule",
   landscape_essay: "Landscape — essay",
+  landscape_tiles: "Landscape — stat tiles",
+  landscape_tables: "Landscape — data tables",
 }
 
 /**
@@ -101,6 +105,8 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_statement: "Statement",
   landscape_schedule: "Schedule",
   landscape_essay: "Essay",
+  landscape_tiles: "Stat tiles",
+  landscape_tables: "Data tables",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */
@@ -118,14 +124,25 @@ export const LANDSCAPE_TOC_NAMES: Record<string, string> = {
 }
 
 /**
+ * The landscape section openers. Mirrors the engine's
+ * divider_templates.LANDSCAPE_KEYS and the backend's
+ * report_design_service.LANDSCAPE_OPENER_KEYS.
+ */
+export const LANDSCAPE_OPENER_KEYS = [
+  "landscape", "landscape_field", "landscape_numeral", "landscape_split",
+] as const
+
+/**
  * The names of the landscape section openers. Each cover brings its own
  * (Split → Brand half, Full brand → Full brand, Quiet statement → Giant
- * numeral); the cover picker names the one that comes with it.
+ * numeral); the cover picker names the one that comes with it. Split artwork
+ * comes with no cover: it is only ever chosen on its own.
  */
 export const LANDSCAPE_OPENER_NAMES: Record<string, string> = {
   landscape: "Brand half",
   landscape_field: "Full brand",
   landscape_numeral: "Giant numeral",
+  landscape_split: "Split artwork",
 }
 
 /**
@@ -326,10 +343,11 @@ export function landscapeKeyToApply(
   return LANDSCAPE_TEMPLATE_KEY
 }
 
-/** The two landscape front-matter picks of a saved design record. */
+/** The landscape front-matter picks of a saved design record. */
 interface LandscapeFrontMatter {
   landscape_cover_template_key?: string | null
   landscape_toc_template_key?: string | null
+  landscape_divider_template_key?: string | null
 }
 
 /**
@@ -357,4 +375,17 @@ export function landscapeTocKey(design?: LandscapeFrontMatter | null): string {
   const saved = design?.landscape_toc_template_key
   if (saved && (LANDSCAPE_TOC_KEYS as readonly string[]).includes(saved)) return saved
   return LANDSCAPE_DESIGN_KEY
+}
+
+/**
+ * The landscape section opener chosen on its own, or null when the opener
+ * follows the cover (never chosen, set back, or a value this screen does not
+ * know — which the backend does not send on either).
+ *
+ * @returns one of LANDSCAPE_OPENER_KEYS, or null
+ */
+export function landscapeOpenerChoice(design?: LandscapeFrontMatter | null): string | null {
+  const saved = design?.landscape_divider_template_key
+  if (saved && (LANDSCAPE_OPENER_KEYS as readonly string[]).includes(saved)) return saved
+  return null
 }

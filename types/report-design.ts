@@ -166,6 +166,11 @@ export interface AnnualDesign {
   /** The cycle's OWN landscape contents pick. Same rules — read it through `landscapeTocKey()`. */
   landscape_toc_template_key?: string | null
   /**
+   * The landscape section opener chosen on its own, null when the opener
+   * follows the cover. Read it through `landscapeOpenerChoice()`.
+   */
+  landscape_divider_template_key?: string | null
+  /**
    * The sheet a landscape report prints on: "a4" or the 16:9 "presentation"
    * sheet. Kept while the report is portrait. Read it through
    * `landscapeFormatOf()`: a backend deployed before the format existed omits it.
@@ -253,6 +258,11 @@ export interface DesignSelection {
   landscape_cover_template_key?: string
   /** Which of the three landscape contents pages a landscape report prints. Same rules. */
   landscape_toc_template_key?: string
+  /**
+   * The landscape section opener chosen on its own (e.g. "landscape_split"),
+   * or "" to have it follow the cover again. Absent leaves the saved choice alone.
+   */
+  landscape_divider_template_key?: string
   /**
    * The sheet a landscape report prints on. Sent with `orientation:
    * "landscape"` by the page-format switch; absent leaves it alone.

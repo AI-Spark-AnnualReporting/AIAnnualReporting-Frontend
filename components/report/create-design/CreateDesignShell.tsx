@@ -49,7 +49,7 @@ import {
 } from "@/lib/customTemplate"
 import {
   countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
-  landscapeOptions, landscapeTocKey, orientationOf, pageFormatOf, pickedKey,
+  landscapeOpenerChoice, landscapeOptions, landscapeTocKey, orientationOf, pageFormatOf, pickedKey,
   selectionForPageFormat, type LandscapeFormat, type Orientation, type PageFormat,
 } from "@/lib/orientation"
 import {
@@ -326,6 +326,19 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not save that cover")),
+  })
+  // The section opener chosen on its own (Split artwork), or "" to have it
+  // follow the cover again. Revoked like the landscape cover: every section
+  // page is drawn with its opener as sheet 1, and no render cache key names it.
+  const saveLandscapeOpener = useMutation({
+    mutationFn: (key: string | null) =>
+      annualDesignApi.save(cycleId, { landscape_divider_template_key: key ?? "" }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(designKey, fresh)
+      revokeCycle(cycleId)
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not save the section title pages")),
   })
   // No revoke: the contents page is drawn on its own, under its own key, and
   // no section page shows it.
@@ -761,6 +774,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
               onChoose={chooseCover}
               orientation={orientation}
               format={format}
+              openerChoice={landscapeOpenerChoice(reportDesign.data)}
+              onChooseOpener={landscape ? (key) => saveLandscapeOpener.mutate(key) : undefined}
+              savingOpener={saveLandscapeOpener.isPending}
             />
           ) : tocOpen ? (
             <TocDesignPanel

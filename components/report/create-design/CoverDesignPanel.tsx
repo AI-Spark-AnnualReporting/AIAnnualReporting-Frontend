@@ -20,7 +20,9 @@
  * In landscape it offers the three landscape covers instead. The pick is saved
  * as the report's LANDSCAPE cover, beside the portrait one, so switching
  * orientation never loses either. Until somebody picks, the default (Split) is
- * the one in use. Each landscape cover brings its own section opener too.
+ * the one in use. Each landscape cover brings its own section opener too,
+ * unless one is chosen on its own under "Section title pages" (Split artwork
+ * comes with no cover, so that is the only way to get it).
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -84,6 +86,9 @@ export function CoverDesignPanel({
   saving,
   orientation = "portrait",
   format = "a4",
+  openerChoice = null,
+  onChooseOpener,
+  savingOpener = false,
 }: {
   cycleId: string
   /**
@@ -99,6 +104,11 @@ export function CoverDesignPanel({
   orientation?: Orientation
   /** The landscape sheet the preview is drawn on: A4 or 16:9. */
   format?: LandscapeFormat
+  /** Landscape: the section opener chosen on its own, or null when it follows the cover. */
+  openerChoice?: string | null
+  /** Landscape: save the section opener (null = follow the cover). Absent hides the choice. */
+  onChooseOpener?: (key: string | null) => void
+  savingOpener?: boolean
 }) {
   const [active, setActive] = useState<string | null>(null)
 
@@ -124,6 +134,8 @@ export function CoverDesignPanel({
   // orientation flips, so a design inspected in one never shows in the other.
   const showing = active ?? chosen ?? fallbackKey
   const inUse = chosen
+  // The opener the cover IN USE brings, for "Follow the cover".
+  const coverOpener = designs.find((design) => design.key === (chosen ?? fallbackKey))?.divider
   // Landscape draws only a design the engine listed, so an engine from before
   // there was a choice is never asked for one it does not have.
   const canDraw = !landscape || designs.some((design) => design.key === showing)
@@ -166,7 +178,8 @@ export function CoverDesignPanel({
         {landscape ? (
           <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
             The front cover of the landscape report. Each cover brings its own
-            section opener. Your portrait cover is kept as it is.
+            section opener, unless you choose one under Section title pages.
+            Your portrait cover is kept as it is.
           </p>
         ) : (
           <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
@@ -218,6 +231,16 @@ export function CoverDesignPanel({
             )
           })}
         </div>
+
+        {landscape && onChooseOpener && (
+          <SectionTitlePages
+            coverOpener={coverOpener ? LANDSCAPE_OPENER_NAMES[coverOpener] ?? null : null}
+            choice={openerChoice}
+            locked={locked}
+            saving={savingOpener}
+            onChoose={onChooseOpener}
+          />
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -228,7 +251,9 @@ export function CoverDesignPanel({
               <p className="text-[11px] text-slate-500">
                 {preview.page_count === 1 ? "One page" : `${preview.page_count} pages`}
                 {" · "}
-                {DIVIDER_NAMES[preview.divider] ?? preview.divider} section openers
+                {landscape && openerChoice
+                  ? `${LANDSCAPE_OPENER_NAMES[openerChoice] ?? openerChoice} section openers (chosen on their own)`
+                  : `${DIVIDER_NAMES[preview.divider] ?? preview.divider} section openers`}
               </p>
             )}
           </div>
@@ -281,6 +306,91 @@ export function CoverDesignPanel({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** The two ways a landscape section can open. */
+const OPENER_OPTIONS: { key: string | null; name: string; blurb: string }[] = [
+  {
+    key: null,
+    name: "Follow the cover",
+    blurb: "The opener that comes with the cover in use.",
+  },
+  {
+    key: "landscape_split",
+    name: LANDSCAPE_OPENER_NAMES.landscape_split,
+    blurb:
+      "One picture across the whole page, under a see-through brand panel " +
+      "with the section number and name.",
+  },
+]
+
+/**
+ * "Section title pages": the landscape section opener, the cover's own or
+ * Split artwork. Saved straight away on a click; every section of the report
+ * opens on it, so the section previews show it once they are drawn again.
+ */
+function SectionTitlePages({
+  coverOpener,
+  choice,
+  locked,
+  saving,
+  onChoose,
+}: {
+  /** The name of the opener the cover in use brings, when known. */
+  coverOpener: string | null
+  /** The opener chosen on its own, or null when it follows the cover. */
+  choice: string | null
+  locked: boolean
+  saving: boolean
+  onChoose: (key: string | null) => void
+}) {
+  return (
+    <div className="mt-5 border-t pt-4">
+      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-900">
+        Section title pages
+        {saving && <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />}
+      </p>
+      <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+        The page that opens every section of the report.
+      </p>
+      <div className="space-y-2" role="radiogroup" aria-label="Section title pages">
+        {OPENER_OPTIONS.map((option) => {
+          const selected = choice === option.key
+          const blurb = option.key === null && coverOpener
+            ? `${coverOpener}, the opener that comes with the cover in use.`
+            : option.blurb
+          return (
+            <button
+              key={option.key ?? "cover"}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={locked || saving || selected}
+              title={locked ? "This report has been approved and locked." : undefined}
+              onClick={() => onChoose(option.key)}
+              className={cn(
+                "w-full rounded-lg border p-2.5 text-left transition disabled:cursor-default",
+                selected
+                  ? "border-indigo-400 bg-indigo-50/60"
+                  : "border-slate-200 hover:border-slate-300",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-900">{option.name}</span>
+                {selected && (
+                  <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700">
+                    <Check className="h-3 w-3" />
+                    In use
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[10.5px] leading-snug text-slate-500">{blurb}</p>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
