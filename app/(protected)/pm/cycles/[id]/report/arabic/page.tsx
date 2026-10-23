@@ -24,6 +24,7 @@ import { PageLoader } from "@/components/ui/spinner"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import {
   ArabicEdition,
+  TranslationRun,
   useCreateArabic,
   withArabicCover,
 } from "@/components/report/ArabicTranslation"
@@ -102,6 +103,19 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
     if (!arabicReport && approval?.locked) startCreate()
   }, [askedToCreate, arabicLoaded, approvalLoaded, arabicReport, approval, router, cycleId, startCreate])
 
+  // From the click until the translation has started, the tab shows the
+  // "Creating your Arabic report" loader at its first step, rather than a page
+  // spinner and then a flash of "No Arabic version yet". It is drawn in the
+  // same place as the real loader, so React keeps it on screen and the real
+  // progress simply continues it. If nothing is started (an Arabic version
+  // already exists, or the English report is not approved), the ?create=1 flag
+  // is dropped and the normal page shows.
+  const startingFromLink = askedToCreate && !createArabic.running
+  const doNothing = useCallback(() => {}, [])
+  const startingLoader = startingFromLink ? (
+    <TranslationRun jobId={null} onFinished={doNothing} onRetry={doNothing} onClose={doNothing} />
+  ) : null
+
   // Same full-width document as the English report page.
   useEffect(() => {
     window.dispatchEvent(
@@ -114,7 +128,7 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
     }
   }, [])
 
-  if (arabicQuery.isLoading) return <PageLoader />
+  if (arabicQuery.isLoading && !startingFromLink) return <PageLoader />
 
   const cycleName = pmData?.cycle?.cycle_name
   // Created only from an approved English report, so a missing one just
@@ -210,7 +224,7 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
         )}
       </div>
 
-      {createArabic.loader}
+      {createArabic.loader ?? startingLoader}
 
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto">
