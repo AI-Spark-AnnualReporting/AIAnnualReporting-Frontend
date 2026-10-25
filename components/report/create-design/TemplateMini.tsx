@@ -408,31 +408,26 @@ interface TileInks {
   hairline: string
 }
 
+/** The tile inks on white: grey labels, coral figures, the unit in the brand colour. */
+function tileInksOnWhite(accent: string): TileInks {
+  return { label: "#C3C7D4", figure: CORAL, unit: accent, hairline: "#E4E6F1" }
+}
+
+/** The tile inks on the brand colour: white at several strengths. */
+const TILE_INKS_ON_BRAND: TileInks = {
+  label: "rgba(255,255,255,0.55)",
+  figure: "rgba(255,255,255,0.95)",
+  unit: "rgba(255,255,255,0.75)",
+  hairline: "rgba(255,255,255,0.3)",
+}
+
 /**
- * The stat-tiles landscape page, drawn sideways like two facing pages: the
- * title and four figure tiles two by two on the white left half, four more on
- * the right half in the brand colour, hairlines between the tiles and nothing
- * in the fold. The text follows on a later sheet, so it is not drawn.
+ * One stat tile: the label over two lines, the figure, the unit line, then
+ * the comparison with the year before. Its lower part stays empty, as on the
+ * page.
  */
-function LandscapeTilesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
-  const whiteHalf: TileInks = { label: "#C3C7D4", figure: CORAL, unit: accent, hairline: "#E4E6F1" }
-  const brandHalf: TileInks = {
-    label: "rgba(255,255,255,0.55)",
-    figure: "rgba(255,255,255,0.95)",
-    unit: "rgba(255,255,255,0.75)",
-    hairline: "rgba(255,255,255,0.3)",
-  }
-  // The band above the tiles. Both halves keep one of the same depth, so the
-  // tile rows stay level across the fold as on the page.
-  const header: React.CSSProperties = {
-    flex: "0 0 22px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-  }
-  // One tile: the label over two lines, the figure, the unit line, then the
-  // comparison with the year before. Its lower part stays empty, as on the page.
-  const tile = (inks: TileInks) => (
+function statTile(inks: TileInks) {
+  return (
     <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
       <div style={line("78%", inks.label, 2)} />
       <div style={line("52%", inks.label, 2)} />
@@ -441,10 +436,16 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
       <div style={{ ...line("70%", inks.label, 2), marginTop: 2 }} />
     </div>
   )
-  // Four tiles two by two, on a three-by-three grid: the tiles in the corners,
-  // the hairlines in the 1px middle tracks and the centre cell left empty, so
-  // the lines stop short of each other where they cross, as on the page.
-  const tileGroup = (inks: TileInks) => (
+}
+
+/**
+ * Four stat tiles two by two, on a three-by-three grid: the tiles in the
+ * corners, the hairlines in the 1px middle tracks and the centre cell left
+ * empty, so the lines stop short of each other where they cross, as on the
+ * page.
+ */
+function statTileGroup(inks: TileInks) {
+  return (
     <div
       style={{
         flex: 1,
@@ -454,17 +455,34 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
         gap: 5,
       }}
     >
-      {tile(inks)}
+      {statTile(inks)}
       <div style={{ background: inks.hairline }} />
-      {tile(inks)}
+      {statTile(inks)}
       <div style={{ background: inks.hairline }} />
       <div />
       <div style={{ background: inks.hairline }} />
-      {tile(inks)}
+      {statTile(inks)}
       <div style={{ background: inks.hairline }} />
-      {tile(inks)}
+      {statTile(inks)}
     </div>
   )
+}
+
+/**
+ * The stat-tiles landscape page, drawn sideways like two facing pages: the
+ * title and four figure tiles two by two on the white left half, four more on
+ * the right half in the brand colour, hairlines between the tiles and nothing
+ * in the fold. The text follows on a later sheet, so it is not drawn.
+ */
+function LandscapeTilesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  // The band above the tiles. Both halves keep one of the same depth, so the
+  // tile rows stay level across the fold as on the page.
+  const header: React.CSSProperties = {
+    flex: "0 0 22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  }
   return (
     <div
       style={{
@@ -491,7 +509,7 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
           <div style={line("16%", accent, 3)} />
           <div style={line("64%", "#9AA0B4", 5)} />
         </div>
-        {tileGroup(whiteHalf)}
+        {statTileGroup(tileInksOnWhite(accent))}
       </div>
       {/* The brand half starts at the safe top, beside the title, and bleeds
           to the side trim only: the page never runs it under the stamped
@@ -508,23 +526,18 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
         }}
       >
         <div style={header} />
-        {tileGroup(brandHalf)}
+        {statTileGroup(TILE_INKS_ON_BRAND)}
       </div>
     </div>
   )
 }
 
 /**
- * The data-tables landscape page, drawn sideways like two facing pages with
- * the fold between them: on the left the subheading after its small square,
- * the opening text and a long table; on the right two more tables. Each table
- * sits under its title, with a short line at the start of each column head,
- * group rows in a brand bar and every other row tinted.
+ * One head of a data table's header row, with the page's short accent line
+ * on its start edge. The head text sits at the bottom of the row.
  */
-function LandscapeTablesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
-  // One head of the header row, with the page's short accent line on its
-  // start edge. The head text sits at the bottom of the row.
-  const headCell = (width: string, ink: string) => (
+function tableHeadCell(width: string, ink: string) {
+  return (
     <div
       style={{
         width,
@@ -538,16 +551,26 @@ function LandscapeTablesMini({ accent, presentation }: { accent: string; present
       <div style={line("60%", ink, 2)} />
     </div>
   )
-  // One cell of a body row. It starts where its head's text starts, just
-  // after the short line, as the figures do on the page.
-  const bodyCell = (width: string, ink: string) => (
+}
+
+/**
+ * One cell of a data table's body row. It starts where its head's text
+ * starts, just after the short line, as the figures do on the page.
+ */
+function tableBodyCell(width: string, ink: string) {
+  return (
     <div style={{ width, flexShrink: 0, paddingLeft: 3 }}>
       <div style={line("60%", ink, 2)} />
     </div>
   )
-  // One body row: the line label, the current year (bold on the page, so
-  // darker here), then the year before it.
-  const bodyRow = (shaded: boolean, index: number) => (
+}
+
+/**
+ * One body row of a data table: the line label, the current year (bold on
+ * the page, so darker here), then the year before it.
+ */
+function tableBodyRow(shaded: boolean, index: number) {
+  return (
     <div
       key={index}
       style={{
@@ -558,21 +581,26 @@ function LandscapeTablesMini({ accent, presentation }: { accent: string; present
         background: shaded ? "#F7F4F9" : "#fff",
       }}
     >
-      {bodyCell("52%", "#C3C7D4")}
-      {bodyCell("24%", "#6B7085")}
-      {bodyCell("24%", "#AEB3C2")}
+      {tableBodyCell("52%", "#C3C7D4")}
+      {tableBodyCell("24%", "#6B7085")}
+      {tableBodyCell("24%", "#AEB3C2")}
     </div>
   )
-  // One table under its title (the lead-in, in the brand colour): the white
-  // header row, a group row as a brand bar when asked, then the rows, every
-  // other one tinted starting with the first.
-  const table = (rows: number, withGroupBar: boolean) => (
+}
+
+/**
+ * One data table under its title (the lead-in, in the brand colour): the
+ * white header row, a group row as a brand bar when asked, then the rows,
+ * every other one tinted starting with the first.
+ */
+function dataTable(accent: string, rows: number, withGroupBar: boolean) {
+  return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={line("58%", accent, 2.5)} />
       <div style={{ height: 8, marginTop: 3, flexShrink: 0, display: "flex" }}>
-        {headCell("52%", "#6B7085")}
-        {headCell("24%", "#6B7085")}
-        {headCell("24%", "#AEB3C2")}
+        {tableHeadCell("52%", "#6B7085")}
+        {tableHeadCell("24%", "#6B7085")}
+        {tableHeadCell("24%", "#AEB3C2")}
       </div>
       {withGroupBar && (
         <div
@@ -588,9 +616,19 @@ function LandscapeTablesMini({ accent, presentation }: { accent: string; present
           <div style={line("20%", "rgba(255,255,255,0.85)", 2)} />
         </div>
       )}
-      {Array.from({ length: rows }, (_, i) => bodyRow(i % 2 === 0, i))}
+      {Array.from({ length: rows }, (_, i) => tableBodyRow(i % 2 === 0, i))}
     </div>
   )
+}
+
+/**
+ * The data-tables landscape page, drawn sideways like two facing pages with
+ * the fold between them: on the left the subheading after its small square,
+ * the opening text and a long table; on the right two more tables. Each table
+ * sits under its title, with a short line at the start of each column head,
+ * group rows in a brand bar and every other row tinted.
+ */
+function LandscapeTablesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
   return (
     <div
       style={{
@@ -608,13 +646,205 @@ function LandscapeTablesMini({ accent, presentation }: { accent: string; present
         </div>
         <div style={line("100%")} />
         <div style={{ ...line("72%"), marginBottom: 5 }} />
-        {table(16, true)}
+        {dataTable(accent, 16, true)}
       </div>
       {/* The fold: nothing is drawn in it on the page either. */}
       <div style={{ flex: "0 0 11%" }} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-        {table(8, false)}
-        {table(8, true)}
+        {dataTable(accent, 8, false)}
+        {dataTable(accent, 8, true)}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One column of prose for the editorial minis: text lines, with a subheading
+ * (a small square before a darker line) part way down when asked, and a bold
+ * closing line in the brand colour for the quotes set as emphasis lines.
+ */
+function editorialColumn(accent: string, withHeading: boolean, withEmphasis: boolean) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2.5 }}>
+      <div style={ruledColumn} />
+      {withHeading && (
+        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0, marginTop: 2 }}>
+          <div style={{ width: 3, height: 3, background: CORAL, flexShrink: 0 }} />
+          <div style={line("62%", "#6B7085", 3)} />
+        </div>
+      )}
+      <div style={ruledColumn} />
+      {withEmphasis && <div style={line("78%", accent, 3.5)} />}
+    </div>
+  )
+}
+
+/**
+ * The editorial-columns landscape page, drawn sideways: a white column on the
+ * start side holding the title, and a tint over the rest of the first sheet
+ * with the lead paragraph at its top. Four columns of text run under them,
+ * with subheadings after a small square and the quotes as bold lines at the
+ * end. The tint stays inside the safe area, as it does on the page.
+ */
+function LandscapeEditorialMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 9,
+        gap: 6,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={line("40%", CORAL, 3)} />
+        <div style={line("92%", accent, 5)} />
+        <div style={{ ...line("70%", accent, 5), marginBottom: 6 }} />
+        {editorialColumn(accent, true, false)}
+      </div>
+      <div
+        style={{
+          flex: 3,
+          minWidth: 0,
+          background: "#F4F0F7",
+          padding: 6,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        <div style={{ width: "62%", display: "flex", flexDirection: "column", gap: 3, flexShrink: 0 }}>
+          <div style={line("100%", accent, 3.5)} />
+          <div style={line("100%", accent, 3.5)} />
+          <div style={line("64%", accent, 3.5)} />
+        </div>
+        <div style={{ flex: 1, display: "flex", gap: 6 }}>
+          {editorialColumn(accent, false, false)}
+          {editorialColumn(accent, true, false)}
+          {editorialColumn(accent, false, true)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One key figure in the portrait + stats rail: the value in the figure
+ * colour, its label, and the hairline under it with a small square.
+ */
+function railFigure(index: number) {
+  return (
+    <div key={index} style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minHeight: 0 }}>
+      <div style={line("62%", CORAL, 5)} />
+      <div style={line("88%")} />
+      <div style={{ display: "flex", alignItems: "center", gap: 2, marginTop: "auto" }}>
+        <div style={{ width: 2.5, height: 2.5, background: CORAL, flexShrink: 0 }} />
+        <div style={line("100%", "#E4E6F1", 1)} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The portrait + stats landscape page, drawn sideways: a tall portrait on the
+ * left half with the featured quote on a brand plate at its foot (outside the
+ * picture, as on the page); on the right half the letter beside a rail of
+ * key figures.
+ */
+function LandscapePortraitMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 9,
+        gap: 9,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <div style={ph({ flex: 1 })} />
+        <div
+          style={{
+            background: accent,
+            padding: 5,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2.5,
+            flexShrink: 0,
+          }}
+        >
+          <div style={line("92%", "rgba(255,255,255,0.95)", 3.5)} />
+          <div style={line("70%", "rgba(255,255,255,0.95)", 3.5)} />
+          <div style={{ ...line("34%", "rgba(255,255,255,0.7)", 2), marginTop: 2 }} />
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 6 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={line("30%", "#9AA0B4", 3)} />
+          <div style={ruledColumn} />
+          <div style={line("40%", "#6B7085", 3)} />
+        </div>
+        <div style={{ flex: "0 0 34%", display: "flex", flexDirection: "column", gap: 4 }}>
+          {[0, 1, 2, 3].map((i) => railFigure(i))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The stat-tiles portrait page: the title and four figure tiles two by two on
+ * white, then four more two by two on the brand colour across the lower half,
+ * which runs to the side trims but stops above the footer, as on the page.
+ * Hairlines between the tiles. More figures and the text follow on later
+ * sheets, so they are not drawn.
+ */
+function StatTilesMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, padding: 0, gap: 0 }}>
+      <div style={{ flex: 1, padding: "6px 7px 3px", display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+          <div style={line("16%", accent, 3)} />
+          <div style={line("64%", "#9AA0B4", 5)} />
+        </div>
+        {statTileGroup(tileInksOnWhite(accent))}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          marginBottom: 6,
+          padding: "5px 7px",
+          background: accent,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {statTileGroup(TILE_INKS_ON_BRAND)}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The data-tables portrait page: the subheading after its small square, the
+ * opening text, then the tables one under another across the full width, each
+ * under its title with the same group bars, tinted rows and bold current year
+ * as the landscape page.
+ */
+function DataTablesMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 3 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+        <div style={{ width: 4, height: 4, background: CORAL, flexShrink: 0 }} />
+        <div style={line("56%", accent, 3.5)} />
+      </div>
+      <div style={line("100%")} />
+      <div style={{ ...line("72%"), marginBottom: 4 }} />
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+        {dataTable(accent, 10, true)}
+        {dataTable(accent, 8, false)}
       </div>
     </div>
   )
@@ -623,7 +853,7 @@ function LandscapeTablesMini({ accent, presentation }: { accent: string; present
 /**
  * A custom template has no fixed look, so its card shows the real first sheet
  * when one has been drawn (see TemplateCardGrid). This is the stand-in until
- * then: an off-grid composition, deliberately unlike the eight fixed designs.
+ * then: an off-grid composition, deliberately unlike the fixed designs.
  */
 function CustomMini({ accent, landscape, presentation }: {
   accent: string
@@ -688,6 +918,19 @@ function TemplateMiniInner({
   }
   if (templateKey === "landscape_tables") {
     return <LandscapeTablesMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_editorial") {
+    return <LandscapeEditorialMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_portrait") {
+    return <LandscapePortraitMini accent={accent} presentation={presentation} />
+  }
+
+  if (templateKey === "stat_tiles") {
+    return <StatTilesMini accent={accent} />
+  }
+  if (templateKey === "data_tables") {
+    return <DataTablesMini accent={accent} />
   }
 
   if (templateKey === "kpi_stat_grid") {
@@ -897,6 +1140,48 @@ function TemplateMiniInner({
     )
   }
 
+  // A tinted sheet: the title, the short lead paragraph in the brand colour,
+  // then two columns of text with subheadings after a small square. The
+  // closing brand line in the second column is the quotes, set as bold
+  // emphasis lines after the text.
+  if (templateKey === "editorial_columns") {
+    return (
+      <div style={{ ...shell, background: "#F4F0F7", gap: 4 }}>
+        <div style={line("44%", accent, 4)} />
+        <div style={{ width: "66%", display: "flex", flexDirection: "column", gap: 2.5, flexShrink: 0 }}>
+          <div style={line("100%", accent, 3)} />
+          <div style={line("100%", accent, 3)} />
+          <div style={line("58%", accent, 3)} />
+        </div>
+        <div style={{ display: "flex", gap: 5, flex: 1, marginTop: 2 }}>
+          {editorialColumn(accent, true, false)}
+          {editorialColumn(accent, true, true)}
+        </div>
+      </div>
+    )
+  }
+
+  // The figure column on the start side (left in English): four key figures,
+  // each with its hairline and small square. Beside it the picture, the
+  // brand plate for the featured quote, then the letter.
+  if (templateKey === "statement_stat_rail") {
+    return (
+      <div style={{ ...shell, flexDirection: "row", gap: 5 }}>
+        <div style={{ flex: "0 0 32%", display: "flex", flexDirection: "column", gap: 4 }}>
+          {[0, 1, 2, 3].map((i) => railFigure(i))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={ph({ flex: "0 0 34%" })} />
+          <div style={{ background: accent, padding: 3, flexShrink: 0, marginTop: -3 }}>
+            <div style={line("80%", "rgba(255,255,255,0.95)", 3)} />
+            <div style={{ ...line("36%", "rgba(255,255,255,0.7)", 2), marginTop: 2 }} />
+          </div>
+          {col(4)}
+        </div>
+      </div>
+    )
+  }
+
   if (templateKey === "financial_table") {
     return (
       <div style={shell}>
@@ -977,6 +1262,10 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
   editorial_movements: "Editorial — movements",
+  editorial_columns: "Editorial — columns",
+  statement_stat_rail: "Statement — figure rail",
+  stat_tiles: "Stat tiles",
+  data_tables: "Data tables",
   custom: "Custom",
   ...LANDSCAPE_TEMPLATE_NAMES,
 }

@@ -20,9 +20,12 @@
  * In landscape it offers the three landscape covers instead. The pick is saved
  * as the report's LANDSCAPE cover, beside the portrait one, so switching
  * orientation never loses either. Until somebody picks, the default (Split) is
- * the one in use. Each landscape cover brings its own section opener too,
- * unless one is chosen on its own under "Section title pages" (Split artwork
- * comes with no cover, so that is the only way to get it).
+ * the one in use.
+ *
+ * In both orientations the cover's section opener can be replaced under
+ * "Section title pages" by Split artwork, which comes with no cover, so that
+ * is the only way to get it. Each orientation saves that choice in its own
+ * field (divider_template_key / landscape_divider_template_key).
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -33,7 +36,7 @@ import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
   keyForFormat, LANDSCAPE_COVER_NAMES, LANDSCAPE_DESIGN_KEY, LANDSCAPE_OPENER_NAMES,
-  type LandscapeFormat, type Orientation,
+  PORTRAIT_OPENER_NAMES, type LandscapeFormat, type Orientation,
 } from "@/lib/orientation"
 import { cn } from "@/lib/utils"
 import type { CoverDesign } from "@/types/report-design"
@@ -65,6 +68,20 @@ const NAMES: Record<string, string> = {
 }
 
 const title = (key: string) => NAMES[key] ?? key
+
+/**
+ * The names of the openers chosen on their own, in either orientation. The
+ * landscape keys never collide with the portrait ones, so one map serves both.
+ */
+const CHOSEN_OPENER_NAMES: Record<string, string> = {
+  ...PORTRAIT_OPENER_NAMES,
+  ...LANDSCAPE_OPENER_NAMES,
+}
+
+/** "ruled" becomes "Ruled", for an opener named at the start of a sentence. */
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
 
 /**
  * The designs the list offers: the portrait menu, or the landscape covers.
@@ -104,9 +121,9 @@ export function CoverDesignPanel({
   orientation?: Orientation
   /** The landscape sheet the preview is drawn on: A4 or 16:9. */
   format?: LandscapeFormat
-  /** Landscape: the section opener chosen on its own, or null when it follows the cover. */
+  /** The section opener chosen on its own, or null when it follows the cover. */
   openerChoice?: string | null
-  /** Landscape: save the section opener (null = follow the cover). Absent hides the choice. */
+  /** Save the section opener (null = follow the cover). Absent hides the choice. */
   onChooseOpener?: (key: string | null) => void
   savingOpener?: boolean
 }) {
@@ -134,8 +151,14 @@ export function CoverDesignPanel({
   // orientation flips, so a design inspected in one never shows in the other.
   const showing = active ?? chosen ?? fallbackKey
   const inUse = chosen
-  // The opener the cover IN USE brings, for "Follow the cover".
-  const coverOpener = designs.find((design) => design.key === (chosen ?? fallbackKey))?.divider
+  // The opener the cover IN USE brings, for "Follow the cover". A portrait
+  // report that never chose one of these covers prints its older cover, whose
+  // opener this panel cannot name.
+  const coverKeyInUse = landscape ? chosen ?? fallbackKey : chosen
+  const coverOpener = designs.find((design) => design.key === coverKeyInUse)?.divider
+  const coverOpenerName = coverOpener && DIVIDER_NAMES[coverOpener]
+    ? capitalise(DIVIDER_NAMES[coverOpener])
+    : null
   // Landscape draws only a design the engine listed, so an engine from before
   // there was a choice is never asked for one it does not have.
   const canDraw = !landscape || designs.some((design) => design.key === showing)
@@ -232,9 +255,10 @@ export function CoverDesignPanel({
           })}
         </div>
 
-        {landscape && onChooseOpener && (
+        {onChooseOpener && (
           <SectionTitlePages
-            coverOpener={coverOpener ? LANDSCAPE_OPENER_NAMES[coverOpener] ?? null : null}
+            options={landscape ? LANDSCAPE_OPENER_OPTIONS : PORTRAIT_OPENER_OPTIONS}
+            coverOpener={coverOpenerName}
             choice={openerChoice}
             locked={locked}
             saving={savingOpener}
@@ -251,8 +275,8 @@ export function CoverDesignPanel({
               <p className="text-[11px] text-slate-500">
                 {preview.page_count === 1 ? "One page" : `${preview.page_count} pages`}
                 {" · "}
-                {landscape && openerChoice
-                  ? `${LANDSCAPE_OPENER_NAMES[openerChoice] ?? openerChoice} section openers (chosen on their own)`
+                {openerChoice
+                  ? `${CHOSEN_OPENER_NAMES[openerChoice] ?? openerChoice} section openers (chosen on their own)`
                   : `${DIVIDER_NAMES[preview.divider] ?? preview.divider} section openers`}
               </p>
             )}
@@ -311,13 +335,23 @@ export function CoverDesignPanel({
   )
 }
 
+/** One way a section can open, as "Section title pages" offers it. */
+interface OpenerOption {
+  key: string | null
+  name: string
+  blurb: string
+}
+
+/** Following the cover: the same first option in both orientations. */
+const FOLLOW_THE_COVER: OpenerOption = {
+  key: null,
+  name: "Follow the cover",
+  blurb: "The opener that comes with the cover in use.",
+}
+
 /** The two ways a landscape section can open. */
-const OPENER_OPTIONS: { key: string | null; name: string; blurb: string }[] = [
-  {
-    key: null,
-    name: "Follow the cover",
-    blurb: "The opener that comes with the cover in use.",
-  },
+const LANDSCAPE_OPENER_OPTIONS: OpenerOption[] = [
+  FOLLOW_THE_COVER,
   {
     key: "landscape_split",
     name: LANDSCAPE_OPENER_NAMES.landscape_split,
@@ -327,18 +361,33 @@ const OPENER_OPTIONS: { key: string | null; name: string; blurb: string }[] = [
   },
 ]
 
+/** The two ways a portrait section can open. */
+const PORTRAIT_OPENER_OPTIONS: OpenerOption[] = [
+  FOLLOW_THE_COVER,
+  {
+    key: "split",
+    name: PORTRAIT_OPENER_NAMES.split,
+    blurb:
+      "One picture across the whole page, under a see-through brand panel " +
+      "over its lower part with the section number and name.",
+  },
+]
+
 /**
- * "Section title pages": the landscape section opener, the cover's own or
- * Split artwork. Saved straight away on a click; every section of the report
- * opens on it, so the section previews show it once they are drawn again.
+ * "Section title pages": the section opener, the cover's own or Split
+ * artwork. Saved straight away on a click; every section of the report opens
+ * on it, so the section previews show it once they are drawn again.
  */
 function SectionTitlePages({
+  options,
   coverOpener,
   choice,
   locked,
   saving,
   onChoose,
 }: {
+  /** The choices for the orientation on screen, "Follow the cover" first. */
+  options: OpenerOption[]
   /** The name of the opener the cover in use brings, when known. */
   coverOpener: string | null
   /** The opener chosen on its own, or null when it follows the cover. */
@@ -357,7 +406,7 @@ function SectionTitlePages({
         The page that opens every section of the report.
       </p>
       <div className="space-y-2" role="radiogroup" aria-label="Section title pages">
-        {OPENER_OPTIONS.map((option) => {
+        {options.map((option) => {
           const selected = choice === option.key
           const blurb = option.key === null && coverOpener
             ? `${coverOpener}, the opener that comes with the cover in use.`

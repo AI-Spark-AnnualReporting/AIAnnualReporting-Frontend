@@ -132,7 +132,11 @@ export interface AnnualDesign {
   /** The cycle's OWN contents-design pick, null when it has never chosen. */
   toc_template_key: string | null
   cover2_template_key: string | null
-  /** The cycle's OWN section-opener pick, null when it has never chosen. */
+  /**
+   * The cycle's OWN portrait section-opener pick, null when it has never
+   * chosen or set it back to follow the cover. Read it through
+   * `portraitOpenerChoice()`.
+   */
   divider_template_key: string | null
   /** The cycle's OWN running-band settings, null when it has never chosen. */
   header_footer: HeaderFooter | null
@@ -226,9 +230,11 @@ export interface DesignSelection {
   brand?: BrandColors
   typography?: Typography | null
   /**
-   * One of the five section-opener designs. Absent is the OPT-OUT, as with
-   * the contents page below: the engine then derives the opener from the
-   * cover, exactly as it always has.
+   * One of the six portrait section-opener designs (Split artwork among
+   * them), or "" to have the opener follow the cover again. Absent leaves the
+   * saved choice alone. Never chosen is the OPT-OUT, as with the contents
+   * page below: the engine then derives the opener from the cover, exactly as
+   * it always has.
    */
   divider_template_key?: string
   /** The running bands. Absent = today's behaviour, derived from the cover. */

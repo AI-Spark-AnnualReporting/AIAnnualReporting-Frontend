@@ -52,6 +52,8 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_essay",
   "landscape_tiles",
   "landscape_tables",
+  "landscape_editorial",
+  "landscape_portrait",
 ] as const
 
 /** The default landscape section-page template — the first in the list. */
@@ -91,6 +93,8 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_essay: "Landscape — essay",
   landscape_tiles: "Landscape — stat tiles",
   landscape_tables: "Landscape — data tables",
+  landscape_editorial: "Landscape — editorial columns",
+  landscape_portrait: "Landscape — portrait + stats",
 }
 
 /**
@@ -107,6 +111,8 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_essay: "Essay",
   landscape_tiles: "Stat tiles",
   landscape_tables: "Data tables",
+  landscape_editorial: "Editorial columns",
+  landscape_portrait: "Portrait + stats",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */
@@ -143,6 +149,26 @@ export const LANDSCAPE_OPENER_NAMES: Record<string, string> = {
   landscape_field: "Full brand",
   landscape_numeral: "Giant numeral",
   landscape_split: "Split artwork",
+}
+
+/**
+ * The portrait section openers. Mirrors the engine's divider_templates.KEYS
+ * and the backend's report_design_service.DIVIDER_TEMPLATE_KEYS. Create
+ * Design offers only Split artwork among them; the others come with the
+ * covers, or were chosen before this screen offered a choice.
+ */
+export const PORTRAIT_OPENER_KEYS = [
+  "rule", "banded", "full", "figure", "numeral", "split",
+] as const
+
+/** The names of the portrait section openers, for saying which one is chosen. */
+export const PORTRAIT_OPENER_NAMES: Record<string, string> = {
+  rule: "Ruled",
+  banded: "Banded",
+  full: "Full brand",
+  figure: "Figure",
+  numeral: "Numeral",
+  split: "Split artwork",
 }
 
 /**
@@ -387,5 +413,21 @@ export function landscapeTocKey(design?: LandscapeFrontMatter | null): string {
 export function landscapeOpenerChoice(design?: LandscapeFrontMatter | null): string | null {
   const saved = design?.landscape_divider_template_key
   if (saved && (LANDSCAPE_OPENER_KEYS as readonly string[]).includes(saved)) return saved
+  return null
+}
+
+/**
+ * The portrait section opener chosen on its own, or null when the opener
+ * follows the cover (never chosen, set back, or a value this screen does not
+ * know — which the backend does not send on either). Same rules as
+ * landscapeOpenerChoice, read from the portrait field.
+ *
+ * @returns one of PORTRAIT_OPENER_KEYS, or null
+ */
+export function portraitOpenerChoice(
+  design?: { divider_template_key?: string | null } | null,
+): string | null {
+  const saved = design?.divider_template_key
+  if (saved && (PORTRAIT_OPENER_KEYS as readonly string[]).includes(saved)) return saved
   return null
 }

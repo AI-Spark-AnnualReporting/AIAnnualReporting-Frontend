@@ -50,7 +50,8 @@ import {
 import {
   countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
   landscapeOpenerChoice, landscapeOptions, landscapeTocKey, orientationOf, pageFormatOf, pickedKey,
-  selectionForPageFormat, type LandscapeFormat, type Orientation, type PageFormat,
+  portraitOpenerChoice, selectionForPageFormat, type LandscapeFormat, type Orientation,
+  type PageFormat,
 } from "@/lib/orientation"
 import {
   DesignDialog, DESIGN_CATALOGUE_KEY, reportDesignKey, type CustomizeTab,
@@ -79,6 +80,10 @@ const FALLBACK_OPTIONS = [
   "executive_statement",
   "editorial_alternating",
   "editorial_movements",
+  "editorial_columns",
+  "statement_stat_rail",
+  "stat_tiles",
+  "data_tables",
 ].map((key) => ({
   key,
   recommended: false,
@@ -340,6 +345,20 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not save the section title pages")),
   })
+  // The same choice for a portrait report, saved in the portrait field so each
+  // orientation keeps its own. Revoked for the same reason: a portrait section
+  // page is drawn with its opener as sheet 1 too, and no render cache key
+  // names it.
+  const savePortraitOpener = useMutation({
+    mutationFn: (key: string | null) =>
+      annualDesignApi.save(cycleId, { divider_template_key: key ?? "" }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(designKey, fresh)
+      revokeCycle(cycleId)
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not save the section title pages")),
+  })
   // No revoke: the contents page is drawn on its own, under its own key, and
   // no section page shows it.
   const saveLandscapeToc = useMutation({
@@ -523,6 +542,15 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const chooseToc = (key: string) => {
     if (landscape) saveLandscapeToc.mutate(key)
     else saveToc.mutate(key)
+  }
+  // The section title pages chosen on their own, in the orientation on screen.
+  const openerChoice = landscape
+    ? landscapeOpenerChoice(reportDesign.data)
+    : portraitOpenerChoice(reportDesign.data)
+  const openerSaving = landscape ? saveLandscapeOpener.isPending : savePortraitOpener.isPending
+  const chooseOpener = (key: string | null) => {
+    if (landscape) saveLandscapeOpener.mutate(key)
+    else savePortraitOpener.mutate(key)
   }
 
   // "Use for all sections" applies the landscape card on screen, and says so.
@@ -774,9 +802,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
               onChoose={chooseCover}
               orientation={orientation}
               format={format}
-              openerChoice={landscapeOpenerChoice(reportDesign.data)}
-              onChooseOpener={landscape ? (key) => saveLandscapeOpener.mutate(key) : undefined}
-              savingOpener={saveLandscapeOpener.isPending}
+              openerChoice={openerChoice}
+              onChooseOpener={chooseOpener}
+              savingOpener={openerSaving}
             />
           ) : tocOpen ? (
             <TocDesignPanel
