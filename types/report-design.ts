@@ -175,6 +175,14 @@ export interface AnnualDesign {
    */
   landscape_divider_template_key?: string | null
   /**
+   * The title page each section chose on its own, { section_code: key }, in
+   * portrait. A section missing from it opens on the report's title page.
+   * Read it through `sectionOpenerChoice()`.
+   */
+  section_divider_keys?: Record<string, string> | null
+  /** The same for landscape, kept apart so each page shape keeps its own picks. */
+  landscape_section_divider_keys?: Record<string, string> | null
+  /**
    * The sheet a landscape report prints on: "a4" or the 16:9 "presentation"
    * sheet. Kept while the report is portrait. Read it through
    * `landscapeFormatOf()`: a backend deployed before the format existed omits it.
@@ -274,6 +282,19 @@ export interface DesignSelection {
    * "landscape"` by the page-format switch; absent leaves it alone.
    */
   landscape_format?: LandscapeFormat
+  /**
+   * ONE section's own title page: key "" sets it back to the report's title
+   * page. Absent leaves every section's pick alone.
+   */
+  section_divider?: SectionDividerPick
+}
+
+/** One section's own title page, as saved through the design PATCH. */
+export interface SectionDividerPick {
+  section_code: string
+  /** An opener key for that page shape, or "" to follow the report again. */
+  key: string
+  orientation: "portrait" | "landscape"
 }
 
 /** One contents-page design, as the engine that owns them describes it. */

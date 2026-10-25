@@ -39,6 +39,8 @@ import {
   pageSize,
   pickedKey,
   portraitOpenerChoice,
+  sectionOpenerChoice,
+  sectionOpenerOptions,
   selectionForPageFormat,
 } from "./orientation.ts"
 
@@ -331,6 +333,27 @@ for (const key of LANDSCAPE_TEMPLATE_KEYS) {
   assert.notEqual(a4, wide, `${key} shares a render-cache key across the two sheets`)
   // Still under the section's prefix, so revokeSection / revokeCycle reach it.
   assert.ok(wide.startsWith("cyc|ceo_review|"))
+}
+
+// sectionOpenerChoice: one section's own title page, per page shape, else
+// null (it opens on the report's title page).
+const picks = {
+  section_divider_keys: { risk: "numeral", old: "landscape_split" },
+  landscape_section_divider_keys: { risk: "landscape_split" },
+}
+assert.equal(sectionOpenerChoice(undefined, "risk", "portrait"), null)
+assert.equal(sectionOpenerChoice({}, "risk", "portrait"), null)
+assert.equal(sectionOpenerChoice(picks, "risk", "portrait"), "numeral")
+assert.equal(sectionOpenerChoice(picks, "risk", "landscape"), "landscape_split")
+assert.equal(sectionOpenerChoice(picks, "strategy", "portrait"), null)
+// A key of the other page shape is never offered as this one's pick.
+assert.equal(sectionOpenerChoice(picks, "old", "portrait"), null)
+
+// sectionOpenerOptions: every title page for the page shape, none of the other's.
+assert.deepEqual(sectionOpenerOptions("portrait").map((o) => o.key), [...PORTRAIT_OPENER_KEYS])
+assert.deepEqual(sectionOpenerOptions("landscape").map((o) => o.key), [...LANDSCAPE_OPENER_KEYS])
+for (const option of [...sectionOpenerOptions("portrait"), ...sectionOpenerOptions("landscape")]) {
+  assert.ok(option.name, `${option.key} has no name`)
 }
 
 console.log("orientation: all checks passed")

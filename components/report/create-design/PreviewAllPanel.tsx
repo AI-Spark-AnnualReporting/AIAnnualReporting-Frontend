@@ -40,6 +40,7 @@ import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
 import {
   keyForFormat, pageSize, pickedKey, type LandscapeFormat, type Orientation,
 } from "@/lib/orientation"
+import { isReportGeneratedSection } from "@/lib/section-filters"
 
 import { clampZoom, PreviewZoomBar, stepZoom } from "./PreviewZoomBar"
 
@@ -219,7 +220,7 @@ export function PreviewAllPanel({
     },
   ]
   const sections = [...(design?.sections ?? [])]
-    .filter((s) => s.eligible && s.section_code !== "table_of_contents")
+    .filter((s) => s.eligible && !isReportGeneratedSection(s))
     .sort((a, b) => a.order - b.order)
   for (const section of sections) {
     for (const unit of section.design?.units ?? []) {

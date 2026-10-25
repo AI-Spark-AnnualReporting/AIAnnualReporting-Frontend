@@ -22,6 +22,7 @@ import { CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES } from "@/lib/customTemplate
 import {
   LANDSCAPE_COVER_NAMES, LANDSCAPE_TOC_NAMES, pickedKey, type Orientation,
 } from "@/lib/orientation"
+import { isReportGeneratedSection } from "@/lib/section-filters"
 import { cn } from "@/lib/utils"
 
 import { TEMPLATE_NAMES } from "./TemplateMini"
@@ -126,14 +127,14 @@ export function CreateDesignRail({
   /** Which set of picks the chips show; portrait unless switched. */
   orientation?: Orientation
 }) {
-  // The blueprint carries a `table_of_contents` section whose content is a
-  // placeholder — the exporters draw the real contents page themselves. It has
-  // always been ineligible for the page designer and showed here greyed out as
-  // "Not laid out", which was harmless until the Contents picker appeared
-  // directly above it: two rows with the same name, one of them dead. Dropped
-  // from the list when the picker is present, since that is now its home.
+  // The blueprint carries a contents section (code `toc`) whose content is a
+  // placeholder — the exporters draw the real contents page themselves. It is
+  // never eligible for the page designer, so it only ever showed here greyed
+  // out as "Not laid out", a dead row under the Contents picker. Always
+  // dropped, with the same check the plan and build pages use (the old
+  // check looked for `table_of_contents`, a code no section has).
   const ordered = [...sections]
-    .filter((s) => !(onSelectToc && s.section_code === "table_of_contents"))
+    .filter((s) => !isReportGeneratedSection(s))
     .sort((a, b) => a.order - b.order)
   const landscape = orientation === "landscape"
   const coverNames = landscape ? LANDSCAPE_COVER_NAMES : COVER_DESIGN_NAMES

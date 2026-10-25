@@ -403,7 +403,8 @@ function SectionTitlePages({
         {saving && <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />}
       </p>
       <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-        The page that opens every section of the report.
+        The page that opens every section of the report, unless a section
+        picks its own.
       </p>
       <div className="space-y-2" role="radiogroup" aria-label="Section title pages">
         {options.map((option) => {

@@ -48,9 +48,10 @@ import {
   CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES, customTemplateFor, paperFor, renderTemplateTag,
 } from "@/lib/customTemplate"
 import {
-  countPicked, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey, landscapeKeyToApply,
-  landscapeOpenerChoice, landscapeOptions, landscapeTocKey, orientationOf, pageFormatOf, pickedKey,
-  portraitOpenerChoice, selectionForPageFormat, type LandscapeFormat, type Orientation,
+  countPicked, LANDSCAPE_OPENER_NAMES, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey,
+  landscapeKeyToApply, landscapeOpenerChoice, landscapeOptions, landscapeTocKey, orientationOf,
+  pageFormatOf, pickedKey, PORTRAIT_OPENER_NAMES, portraitOpenerChoice, sectionOpenerChoice,
+  sectionOpenerOptions, selectionForPageFormat, type LandscapeFormat, type Orientation,
   type PageFormat,
 } from "@/lib/orientation"
 import {
@@ -64,6 +65,7 @@ import { CustomTemplatePanel } from "./CustomTemplatePanel"
 import { OrientationToggle } from "./OrientationToggle"
 import { PageRenderPanel } from "./PageRenderPanel"
 import { PreviewAllPanel } from "./PreviewAllPanel"
+import { SectionTitlePagePicker } from "./SectionTitlePagePicker"
 import { TemplateCardGrid } from "./TemplateCardGrid"
 import { CoverDesignPanel } from "./CoverDesignPanel"
 import { TocDesignPanel } from "./TocDesignPanel"
@@ -359,6 +361,25 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     onError: (err: MutationError) =>
       toast.error(readError(err, "Could not save the section title pages")),
   })
+  // ONE section's own title page, or "" to open it on the report's again.
+  // Only that section's drawn pages are dropped: the title page is its first
+  // sheet, and no other section's pages change.
+  const saveSectionOpener = useMutation({
+    mutationFn: (pick: { sectionCode: string; key: string | null; orientation: Orientation }) =>
+      annualDesignApi.save(cycleId, {
+        section_divider: {
+          section_code: pick.sectionCode,
+          key: pick.key ?? "",
+          orientation: pick.orientation,
+        },
+      }),
+    onSuccess: (fresh, pick) => {
+      qc.setQueryData(designKey, fresh)
+      revokeSection(cycleId, pick.sectionCode)
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not save this section's title page")),
+  })
   // No revoke: the contents page is drawn on its own, under its own key, and
   // no section page shows it.
   const saveLandscapeToc = useMutation({
@@ -552,6 +573,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
     if (landscape) saveLandscapeOpener.mutate(key)
     else savePortraitOpener.mutate(key)
   }
+  // The report's title page by name when it was chosen on its own, for the
+  // per-section picker's "Same as the rest" option. Null means it follows the
+  // cover, which the picker says in words.
+  const openerNames = landscape ? LANDSCAPE_OPENER_NAMES : PORTRAIT_OPENER_NAMES
+  const reportOpenerName = openerChoice ? openerNames[openerChoice] ?? null : null
 
   // "Use for all sections" applies the landscape card on screen, and says so.
   const keyToApply = landscapeKeyToApply(previewKey, unit)
@@ -873,6 +899,18 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
 
               <div className="flex min-h-0 flex-1">
                 <div className="w-[420px] shrink-0 overflow-y-auto border-r p-4">
+                  <SectionTitlePagePicker
+                    options={sectionOpenerOptions(orientation)}
+                    choice={sectionOpenerChoice(
+                      reportDesign.data, section.section_code, orientation)}
+                    reportDefaultName={reportOpenerName}
+                    locked={reportDesign.data?.locked ?? false}
+                    saving={saveSectionOpener.isPending}
+                    onChoose={(key) =>
+                      saveSectionOpener.mutate({
+                        sectionCode: section.section_code, key, orientation,
+                      })}
+                  />
                   {landscape && (
                     <div className="mb-3 space-y-2">
                       <p className="text-[11px] leading-relaxed text-slate-500">

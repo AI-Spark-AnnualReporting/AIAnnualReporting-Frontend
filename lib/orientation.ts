@@ -431,3 +431,39 @@ export function portraitOpenerChoice(
   if (saved && (PORTRAIT_OPENER_KEYS as readonly string[]).includes(saved)) return saved
   return null
 }
+
+/**
+ * Every title page one section can choose, for the page shape on screen, in
+ * the engine's order, with the name the screen shows for each.
+ */
+export function sectionOpenerOptions(
+  orientation: Orientation,
+): { key: string; name: string }[] {
+  if (orientation === "landscape") {
+    return LANDSCAPE_OPENER_KEYS.map((key) => ({ key, name: LANDSCAPE_OPENER_NAMES[key] }))
+  }
+  return PORTRAIT_OPENER_KEYS.map((key) => ({ key, name: PORTRAIT_OPENER_NAMES[key] }))
+}
+
+/**
+ * The title page one section chose on its own, or null when it opens on the
+ * report's title page (never chosen, set back, or a key this screen does not
+ * know). Each page shape keeps its own picks, like the page templates.
+ *
+ * @returns one of the opener keys for `orientation`, or null
+ */
+export function sectionOpenerChoice(
+  design: {
+    section_divider_keys?: Record<string, string> | null
+    landscape_section_divider_keys?: Record<string, string> | null
+  } | null | undefined,
+  sectionCode: string,
+  orientation: Orientation,
+): string | null {
+  const landscape = orientation === "landscape"
+  const picks = landscape ? design?.landscape_section_divider_keys : design?.section_divider_keys
+  const saved = picks?.[sectionCode]
+  const known: readonly string[] = landscape ? LANDSCAPE_OPENER_KEYS : PORTRAIT_OPENER_KEYS
+  if (saved && known.includes(saved)) return saved
+  return null
+}
