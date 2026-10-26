@@ -3,8 +3,6 @@
 import { useState } from "react"
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Loader2 } from "lucide-react"
-
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ProsePreview } from "@/components/ui/prose-preview"
+import { Skeleton } from "@/components/ui/skeletons"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 import { pmApi, type UndoChange, type UndoHistoryEntry } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
@@ -28,8 +27,9 @@ export interface UndoTarget {
 }
 
 /* The Undo pop-up: the section's latest change since the check (the only one
- * kept), and how the section will read once it is undone, with what comes back
- * in green and what goes away in red. The undo itself can't be undone. */
+ * kept), side by side - the section now, with what goes away in red, and how
+ * it will read once undone, with what comes back in green. The undo itself
+ * can't be undone. */
 export function UndoChangeDialog({
   cycleId,
   target,
@@ -44,7 +44,7 @@ export function UndoChangeDialog({
 
   return (
     <Dialog open={!!target} onOpenChange={(next) => !next && !undoing && onClose()}>
-      <DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-[760px] flex-col gap-0 p-0">
+      <DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-[1100px] flex-col gap-0 p-0">
         {target && (
           <UndoPreview
             cycleId={cycleId}
@@ -81,6 +81,7 @@ function UndoPreview({
   // Newest first; only the latest is undone.
   const latest = history.data?.changes?.[0]
   const after = latest?.text ?? ""
+  const now = history.data?.current_text ?? ""
 
   const confirm = async () => {
     setUndoing(true)
@@ -118,22 +119,21 @@ function UndoPreview({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <p className="px-6 pb-2 pt-4 text-sm font-bold text-[#1A1D2E]">
-          How the section will read after the undo
-        </p>
-        <div className="mx-6 mb-4 min-h-[12rem] overflow-y-auto rounded-xl border border-slate-200 px-5 py-4 md:max-h-[55vh]">
-          {history.isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-          ) : after.trim() ? (
-            <ProsePreview
-              content={markChanges(history.data?.current_text ?? "", after)}
-              changeMarks
-            />
-          ) : latest ? (
-            <p className="text-sm italic text-slate-400">The section was empty.</p>
-          ) : null}
-        </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-6 py-4 md:grid-cols-2 md:overflow-visible">
+        <SidePanel
+          heading="Now"
+          loading={history.isLoading}
+          text={now}
+          marked={markChanges(now, after, "now")}
+          emptyText={latest ? "The section is empty." : null}
+        />
+        <SidePanel
+          heading="After the undo"
+          loading={history.isLoading}
+          text={after}
+          marked={markChanges(now, after, "after")}
+          emptyText={latest ? "The section was empty." : null}
+        />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-lg border-t border-slate-200 bg-slate-50 px-6 py-3.5">
@@ -148,6 +148,55 @@ function UndoPreview({
         </div>
       </div>
     </>
+  )
+}
+
+/** One side of the comparison: a heading and the section's text with its
+ *  change marks, or a spinner while loading, or a note when it's empty. */
+function SidePanel({
+  heading,
+  loading,
+  text,
+  marked,
+  emptyText,
+}: {
+  heading: string
+  loading: boolean
+  /** The plain text, to tell whether this side is empty. */
+  text: string
+  /** The same text with markChanges' marks, to show. */
+  marked: string
+  /** Shown when the text is empty; null = show nothing. */
+  emptyText: string | null
+}) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      <p className="pb-2 text-sm font-bold text-[#1A1D2E]">{heading}</p>
+      <div className="min-h-[12rem] overflow-y-auto rounded-xl border border-slate-200 px-5 py-4 md:max-h-[55vh]">
+        {loading ? (
+          <TextSkeleton />
+        ) : text.trim() ? (
+          <ProsePreview content={marked} changeMarks />
+        ) : emptyText ? (
+          <p className="text-sm italic text-slate-400">{emptyText}</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** Grey pulsing lines shaped like a paragraph, a heading and a paragraph,
+ *  shown while the section's text loads. */
+function TextSkeleton() {
+  return (
+    <div className="space-y-2.5">
+      <Skeleton className="h-3.5 w-full" />
+      <Skeleton className="h-3.5 w-11/12" />
+      <Skeleton className="h-3.5 w-4/5" />
+      <Skeleton className="mt-5 h-5 w-1/2" />
+      <Skeleton className="h-3.5 w-full" />
+      <Skeleton className="h-3.5 w-2/3" />
+    </div>
   )
 }
 

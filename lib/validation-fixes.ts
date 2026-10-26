@@ -68,9 +68,11 @@ export function briefAskTodo(ask: string): string {
   return `Add this ask from the strategic brief by hand, with real details (names, dates, numbers): "${ask}"`
 }
 
-/** Refine instruction for a concept message no section carries. */
+/** Refine instruction for a concept message a section doesn't carry. Asks for
+ *  a rewrite, not only an addition: a section often already has a weak or
+ *  pasted-in sentence about it, and "add a sentence" made the AI change nothing. */
 export function conceptInstruction(title: string): string {
-  return `Add a sentence that carries the concept message "${title}", where it fits naturally. Do not invent facts. Keep everything else unchanged.`
+  return `Make this section clearly carry the concept message "${title}", in words about this section's own subject. If a sentence already touches on it, rewrite that sentence instead of adding a new one. Do not invent facts. Keep everything else unchanged.`
 }
 
 /** The fix for a section that carries none of several concept messages: any
@@ -78,7 +80,7 @@ export function conceptInstruction(title: string): string {
 export function anyConceptInstruction(titles: string[]): string {
   if (titles.length === 1) return conceptInstruction(titles[0])
   const names = titles.map((t) => `"${t}"`).join(", ")
-  return `Add a sentence that carries one of these concept messages: ${names}, whichever fits naturally. Do not invent facts. Keep everything else unchanged.`
+  return `Make this section clearly carry one of these concept messages: ${names}, whichever fits this section's own subject. If a sentence already touches on one, rewrite that sentence instead of adding a new one. Do not invent facts. Keep everything else unchanged.`
 }
 
 /**
