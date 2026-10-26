@@ -14,6 +14,7 @@ import {
   Languages,
   Loader2,
   Lock,
+  Pencil,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -36,10 +37,12 @@ import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
+import { ClientReviewCard } from "@/components/report-review/ClientReviewCard"
+import { useReportReview } from "@/hooks/useReportReview"
 import {
-  useApproveReport,
   useArabicReport,
   useAssembleReport,
+  useAssemblyReadiness,
   useAssembledReport,
   useFinalReport,
   useRenderReport,
@@ -90,17 +93,29 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // as its onChanged — an inline arrow there would re-run its loader forever.
   const approvalQuery = useReportApproval(cycleId)
   const approval = approvalQuery.data
-  const approve = useApproveReport(cycleId)
   // Spark doesn't send reports out for review, so the rail drops the whole
   // "Review & approval" card for them — without the share button it only
   // said "Not yet shared for review."
   const { user } = useAuth()
   const isSpark = user?.role === "spark_internal"
 
+  // The client review (Spark sends the report to the client). Once the
+  // report has been sent, the server refuses Re-assemble, Validate and every
+  // Builder edit (changes go through Edit report), so those buttons are off
+  // here too. Edit report only opens once the client asked for changes.
+  const reviewQuery = useReportReview(cycleId, reportQuery.isSuccess)
+  const review = reviewQuery.data
+  const withClient = !!review?.awaiting_client
+  const sentToClient = !!review?.share
+  const changesRequested = review?.share?.status === "changes_requested"
+  // Re-assemble only when a section changed in the Builder since this report
+  // was built (the Builder's "Assemble again" flag). With nothing new it only
+  // rewrites the Executive Summary and throws away a clean validation.
+  const builderChanged = !!useAssemblyReadiness(cycleId).data?.stale
+
   const [reassembleOpen, setReassembleOpen] = useState(false)
   // Hidden 2026-09-24 with the Design button — see the comment beside it below.
   // const [designOpen, setDesignOpen] = useState(false)
-  const [approveOpen, setApproveOpen] = useState(false)
 
   // The Arabic edition lives on its own page (/report/arabic), always opened in
   // a new tab so the English report stays open here. English cycles only.
@@ -177,10 +192,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               {typeof report.word_count === "number"
                 ? ` · ${report.word_count.toLocaleString()} words`
                 : ""}
+              {review?.label ? ` · ${review.label}` : ""}
               {locked && approval?.approved_by
-                ? ` · Approved by ${approval.approved_by}${
-                    approval.version ? ` · ${approval.version}` : ""
-                  }`
+                ? ` · Approved by ${approval.approved_by}`
                 : ""}
             </p>
           )}
@@ -192,20 +206,23 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 API (409), so both buttons go away rather than failing on click. */}
             {!locked && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setReassembleOpen(true)}
-                  disabled={assemble.isPending || render.isPending}
-                  className="h-8"
-                >
-                  {assemble.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  Re-assemble
-                </Button>
+                {builderChanged && !sentToClient && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setReassembleOpen(true)}
+                    disabled={assemble.isPending || render.isPending}
+                    title="A section changed in the Builder after this report was built."
+                    className="h-8"
+                  >
+                    {assemble.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Re-assemble
+                  </Button>
+                )}
                 {/* Hidden 2026-09-24 — superseded by Create Design, which took
                     this button's Palette icon. The cover/typography/palette modal
                     itself is untouched in components/report/design/DesignDialog.tsx;
@@ -245,7 +262,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     it behaves. So: click here, navigate when it is done, and
                     the page that receives them only ever reads a stored
                     result. */}
-                {(!locked || hasValidation) && (
+                {/* Once sent, the report is never validated again: the
+                    button only opens a result already on file. */}
+                {(hasValidation || (!locked && !sentToClient)) && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -253,7 +272,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     // A signed-off report is never re-validated - the API
                     // refuses to change it, and a fresh verdict on a document
                     // nobody can edit is a cost with no action behind it.
-                    if (locked) {
+                    if (locked || sentToClient) {
                       router.push(`/pm/cycles/${cycleId}/validation`)
                       return
                     }
@@ -292,6 +311,16 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                       : "Validate report"}
                 </Button>
                 )}
+            {/* The client asked for changes: the PM edits the report here,
+                not in the Builder. Saving makes the next version. */}
+            {changesRequested && !locked && (
+              <Link href={`/pm/cycles/${cycleId}/report/edit`} className="shrink-0">
+                <Button variant="brand" size="sm" className="h-8">
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                  Edit report
+                </Button>
+              </Link>
+            )}
             {/* Create Arabic the first time; afterwards it opens the Arabic
                 page, which has its own Create again and Export. Both open a
                 new tab. */}
@@ -316,38 +345,18 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 onClick={createArabicInNewTab}
                 // Only a signed-off report is translated; the server refuses too.
                 disabled={!locked || arabicQuery.isLoading}
-                title={locked ? undefined : "Approve the report before creating the Arabic version."}
+                title={locked ? undefined : "The client approves the report first, then the Arabic version can be created."}
                 className="h-8"
               >
                 <Languages className="h-3.5 w-3.5 mr-1.5" />
                 Create Arabic
               </Button>
             )}
-            {/* Not gated on completeness — the confirm dialog is where the
-                one-way consequence gets spelled out. Same as the board report. */}
-            {approval?.can_approve && (
-              <Button
-                size="sm"
-                variant="brand"
-                onClick={() => setApproveOpen(true)}
-                disabled={approve.isPending}
-                className="h-8"
-              >
-                {approve.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Lock className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Approve &amp; Lock
-              </Button>
-            )}
-
             {/* Export is the last step, not a parallel one. Quarterly
                 (AssembledReportPage) and earnings (PublishBar) both hide it
                 until the report is signed off, so a draft cannot be handed
-                round as though it were the final file. Approve & Lock and
-                Export are never on the bar together, which is why both can
-                wear the brand colour. */}
+                round as though it were the final file. The client's approval
+                is what signs it off. */}
             {locked && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -420,13 +429,23 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           which is the same moment `validation_stale` goes false. Hidden once
           locked - a signed-off report cannot be re-validated, so nagging about
           it asks for something that is no longer possible. */}
-      {report?.validation_stale && !locked && (
+      {report?.validation_stale && !locked && !sentToClient && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 print:hidden">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>
             This report was re-assembled after it was validated. The earlier
             result describes the previous version, so it is no longer shown or
             printed &mdash; validate it again.
+          </span>
+        </div>
+      )}
+
+      {withClient && review?.share && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 print:hidden">
+          <Lock className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            The report is with {review.share.client_email} for review. It
+            can&apos;t be edited until they answer.
           </span>
         </div>
       )}
@@ -445,7 +464,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
         </div>
 
-        {/* The Communication Hub rail, same composition as the board report's:
+        {/* The rail. For PM / admin: the Communication Hub, same composition as the board report's:
             a plain status card, then "Share for review" (assigns a reviewer and
             starts the thread), Discuss, and the reviewer's approve / send-back
             screen. Status lives in the card above, so the panel's own radios
@@ -469,8 +488,18 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               <ReportHubPanel
                 reportId={approval.report_id}
                 showStatus={false}
-                readOnly={locked}
+                readOnly={locked || withClient}
                 onChanged={approvalQuery.refetch}
+              />
+            )}
+            {/* Spark sends the report to the client from here. Everyone else
+                sees the card once it has been sent, read-only. */}
+            {review && (isSpark || review.share) && (
+              <ClientReviewCard
+                cycleId={cycleId}
+                state={review}
+                isSpark={isSpark}
+                locked={locked}
               />
             )}
           </aside>
@@ -521,19 +550,6 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
       />
       */}
 
-      <ConfirmDialog
-        open={approveOpen}
-        onOpenChange={setApproveOpen}
-        title="Approve and lock this report?"
-        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. Export unlocks at the same moment."
-        confirmLabel="Approve & Lock"
-        variant="destructive"
-        isLoading={approve.isPending}
-        onConfirm={async () => {
-          await approve.mutateAsync()
-          setApproveOpen(false)
-        }}
-      />
     </div>
   )
 }

@@ -34,7 +34,8 @@ export interface ChooseTarget {
 /**
  * The Build page, opened on one section, optionally with an instruction ready.
  * A manual one travels as `todo` instead of `fix`: the Build page shows it but
- * does not put it in the refine box.
+ * does not put it in the refine box. `from=validation` tells the Build page to
+ * show the validation findings; opened any other way it leaves them out.
  */
 export function buildFixHref(
   cycleId: string,
@@ -42,7 +43,7 @@ export function buildFixHref(
   instruction?: string,
   manual = false,
 ): string {
-  const params = new URLSearchParams({ section: sectionCode })
+  const params = new URLSearchParams({ section: sectionCode, from: "validation" })
   if (instruction) params.set(manual ? "todo" : "fix", instruction)
   return `/pm/cycles/${cycleId}/build?${params.toString()}`
 }

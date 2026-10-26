@@ -828,6 +828,24 @@ export interface PMCycleSession {
   submitted_at: string | null
 }
 
+/** The PM's edits to a whole report (Edit report / Edit Arabic): the summary and each text section. */
+export interface ArabicEditBody {
+  executive_summary: string
+  sections: { section_code: string; content: string }[]
+}
+
+/** Figures from an English section that its Arabic text no longer has. */
+export interface NumberWarning {
+  section_code: string
+  title: string
+  missing: string[]
+}
+
+export interface ArabicEditResult {
+  report: FinalReport
+  number_warnings: NumberWarning[]
+}
+
 export const pmApi = {
   /**
    * Fetch PM cycle dashboard directly from the backend.
@@ -1513,14 +1531,6 @@ export const pmApi = {
     return data
   },
 
-  // Approve and lock the assembled report. One-way: afterwards every section,
-  // plan, and assemble write returns 409. 409 here too if the report has not
-  // been assembled, or was already signed off (including from the Hub).
-  approveReport: async (cycleId: string): Promise<ReportApproval> => {
-    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/approve`)
-    return data
-  },
-
   // Also carries the section's writing style when given, so Start Building
   // saves feeders and style in one request. Omitted = style left unchanged.
   setFeeders: async (
@@ -1783,6 +1793,28 @@ export const pmApi = {
   getArabicReport: async (cycleId: string): Promise<FinalReport> => {
     const { data } = await apiClient.get<FinalReport>(
       `/pm/cycles/${cycleId}/final-report/arabic`,
+    )
+    return data
+  },
+
+  /** Edit report: saves the PM's hand edits to the whole English report.
+   *  Only after the client asked for changes; the first save makes the next
+   *  version. 409 otherwise, or once the report is locked. */
+  saveReport: async (cycleId: string, body: ArabicEditBody): Promise<FinalReport> => {
+    const { data } = await apiClient.put<FinalReport>(`/pm/cycles/${cycleId}/final-report`, body)
+    return data
+  },
+
+  /** Saves the PM's hand edits to the whole Arabic report. Only the text
+   *  changes; after the client asked for changes this makes the next Arabic
+   *  version. 409 while the Arabic is with the client or after they approved it. */
+  saveArabicReport: async (
+    cycleId: string,
+    body: ArabicEditBody,
+  ): Promise<ArabicEditResult> => {
+    const { data } = await apiClient.put<ArabicEditResult>(
+      `/pm/cycles/${cycleId}/final-report/arabic`,
+      body,
     )
     return data
   },

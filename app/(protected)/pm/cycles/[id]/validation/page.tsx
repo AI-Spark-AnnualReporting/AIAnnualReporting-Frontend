@@ -22,6 +22,7 @@ import {
   type MutationError,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { useReportReview } from "@/hooks/useReportReview"
 import { pmApi } from "@/lib/api/pm"
 import { waitForAssembleJob } from "@/lib/assemble-job"
 import { QUERY_KEYS } from "@/lib/constants"
@@ -56,7 +57,11 @@ function ValidationView({ cycleId }: { cycleId: string }) {
   // with nothing to act on - and the stored one is what the printed Validation
   // Report page states. Overwriting it would leave the file and the screen
   // disagreeing about a document nobody can change.
-  const locked = !!approval?.locked
+  const approved = !!approval?.locked
+  // Sent to the client once: the report is no longer validated or fixed
+  // through the Builder (the server refuses both), so the page is read-only.
+  const sentToClient = !!useReportReview(cycleId).data?.share
+  const locked = approved || sentToClient
   // Sections with an AI refine box. Extract and manual sections have none, so
   // their fixes open by hand. Undefined until loaded, which offers the AI fix.
   const sectionsQuery = usePMCycleSections(cycleId)
@@ -206,7 +211,11 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           description={
             validation
               ? `${cycleName ?? "This report"} — checked ${formatDateTime(validation.validated_at)}${
-                  locked ? " · approved, so this is the final check" : ""
+                  approved
+                    ? " · approved, so this is the final check"
+                    : sentToClient
+                      ? " · sent to the client, so this is the final check"
+                      : ""
                 }`
               : `${cycleName ?? "This report"} — not checked yet`
           }
@@ -218,7 +227,9 @@ function ValidationView({ cycleId }: { cycleId: string }) {
               disabled={running || locked || mustFixFirst || savingIgnores}
               title={
                 locked
-                  ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
+                  ? approved
+                    ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
+                    : "The report was sent to the client, so it is not validated again. Make changes with Edit report."
                   : mustFixFirst
                     ? fixFirstText
                     : undefined

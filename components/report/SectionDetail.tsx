@@ -225,9 +225,12 @@ function AutoSection({
 function AssembledView({
   section,
   isRtl,
+  withClient = false,
 }: {
   section: CycleReportSection
   isRtl?: boolean
+  /** Read-only because the client has the review link, not because it is signed off. */
+  withClient?: boolean
 }) {
   const content = section.content ?? ""
   const attachment = section.attachment
@@ -240,7 +243,9 @@ function AssembledView({
           <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
             <FileCheck className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              This report is approved and locked — it can no longer be edited.
+              {withClient
+                ? "The report was sent to the client, so the Builder is closed. Make changes with Edit report on the report page."
+                : "This report is approved and locked — it can no longer be edited."}
             </span>
           </div>
 
@@ -278,6 +283,7 @@ export function SectionDetail({
   cycleId,
   stale = false,
   reportLocked = false,
+  withClient = false,
   hasFindings = false,
   contentLanguage = "english",
   isRtl = false,
@@ -290,6 +296,8 @@ export function SectionDetail({
   // The report has been signed off. Every write path 409s, so nothing is
   // editable.
   reportLocked?: boolean
+  // Locked because the client has the review link (it opens again after).
+  withClient?: boolean
   // The last validation found something in this section. It is being fixed,
   // so the start-over buttons (Regenerate, Re-run Analysis) are hidden: a
   // fresh draft would make the findings meaningless.
@@ -311,7 +319,7 @@ export function SectionDetail({
 
   // Approved and locked → everything is read-only.
   if (reportLocked) {
-    return <AssembledView section={section} isRtl={isRtl} />
+    return <AssembledView section={section} isRtl={isRtl} withClient={withClient} />
   }
 
   // Assembling is not approving: the report is still a draft and the backend

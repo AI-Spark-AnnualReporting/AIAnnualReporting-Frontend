@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
 import type {
+  ArabicEditBody,
   DepartmentClaimsResponse,
   DraftFindingsResponse,
   ExternalReportInput,
@@ -21,7 +22,6 @@ import type {
   CycleReportSection,
   FinalReport,
   PlanResponse,
-  ReportApproval,
   ReportTheme,
   SectionMode,
   WritingStyle,
@@ -707,6 +707,15 @@ export function useRefineSection(cycleId: string) {
       instruction: string
     }) => pmApi.refineSection(cycleId, sectionCode, instruction),
     onSuccess: (section) => {
+      // The AI can hand the text back unchanged (it may think it already
+      // does what was asked). Said out loud, or Send looks broken: there is
+      // no new text and no Undo.
+      const before = qc
+        .getQueryData<CycleReportSection[]>(QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId))
+        ?.find((s) => s.section_code === section.section_code)?.content
+      if (before !== undefined && (before ?? "").trim() === (section.content ?? "").trim()) {
+        toast.info("The AI made no change. Edit the text by hand, or Ignore the finding.")
+      }
       patchSectionInList(qc, cycleId, section)
     },
     onError: (err: MutationError) =>
@@ -816,6 +825,38 @@ export function useArabicReport(cycleId: string, enabled = true) {
   })
 }
 
+/** Saves the PM's hand edits to the Arabic report. */
+export function useSaveArabicReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ArabicEditBody) => pmApi.saveArabicReport(cycleId, body),
+    onSuccess: (result) => {
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_ARABIC_REPORT(cycleId), result.report)
+      // A save can make the next Arabic version, which History shows.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't save the Arabic report")),
+  })
+}
+
+// Edit report: saves the PM's edits to the English report. The report page
+// reads the saved text from the cache straight away; a save can make the next
+// version, which History shows.
+export function useSaveReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ArabicEditBody) => pmApi.saveReport(cycleId, body),
+    onSuccess: (report) => {
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't save the report")),
+  })
+}
+
 // Starts a translation; the page then follows it with useTranslationJob.
 export function useStartTranslation(cycleId: string) {
   return useMutation({
@@ -895,26 +936,6 @@ export function useReportApproval(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
     refetchOnWindowFocus: true,
-  })
-}
-
-// One-way. Everything the report page and the builder gate on has to re-read.
-export function useApproveReport(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => pmApi.approveReport(cycleId),
-    onSuccess: (approval) => {
-      qc.setQueryData<ReportApproval>(
-        QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
-        approval,
-      )
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
-      toast.success("Report approved and locked")
-    },
-    onError: (err: MutationError) =>
-      toast.error(readError(err, "Failed to approve the report")),
   })
 }
 

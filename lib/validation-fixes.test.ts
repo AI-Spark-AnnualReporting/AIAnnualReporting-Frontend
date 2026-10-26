@@ -91,7 +91,7 @@ assert.equal(found.audit, undefined)
 assert.equal(Object.values(found).flat().some((line) => line.includes("roadmap")), false)
 
 // The link carries the section, and the instruction only when given.
-assert.equal(buildFixHref("c1", "ops"), "/pm/cycles/c1/build?section=ops")
+assert.equal(buildFixHref("c1", "ops"), "/pm/cycles/c1/build?section=ops&from=validation")
 const href = buildFixHref("c1", "chair", bannedWordsInstruction(["leverage"]))
 const params = new URLSearchParams(href.split("?")[1])
 assert.equal(params.get("section"), "chair")

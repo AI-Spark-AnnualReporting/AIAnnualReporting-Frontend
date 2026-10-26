@@ -71,10 +71,16 @@ interface FinalReportViewProps {
    * did, so its section numbers match; Arabic-language cycles leave this off.
    */
   westernDigits?: boolean
+  /**
+   * Show a contents list after the cover. The client's review page uses it;
+   * the PM's report page leaves it off (the contents page is the PDF's).
+   */
+  showContents?: boolean
 }
 
 export function FinalReportView({
   report, cycle, assembled, assembledPending = false, westernDigits = false,
+  showContents = false,
 }: FinalReportViewProps) {
   // Skip the auto cover/TOC sections from the body list — we render bespoke
   // treatments for those.
@@ -197,6 +203,13 @@ export function FinalReportView({
 
       <CoverBlock report={report} cycle={cycle} assembled={assembled}
                   pending={assembledPending} />
+      {showContents && (
+        <ContentsBlock
+          entries={contentsEntries(report, bodySections, numbering, execNumber)}
+          isArabic={isArabic}
+          arabicDigits={arabicDigits}
+        />
+      )}
       <ExecutiveSummary
         content={report.executive_summary}
         number={execNumber}
@@ -331,6 +344,62 @@ function CoverBlock({
           {metaLine}
         </p>
       )}
+    </section>
+  )
+}
+
+interface ContentsEntry {
+  number: string | null
+  title: string
+}
+
+/** The contents list's rows: the Executive Summary, then each body section. */
+function contentsEntries(
+  report: FinalReport,
+  bodySections: FinalReport["sections"],
+  numbering: Map<string, { number: string | null }>,
+  execNumber: string | null,
+): ContentsEntry[] {
+  const entries: ContentsEntry[] = []
+  if (report.executive_summary && report.executive_summary.trim()) {
+    entries.push({ number: execNumber, title: "" })
+  }
+  for (const section of bodySections) {
+    entries.push({
+      number: numbering.get(section.section_code)?.number ?? null,
+      title: section.title,
+    })
+  }
+  return entries
+}
+
+/** A plain contents list: section numbers and titles, in the report's brand colour. */
+function ContentsBlock({
+  entries,
+  isArabic,
+  arabicDigits,
+}: {
+  entries: ContentsEntry[]
+  isArabic: boolean
+  arabicDigits: boolean
+}) {
+  if (entries.length === 0) return null
+  const execTitle = isArabic ? "الملخص التنفيذي" : "Executive Summary"
+  return (
+    <section className="print:break-before-page" dir={isArabic ? "rtl" : "ltr"}>
+      <h2 className="text-2xl font-semibold mb-4">{isArabic ? "المحتويات" : "Contents"}</h2>
+      <ol className="space-y-2">
+        {entries.map((entry, index) => (
+          <li key={index} className="flex items-baseline gap-3 border-b border-dashed border-[#E5E7EF] pb-2 text-sm">
+            <span className="w-8 shrink-0 tabular-nums text-muted-foreground">
+              {entry.number == null ? "" : arabicDigits ? toArabicDigits(entry.number) : entry.number}
+            </span>
+            <span className="flex-1" style={{ color: "var(--report-brand)" }}>
+              {entry.title || execTitle}
+            </span>
+          </li>
+        ))}
+      </ol>
     </section>
   )
 }

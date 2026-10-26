@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useCallback, useEffect, useRef } from "react"
+import { use, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -8,12 +8,15 @@ import {
   ChevronDown,
   FileDown,
   FileText,
+  History,
   Languages,
   Loader2,
+  Pencil,
   RefreshCw,
 } from "lucide-react"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +32,10 @@ import {
   withArabicCover,
 } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
+import { ClientReviewCard } from "@/components/report-review/ClientReviewCard"
+import { VersionHistory } from "@/components/report-review/VersionHistory"
+import { useAuth } from "@/contexts/AuthContext"
+import { useReportReview } from "@/hooks/useReportReview"
 import {
   useArabicReport,
   useAssembledReport,
@@ -42,7 +49,8 @@ import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 /**
  * The cycle's Arabic edition on its own page, with its own Create again and
  * Export. The English report page only creates it the first time and links
- * here. The Arabic edition is always a draft: it has no approval of its own.
+ * here. The Arabic edition is always a draft: it has no approval of its own,
+ * but Spark can send it to the client for review (its own link and versions).
  */
 export default function ArabicReportPage({
   params,
@@ -76,6 +84,14 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   const pmData = pmDataRaw as DashboardData | undefined
   const approval = useReportApproval(cycleId).data
   const render = useRenderReport(cycleId, true)
+  const { user } = useAuth()
+  const isSpark = user?.role === "spark_internal"
+  // The client's review of the Arabic. Once it was sent to them even once,
+  // Create again is refused by the server, so the button is off.
+  const review = useReportReview(cycleId, !!arabicQuery.data, true).data
+  // Create again replaces the Arabic, hand edits included, so it asks first.
+  const [confirmCreate, setConfirmCreate] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // Create again stays on this page; the new version is re-read by the hook.
   const stayHere = useCallback(() => {}, [])
@@ -134,6 +150,18 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   // Created only from an approved English report, so a missing one just
   // means "not created yet" (or the English report was reopened since).
   const canCreate = !!approval?.locked
+  // Edit Arabic: off while the client has the link, or once they approved it.
+  const reviewBlocksEdit = review ? !review.can_reassemble : false
+  // Create again: off for good once the Arabic was sent to the client.
+  const sentToClient = !!review?.share
+  const approveFirst = "Approve the English report before creating the Arabic version."
+  let editReason: string | undefined = undefined
+  if (!canCreate) editReason = approveFirst
+  else if (review?.awaiting_client) editReason = "The Arabic report is with the client. You can edit it once they answer."
+  else if (reviewBlocksEdit) editReason = "The client approved this Arabic report, so it can't be changed."
+  let createAgainReason: string | undefined = undefined
+  if (!canCreate) createAgainReason = approveFirst
+  else if (sentToClient) createAgainReason = "The Arabic was already sent to the client. Use Edit Arabic to make changes."
 
   return (
     <div className="-m-8 flex h-[calc(100vh-72px)] flex-col overflow-hidden bg-background">
@@ -163,20 +191,34 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
           )}
         </div>
 
-        <Link href={englishPage} className="shrink-0">
-          <Button variant="ghost" size="sm" className="h-8">
-            English report
+        {review && review.versions.length > 0 && (
+          <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setHistoryOpen(true)}>
+            <History className="h-3.5 w-3.5 mr-1.5" />
+            History
           </Button>
-        </Link>
+        )}
 
         {arabicReport && (
           <>
+            {canCreate && !reviewBlocksEdit && !createArabic.running ? (
+              <Link href={`/pm/cycles/${cycleId}/report/arabic/edit`} className="shrink-0">
+                <Button variant="outline" size="sm" className="h-8">
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                  Edit Arabic
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="outline" size="sm" className="h-8" disabled title={editReason}>
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit Arabic
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
-              onClick={createArabic.create}
-              disabled={!canCreate || createArabic.running}
-              title={canCreate ? undefined : "Approve the English report before creating the Arabic version."}
+              onClick={() => setConfirmCreate(true)}
+              disabled={!canCreate || sentToClient || createArabic.running}
+              title={createAgainReason}
               className="h-8"
             >
               <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
@@ -226,6 +268,29 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
 
       {createArabic.loader ?? startingLoader}
 
+      {review && (
+        <VersionHistory
+          cycleId={cycleId}
+          versions={review.versions}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          arabic
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirmCreate}
+        onOpenChange={setConfirmCreate}
+        title="Create the Arabic report again?"
+        description="This translates the English again and replaces the Arabic report, including any changes made by hand."
+        confirmLabel="Create again"
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmCreate(false)
+          createArabic.create()
+        }}
+      />
+
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto">
           {arabicReport ? (
@@ -260,6 +325,18 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
             }}
           >
             <ArabicStatusCard />
+            {/* Spark sends the Arabic to the client from here. Everyone else
+                sees the card once it has been sent, read-only. */}
+            {review && (isSpark || review.share) && (
+              <ClientReviewCard
+                cycleId={cycleId}
+                state={review}
+                isSpark={isSpark}
+                locked={!!approval?.locked}
+                arabic
+                showHistory={false}
+              />
+            )}
           </aside>
         )}
       </div>
@@ -277,8 +354,8 @@ function ArabicStatusCard() {
         <span className="text-[13.5px] font-bold text-slate-900">Draft</span>
       </div>
       <p className="mt-1 text-xs text-slate-600">
-        Made from the approved English report. If the English report changes,
-        use Create again.
+        Made from the approved English report. Until it is sent to the client,
+        Create again makes it again from the English.
       </p>
     </div>
   )

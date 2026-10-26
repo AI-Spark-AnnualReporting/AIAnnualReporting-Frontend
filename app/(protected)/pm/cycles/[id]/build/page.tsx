@@ -12,6 +12,7 @@ import {
   useAssemblyReadiness,
   useReportApproval,
 } from "@/hooks/useReportBuilder"
+import { useReportReview } from "@/hooks/useReportReview"
 import { SectionFindingsBanner } from "@/components/report/SectionFindingsBanner"
 import {
   FixPrefillContext,
@@ -69,8 +70,14 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   // header's AssembleEntry reads, so the banner below and the "Assemble again"
   // button can never disagree — React Query serves both from one fetch.
   const stale = !!useAssemblyReadiness(cycleId).data?.stale
-  // Signed off — from this side's Approve & Lock or a Communication Hub reviewer.
-  const reportLocked = !!useReportApproval(cycleId).data?.locked
+  // Signed off — from this side's Approve & Lock or a Communication Hub reviewer —
+  // or with the client for review, when the server refuses edits too.
+  const signedOff = !!useReportApproval(cycleId).data?.locked
+  // Closed once the report was sent to the client: changes then go through
+  // Edit report on the report page, never back through the Builder.
+  const sentToClient = !!useReportReview(cycleId).data?.share
+  const reportLocked = signedOff || sentToClient
+  const withClient = sentToClient
 
   // A Fix button on the validation page links here with ?section= (open that
   // section) and, for an AI fix, ?fix= (the refine instruction to start with).
@@ -94,9 +101,15 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
     return null
   })
 
+  // Only when the PM came from the validation page's Fix button: a PM who
+  // just went back to the Builder to change something should not be shown
+  // every finding (user decision, 2026-10-25). Read once, for the whole visit.
+  const [fromValidation] = useState(() => searchParams.get("from") === "validation")
+
   // The last validation's findings, by section, for the banner and the rail's
   // counts. The summary is filed under its own code in each.
-  const validation = useFinalReport(cycleId).data?.validation
+  const lastValidation = useFinalReport(cycleId).data?.validation
+  const validation = fromValidation ? lastValidation : undefined
   const findings = validation ? findingsBySection(validation) : {}
   if (findings[VALIDATION_SUMMARY_CODE]) {
     findings[EXECUTIVE_SUMMARY_CODE] = findings[VALIDATION_SUMMARY_CODE]
@@ -298,6 +311,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
                   cycleId={cycleId}
                   stale={stale}
                   reportLocked={reportLocked}
+                  withClient={withClient && !signedOff}
                   hasFindings={!!effectiveCode && (findings[effectiveCode]?.length ?? 0) > 0}
                   contentLanguage={contentLanguage}
                   isRtl={isRtl}

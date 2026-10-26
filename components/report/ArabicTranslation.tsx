@@ -215,6 +215,8 @@ export function useCreateArabic(cycleId: string, onCreated: () => void) {
 
   const finish = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId) })
+    // A new translation can make the next Arabic version, which History shows.
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
     setRunning(false)
     setJobId(null)
     onCreated()

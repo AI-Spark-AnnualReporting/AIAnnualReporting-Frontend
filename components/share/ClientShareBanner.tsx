@@ -190,8 +190,11 @@ export function ClientShareBanner({
   progress,
   contactName,
   contactEmail,
+  wide = false,
 }: {
-  stage: ShareStage
+  /** The kickoff gate, for the step trail. Left out on the report review page,
+   *  which has no steps. */
+  stage?: ShareStage
   cycleName: string
   title: string
   subtitle: string
@@ -203,6 +206,8 @@ export function ClientShareBanner({
   progress?: { answered: number; required: number } | null
   contactName?: string | null
   contactEmail?: string | null
+  /** Wider column, for a page that shows a whole report under the banner. */
+  wide?: boolean
 }) {
   const bannerRef = useRef<HTMLElement>(null)
   const [scrolledPast, setScrolledPast] = useState(false)
@@ -230,7 +235,7 @@ export function ClientShareBanner({
         <span className="pointer-events-none absolute -right-20 -top-32 h-72 w-72 rounded-full bg-white/[0.08]" aria-hidden />
         <span className="pointer-events-none absolute -bottom-24 right-36 h-40 w-40 rounded-full bg-white/[0.06]" aria-hidden />
 
-        <div className="relative mx-auto max-w-4xl px-4 sm:px-6">
+        <div className={cn("relative mx-auto px-4 sm:px-6", wide ? "max-w-6xl" : "max-w-4xl")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CentriyonMark tone="light" />
             {(contactName || contactEmail) && (
@@ -250,7 +255,7 @@ export function ClientShareBanner({
             )}
           </div>
 
-          <StepTrail stage={stage} finished={finished} />
+          {stage && <StepTrail stage={stage} finished={finished} />}
 
           <div className="mt-4 flex flex-wrap items-end justify-between gap-5">
             <div className="min-w-0 flex-1 basis-80">

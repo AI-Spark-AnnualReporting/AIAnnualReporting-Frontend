@@ -21,6 +21,7 @@ import {
   useFinalReport,
   type MutationError,
 } from "@/hooks/useReportBuilder"
+import { useReportReview } from "@/hooks/useReportReview"
 import { pmApi } from "@/lib/api/pm"
 import { waitForAssembleJob } from "@/lib/assemble-job"
 import { QUERY_KEYS, SECTION_LAYERS } from "@/lib/constants"
@@ -59,6 +60,9 @@ interface AssembleEntryProps {
 export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readinessQuery = useAssemblyReadiness(cycleId)
   const finalReportQuery = useFinalReport(cycleId)
+  // Sent to the client once: no more assembling (the server refuses it), so
+  // the button only opens the report, where Edit report is.
+  const sentToClient = !!useReportReview(cycleId, finalReportQuery.isSuccess).data?.share
   const qc = useQueryClient()
   const router = useRouter()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -193,7 +197,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const hasReport = finalReportQuery.isSuccess || stale
 
   // A report exists and nothing has changed since → nothing to do but read it.
-  if (hasReport && !stale) {
+  if (hasReport && (!stale || sentToClient)) {
     return (
       <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
         <Button className="bg-indigo-600 text-white hover:bg-indigo-700">

@@ -21,7 +21,7 @@ const BASE_URL =
   "https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1"
 
 /** Deliberately bare: no auth header, no company header, no redirect-on-401. */
-const publicClient = axios.create({
+export const publicClient = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
