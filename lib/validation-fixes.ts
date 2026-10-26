@@ -81,6 +81,21 @@ export function anyConceptInstruction(titles: string[]): string {
   return `Add a sentence that carries one of these concept messages: ${names}, whichever fits naturally. Do not invent facts. Keep everything else unchanged.`
 }
 
+/**
+ * Whether a banner line is the finding the PM's Fix instruction came from, so
+ * the banner doesn't list it twice. The link carries only the instruction, and
+ * every instruction quotes the finding's detail (the banned word, the repeated
+ * point, the left-in line), which is the part of the line after the first ": ".
+ * Details shorter than 4 characters (a bare figure) are never matched.
+ */
+export function isFixedFinding(line: string, instruction: string): boolean {
+  const colon = line.indexOf(": ")
+  if (colon === -1) return false
+  const detail = line.slice(colon + 2).trim()
+  if (detail.length < 4) return false
+  return instruction.includes(detail)
+}
+
 /** A string matched literally inside a regular expression. */
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
