@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Sparkles,
   Palette,
+  Globe,
 } from "lucide-react"
 // Hidden 2026-09-24 with the Design button — the dialog's onSaved was the only
 // thing in this file that invalidated a query.
@@ -207,6 +208,15 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </Link>
               </>
             )}
+            {/* The microsite's sitemap. Outside the lock gate on purpose: a
+                website is usually made after sign-off, and the sitemap changes
+                nothing in the printed report. */}
+            <Link href={`/pm/cycles/${cycleId}/web`} className="shrink-0">
+              <Button variant="ghost" size="sm" className="h-8">
+                <Globe className="h-3.5 w-3.5 mr-1.5" />
+                Web
+              </Button>
+            </Link>
             {/* Not gated on completeness — the confirm dialog is where the
                 one-way consequence gets spelled out. Same as the board report. */}
             {approval?.can_approve && (
