@@ -56,6 +56,8 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_portrait",
   "landscape_photo_panel",
   "landscape_people",
+  "landscape_borderless_table",
+  "landscape_grid_table",
 ] as const
 
 /** The default landscape section-page template — the first in the list. */
@@ -99,6 +101,8 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_portrait: "Landscape — portrait + stats",
   landscape_photo_panel: "Landscape — photo + panel",
   landscape_people: "Landscape — people",
+  landscape_borderless_table: "Landscape — borderless table",
+  landscape_grid_table: "Landscape — grid table",
 }
 
 /**
@@ -119,6 +123,8 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_portrait: "Portrait + stats",
   landscape_photo_panel: "Photo + panel",
   landscape_people: "People",
+  landscape_borderless_table: "Borderless table",
+  landscape_grid_table: "Grid table",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */
@@ -335,23 +341,39 @@ export function isLandscapeTemplateKey(key: string | null | undefined): boolean 
 }
 
 /**
+ * Landscape templates that print EXACTLY what a portrait one does — the same
+ * filling code in the engine, only the paper differs — so their card can show
+ * the portrait card's counts. Borderless table and Grid table leave the text,
+ * figures and quotes out, and without these counts their landscape cards
+ * would never show the red "Content missing" line.
+ */
+const LANDSCAPE_COUNTS_FROM: Record<string, string> = {
+  landscape_borderless_table: "borderless_table",
+  landscape_grid_table: "grid_table",
+}
+
+/**
  * The template cards a page offers in landscape: every landscape template.
  *
  * Shaped like the portrait fallback cards on the Create Design screen. Never
- * marked recommended and carries no counts, because the art director never
- * looked at them — in landscape the person picks.
+ * marked recommended, because the art director never looked at them — in
+ * landscape the person picks. No counts either, except on a template that
+ * prints exactly what a portrait one does (LANDSCAPE_COUNTS_FROM): that card
+ * copies the portrait card's counts and losses from `portraitOptions`.
  *
+ * @param portraitOptions the page's stored portrait cards, if any
  * @returns one option per landscape section-page template, default first
  */
-export function landscapeOptions(): DesignOption[] {
+export function landscapeOptions(portraitOptions: DesignOption[] = []): DesignOption[] {
   const options: DesignOption[] = []
   for (const key of LANDSCAPE_TEMPLATE_KEYS) {
+    const twin = portraitOptions.find((option) => option.key === LANDSCAPE_COUNTS_FROM[key])
     options.push({
       key,
       recommended: false,
       reason: null,
-      counts: {},
-      dropped: {},
+      counts: twin ? { ...twin.counts } : {},
+      dropped: twin ? { ...twin.dropped } : {},
     })
   }
   return options

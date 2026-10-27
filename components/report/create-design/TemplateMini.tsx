@@ -1040,6 +1040,265 @@ function CustomMini({ accent, landscape, presentation }: {
   )
 }
 
+/** The borderless table page draws its type and its rules in dark ink, and
+ *  the current year on a light grey band (Centriton page.css .bt-page). */
+const BT_INK = "#4B4F5C"
+const BT_BAND = "#ECEDEF"
+
+/** The kinds of row a borderless table mini draws. */
+type BorderlessRowKind = "item" | "group" | "child" | "total"
+
+/**
+ * One row of a borderless table mini: a label and three figures, the first
+ * figure on the grey band. A group heading has a dark label and no figures,
+ * a row under one is set in, and a total is dark between two thin lines.
+ */
+function borderlessRow(kind: BorderlessRowKind, key: number) {
+  const dark = kind === "group" || kind === "total"
+  const labelWidth = kind === "child" ? "64%" : "76%"
+  const cells = [0, 1, 2].map((index) => {
+    const ruled = kind === "total"
+    return (
+      <div
+        key={index}
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          padding: "1.5px 2px",
+          background: index === 0 ? BT_BAND : undefined,
+          borderTop: ruled ? `0.5px solid ${BT_INK}` : undefined,
+          borderBottom: ruled ? `0.5px solid ${BT_INK}` : undefined,
+        }}
+      >
+        {kind !== "group" && <div style={line("72%", dark ? BT_INK : "#C9CCD6", 2)} />}
+      </div>
+    )
+  })
+  return (
+    <div key={key} style={{ display: "contents" }}>
+      <div style={{ display: "flex", alignItems: "center", paddingLeft: kind === "child" ? 4 : 0 }}>
+        <div style={line(labelWidth, dark ? BT_INK : "#D7DAE5", 2)} />
+      </div>
+      {cells}
+    </div>
+  )
+}
+
+/**
+ * One borderless table for the minis: small heads over one thin dark rule,
+ * then rows with no lines between them and no stripes.
+ */
+function borderlessTable(accent: string, kinds: BorderlessRowKind[]) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+      <div style={line("40%", accent, 2.5)} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 15% 15% 15%" }}>
+        <div style={{ borderBottom: `0.75px solid ${BT_INK}` }} />
+        {[0, 1, 2].map((index) => (
+          <div
+            key={index}
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "1px 2px",
+              background: index === 0 ? BT_BAND : undefined,
+              borderBottom: `0.75px solid ${BT_INK}`,
+            }}
+          >
+            <div style={line("60%", index === 0 ? BT_INK : "#C9CCD6", 1.5)} />
+          </div>
+        ))}
+        {kinds.map((kind, index) => borderlessRow(kind, index))}
+      </div>
+    </div>
+  )
+}
+
+/** The rows of the statement the borderless minis draw. */
+const BORDERLESS_STATEMENT: BorderlessRowKind[] = [
+  "item", "group", "child", "child", "child", "child", "child", "total",
+  "item", "item", "item", "item", "total",
+  "item", "item", "total",
+]
+const BORDERLESS_LIST: BorderlessRowKind[] = ["item", "item", "item", "item", "item", "item"]
+
+/**
+ * The borderless table page: a dark heading, then the tables at the full
+ * width, nothing else — no text, no figure boxes, no quotes.
+ */
+function BorderlessTableMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 6 }}>
+      <div style={{ ...line("62%", BT_INK, 4), marginBottom: 2 }} />
+      {borderlessTable(accent, BORDERLESS_STATEMENT)}
+      {borderlessTable(accent, BORDERLESS_LIST)}
+    </div>
+  )
+}
+
+/** The same page on the landscape sheet: the tables run the full width. */
+function LandscapeBorderlessTableMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
+      <div style={{ ...line("40%", BT_INK, 4), marginBottom: 1 }} />
+      {borderlessTable(accent, BORDERLESS_STATEMENT)}
+      {borderlessTable(accent, BORDERLESS_LIST)}
+    </div>
+  )
+}
+
+/** The grid table page draws its type in dark ink, every body cell boxed in
+ *  thin light-grey lines, and the current year on a light grey fill
+ *  (Centriton page.css .gt-page). */
+const GT_INK = "#3A3F4B"
+const GT_LINE = "#D3D6DC"
+const GT_CURRENT = "#E8EAED"
+
+/** The kinds of row a grid table mini draws. */
+type GridRowKind = "item" | "group" | "total" | "note"
+
+/** The grey box round one body cell. Only the first column draws a left
+ *  line, so two neighbouring cells never stack two lines into one thick one. */
+function gridCellBox(firstColumn: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    minHeight: 6,
+    padding: "1.5px 2px",
+    borderRight: `0.5px solid ${GT_LINE}`,
+    borderBottom: `0.5px solid ${GT_LINE}`,
+    borderLeft: firstColumn ? `0.5px solid ${GT_LINE}` : undefined,
+  }
+}
+
+/**
+ * One body row of a grid table mini. A group heading is a full-width brand
+ * bar with a white label; a note is a full-width boxed row of plain text; an
+ * item or a total is a label and two centred figures, the first (the current
+ * year) dark on the grey fill.
+ */
+function gridRow(kind: GridRowKind, accent: string, key: number) {
+  if (kind === "group") {
+    return (
+      <div
+        key={key}
+        style={{
+          gridColumn: "1 / -1",
+          background: accent,
+          padding: "2px 2px",
+          display: "flex",
+          // A thin white seam, so a group bar straight under the header bar
+          // still reads as its own bar and not one thick block.
+          borderTop: "1px solid #FFFFFF",
+        }}
+      >
+        <div style={line("48%", "rgba(255,255,255,0.95)", 2)} />
+      </div>
+    )
+  }
+  if (kind === "note") {
+    return (
+      <div
+        key={key}
+        style={{ ...gridCellBox(true), gridColumn: "1 / -1", flexDirection: "column", alignItems: "stretch", gap: 1.5 }}
+      >
+        <div style={line("100%", "#C9CCD6", 1.5)} />
+        <div style={line("64%", "#C9CCD6", 1.5)} />
+      </div>
+    )
+  }
+  const labelInk = kind === "total" ? GT_INK : "#C9CCD6"
+  return (
+    <div key={key} style={{ display: "contents" }}>
+      <div style={gridCellBox(true)}>
+        <div style={line("70%", labelInk, 2)} />
+      </div>
+      <div style={{ ...gridCellBox(false), justifyContent: "center", background: GT_CURRENT }}>
+        <div style={line("56%", GT_INK, 2)} />
+      </div>
+      <div style={{ ...gridCellBox(false), justifyContent: "center" }}>
+        <div style={line("50%", "#B9BDC8", 2)} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One grid table for the minis: an optional dark title, the solid brand
+ * header bar with the year heads centred in white (the current year bolder),
+ * then the boxed rows.
+ */
+function gridTable(accent: string, kinds: GridRowKind[], titled: boolean) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2.5, flexShrink: 0 }}>
+      {titled && <div style={line("58%", GT_INK, 2.5)} />}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 17% 17%" }}>
+        <div style={{ background: accent }} />
+        {[0, 1].map((index) => (
+          <div
+            key={index}
+            style={{ background: accent, display: "flex", justifyContent: "center", padding: "2.5px 2px" }}
+          >
+            <div style={line("50%", index === 0 ? "#FFFFFF" : "rgba(255,255,255,0.7)", index === 0 ? 2 : 1.5)} />
+          </div>
+        ))}
+        {kinds.map((kind, index) => gridRow(kind, accent, index))}
+      </div>
+    </div>
+  )
+}
+
+/** The rows of the statement the grid minis draw, after Bank AlJazira's
+ *  related-party table: group bars, plain rows and a closing note. */
+const GRID_STATEMENT: GridRowKind[] = [
+  "group", "item", "item", "item", "item", "item",
+  "group", "item", "item", "item", "note",
+  "group", "item", "item",
+]
+// The landscape half-column is taller for its width than the portrait page,
+// so the statement there runs a few rows longer to reach the foot of the card.
+const GRID_STATEMENT_LONG: GridRowKind[] = [...GRID_STATEMENT, "item", "item", "item"]
+const GRID_SHORT: GridRowKind[] = ["item", "item"]
+const GRID_LIST: GridRowKind[] = ["item", "item", "item", "item", "total"]
+
+/**
+ * The grid table page: a small bold heading, then the tables at the full
+ * width, nothing else — no text, no figure boxes, no quotes.
+ */
+function GridTableMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 5 }}>
+      <div style={{ ...line("46%", GT_INK, 3), marginBottom: 1 }} />
+      {gridTable(accent, GRID_STATEMENT, false)}
+      {gridTable(accent, GRID_SHORT, true)}
+    </div>
+  )
+}
+
+/**
+ * The same page on the landscape sheet: the tables flow in two half-page
+ * columns with a gap between them, like the spread they copy.
+ */
+function LandscapeGridTableMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  const half: React.CSSProperties = { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }
+  // The 16:9 sheet is shorter than A4 landscape, so the longer statement
+  // would run off its foot and cut the last row's line.
+  const statement = presentation ? GRID_STATEMENT : GRID_STATEMENT_LONG
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, flexDirection: "row", gap: 14 }}>
+      <div style={half}>
+        <div style={{ ...line("52%", GT_INK, 3), marginBottom: 1 }} />
+        {gridTable(accent, statement, false)}
+      </div>
+      <div style={{ ...half, paddingTop: 5 }}>
+        {gridTable(accent, GRID_SHORT, true)}
+        {gridTable(accent, GRID_LIST, true)}
+      </div>
+    </div>
+  )
+}
+
 function TemplateMiniInner({
   templateKey,
   accent = "#3C0866",
@@ -1096,6 +1355,12 @@ function TemplateMiniInner({
   if (templateKey === "landscape_people") {
     return <LandscapePeopleMini accent={accent} presentation={presentation} />
   }
+  if (templateKey === "landscape_borderless_table") {
+    return <LandscapeBorderlessTableMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_grid_table") {
+    return <LandscapeGridTableMini accent={accent} presentation={presentation} />
+  }
   if (templateKey === "photo_panel") {
     return <PhotoPanelMini accent={accent} />
   }
@@ -1108,6 +1373,12 @@ function TemplateMiniInner({
   }
   if (templateKey === "data_tables") {
     return <DataTablesMini accent={accent} />
+  }
+  if (templateKey === "borderless_table") {
+    return <BorderlessTableMini accent={accent} />
+  }
+  if (templateKey === "grid_table") {
+    return <GridTableMini accent={accent} />
   }
 
   if (templateKey === "kpi_stat_grid") {
@@ -1445,6 +1716,8 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   data_tables: "Data tables",
   photo_panel: "Photo + panel",
   people_grid: "People",
+  borderless_table: "Borderless table",
+  grid_table: "Grid table",
   custom: "Custom",
   ...LANDSCAPE_TEMPLATE_NAMES,
 }

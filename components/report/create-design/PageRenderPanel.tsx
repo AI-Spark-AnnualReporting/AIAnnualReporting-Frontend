@@ -28,7 +28,9 @@ import {
 } from "@/lib/api/createDesign"
 import { renderSectionPages } from "@/lib/api/sectionBlocks"
 import { cacheKey, evict, getOrRender, peek } from "@/lib/createDesignCache"
-import { losesContent, lossText, placementText } from "@/lib/createDesignLoss"
+import {
+  losesContent, lossText, placementText, tablesOnlyUncounted, TABLES_ONLY_UNCOUNTED_TEXT,
+} from "@/lib/createDesignLoss"
 import { adjustResultSummary, retryNote, type AdjustResultLine } from "@/lib/customAdjust"
 import {
   CUSTOM_TEMPLATE_KEY, customRenderFields, customTemplateFor, customTemplateHistory, paperFor,
@@ -56,11 +58,24 @@ function maxPageWidth(orientation: Orientation, format: LandscapeFormat = "a4"):
 /**
  * The line under the template name. The landscape template has no counts —
  * the art director never looked at it — so "Nothing to place" would be false;
- * it holds every content type, which is what is said instead.
+ * it holds every content type, which is what is said instead. Never when the
+ * card says it loses something (Borderless table): the red line under it
+ * would say the opposite. A tables-only template with no counts (a section
+ * extracted before it existed) says it has not been counted, in either
+ * orientation — "nothing is dropped" and "nothing to place" would both be
+ * false there.
  */
-function placementLine(option: DesignOption | null, orientation: Orientation): string {
+function placementLine(
+  option: DesignOption | null,
+  templateKey: string,
+  orientation: Orientation,
+): string {
+  if (tablesOnlyUncounted(templateKey, option)) {
+    return "Not counted yet for this section"
+  }
   const counted = option && Object.keys(option.counts).length > 0
-  if (orientation === "landscape" && !counted) {
+  const loses = option ? losesContent(option.dropped) : false
+  if (orientation === "landscape" && !counted && !loses) {
     return "Every figure, paragraph, quote and table prints — nothing is dropped"
   }
   return placementText(option?.counts)
@@ -312,7 +327,7 @@ export function PageRenderPanel({
             )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">
-            {placementLine(option, orientation)}
+            {placementLine(option, templateKey, orientation)}
           </p>
           {/* Loss is no longer a layout trade-off a person chooses between —
               every template holds everything — so this is a defect notice,
@@ -320,6 +335,13 @@ export function PageRenderPanel({
           {option && losesContent(option.dropped) && (
             <p className="mt-0.5 text-[11px] font-semibold text-red-700">
               Content missing: {lossText(option.dropped, option.counts)}
+            </p>
+          )}
+          {/* With no counts there is no loss to list, but a tables-only
+              template still leaves the rest out, so it is still flagged. */}
+          {tablesOnlyUncounted(templateKey, option) && (
+            <p className="mt-0.5 text-[11px] font-semibold text-red-700">
+              Content missing: {TABLES_ONLY_UNCOUNTED_TEXT}
             </p>
           )}
           {custom?.brief?.summary_for_pm && (

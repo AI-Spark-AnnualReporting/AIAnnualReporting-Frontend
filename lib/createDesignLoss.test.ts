@@ -7,7 +7,9 @@
  */
 
 import assert from "node:assert/strict"
-import { lossText, losesContent, placedText, placementText } from "./createDesignLoss.ts"
+import {
+  lossText, losesContent, placedText, placementText, tablesOnlyUncounted,
+} from "./createDesignLoss.ts"
 
 // Nothing dropped is silence, not "0 figures not shown".
 assert.equal(lossText({}), "")
@@ -44,8 +46,6 @@ assert.equal(placedText({ para: 1 }), "1 paragraph")
 assert.equal(placedText({}), "")
 assert.equal(placedText(null), "")
 
-console.log("createDesignLoss: all checks passed")
-
 // --- placement: the normal state is now a positive confirmation ------------
 assert.equal(placedText({ stat: 17, table: 2, para: 40, quote: 4 }),
   "17 figures · 2 tables · 40 paragraphs · 4 quotes")
@@ -54,3 +54,18 @@ assert.equal(placedText({ para: 3, lede: 2 }), "5 paragraphs")
 assert.equal(placementText({ stat: 1, para: 2 }), "All 1 figure · 2 paragraphs placed")
 assert.equal(placementText({}), "Nothing to place in this section")
 assert.equal(placementText(null), "Nothing to place in this section")
+
+// A tables-only template with no counts (a section extracted before it
+// existed) must not read as "nothing is dropped".
+assert.equal(tablesOnlyUncounted("grid_table", undefined), true)
+assert.equal(tablesOnlyUncounted("landscape_grid_table", { counts: {}, dropped: {} }), true)
+assert.equal(tablesOnlyUncounted("borderless_table", null), true)
+assert.equal(tablesOnlyUncounted("landscape_borderless_table", { counts: {}, dropped: {} }), true)
+assert.equal(tablesOnlyUncounted("grid_table", { counts: { table: 2 }, dropped: {} }), false,
+  "counted: the real placement shows")
+assert.equal(tablesOnlyUncounted("grid_table", { counts: {}, dropped: { narrative_blocks: 3 } }), false,
+  "counted losses: the real red line shows instead")
+assert.equal(tablesOnlyUncounted("landscape_tables", { counts: {}, dropped: {} }), false, "prints everything")
+assert.equal(tablesOnlyUncounted(null, null), false)
+
+console.log("createDesignLoss: all checks passed")

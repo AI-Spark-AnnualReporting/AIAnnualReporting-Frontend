@@ -88,6 +88,8 @@ const FALLBACK_OPTIONS = [
   "data_tables",
   "photo_panel",
   "people_grid",
+  "borderless_table",
+  "grid_table",
 ].map((key) => ({
   key,
   recommended: false,
@@ -142,7 +144,7 @@ function cardsFor(
   orientation: Orientation,
   format: LandscapeFormat,
 ): DesignOption[] {
-  const fixed = orientation === "landscape" ? landscapeOptions() : withEveryTemplate(unit.options)
+  const fixed = orientation === "landscape" ? landscapeOptions(unit.options) : withEveryTemplate(unit.options)
   if (!SHOW_CUSTOM_TEMPLATES) return fixed
   return customTemplateFor(unit, orientation, format) ? [CUSTOM_OPTION, ...fixed] : fixed
 }
@@ -196,7 +198,7 @@ function optionFor(
 ): DesignOption | null {
   if (!unit) return null
   if (templateKey === CUSTOM_TEMPLATE_KEY) return CUSTOM_OPTION
-  const options = orientation === "landscape" ? landscapeOptions() : unit.options
+  const options = orientation === "landscape" ? landscapeOptions(unit.options) : unit.options
   return options.find((o) => o.key === templateKey) ?? null
 }
 
