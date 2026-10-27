@@ -830,8 +830,8 @@ export function useSaveArabicReport(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: ArabicEditBody) => pmApi.saveArabicReport(cycleId, body),
-    onSuccess: (result) => {
-      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_ARABIC_REPORT(cycleId), result.report)
+    onSuccess: (report) => {
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_ARABIC_REPORT(cycleId), report)
       // A save can make the next Arabic version, which History shows.
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
     },

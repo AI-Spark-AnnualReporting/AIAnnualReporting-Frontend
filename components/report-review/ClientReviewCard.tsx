@@ -60,7 +60,6 @@ export function ClientReviewCard({
   isSpark,
   locked,
   arabic = false,
-  showHistory = true,
 }: {
   cycleId: string
   state: ReportReviewState
@@ -69,8 +68,6 @@ export function ClientReviewCard({
   locked: boolean
   /** This card is for the Arabic translation, with its own link and versions. */
   arabic?: boolean
-  /** The Arabic page has History in its top bar instead. */
-  showHistory?: boolean
 }) {
   const [shareOpen, setShareOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -205,7 +202,7 @@ export function ClientReviewCard({
               {resend.isPending ? "Resending…" : "Resend link"}
             </button>
           )}
-          {showHistory && state.versions.length > 0 && (
+          {state.versions.length > 0 && (
             <button type="button" style={{ ...BTN_SECONDARY, width: "100%" }} onClick={() => setHistoryOpen(true)}>
               History
             </button>

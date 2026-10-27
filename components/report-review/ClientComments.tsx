@@ -207,7 +207,10 @@ export function SectionComments({
       )}
       {open && adding && (
         <Composer
-          placeholder={`What should change in "${title}"?`}
+          // The title is wrapped in direction isolates (U+2068 … U+2069): an
+          // Arabic title in this English line otherwise pulled the quotes and
+          // the "?" out of place.
+          placeholder={`What should change in "⁨${title}⁩"?`}
           onCancel={() => setAdding(false)}
           onSave={async (body) => {
             const saved = await api.add(sectionCode, body)

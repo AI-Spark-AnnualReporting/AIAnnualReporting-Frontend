@@ -4,12 +4,12 @@ import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { AlertTriangle, ArrowLeft, FileText, Info, Loader2, Lock } from "lucide-react"
+import { ArrowLeft, FileText, Info, Loader2, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ArabicEdition } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
-import type { ArabicEditBody, NumberWarning } from "@/lib/api/pm"
+import type { ArabicEditBody } from "@/lib/api/pm"
 import type { VersionSummary } from "@/lib/api/reportReview"
 import type { FinalReport } from "@/types"
 
@@ -27,12 +27,6 @@ import type { FinalReport } from "@/types"
 interface Texts {
   summary: string
   sections: Record<string, string>
-}
-
-/** What a save hands back: the saved report, and (Arabic) figures to check. */
-export interface EditorSaveResult {
-  report: FinalReport
-  warnings: NumberWarning[]
 }
 
 /** The editable text the report holds now. */
@@ -123,12 +117,12 @@ export function ReportEditor({
   /** The newest version's status: "changes_requested" means this save makes the next one. */
   latestStatus?: string
   saving: boolean
-  onSave: (body: ArabicEditBody) => Promise<EditorSaveResult>
+  /** Saves the edits and resolves with the saved report. */
+  onSave: (body: ArabicEditBody) => Promise<FinalReport>
 }) {
   const router = useRouter()
   const [saved, setSaved] = useState<Texts>(() => textsOf(report))
   const [texts, setTexts] = useState<Texts>(() => textsOf(report))
-  const [warnings, setWarnings] = useState<NumberWarning[]>([])
   const [leaveOpen, setLeaveOpen] = useState(false)
   const dirty = textsDiffer(texts, saved)
 
@@ -145,13 +139,13 @@ export function ReportEditor({
 
   const save = async () => {
     const sections = Object.entries(texts.sections).map(([section_code, content]) => ({ section_code, content }))
-    let result: EditorSaveResult
+    let savedReport: FinalReport
     try {
-      result = await onSave({ executive_summary: texts.summary, sections })
+      savedReport = await onSave({ executive_summary: texts.summary, sections })
     } catch {
       return // the hook has shown the error
     }
-    const next = textsOf(result.report)
+    const next = textsOf(savedReport)
     setSaved(next)
     setTexts(next)
     const madeNext = latestStatus === "changes_requested" && reviewComments
@@ -161,12 +155,7 @@ export function ReportEditor({
         ? `Saved as ${label} ${reviewComments.version_no + 1}. Share it again to send it to the client.`
         : "Saved.",
     )
-    // The Arabic shows its number warnings here first; the English goes
-    // straight back to the report page, which shows the saved text.
-    if (result.warnings.length > 0) {
-      setWarnings(result.warnings)
-      return
-    }
+    // Back to the report page, which shows the saved text.
     router.push(backHref)
   }
 
@@ -279,22 +268,6 @@ export function ReportEditor({
                   )
                 ))}
               </div>
-            </div>
-          )}
-
-          {warnings.length > 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900" role="status">
-              <p className="mb-1.5 flex items-center gap-1.5 font-semibold">
-                <AlertTriangle className="h-3.5 w-3.5" /> Numbers to check
-              </p>
-              <p className="mb-2">These figures from the English are not in the Arabic text. It was saved anyway.</p>
-              <ul className="space-y-1">
-                {warnings.map((warning) => (
-                  <li key={warning.section_code}>
-                    <span lang="ar">{warning.title}</span>: {warning.missing.join(", ")}
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 

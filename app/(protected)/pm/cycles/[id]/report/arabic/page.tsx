@@ -8,7 +8,6 @@ import {
   ChevronDown,
   FileDown,
   FileText,
-  History,
   Languages,
   Loader2,
   Pencil,
@@ -33,7 +32,6 @@ import {
 } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
 import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
-import { VersionHistory } from "@/components/report-review/VersionHistory"
 import { useAuth } from "@/contexts/AuthContext"
 import { useReportReview } from "@/hooks/useReportReview"
 import {
@@ -92,7 +90,6 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   const review = reviewQuery.data
   // Create again replaces the Arabic, hand edits included, so it asks first.
   const [confirmCreate, setConfirmCreate] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
 
   // Create again stays on this page; the new version is re-read by the hook.
   const stayHere = useCallback(() => {}, [])
@@ -192,13 +189,6 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
           )}
         </div>
 
-        {review && review.versions.length > 0 && (
-          <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setHistoryOpen(true)}>
-            <History className="h-3.5 w-3.5 mr-1.5" />
-            History
-          </Button>
-        )}
-
         {arabicReport && (
           <>
             {canCreate && !reviewBlocksEdit && !createArabic.running ? (
@@ -269,16 +259,6 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
 
       {createArabic.loader ?? startingLoader}
 
-      {review && (
-        <VersionHistory
-          cycleId={cycleId}
-          versions={review.versions}
-          open={historyOpen}
-          onOpenChange={setHistoryOpen}
-          arabic
-        />
-      )}
-
       <ConfirmDialog
         open={confirmCreate}
         onOpenChange={setConfirmCreate}
@@ -336,7 +316,6 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
                 isSpark={isSpark}
                 locked={!!approval?.locked}
                 arabic
-                showHistory={false}
               />
             )}
           </aside>

@@ -210,6 +210,18 @@ function VersionChanges({
             <span><span className="rounded bg-red-100 px-1.5 text-red-800 line-through">red</span> removed</span>
           </div>
         )}
+        {/* Once, at the top, over the two columns of every section below
+            (side by side only; stacked on a phone, each cell names its own).
+            The Arabic reads right to left, so its older version is on the right. */}
+        {compare.data && previousNo !== null && changed.length > 0 && (
+          <div
+            dir={arabic ? "rtl" : "ltr"}
+            className="hidden grid-cols-2 rounded-md border bg-muted/40 pt-0 text-[11px] font-bold tracking-wide text-muted-foreground md:grid"
+          >
+            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "text-right" : "border-r")}>VERSION {previousNo}</span>
+            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "border-r text-right" : "")}>VERSION {version.version_no}</span>
+          </div>
+        )}
       </DialogHeader>
 
       <div className="-mx-6 min-h-0 flex-1 space-y-4 overflow-y-auto px-6">
@@ -313,7 +325,6 @@ function ChangedSection({
   fromNo: number
   toNo: number
 }) {
-  const label = "px-3 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground"
   return (
     <section className="overflow-hidden rounded-lg border" dir={arabic ? "rtl" : undefined} lang={arabic ? "ar" : undefined}>
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-sm">
@@ -322,8 +333,6 @@ function ChangedSection({
         {section.status === "removed" && <span className="text-xs text-red-700">· removed</span>}
       </div>
       <div className={cn("grid grid-cols-1 md:grid-cols-2", arabic ? "text-right" : "text-left")}>
-        <div dir="ltr" className={cn(label, "hidden border-b md:block", arabic ? "text-right" : "border-r")}>VERSION {fromNo}</div>
-        <div dir="ltr" className={cn(label, "hidden border-b md:block", arabic ? "border-r text-right" : "")}>VERSION {toNo}</div>
         {section.paragraphs.map((paragraph, index) => (
           <SidePair key={index} paragraph={paragraph} fromNo={fromNo} toNo={toNo} first={index === 0} arabic={arabic} />
         ))}
@@ -366,7 +375,9 @@ function SidePair({
 
 /** A paragraph as one version has it, shown as what it is: heading, bullet, text or table row. */
 function SideParagraph({ paragraph, side, emptyText }: { paragraph: DiffParagraph; side: Side; emptyText: string }) {
-  const empty = <p className="text-sm italic text-muted-foreground">{emptyText}</p>
+  // English words, so written left to right even in an Arabic column (else
+  // the leading dash jumps to the end); the column still aligns it.
+  const empty = <p dir="ltr" className="text-sm italic text-muted-foreground">{emptyText}</p>
   if (paragraph.type === "row") {
     const cells = paragraph.cells.map((parts) => sideParts(parts, side))
     if (!cells.some(hasWords)) return empty

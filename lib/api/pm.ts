@@ -834,18 +834,6 @@ export interface ArabicEditBody {
   sections: { section_code: string; content: string }[]
 }
 
-/** Figures from an English section that its Arabic text no longer has. */
-export interface NumberWarning {
-  section_code: string
-  title: string
-  missing: string[]
-}
-
-export interface ArabicEditResult {
-  report: FinalReport
-  number_warnings: NumberWarning[]
-}
-
 export const pmApi = {
   /**
    * Fetch PM cycle dashboard directly from the backend.
@@ -1811,8 +1799,8 @@ export const pmApi = {
   saveArabicReport: async (
     cycleId: string,
     body: ArabicEditBody,
-  ): Promise<ArabicEditResult> => {
-    const { data } = await apiClient.put<ArabicEditResult>(
+  ): Promise<FinalReport> => {
+    const { data } = await apiClient.put<FinalReport>(
       `/pm/cycles/${cycleId}/final-report/arabic`,
       body,
     )

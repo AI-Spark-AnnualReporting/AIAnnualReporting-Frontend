@@ -65,10 +65,7 @@ function EditArabicShell({ cycleId }: { cycleId: string }) {
       reviewComments={askedForChanges}
       latestStatus={review?.versions[0]?.status}
       saving={save.isPending}
-      onSave={async (body) => {
-        const result = await save.mutateAsync(body)
-        return { report: result.report, warnings: result.number_warnings }
-      }}
+      onSave={(body) => save.mutateAsync(body)}
     />
   )
 }

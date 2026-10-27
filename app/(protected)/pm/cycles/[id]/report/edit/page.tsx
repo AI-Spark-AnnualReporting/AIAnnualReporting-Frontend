@@ -62,10 +62,7 @@ function EditReportShell({ cycleId }: { cycleId: string }) {
       reviewComments={askedForChanges}
       latestStatus={review.versions[0]?.status}
       saving={save.isPending}
-      onSave={async (body) => {
-        const saved = await save.mutateAsync(body)
-        return { report: saved, warnings: [] }
-      }}
+      onSave={(body) => save.mutateAsync(body)}
     />
   )
 }
