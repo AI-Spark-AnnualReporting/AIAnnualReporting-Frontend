@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { Fragment, useMemo, type ReactNode } from "react"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { CoverPreview } from "@/components/report/design/CoverPreview"
 import {
@@ -76,11 +76,42 @@ interface FinalReportViewProps {
    * the PM's report page leaves it off (the contents page is the PDF's).
    */
   showContents?: boolean
+  /**
+   * Drawn under the Executive Summary and under each section, with that
+   * section's code and title. The client's review page puts its comments
+   * there; every other page leaves it off.
+   */
+  sectionFooter?: (sectionCode: string, title: string) => ReactNode
+}
+
+/** The code the Executive Summary goes by in comments, as on the server. */
+export const EXECUTIVE_SUMMARY_SECTION = "executive_summary"
+
+/** The id of the marker just before a section, for "jump to this section". */
+export function reportSectionAnchor(sectionCode: string): string {
+  return `report-sec-${sectionCode}`
+}
+
+/**
+ * Scrolls the report to a section and briefly highlights it. Does nothing
+ * when the section isn't on the page.
+ */
+export function jumpToReportSection(sectionCode: string): void {
+  const marker = document.getElementById(reportSectionAnchor(sectionCode))
+  if (!marker) return
+  marker.scrollIntoView({ behavior: "smooth", block: "start" })
+  const section = marker.nextElementSibling as HTMLElement | null
+  if (!section) return
+  section.style.transition = "background-color 0.4s"
+  section.style.backgroundColor = "rgba(99, 102, 241, 0.10)"
+  window.setTimeout(() => {
+    section.style.backgroundColor = ""
+  }, 1600)
 }
 
 export function FinalReportView({
   report, cycle, assembled, assembledPending = false, westernDigits = false,
-  showContents = false,
+  showContents = false, sectionFooter,
 }: FinalReportViewProps) {
   // Skip the auto cover/TOC sections from the body list — we render bespoke
   // treatments for those.
@@ -210,17 +241,21 @@ export function FinalReportView({
           arabicDigits={arabicDigits}
         />
       )}
+      <div id={reportSectionAnchor(EXECUTIVE_SUMMARY_SECTION)} className="scroll-mt-4" />
       <ExecutiveSummary
         content={report.executive_summary}
         number={execNumber}
         isArabic={isArabic}
         arabicDigits={arabicDigits}
       />
+      {report.executive_summary?.trim() &&
+        sectionFooter?.(EXECUTIVE_SUMMARY_SECTION, isArabic ? "الملخص التنفيذي" : "Executive Summary")}
       {bodySections.map((section, i) => {
         const n = numbering.get(section.section_code)
         return (
+          <Fragment key={section.section_code}>
+          <div id={reportSectionAnchor(section.section_code)} className="scroll-mt-4" />
           <ReportSectionRenderer
-            key={section.section_code}
             section={section}
             index={i}
             number={n?.number ?? null}
@@ -232,6 +267,8 @@ export function FinalReportView({
             isArabic={isArabic}
             arabicDigits={arabicDigits}
           />
+          {sectionFooter?.(section.section_code, section.title)}
+          </Fragment>
         )
       })}
       {bodySections.some((s) => s.type === "attachment") && (

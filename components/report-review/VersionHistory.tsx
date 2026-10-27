@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn, formatDateTime } from "@/lib/utils"
 import type { DiffParagraph, DiffPart, SectionDiff, VersionSummary } from "@/lib/api/reportReview"
-import { useCompareVersions, useDownloadVersionPdf } from "@/hooks/useReportReview"
+import { useCompareVersions, useDownloadVersionWord } from "@/hooks/useReportReview"
 
 const STATUS_LABEL: Record<VersionSummary["status"], string> = {
   draft: "Draft",
@@ -58,9 +58,10 @@ export function VersionHistory({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      {/* A column, not one scrolling box: the title, Back and PDF stay put
+      {/* A column, not one scrolling box: the title, Back and Word stay put
           and only the list or the changes below them scroll. */}
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-3xl">
+      {/* Wider for the changes: two versions side by side. */}
+      <DialogContent className={cn("flex max-h-[85vh] flex-col", selected ? "sm:max-w-5xl" : "sm:max-w-3xl")}>
         {selected ? (
           <VersionChanges
             cycleId={cycleId}
@@ -131,6 +132,9 @@ function VersionRow({ version, onOpen }: { version: VersionSummary; onOpen: () =
             )}
             {version.comments.map((comment) => (
               <span key={comment.id} className="block whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-xs">
+                <span className="block text-[10.5px] font-semibold text-muted-foreground" dir="auto">
+                  {comment.section_title ?? "Whole report"}
+                </span>
                 {comment.body}
               </span>
             ))}
@@ -157,7 +161,8 @@ function VersionChanges({
   arabic: boolean
   onBack: () => void
 }) {
-  const pdf = useDownloadVersionPdf(cycleId, arabic)
+  // The designed Word file of this version (internal users; the client gets a simple PDF).
+  const word = useDownloadVersionWord(cycleId, arabic)
   const previousNo = version.has_previous ? version.version_no - 1 : null
   const compare = useCompareVersions(
     cycleId,
@@ -191,11 +196,11 @@ function VersionChanges({
             size="sm"
             variant="outline"
             className="h-8 shrink-0"
-            disabled={pdf.isPending}
-            onClick={() => pdf.mutate(version.version_no)}
+            disabled={word.isPending}
+            onClick={() => word.mutate(version.version_no)}
           >
-            {pdf.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
-            PDF
+            {word.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+            Word
           </Button>
         </div>
         {compare.data && (
@@ -215,7 +220,7 @@ function VersionChanges({
               ? "This is the first version, so there's nothing to compare."
               : "The version before this one is no longer kept, so there's nothing to compare."}
           </p>
-          <p className="text-sm text-muted-foreground">Open the PDF to read it as it was.</p>
+          <p className="text-sm text-muted-foreground">Download the Word file to read it as it was.</p>
         </div>
       )}
 
@@ -233,14 +238,15 @@ function VersionChanges({
           )}
           <div className="space-y-3">
             {changed.map((section) => (
-              <ChangedSection key={section.code} section={section} arabic={arabic} />
+              <ChangedSection
+                key={section.code}
+                section={section}
+                arabic={arabic}
+                fromNo={previousNo ?? version.version_no - 1}
+                toNo={version.version_no}
+              />
             ))}
           </div>
-          {same.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Unchanged: {same.map((section) => section.title).join(", ")}
-            </p>
-          )}
         </>
       )}
       </div>
@@ -248,8 +254,38 @@ function VersionChanges({
   )
 }
 
-/** One changed section: its changed paragraphs, each once, with the words marked. */
-function ChangedSection({ section, arabic }: { section: SectionDiff; arabic: boolean }) {
+/** Which version a column shows: the older one keeps removed words, the newer one added words. */
+type Side = "old" | "new"
+
+/** A paragraph's words as one side shows them. */
+function sideParts(parts: DiffPart[], side: Side): DiffPart[] {
+  const hidden = side === "old" ? "added" : "deleted"
+  return parts.filter((part) => part.kind !== hidden)
+}
+
+/** True when the parts have any words at all. */
+function hasWords(parts: DiffPart[]): boolean {
+  return parts.some((part) => part.text.trim() !== "")
+}
+
+/**
+ * One changed section, the two versions side by side: the older on the
+ * left (removed words in red), the newer on the right (added words in
+ * green), each changed paragraph on the same row. The Arabic reads right to
+ * left, so there the older version is on the right.
+ */
+function ChangedSection({
+  section,
+  arabic,
+  fromNo,
+  toNo,
+}: {
+  section: SectionDiff
+  arabic: boolean
+  fromNo: number
+  toNo: number
+}) {
+  const label = "px-3 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground"
   return (
     <section className="overflow-hidden rounded-lg border" dir={arabic ? "rtl" : undefined} lang={arabic ? "ar" : undefined}>
       <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-sm">
@@ -257,19 +293,60 @@ function ChangedSection({ section, arabic }: { section: SectionDiff; arabic: boo
         {section.status === "added" && <span className="text-xs text-green-700">· new section</span>}
         {section.status === "removed" && <span className="text-xs text-red-700">· removed</span>}
       </div>
-      <div className={cn("space-y-3 p-3", arabic ? "text-right" : "text-left")}>
+      <div className={cn("grid grid-cols-1 md:grid-cols-2", arabic ? "text-right" : "text-left")}>
+        <div dir="ltr" className={cn(label, "hidden border-b md:block", arabic ? "text-right" : "border-r")}>VERSION {fromNo}</div>
+        <div dir="ltr" className={cn(label, "hidden border-b md:block", arabic ? "border-r text-right" : "")}>VERSION {toNo}</div>
         {section.paragraphs.map((paragraph, index) => (
-          <ChangedParagraph key={index} paragraph={paragraph} />
+          <SidePair key={index} paragraph={paragraph} fromNo={fromNo} toNo={toNo} first={index === 0} arabic={arabic} />
         ))}
       </div>
     </section>
   )
 }
 
-/** A changed paragraph, shown as what it is: heading, bullet, text or table row. */
-function ChangedParagraph({ paragraph }: { paragraph: DiffParagraph }) {
-  if (paragraph.type === "row") return <ChangedRow paragraph={paragraph} />
-  const words = paragraph.parts.map((part, index) => <Words key={index} part={part} />)
+/** One changed paragraph's two cells: the older version, then the newer. */
+function SidePair({
+  paragraph,
+  fromNo,
+  toNo,
+  first,
+  arabic,
+}: {
+  paragraph: DiffParagraph
+  fromNo: number
+  toNo: number
+  first: boolean
+  arabic: boolean
+}) {
+  const cell = cn("min-w-0 px-3 py-2.5", !first && "border-t")
+  // The divider sits between the two columns: on the right of the first in
+  // English, on its left (the second's right) in Arabic.
+  return (
+    <>
+      <div className={cn(cell, arabic ? "" : "md:border-r")}>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo}</p>
+        <SideParagraph paragraph={paragraph} side="old" emptyText={`— not in Version ${fromNo}`} />
+      </div>
+      {/* Stacked (phone), it needs its own top line; side by side, only between rows. */}
+      <div className={cn("min-w-0 border-t px-3 py-2.5", first && "md:border-t-0", arabic ? "md:border-r" : "")}>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo}</p>
+        <SideParagraph paragraph={paragraph} side="new" emptyText={`— removed in Version ${toNo}`} />
+      </div>
+    </>
+  )
+}
+
+/** A paragraph as one version has it, shown as what it is: heading, bullet, text or table row. */
+function SideParagraph({ paragraph, side, emptyText }: { paragraph: DiffParagraph; side: Side; emptyText: string }) {
+  const empty = <p className="text-sm italic text-muted-foreground">{emptyText}</p>
+  if (paragraph.type === "row") {
+    const cells = paragraph.cells.map((parts) => sideParts(parts, side))
+    if (!cells.some(hasWords)) return empty
+    return <SideRow header={paragraph.header} cells={cells} title={paragraph.table_title ?? null} />
+  }
+  const parts = sideParts(paragraph.parts, side)
+  if (!hasWords(parts)) return empty
+  const words = parts.map((part, index) => <Words key={index} part={part} />)
   if (paragraph.type === "heading") {
     return <p className="text-sm font-bold leading-7">{words}</p>
   }
@@ -284,15 +361,25 @@ function ChangedParagraph({ paragraph }: { paragraph: DiffParagraph }) {
   return <p className="text-sm leading-7">{words}</p>
 }
 
-/** A changed table row, under its table's top row so the numbers have their labels. */
-function ChangedRow({ paragraph }: { paragraph: DiffParagraph }) {
+/** A table row as one version has it, under its table's top row so the numbers have their labels. */
+function SideRow({
+  header,
+  cells,
+  title,
+}: {
+  header: string[] | null
+  cells: DiffPart[][]
+  /** The table's name, from the subheading or "…:" line above it. */
+  title: string | null
+}) {
   return (
     <div className="overflow-x-auto">
+      {title && <p className="mb-1 text-xs font-semibold text-foreground">Table: {title}</p>}
       <table className="w-full border-collapse text-sm">
-        {paragraph.header && (
+        {header && (
           <thead>
             <tr>
-              {paragraph.header.map((cell, index) => (
+              {header.map((cell, index) => (
                 <th key={index} className="border bg-muted/40 px-2 py-1 text-start font-semibold">{cell}</th>
               ))}
             </tr>
@@ -300,7 +387,7 @@ function ChangedRow({ paragraph }: { paragraph: DiffParagraph }) {
         )}
         <tbody>
           <tr>
-            {paragraph.cells.map((parts, index) => (
+            {cells.map((parts, index) => (
               <td key={index} className="border px-2 py-1 align-top">
                 {parts.map((part, partIndex) => (
                   <Words key={partIndex} part={part} />

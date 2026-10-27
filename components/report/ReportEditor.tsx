@@ -53,6 +53,27 @@ function textsDiffer(a: Texts, b: Texts): boolean {
   return false
 }
 
+/** The id of a section's block in the editor, for the comments to jump to. */
+function editorSectionId(sectionCode: string): string {
+  return `edit-sec-${sectionCode}`
+}
+
+/**
+ * Scrolls the editor to a section, puts the cursor in its text, and briefly
+ * highlights it. Does nothing when the section isn't on the page.
+ */
+function jumpToEditorSection(sectionCode: string): void {
+  const block = document.getElementById(editorSectionId(sectionCode))
+  if (!block) return
+  block.scrollIntoView({ behavior: "smooth", block: "start" })
+  block.querySelector("textarea")?.focus({ preventScroll: true })
+  block.style.transition = "background-color 0.4s"
+  block.style.backgroundColor = "rgba(99, 102, 241, 0.10)"
+  window.setTimeout(() => {
+    block.style.backgroundColor = ""
+  }, 1600)
+}
+
 /** Enough rows to show the text without scrolling inside the box. */
 function rowsFor(text: string): number {
   let rows = 0
@@ -194,6 +215,7 @@ export function ReportEditor({
               aria-label={arabic ? "Arabic report, editable" : "Report, editable"}
             >
               <EditableSection
+                sectionCode="executive_summary"
                 arabic={arabic}
                 number="1"
                 title={summaryTitle}
@@ -207,6 +229,7 @@ export function ReportEditor({
                   section.type === "narrative" ? (
                     <EditableSection
                       key={section.section_code}
+                      sectionCode={section.section_code}
                       arabic={arabic}
                       number={section.number == null ? null : String(section.number)}
                       title={section.title}
@@ -214,7 +237,7 @@ export function ReportEditor({
                       onChange={(value) => setSection(section.section_code, value)}
                     />
                   ) : (
-                    <section key={section.section_code} className="space-y-2">
+                    <section key={section.section_code} id={editorSectionId(section.section_code)} className="scroll-mt-4 space-y-2 rounded-md">
                       <SectionHeading number={section.number == null ? null : String(section.number)} title={section.title} />
                       <div dir="ltr" className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/40 p-3 text-xs text-muted-foreground">
                         <FileText className="h-4 w-4 shrink-0" />
@@ -234,9 +257,26 @@ export function ReportEditor({
               <div className="space-y-2">
                 {note && <p className="whitespace-pre-wrap rounded-lg bg-[#F5F4FF] p-2 text-xs">{note}</p>}
                 {comments.map((comment) => (
-                  <p key={comment.id} className="whitespace-pre-wrap rounded-lg border border-[#ECEEF8] p-2 text-xs">
-                    {comment.body}
-                  </p>
+                  comment.section_code ? (
+                    // Jumps to that section's text, with the cursor in it.
+                    <button
+                      key={comment.id}
+                      type="button"
+                      onClick={() => jumpToEditorSection(comment.section_code as string)}
+                      title={`Go to ${comment.section_title ?? "this section"}`}
+                      className="block w-full rounded-lg border border-[#ECEEF8] p-2 text-left text-xs transition-colors hover:bg-indigo-50/50"
+                    >
+                      <p className="mb-0.5 text-[10.5px] font-semibold text-indigo-600" dir="auto">
+                        {comment.section_title}
+                      </p>
+                      <p className="whitespace-pre-wrap">{comment.body}</p>
+                    </button>
+                  ) : (
+                    <div key={comment.id} className="rounded-lg border border-[#ECEEF8] p-2 text-xs">
+                      <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">Whole report</p>
+                      <p className="whitespace-pre-wrap">{comment.body}</p>
+                    </div>
+                  )
                 ))}
               </div>
             </div>
@@ -303,12 +343,14 @@ function SectionHeading({ number, title }: { number: string | null; title: strin
 }
 
 function EditableSection({
+  sectionCode,
   arabic,
   number,
   title,
   value,
   onChange,
 }: {
+  sectionCode: string
   arabic: boolean
   number: string | null
   title: string
@@ -316,7 +358,7 @@ function EditableSection({
   onChange: (value: string) => void
 }) {
   return (
-    <section className="space-y-2">
+    <section id={editorSectionId(sectionCode)} className="scroll-mt-4 space-y-2 rounded-md">
       <SectionHeading number={number} title={title} />
       <textarea
         dir={arabic ? "rtl" : "ltr"}

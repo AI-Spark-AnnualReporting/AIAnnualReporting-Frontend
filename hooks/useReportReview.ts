@@ -82,9 +82,9 @@ export function useCompareVersions(
   })
 }
 
-export function useDownloadVersionPdf(cycleId: string, arabic = false) {
+export function useDownloadVersionWord(cycleId: string, arabic = false) {
   return useMutation({
-    mutationFn: (versionNo: number) => reportReviewApi.downloadPdf(cycleId, versionNo, arabic),
-    onError: (err: MutationError) => toast.error(err?.message || "Couldn't make the PDF."),
+    mutationFn: (versionNo: number) => reportReviewApi.downloadWord(cycleId, versionNo, arabic),
+    onError: (err: MutationError) => toast.error(err?.message || "Couldn't make the Word file."),
   })
 }

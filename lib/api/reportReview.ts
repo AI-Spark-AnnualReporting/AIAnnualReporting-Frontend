@@ -27,6 +27,9 @@ export type ReportShareStatus =
 export interface ClientComment {
   id: string
   body: string
+  /** The section it's about, and its title as the client saw it; null for the whole report. */
+  section_code?: string | null
+  section_title?: string | null
   is_draft: boolean
   created_at?: string | null
 }
@@ -96,6 +99,8 @@ export interface DiffParagraph {
   parts: DiffPart[]
   cells: DiffPart[][]
   header: string[] | null
+  /** A row's table name: the subheading or "…:" line above the table; null when there is none. */
+  table_title?: string | null
 }
 
 export interface DiffPart {
@@ -223,16 +228,17 @@ export const reportReviewApi = {
   },
 
   /** Downloads one kept version as a PDF. */
-  downloadPdf: async (cycleId: string, versionNo: number, arabic = false): Promise<void> => {
+  /** One kept version as the designed Word file (internal users). */
+  downloadWord: async (cycleId: string, versionNo: number, arabic = false): Promise<void> => {
     try {
       const response = await apiClient.get(
-        `/pm/cycles/${cycleId}/report-review/versions/${versionNo}/pdf`,
-        { responseType: "blob", timeout: 120000, params: reportParams(arabic) },
+        `/pm/cycles/${cycleId}/report-review/versions/${versionNo}/docx`,
+        { responseType: "blob", timeout: 180000, params: reportParams(arabic) },
       )
-      const name = fileNameFrom(response.headers?.["content-disposition"], `Report_v${versionNo}.pdf`)
+      const name = fileNameFrom(response.headers?.["content-disposition"], `Report_v${versionNo}.docx`)
       saveFile(response.data as Blob, name)
     } catch (err) {
-      throw new Error(await blobErrorMessage(err, "Couldn't make the PDF."))
+      throw new Error(await blobErrorMessage(err, "Couldn't make the Word file."))
     }
   },
 }
@@ -246,10 +252,11 @@ export const clientReportReviewApi = {
     return data
   },
 
-  addComment: async (token: string, body: string): Promise<ClientComment[]> => {
+  /** A comment on one section, or on the whole report when sectionCode is null. */
+  addComment: async (token: string, body: string, sectionCode: string | null = null): Promise<ClientComment[]> => {
     const { data } = await publicClient.post<{ comments: ClientComment[] }>(
       `/report-review/${encodeURIComponent(token)}/comments`,
-      { body },
+      { body, section_code: sectionCode },
     )
     return data.comments
   },

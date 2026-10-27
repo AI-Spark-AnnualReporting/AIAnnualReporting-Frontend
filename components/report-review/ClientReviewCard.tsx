@@ -6,6 +6,7 @@ import { BTN_PRIMARY, BTN_SECONDARY, CARD, RAIL_LABEL } from "@/components/commu
 import { formatDateTime } from "@/lib/utils"
 import type { ReportReviewState, ReportShare, VersionSummary } from "@/lib/api/reportReview"
 import { useResendReportLink } from "@/hooks/useReportReview"
+import { jumpToReportSection } from "@/components/report/FinalReportView"
 import { ShareWithClientDialog } from "./ShareWithClientDialog"
 import { VersionHistory } from "./VersionHistory"
 
@@ -141,14 +142,32 @@ export function ClientReviewCard({
               Comments ({comments.length})
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {comments.map((comment) => (
-                <div
-                  key={comment.id}
-                  style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ECEEF8", fontSize: 12, color: INK, whiteSpace: "pre-wrap" }}
-                >
-                  {comment.body}
-                </div>
-              ))}
+              {comments.map((comment) => {
+                const code = comment.section_code
+                const box = { padding: "8px 10px", borderRadius: 10, border: "1px solid #ECEEF8", fontSize: 12, color: INK, whiteSpace: "pre-wrap" as const }
+                const label = (
+                  <div dir="auto" style={{ fontSize: 10.5, fontWeight: 700, color: code ? "#4F46E5" : SOFT, marginBottom: 2 }}>
+                    {comment.section_title ?? "Whole report"}
+                  </div>
+                )
+                // A comment on a section jumps the report to it; one on the
+                // whole report has nowhere to go.
+                if (!code) {
+                  return <div key={comment.id} style={box}>{label}{comment.body}</div>
+                }
+                return (
+                  <button
+                    key={comment.id}
+                    type="button"
+                    onClick={() => jumpToReportSection(code)}
+                    title={`Go to ${comment.section_title ?? "this section"}`}
+                    style={{ ...box, textAlign: "left", background: "transparent", cursor: "pointer", width: "100%" }}
+                  >
+                    {label}
+                    {comment.body}
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}

@@ -102,7 +102,8 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const planLocked = !!plan?.sections_locked
   // Pre-build draft checks. Read-only here — running the check is an explicit
   // click inside the panel, so opening this page never costs a model call.
-  const { data: draftFindings } = useDraftFindings(id)
+  const draftFindingsQuery = useDraftFindings(id)
+  const draftFindings = draftFindingsQuery.data
   // Analysing here rather than on the findings page so the PM starts it from
   // the card and lands on the findings once it returns.
   const checkDrafts = useCheckDrafts(id)
@@ -930,6 +931,24 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             // were not resolved. Open Report Builder keeps the full can_build
             // gate, on the findings page.
             if (total > 0 && approved === total) {
+              // Not known yet, or the read failed: say so. Guessing "never
+              // analysed" offered Analyze on cycles analysed and locked long
+              // ago, e.g. right after a restart before the backend answered.
+              if (draftFindingsQuery.isPending) {
+                return (
+                  <Button disabled>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Checking…
+                  </Button>
+                )
+              }
+              if (draftFindingsQuery.isError) {
+                return (
+                  <Button variant="outline" onClick={() => draftFindingsQuery.refetch()}>
+                    Couldn&apos;t check the drafts. Retry
+                  </Button>
+                )
+              }
               // The route to the builder runs through the findings page, so the
               // PM cannot assemble a report without first seeing what the
               // analysis found. Open Report Builder lives there, not here.

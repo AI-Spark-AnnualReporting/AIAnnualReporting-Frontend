@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useEffect, useRef, useState } from "react"
+import { use, useEffect, useState } from "react"
 import { toast } from "sonner"
 import {
   AlertTriangle,
@@ -11,7 +11,6 @@ import {
   MessageSquare,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { PageLoader } from "@/components/ui/spinner"
 import {
   Dialog,
@@ -21,6 +20,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
+import {
+  CommentsRail,
+  SectionComments,
+  useClientComments,
+} from "@/components/report-review/ClientComments"
 import { ArabicEdition } from "@/components/report/ArabicTranslation"
 import {
   CentriyonFooter,
@@ -30,7 +34,6 @@ import {
 } from "@/components/share/ClientShareBanner"
 import {
   clientReportReviewApi,
-  type ClientComment,
   type ClientReviewView,
 } from "@/lib/api/reportReview"
 
@@ -41,8 +44,9 @@ import {
    drawn exactly as the PM's report page draws it (FinalReportView): the
    designed cover, a contents list, then the sections in the report's design.
 
-   One comment box, saved as they go; then Approve or Request changes. That
-   choice is final, so it is asked once more before it is sent.
+   Comments like the Communication Hub reviewer screen: "Add comment" under
+   each section, all of them listed in the rail. Then Approve or Request
+   changes. That choice is final, so it is asked once more before it is sent.
 ──────────────────────────────────────────────────────────────────────────── */
 
 type LoadState = "loading" | "ready" | "dead" | "closed" | "stumbled"
@@ -181,7 +185,8 @@ function ReviewScreen({
   onView: (view: ClientReviewView) => void
 }) {
   const open = view.status === "pending"
-  const comments = useCommentBox(token, view.comments)
+  const comments = useClientComments(token, view.comments)
+  const hasComments = comments.comments.length > 0
   const [decision, setDecision] = useState<Decision | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -195,9 +200,6 @@ function ReviewScreen({
     if (!decision) return
     setSubmitting(true)
     try {
-      // Whatever is in the box goes with the answer, so save it first.
-      const saved = await comments.save()
-      if (!saved) return
       const next = await clientReportReviewApi.submit(token, { decision })
       onView(next)
       setDecision(null)
@@ -231,6 +233,9 @@ function ReviewScreen({
       // The translated Arabic keeps Western digits, as on the PM's Arabic page.
       westernDigits={view.is_arabic}
       showContents
+      sectionFooter={(code, title) => (
+        <SectionComments sectionCode={code} title={title} open={open} api={comments} />
+      )}
     />
   )
 
@@ -270,39 +275,22 @@ function ReviewScreen({
                 </p>
                 <div className="space-y-1.5">
                   {view.previous_comments.map((comment) => (
-                    <p key={comment.id} className="whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-xs">
-                      {comment.body}
-                    </p>
+                    <div key={comment.id} className="rounded-md bg-muted/50 p-2 text-xs">
+                      <p className="text-[11px] font-semibold text-muted-foreground" dir="auto">
+                        {comment.section_title ?? "Whole report"}
+                      </p>
+                      <p className="whitespace-pre-wrap" dir="auto">{comment.body}</p>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
 
             <div className="space-y-3 rounded-2xl border bg-card p-4 shadow-sm">
-              <p className="text-sm font-semibold">Your comments</p>
-              {open ? (
-                <>
-                  <Textarea
-                    value={comments.text}
-                    onChange={(e) => comments.setText(e.target.value)}
-                    onBlur={() => void comments.save()}
-                    rows={8}
-                    maxLength={5000}
-                    placeholder="Anything to change? Say which section and what should change."
-                  />
-                  <p className="h-4 text-xs text-muted-foreground">
-                    {comments.saving ? "Saving…" : comments.dirty ? "" : comments.text.trim() ? "Saved" : ""}
-                  </p>
-                </>
-              ) : (
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-                  {comments.text.trim() || "You left no comments."}
-                </p>
-              )}
-
+              <CommentsRail open={open} api={comments} />
               {open && (
                 <div className="space-y-2 border-t pt-3">
-                  <Button className="w-full" onClick={() => setDecision("approve")}>
+                  <Button variant="brand" className="w-full" onClick={() => setDecision("approve")}>
                     <CheckCircle2 className="mr-1.5 h-4 w-4" />
                     Approve the report
                   </Button>
@@ -340,16 +328,44 @@ function ReviewScreen({
                 : "Your comments go to the team, and they'll send you a new version."}
             </DialogDescription>
           </DialogHeader>
-          {decision === "request_changes" && !comments.text.trim() && (
-            <p className="text-xs text-amber-700">Write in the comment box what should change first.</p>
+          {/* Approving accepts the report as it is: the server discards the
+              comments, so say so before they click. */}
+          {decision === "approve" && hasComments && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm text-amber-900">
+              You have {comments.comments.length} comment{comments.comments.length === 1 ? "" : "s"}.
+              Approving discards {comments.comments.length === 1 ? "it" : "them"}: the report is accepted as it is.
+              To send {comments.comments.length === 1 ? "it" : "them"} to the team, choose Request changes instead.
+            </p>
+          )}
+          {decision === "request_changes" && !hasComments && (
+            <p className="text-xs text-amber-700">Add a comment saying what should change first.</p>
+          )}
+          {/* What goes to the team, so the client sees exactly what they send. */}
+          {decision === "request_changes" && hasComments && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-muted-foreground">
+                Your comments ({comments.comments.length})
+              </p>
+              <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                {comments.comments.map((comment) => (
+                  <div key={comment.id} className="rounded-md border bg-muted/40 p-2 text-sm">
+                    <p className="text-[11px] font-semibold text-indigo-700" dir="auto">
+                      {comment.section_title ?? "Whole report"}
+                    </p>
+                    <p className="whitespace-pre-wrap break-words" dir="auto">{comment.body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setDecision(null)} disabled={submitting}>
               Cancel
             </Button>
             <Button
+              variant="brand"
               onClick={submit}
-              disabled={submitting || (decision === "request_changes" && !comments.text.trim())}
+              disabled={submitting || (decision === "request_changes" && !hasComments)}
             >
               {submitting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
               {decision === "approve" ? "Approve" : "Send"}
@@ -361,48 +377,3 @@ function ReviewScreen({
   )
 }
 
-/**
- * The one comment box. It is kept as a single comment on the server, saved
- * when the client clicks away from the box, and before they send their answer.
- */
-function useCommentBox(token: string, initial: ClientComment[]) {
-  const first = initial[0]
-  const [text, setText] = useState(first?.body ?? "")
-  const [saving, setSaving] = useState(false)
-  // What the server has, so an unchanged box isn't saved again.
-  const [savedText, setSavedText] = useState(first?.body ?? "")
-  const commentId = useRef<string | null>(first?.id ?? null)
-
-  /** Saves the box. Returns false if the save failed (the error is shown). */
-  const save = async (): Promise<boolean> => {
-    const body = text.trim()
-    if (body === savedText.trim()) return true
-    setSaving(true)
-    try {
-      if (!commentId.current) {
-        const list = await clientReportReviewApi.addComment(token, body)
-        commentId.current = list[list.length - 1]?.id ?? null
-      } else if (body) {
-        await clientReportReviewApi.editComment(token, commentId.current, body)
-      } else {
-        await clientReportReviewApi.deleteComment(token, commentId.current)
-        commentId.current = null
-      }
-      setSavedText(body)
-      return true
-    } catch (err) {
-      toast.error(errorDetail(err, "Couldn't save your comments. Please try again."))
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return {
-    text,
-    setText,
-    save,
-    saving,
-    dirty: text.trim() !== savedText.trim(),
-  }
-}
