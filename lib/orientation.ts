@@ -58,6 +58,8 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_people",
   "landscape_borderless_table",
   "landscape_grid_table",
+  "landscape_striped_table",
+  "landscape_zebra_table",
 ] as const
 
 /** The default landscape section-page template — the first in the list. */
@@ -103,6 +105,8 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_people: "Landscape — people",
   landscape_borderless_table: "Landscape — borderless table",
   landscape_grid_table: "Landscape — grid table",
+  landscape_striped_table: "Landscape — striped table",
+  landscape_zebra_table: "Landscape — zebra table",
 }
 
 /**
@@ -125,6 +129,8 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_people: "People",
   landscape_borderless_table: "Borderless table",
   landscape_grid_table: "Grid table",
+  landscape_striped_table: "Striped table",
+  landscape_zebra_table: "Zebra table",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */
@@ -343,13 +349,15 @@ export function isLandscapeTemplateKey(key: string | null | undefined): boolean 
 /**
  * Landscape templates that print EXACTLY what a portrait one does — the same
  * filling code in the engine, only the paper differs — so their card can show
- * the portrait card's counts. Borderless table and Grid table leave the text,
+ * the portrait card's counts. Borderless, Grid, Striped and Zebra table leave the text,
  * figures and quotes out, and without these counts their landscape cards
  * would never show the red "Content missing" line.
  */
 const LANDSCAPE_COUNTS_FROM: Record<string, string> = {
   landscape_borderless_table: "borderless_table",
   landscape_grid_table: "grid_table",
+  landscape_striped_table: "striped_table",
+  landscape_zebra_table: "zebra_table",
 }
 
 /**

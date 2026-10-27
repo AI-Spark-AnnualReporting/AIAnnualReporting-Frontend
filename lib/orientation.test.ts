@@ -64,7 +64,11 @@ const PORTRAIT_PAGE_KEYS = [
   "people_grid",
   "borderless_table",
   "grid_table",
+  "striped_table",
+  "zebra_table",
 ]
+// Eighteen portrait section cards, the same count /reports/page-options returns.
+assert.equal(PORTRAIT_PAGE_KEYS.length, 18)
 const PORTRAIT_COVER_KEYS = ["statement", "band", "panel", "monolith"]
 const PORTRAIT_TOC_KEYS = ["classic", "columns", "spread", "index", "brand_band"]
 const PORTRAIT_DIVIDER_KEYS = ["rule", "banded", "full", "figure", "numeral", "split"]
@@ -116,15 +120,16 @@ assert.deepEqual(pageSize("landscape"), { width: 841.89, height: 595.28 })
 assert.ok(pageSize("portrait").height > pageSize("portrait").width)
 assert.ok(pageSize("landscape").width > pageSize("landscape").height)
 
-// The fifteen landscape section templates, the default first. Copied from the
+// The seventeen landscape section templates, the default first. Copied from the
 // engine's page_templates.LANDSCAPE_KEYS.
 assert.deepEqual([...LANDSCAPE_TEMPLATE_KEYS], [
   "landscape_columns", "landscape_rail", "landscape_hero",
   "landscape_picture", "landscape_statement", "landscape_schedule", "landscape_essay",
   "landscape_tiles", "landscape_tables", "landscape_editorial", "landscape_portrait",
   "landscape_photo_panel", "landscape_people", "landscape_borderless_table",
-  "landscape_grid_table",
+  "landscape_grid_table", "landscape_striped_table", "landscape_zebra_table",
 ])
+assert.equal(LANDSCAPE_TEMPLATE_KEYS.length, 17)
 assert.equal(LANDSCAPE_TEMPLATE_KEYS[0], LANDSCAPE_TEMPLATE_KEY)
 
 // The landscape covers and contents pages, the default first. Copied from the
@@ -170,7 +175,7 @@ assert.equal(portraitOpenerChoice(landscapeOpenerOnly), null)
 
 // landscapeOptions: one card per landscape template, nothing recommended.
 const options = landscapeOptions()
-assert.equal(options.length, 15)
+assert.equal(options.length, 17)
 assert.deepEqual(options.map((option) => option.key), [...LANDSCAPE_TEMPLATE_KEYS])
 for (const option of options) {
   assert.deepEqual(option, {
@@ -185,7 +190,7 @@ for (const option of options) {
 assert.notEqual(landscapeOptions(), landscapeOptions())
 assert.notEqual(landscapeOptions()[0], landscapeOptions()[0])
 
-// The landscape Borderless table and Grid table print exactly what their
+// The landscape Borderless, Grid, Striped and Zebra tables print exactly what their
 // portrait ones do, so their cards copy the portrait cards' counts and losses
 // (the red "Content missing" line); every other landscape card stays without
 // counts.
@@ -194,6 +199,10 @@ const portraitCards = [
     counts: { table: 2 }, dropped: { narrative_blocks: 3, pull_quotes: 1 } },
   { key: "grid_table", recommended: false, reason: null,
     counts: { table: 3 }, dropped: { narrative_blocks: 1, numeric_data: 2 } },
+  { key: "striped_table", recommended: false, reason: null,
+    counts: { table: 1 }, dropped: { pull_quotes: 2 } },
+  { key: "zebra_table", recommended: false, reason: null,
+    counts: { table: 4 }, dropped: { narrative_blocks: 2 } },
   { key: "landscape_tables", recommended: false, reason: null,
     counts: { table: 2 }, dropped: {} },
 ]
@@ -206,14 +215,24 @@ const grid = borrowed.find((option) => option.key === "landscape_grid_table")!
 assert.deepEqual(grid.counts, { table: 3 }, "its own portrait card's counts, not Borderless's")
 assert.deepEqual(grid.dropped, { narrative_blocks: 1, numeric_data: 2 })
 assert.notEqual(grid.dropped, portraitCards[1].dropped, "a copy, not the same object")
+const striped = borrowed.find((option) => option.key === "landscape_striped_table")!
+assert.deepEqual(striped.counts, { table: 1 }, "its own portrait card's counts")
+assert.deepEqual(striped.dropped, { pull_quotes: 2 })
+assert.notEqual(striped.dropped, portraitCards[2].dropped, "a copy, not the same object")
+const zebra = borrowed.find((option) => option.key === "landscape_zebra_table")!
+assert.deepEqual(zebra.counts, { table: 4 }, "its own portrait card's counts, not Striped's")
+assert.deepEqual(zebra.dropped, { narrative_blocks: 2 })
+assert.notEqual(zebra.dropped, portraitCards[3].dropped, "a copy, not the same object")
 for (const option of borrowed) {
   if (option.key === "landscape_borderless_table") continue
   if (option.key === "landscape_grid_table") continue
+  if (option.key === "landscape_striped_table") continue
+  if (option.key === "landscape_zebra_table") continue
   assert.deepEqual(option.counts, {}, option.key)
   assert.deepEqual(option.dropped, {}, option.key)
 }
 
-// isLandscapeTemplateKey: the fifteen, and nothing else.
+// isLandscapeTemplateKey: the seventeen, and nothing else.
 for (const key of LANDSCAPE_TEMPLATE_KEYS) assert.ok(isLandscapeTemplateKey(key))
 for (const key of PORTRAIT_PAGE_KEYS) assert.ok(!isLandscapeTemplateKey(key))
 assert.ok(!isLandscapeTemplateKey(null))

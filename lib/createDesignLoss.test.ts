@@ -61,6 +61,10 @@ assert.equal(tablesOnlyUncounted("grid_table", undefined), true)
 assert.equal(tablesOnlyUncounted("landscape_grid_table", { counts: {}, dropped: {} }), true)
 assert.equal(tablesOnlyUncounted("borderless_table", null), true)
 assert.equal(tablesOnlyUncounted("landscape_borderless_table", { counts: {}, dropped: {} }), true)
+assert.equal(tablesOnlyUncounted("striped_table", undefined), true)
+assert.equal(tablesOnlyUncounted("landscape_striped_table", { counts: {}, dropped: {} }), true)
+assert.equal(tablesOnlyUncounted("zebra_table", undefined), true)
+assert.equal(tablesOnlyUncounted("landscape_zebra_table", { counts: {}, dropped: {} }), true)
 assert.equal(tablesOnlyUncounted("grid_table", { counts: { table: 2 }, dropped: {} }), false,
   "counted: the real placement shows")
 assert.equal(tablesOnlyUncounted("grid_table", { counts: {}, dropped: { narrative_blocks: 3 } }), false,

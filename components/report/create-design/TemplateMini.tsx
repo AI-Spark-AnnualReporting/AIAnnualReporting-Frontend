@@ -1299,6 +1299,308 @@ function LandscapeGridTableMini({ accent, presentation }: { accent: string; pres
   )
 }
 
+/** The striped table page draws its heading and its totals in dark ink, and
+ *  no lines anywhere (Centriton page.css .st-page). */
+const ST_INK = "#3A3F4B"
+
+/** The kinds of row a striped table mini draws. A gap is the small white
+ *  space between two blocks of a statement. */
+type StripedRowKind = "item" | "group" | "total" | "gap"
+
+/**
+ * A light tint of the brand colour, mixed with white.
+ *
+ * color-mix rather than parsing the hex, so any CSS colour the brand gives
+ * (a name, rgb(), a short hex) still tints.
+ *
+ * @param accent  the brand colour
+ * @param percent how much of the brand goes into the mix, 0 to 100
+ * @returns a CSS colour string
+ */
+function brandTint(accent: string, percent: number): string {
+  return `color-mix(in srgb, ${accent} ${percent}%, #FFFFFF)`
+}
+
+/**
+ * Which body rows of a striped table mini sit on the tint.
+ *
+ * The stripe starts white under the header bar and restarts white under a
+ * group label, a total and a gap, the same rule the engine follows, so every
+ * block starts the same way.
+ *
+ * @param kinds the rows the mini draws, top to bottom
+ * @returns one true/false per row: true for a tinted item row
+ */
+function stripedRowTints(kinds: StripedRowKind[]): boolean[] {
+  const tints: boolean[] = []
+  let itemsSinceRestart = 0
+  for (const kind of kinds) {
+    if (kind === "item") {
+      tints.push(itemsSinceRestart % 2 === 1)
+      itemsSinceRestart += 1
+    } else {
+      tints.push(false)
+      itemsSinceRestart = 0
+    }
+  }
+  return tints
+}
+
+/**
+ * One body row of a striped table mini, with no lines: an item is a grey
+ * label and right-aligned figures on white or the light tint; a group is a
+ * bold brand label alone on white; a total is dark on a stronger tint; a gap
+ * is a small white space.
+ */
+function stripedRow(kind: StripedRowKind, tinted: boolean, accent: string, figureColumns: number, key: number) {
+  if (kind === "gap") {
+    return <div key={key} style={{ gridColumn: "1 / -1", height: 3 }} />
+  }
+  if (kind === "group") {
+    return (
+      <div key={key} style={{ gridColumn: "1 / -1", display: "flex", padding: "3px 2px 1.5px" }}>
+        <div style={line("44%", accent, 2)} />
+      </div>
+    )
+  }
+  const total = kind === "total"
+  let background = "#FFFFFF"
+  if (total) background = brandTint(accent, 28)
+  else if (tinted) background = brandTint(accent, 14)
+  const cell: React.CSSProperties = { display: "flex", alignItems: "center", padding: "2.5px 2px", background }
+  const figures = []
+  for (let index = 0; index < figureColumns; index += 1) {
+    figures.push(
+      <div key={index} style={{ ...cell, justifyContent: "flex-end" }}>
+        <div style={line("58%", total || index === 0 ? ST_INK : "#A9AEBA", total ? 2 : 1.5)} />
+      </div>,
+    )
+  }
+  return (
+    <div key={key} style={{ display: "contents" }}>
+      <div style={cell}>
+        <div style={line(total ? "52%" : "70%", total ? ST_INK : "#BCC0CB", total ? 2 : 1.5)} />
+      </div>
+      {figures}
+    </div>
+  )
+}
+
+/**
+ * One striped table for the minis: an optional title in the brand colour,
+ * the solid brand header bar with the year heads right-aligned in white (the
+ * current year bolder), then the striped rows. No lines anywhere.
+ */
+function stripedTable(accent: string, kinds: StripedRowKind[], titled: boolean, figureColumns: number) {
+  const figureWidth = figureColumns > 2 ? "13%" : "17%"
+  const columns = ["1fr"]
+  for (let index = 0; index < figureColumns; index += 1) columns.push(figureWidth)
+  const heads = []
+  for (let index = 0; index < figureColumns; index += 1) {
+    heads.push(
+      <div
+        key={index}
+        style={{ background: accent, display: "flex", justifyContent: "flex-end", padding: "3px 2px" }}
+      >
+        <div style={line("50%", index === 0 ? "#FFFFFF" : "rgba(255,255,255,0.7)", index === 0 ? 2 : 1.5)} />
+      </div>,
+    )
+  }
+  const tints = stripedRowTints(kinds)
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2.5, flexShrink: 0 }}>
+      {titled && <div style={line("50%", accent, 2.5)} />}
+      <div style={{ display: "grid", gridTemplateColumns: columns.join(" ") }}>
+        <div style={{ background: accent }} />
+        {heads}
+        {kinds.map((kind, index) => stripedRow(kind, tints[index], accent, figureColumns, index))}
+      </div>
+    </div>
+  )
+}
+
+/** The rows of the statement the striped minis draw: two groups, each
+ *  striped from white and closed by a total, then a short closing block. */
+const STRIPED_STATEMENT: StripedRowKind[] = [
+  "group", "item", "item", "item", "item", "item", "total",
+  "group", "item", "item", "item", "item", "total",
+  "gap", "item", "item", "total",
+]
+const STRIPED_LIST: StripedRowKind[] = ["item", "item", "item", "item", "item"]
+// The portrait card is taller than the landscape ones, so its second table
+// runs longer to fill the card down to its foot, like the other table minis.
+const STRIPED_LIST_LONG: StripedRowKind[] = ["item", "item", "item", "item", "item", "item", "item"]
+// The 16:9 sheet is shorter than A4 landscape, so its statement drops the
+// closing block or the last rows run off the card's foot.
+const STRIPED_STATEMENT_SHORT: StripedRowKind[] = STRIPED_STATEMENT.slice(0, 13)
+
+/**
+ * The striped table page: a small bold heading, then the tables at the full
+ * width, nothing else — no text, no figure boxes, no quotes.
+ */
+function StripedTableMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 5 }}>
+      <div style={{ ...line("46%", ST_INK, 3), marginBottom: 1 }} />
+      {stripedTable(accent, STRIPED_STATEMENT, false, 2)}
+      {stripedTable(accent, STRIPED_LIST_LONG, true, 2)}
+    </div>
+  )
+}
+
+/**
+ * The same page on the landscape sheet: the tables run the full width, one
+ * under another, with more year columns because the sheet is wide.
+ */
+function LandscapeStripedTableMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  const statement = presentation ? STRIPED_STATEMENT_SHORT : STRIPED_STATEMENT
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
+      <div style={{ ...line("34%", ST_INK, 3), marginBottom: 1 }} />
+      {stripedTable(accent, statement, false, 4)}
+      {stripedTable(accent, STRIPED_LIST, true, 4)}
+    </div>
+  )
+}
+
+/** The kinds of row a zebra table mini draws. An important row is a total
+ *  or a group heading. There is no gap kind: the zebra page does not draw
+ *  empty rows (Centriton page.css .zt-page). */
+type ZebraRowKind = "item" | "important"
+
+/**
+ * Which body rows of a zebra table mini sit on the light tint.
+ *
+ * Unlike the striped table, the count never restarts inside a table: it runs
+ * down the whole table and skips the important rows, so the normal rows
+ * always alternate white, tint, white... the same rule the engine follows.
+ *
+ * @param kinds the rows the mini draws, top to bottom
+ * @returns one true/false per row: true for a tinted normal row
+ */
+function zebraRowTints(kinds: ZebraRowKind[]): boolean[] {
+  const tints: boolean[] = []
+  let itemCount = 0
+  for (const kind of kinds) {
+    if (kind === "item") {
+      tints.push(itemCount % 2 === 1)
+      itemCount += 1
+    } else {
+      tints.push(false)
+    }
+  }
+  return tints
+}
+
+/**
+ * One body row of a zebra table mini, with no lines: a normal row is a grey
+ * label and right-aligned figures on white or the light tint; an important
+ * row is dark and bold on a clearly darker tint.
+ */
+function zebraRow(kind: ZebraRowKind, tinted: boolean, accent: string, figureColumns: number, key: number) {
+  const important = kind === "important"
+  let background = "#FFFFFF"
+  if (important) background = brandTint(accent, 34)
+  else if (tinted) background = brandTint(accent, 13)
+  const cell: React.CSSProperties = { display: "flex", alignItems: "center", padding: "2.5px 2px", background }
+  const figures = []
+  for (let index = 0; index < figureColumns; index += 1) {
+    figures.push(
+      <div key={index} style={{ ...cell, justifyContent: "flex-end" }}>
+        <div style={line("58%", important || index === 0 ? ST_INK : "#A9AEBA", important ? 2.2 : 1.5)} />
+      </div>,
+    )
+  }
+  return (
+    <div key={key} style={{ display: "contents" }}>
+      <div style={cell}>
+        <div style={line(important ? "52%" : "70%", important ? ST_INK : "#BCC0CB", important ? 2.2 : 1.5)} />
+      </div>
+      {figures}
+    </div>
+  )
+}
+
+/**
+ * One zebra table for the minis: an optional title in the brand colour, the
+ * same solid brand header bar as the striped table, then the zebra rows. No
+ * lines anywhere.
+ */
+function zebraTable(accent: string, kinds: ZebraRowKind[], titled: boolean, figureColumns: number) {
+  const figureWidth = figureColumns > 2 ? "13%" : "17%"
+  const columns = ["1fr"]
+  for (let index = 0; index < figureColumns; index += 1) columns.push(figureWidth)
+  const heads = []
+  for (let index = 0; index < figureColumns; index += 1) {
+    heads.push(
+      <div
+        key={index}
+        style={{ background: accent, display: "flex", justifyContent: "flex-end", padding: "3px 2px" }}
+      >
+        <div style={line("50%", index === 0 ? "#FFFFFF" : "rgba(255,255,255,0.7)", index === 0 ? 2 : 1.5)} />
+      </div>,
+    )
+  }
+  const tints = zebraRowTints(kinds)
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2.5, flexShrink: 0 }}>
+      {titled && <div style={line("50%", accent, 2.5)} />}
+      <div style={{ display: "grid", gridTemplateColumns: columns.join(" ") }}>
+        <div style={{ background: accent }} />
+        {heads}
+        {kinds.map((kind, index) => zebraRow(kind, tints[index], accent, figureColumns, index))}
+      </div>
+    </div>
+  )
+}
+
+/** The rows of the statement the zebra minis draw: the normal rows stripe
+ *  straight through, broken only by the darker important rows. */
+const ZEBRA_STATEMENT: ZebraRowKind[] = [
+  "important", "item", "item", "item", "item", "item", "important",
+  "item", "item", "item", "item", "item", "important",
+  "item", "item", "item", "important",
+]
+const ZEBRA_LIST: ZebraRowKind[] = ["item", "item", "item", "item", "item"]
+// The portrait card is taller than the landscape ones, so its second table
+// runs longer to fill the card down to its foot, like the other table minis.
+const ZEBRA_LIST_LONG: ZebraRowKind[] = ["item", "item", "item", "item", "item", "item"]
+// The 16:9 sheet is shorter than A4 landscape, so its statement drops the
+// closing block or the last rows run off the card's foot.
+const ZEBRA_STATEMENT_SHORT: ZebraRowKind[] = ZEBRA_STATEMENT.slice(0, 13)
+// Its second table is shorter too, so the last row ends above the foot.
+const ZEBRA_LIST_SHORT: ZebraRowKind[] = ["item", "item", "item"]
+
+/**
+ * The zebra table page: a small bold heading, then the tables at the full
+ * width, nothing else — no text, no figure boxes, no quotes.
+ */
+function ZebraTableMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 5 }}>
+      <div style={{ ...line("46%", ST_INK, 3), marginBottom: 1 }} />
+      {zebraTable(accent, ZEBRA_STATEMENT, false, 2)}
+      {zebraTable(accent, ZEBRA_LIST_LONG, true, 2)}
+    </div>
+  )
+}
+
+/**
+ * The same page on the landscape sheet: the tables run the full width, one
+ * under another, with more year columns because the sheet is wide.
+ */
+function LandscapeZebraTableMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  const statement = presentation ? ZEBRA_STATEMENT_SHORT : ZEBRA_STATEMENT
+  const list = presentation ? ZEBRA_LIST_SHORT : ZEBRA_LIST
+  return (
+    <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
+      <div style={{ ...line("34%", ST_INK, 3), marginBottom: 1 }} />
+      {zebraTable(accent, statement, false, 4)}
+      {zebraTable(accent, list, true, 4)}
+    </div>
+  )
+}
+
 function TemplateMiniInner({
   templateKey,
   accent = "#3C0866",
@@ -1361,6 +1663,12 @@ function TemplateMiniInner({
   if (templateKey === "landscape_grid_table") {
     return <LandscapeGridTableMini accent={accent} presentation={presentation} />
   }
+  if (templateKey === "landscape_striped_table") {
+    return <LandscapeStripedTableMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_zebra_table") {
+    return <LandscapeZebraTableMini accent={accent} presentation={presentation} />
+  }
   if (templateKey === "photo_panel") {
     return <PhotoPanelMini accent={accent} />
   }
@@ -1379,6 +1687,12 @@ function TemplateMiniInner({
   }
   if (templateKey === "grid_table") {
     return <GridTableMini accent={accent} />
+  }
+  if (templateKey === "striped_table") {
+    return <StripedTableMini accent={accent} />
+  }
+  if (templateKey === "zebra_table") {
+    return <ZebraTableMini accent={accent} />
   }
 
   if (templateKey === "kpi_stat_grid") {
@@ -1718,6 +2032,8 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   people_grid: "People",
   borderless_table: "Borderless table",
   grid_table: "Grid table",
+  striped_table: "Striped table",
+  zebra_table: "Zebra table",
   custom: "Custom",
   ...LANDSCAPE_TEMPLATE_NAMES,
 }

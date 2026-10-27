@@ -90,6 +90,8 @@ const FALLBACK_OPTIONS = [
   "people_grid",
   "borderless_table",
   "grid_table",
+  "striped_table",
+  "zebra_table",
 ].map((key) => ({
   key,
   recommended: false,

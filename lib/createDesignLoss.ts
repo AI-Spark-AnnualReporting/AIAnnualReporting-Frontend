@@ -103,13 +103,17 @@ export const TABLES_ONLY_TEMPLATE_KEYS: readonly string[] = [
   "landscape_borderless_table",
   "grid_table",
   "landscape_grid_table",
+  "striped_table",
+  "landscape_striped_table",
+  "zebra_table",
+  "landscape_zebra_table",
 ]
 
 /**
  * Whether a tables-only template is on screen with nothing counted for it.
  *
  * A section's cards are saved when it is extracted, so a section extracted
- * before Borderless table or Grid table existed has no counts or losses for
+ * before Borderless, Grid, Striped or Zebra table existed has no counts or losses for
  * them. Without this, the panel read that silence as "nothing is dropped"
  * while the template leaves out every paragraph, figure and quote.
  *
