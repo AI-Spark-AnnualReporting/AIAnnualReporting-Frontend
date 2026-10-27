@@ -48,8 +48,9 @@ import {
   CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES, customTemplateFor, paperFor, renderTemplateTag,
 } from "@/lib/customTemplate"
 import {
-  countPicked, LANDSCAPE_OPENER_NAMES, LANDSCAPE_TEMPLATE_SHORT_NAMES, landscapeCoverKey,
-  landscapeKeyToApply, landscapeOpenerChoice, landscapeOptions, landscapeTocKey, orientationOf,
+  applyToAllLabel, countPicked, LANDSCAPE_OPENER_NAMES, LANDSCAPE_TEMPLATE_SHORT_NAMES,
+  landscapeAppliedText, landscapeCoverKey, landscapeKeyToApply, landscapeOpenerChoice,
+  landscapeOptions, landscapeTocKey, orientationOf,
   pageFormatOf, pickedKey, PORTRAIT_OPENER_NAMES, portraitOpenerChoice, sectionOpenerChoice,
   sectionOpenerOptions, selectionForPageFormat, type LandscapeFormat, type Orientation,
   type PageFormat,
@@ -239,13 +240,6 @@ function previewButtonTitle(orientation: Orientation, unitsChosen: number): stri
   }
   if (unitsChosen === 0) return "Choose a template for at least one page first"
   return "Renders every chosen page — about a second each"
-}
-
-/** The toast after "Use for all sections", naming the template applied. */
-function landscapeAppliedText(applied: number, templateName: string): string {
-  if (applied === 0) return "Every section already has a landscape template"
-  if (applied === 1) return `${templateName} applied to 1 section`
-  return `${templateName} applied to ${applied} sections`
 }
 
 export function CreateDesignShell({ cycleId }: { cycleId: string }) {
@@ -634,8 +628,11 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
       { templateKey: keyToApply },
       {
         onSuccess: (res) => {
-          if (res.applied === 0) toast(landscapeAppliedText(0, nameToApply))
-          else toast.success(landscapeAppliedText(res.applied, nameToApply))
+          const text = landscapeAppliedText(
+            res.applied, keyToApply, nameToApply, res.skipped_no_tables,
+          )
+          if (res.applied === 0) toast(text)
+          else toast.success(text)
         },
       },
     )
@@ -937,7 +934,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                         ) : (
                           <ListChecks className="mr-1.5 h-3.5 w-3.5" />
                         )}
-                        Use {nameToApply} for all sections
+                        {applyToAllLabel(keyToApply, nameToApply)}
                       </Button>
                     </div>
                   )}

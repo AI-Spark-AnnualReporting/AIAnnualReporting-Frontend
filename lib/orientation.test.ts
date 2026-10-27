@@ -25,11 +25,13 @@ import {
   PAGE_FORMAT_LABELS,
   PORTRAIT_OPENER_KEYS,
   PORTRAIT_OPENER_NAMES,
+  applyToAllLabel,
   countPicked,
   isLandscapeTemplateKey,
   keyForFormat,
   landscapeCoverKey,
   landscapeOpenerChoice,
+  landscapeAppliedText,
   landscapeFormatOf,
   landscapeKeyToApply,
   landscapeOptions,
@@ -252,6 +254,45 @@ assert.equal(landscapeKeyToApply("kpi_stat_grid", railPicked), "landscape_rail")
 assert.equal(
   landscapeKeyToApply("kpi_stat_grid", { landscape_template_key: "kpi_stat_grid" }),
   LANDSCAPE_TEMPLATE_KEY,
+)
+
+// applyToAllLabel / landscapeAppliedText: a tables-only template is put only on
+// sections with tables, so the button and the toast must both say so.
+for (const key of ["landscape_borderless_table", "landscape_grid_table", "landscape_striped_table", "landscape_zebra_table"]) {
+  assert.equal(applyToAllLabel(key, "Zebra table"), "Use Zebra table for all sections with tables")
+  assert.match(landscapeAppliedText(3, key, "Zebra table"), /3 sections with tables$/)
+}
+assert.equal(applyToAllLabel("landscape_rail", "Figure rail"), "Use Figure rail for all sections")
+assert.equal(applyToAllLabel("landscape_tables", "Data tables"), "Use Data tables for all sections")
+assert.equal(landscapeAppliedText(0, "landscape_rail", "Figure rail"), "Every section already has a landscape template")
+assert.equal(landscapeAppliedText(1, "landscape_rail", "Figure rail"), "Figure rail applied to 1 section")
+assert.equal(landscapeAppliedText(4, "landscape_rail", "Figure rail"), "Figure rail applied to 4 sections")
+assert.equal(
+  landscapeAppliedText(1, "landscape_zebra_table", "Zebra table"),
+  "Zebra table applied to 1 section with tables",
+)
+assert.equal(
+  landscapeAppliedText(0, "landscape_zebra_table", "Zebra table"),
+  "Every section with tables already has a landscape template",
+)
+// Nothing applied because no waiting section has a table: say that, rather
+// than "Every section with tables already has a landscape template".
+assert.equal(
+  landscapeAppliedText(0, "landscape_zebra_table", "Zebra table", 4),
+  "Zebra table was not applied: none of the 4 sections without a landscape template has tables",
+)
+assert.equal(
+  landscapeAppliedText(0, "landscape_zebra_table", "Zebra table", 1),
+  "Zebra table was not applied: the 1 section without a landscape template has no tables",
+)
+// The skipped count is reported when the backend sends it, and absent reads as 0.
+assert.equal(
+  landscapeAppliedText(2, "landscape_grid_table", "Grid table", 3),
+  "Grid table applied to 2 sections with tables. 3 sections without tables were left as they were",
+)
+assert.equal(
+  landscapeAppliedText(2, "landscape_grid_table", "Grid table", 1),
+  "Grid table applied to 2 sections with tables. 1 section without tables was left as it was",
 )
 
 // landscapeCoverKey / landscapeTocKey: the saved pick when valid, else the default.

@@ -12,6 +12,8 @@
  * picked it.
  */
 import type { DesignOption, DesignUnit } from "@/lib/api/createDesign"
+// The ".ts" extension lets `node lib/orientation.test.ts` load this file too.
+import { TABLES_ONLY_TEMPLATE_KEYS } from "./createDesignLoss.ts"
 
 export type Orientation = "portrait" | "landscape"
 
@@ -403,6 +405,63 @@ export function landscapeKeyToApply(
   const picked = unit?.landscape_template_key
   if (picked && isLandscapeTemplateKey(picked)) return picked
   return LANDSCAPE_TEMPLATE_KEY
+}
+
+/**
+ * What the "Use for all sections" button says for the template it applies.
+ *
+ * A tables-only template (Borderless, Grid, Striped, Zebra table) prints just
+ * the heading and the tables, so the backend puts it only on sections that
+ * have tables — the button says so up front, or a person would expect every
+ * section to change.
+ *
+ * @param templateKey the landscape template the button applies
+ * @param name        the name to show for it
+ * @returns "Use <name> for all sections", plus " with tables" when tables-only
+ */
+export function applyToAllLabel(templateKey: string, name: string): string {
+  if (TABLES_ONLY_TEMPLATE_KEYS.includes(templateKey)) {
+    return `Use ${name} for all sections with tables`
+  }
+  return `Use ${name} for all sections`
+}
+
+/**
+ * The toast after "Use for all sections", naming the template applied.
+ *
+ * @param applied         how many pages the backend filled
+ * @param templateKey     the landscape template applied
+ * @param name            the name to show for it
+ * @param skippedNoTables sections left alone because they have no tables;
+ *                        absent from an older backend's reply, read as 0
+ * @returns the sentence to show
+ */
+export function landscapeAppliedText(
+  applied: number,
+  templateKey: string,
+  name: string,
+  skippedNoTables = 0,
+): string {
+  if (!TABLES_ONLY_TEMPLATE_KEYS.includes(templateKey)) {
+    if (applied === 0) return "Every section already has a landscape template"
+    if (applied === 1) return `${name} applied to 1 section`
+    return `${name} applied to ${applied} sections`
+  }
+  // Nothing applied and some sections skipped: none of the sections still
+  // waiting for a landscape template has a table. "Every section with tables
+  // already has one" read oddly when the report has no tables at all.
+  if (applied === 0 && skippedNoTables === 1) {
+    return `${name} was not applied: the 1 section without a landscape template has no tables`
+  }
+  if (applied === 0 && skippedNoTables > 1) {
+    return `${name} was not applied: none of the ${skippedNoTables} sections without a landscape template has tables`
+  }
+  let text = `${name} applied to ${applied} sections with tables`
+  if (applied === 0) text = "Every section with tables already has a landscape template"
+  if (applied === 1) text = `${name} applied to 1 section with tables`
+  if (skippedNoTables === 1) return `${text}. 1 section without tables was left as it was`
+  if (skippedNoTables > 1) return `${text}. ${skippedNoTables} sections without tables were left as they were`
+  return text
 }
 
 /** The landscape front-matter picks of a saved design record. */

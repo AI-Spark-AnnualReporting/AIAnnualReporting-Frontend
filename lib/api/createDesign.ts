@@ -578,17 +578,30 @@ export const createDesignApi = {
    * Same timeout as setTemplate and for the same reason, only more so: it is
    * that read-modify-write once per section, fired while the pre-warm is busy.
    *
-   * @returns how many pages were filled, and each changed section's envelope
+   * @returns how many pages were filled, how many sections a tables-only
+   *          template skipped for having no tables, and each changed
+   *          section's envelope
    */
   applyLandscapeToAll: async (
     cycleId: string,
     templateKey: string,
-  ): Promise<{ applied: number; sections: Record<string, DesignEnvelope> }> => {
+  ): Promise<{
+    applied: number
+    // Sections a tables-only template left alone because they have no
+    // tables. 0 when the backend does not send it (an older one, or any
+    // other template).
+    skipped_no_tables: number
+    sections: Record<string, DesignEnvelope>
+  }> => {
     const { data } = await apiClient.post(
       `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-landscape-all`,
       { template_key: templateKey },
       { timeout: 60000 },
     )
-    return { applied: data?.applied ?? 0, sections: data?.sections ?? {} }
+    return {
+      applied: data?.applied ?? 0,
+      skipped_no_tables: data?.skipped_no_tables ?? 0,
+      sections: data?.sections ?? {},
+    }
   },
 }
