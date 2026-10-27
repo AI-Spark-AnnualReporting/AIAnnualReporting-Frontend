@@ -32,6 +32,8 @@ import {
 } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
 import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
+import { formatApprovedDate } from "@/components/communication/review/ReportStatusCard"
+import type { ReportShare } from "@/lib/api/reportReview"
 import { useAuth } from "@/contexts/AuthContext"
 import { useReportReview } from "@/hooks/useReportReview"
 import {
@@ -305,7 +307,7 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
               gap: 14,
             }}
           >
-            <ArabicStatusCard />
+            <ArabicStatusCard share={review?.share} />
             {/* Spark sends the Arabic to the client from here. Everyone else
                 sees the card once it has been sent, read-only. */}
             {!review && reviewQuery.isLoading && <ClientReviewCardSkeleton />}
@@ -325,8 +327,25 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   )
 }
 
-/** The Arabic edition's status: always Draft, it has no approval of its own. */
-function ArabicStatusCard() {
+/**
+ * The Arabic edition's status, from its client review: Approved once the
+ * client approved it, otherwise Draft (with what changes it: Create again
+ * before it is sent, Edit Arabic after).
+ */
+function ArabicStatusCard({ share }: { share: ReportShare | null | undefined }) {
+  if (share?.status === "approved") {
+    const on = share.responded_at ? formatApprovedDate(share.responded_at) : null
+    return (
+      <div style={{ ...CARD, padding: "14px 16px" }}>
+        <div style={RAIL_LABEL}>Report status</div>
+        <div className="flex items-center gap-2">
+          <span className="h-[9px] w-[9px] shrink-0 rounded-full bg-green-600" />
+          <span className="text-[13.5px] font-bold text-slate-900">Approved</span>
+          <span className="text-xs text-slate-600">· {on ? `approved by client ${on}` : "approved by client"}</span>
+        </div>
+      </div>
+    )
+  }
   return (
     <div style={{ ...CARD, padding: "14px 16px" }}>
       <div style={RAIL_LABEL}>Report status</div>
@@ -335,8 +354,9 @@ function ArabicStatusCard() {
         <span className="text-[13.5px] font-bold text-slate-900">Draft</span>
       </div>
       <p className="mt-1 text-xs text-slate-600">
-        Made from the approved English report. Until it is sent to the client,
-        Create again makes it again from the English.
+        {share
+          ? "Changes are made with Edit Arabic."
+          : "Made from the approved English report. Create again makes it again from the English."}
       </p>
     </div>
   )

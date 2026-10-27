@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { ArrowLeft, ChevronRight, Download, FileText, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -333,9 +333,28 @@ function ChangedSection({
         {section.status === "removed" && <span className="text-xs text-red-700">· removed</span>}
       </div>
       <div className={cn("grid grid-cols-1 md:grid-cols-2", arabic ? "text-right" : "text-left")}>
-        {section.paragraphs.map((paragraph, index) => (
-          <SidePair key={index} paragraph={paragraph} fromNo={fromNo} toNo={toNo} first={index === 0} arabic={arabic} />
-        ))}
+        {section.paragraphs.map((paragraph, index) => {
+          // Name the subsection once, above the first changed line in it.
+          const place = paragraph.subsection ?? null
+          const previous = index > 0 ? (section.paragraphs[index - 1].subsection ?? null) : null
+          const showPlace = place !== null && (index === 0 || place !== previous)
+          return (
+            <Fragment key={index}>
+              {showPlace && (
+                // Just the subsection's name, in the report's own direction.
+                <p
+                  className={cn(
+                    "bg-muted/20 px-3 py-1.5 text-xs font-semibold text-foreground md:col-span-2",
+                    index > 0 && "border-t",
+                  )}
+                >
+                  {place}
+                </p>
+              )}
+              <SidePair paragraph={paragraph} fromNo={fromNo} toNo={toNo} first={index === 0 && !showPlace} arabic={arabic} />
+            </Fragment>
+          )
+        })}
       </div>
     </section>
   )

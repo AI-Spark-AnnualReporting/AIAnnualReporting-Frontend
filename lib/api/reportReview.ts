@@ -101,6 +101,8 @@ export interface DiffParagraph {
   header: string[] | null
   /** A row's table name: the subheading or "…:" line above the table; null when there is none. */
   table_title?: string | null
+  /** The subheading this paragraph sits under; null before the first one. */
+  subsection?: string | null
 }
 
 export interface DiffPart {
