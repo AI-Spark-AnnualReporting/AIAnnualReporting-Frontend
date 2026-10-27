@@ -77,12 +77,24 @@ export interface SectionQuoteBlock {
   attribution: string | null
 }
 
+/**
+ * A person the section names together with a role, copied as written. Absent
+ * on sections extracted before the People templates existed.
+ */
+export interface SectionProfile {
+  name: string
+  role: string | null
+  bio: string | null
+}
+
 export interface SectionBlocks {
   section_code: string
   narrative_blocks: SectionNarrativeBlock[]
   numeric_data: SectionNumericBlock[]
   tables: SectionTableBlock[]
   pull_quotes: SectionQuoteBlock[]
+  /** Optional: old stored extractions have none. */
+  profiles?: SectionProfile[]
 }
 
 export interface CreateDesignStreamError {

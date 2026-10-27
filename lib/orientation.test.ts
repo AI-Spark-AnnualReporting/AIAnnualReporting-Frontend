@@ -60,6 +60,8 @@ const PORTRAIT_PAGE_KEYS = [
   "statement_stat_rail",
   "stat_tiles",
   "data_tables",
+  "photo_panel",
+  "people_grid",
 ]
 const PORTRAIT_COVER_KEYS = ["statement", "band", "panel", "monolith"]
 const PORTRAIT_TOC_KEYS = ["classic", "columns", "spread", "index", "brand_band"]
@@ -112,12 +114,13 @@ assert.deepEqual(pageSize("landscape"), { width: 841.89, height: 595.28 })
 assert.ok(pageSize("portrait").height > pageSize("portrait").width)
 assert.ok(pageSize("landscape").width > pageSize("landscape").height)
 
-// The eleven landscape section templates, the default first. Copied from the
+// The thirteen landscape section templates, the default first. Copied from the
 // engine's page_templates.LANDSCAPE_KEYS.
 assert.deepEqual([...LANDSCAPE_TEMPLATE_KEYS], [
   "landscape_columns", "landscape_rail", "landscape_hero",
   "landscape_picture", "landscape_statement", "landscape_schedule", "landscape_essay",
   "landscape_tiles", "landscape_tables", "landscape_editorial", "landscape_portrait",
+  "landscape_photo_panel", "landscape_people",
 ])
 assert.equal(LANDSCAPE_TEMPLATE_KEYS[0], LANDSCAPE_TEMPLATE_KEY)
 
@@ -164,7 +167,7 @@ assert.equal(portraitOpenerChoice(landscapeOpenerOnly), null)
 
 // landscapeOptions: one card per landscape template, nothing recommended.
 const options = landscapeOptions()
-assert.equal(options.length, 11)
+assert.equal(options.length, 13)
 assert.deepEqual(options.map((option) => option.key), [...LANDSCAPE_TEMPLATE_KEYS])
 for (const option of options) {
   assert.deepEqual(option, {
@@ -179,7 +182,7 @@ for (const option of options) {
 assert.notEqual(landscapeOptions(), landscapeOptions())
 assert.notEqual(landscapeOptions()[0], landscapeOptions()[0])
 
-// isLandscapeTemplateKey: the eleven, and nothing else.
+// isLandscapeTemplateKey: the thirteen, and nothing else.
 for (const key of LANDSCAPE_TEMPLATE_KEYS) assert.ok(isLandscapeTemplateKey(key))
 for (const key of PORTRAIT_PAGE_KEYS) assert.ok(!isLandscapeTemplateKey(key))
 assert.ok(!isLandscapeTemplateKey(null))
@@ -253,6 +256,10 @@ assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_tiles, "Stat tiles")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_tables, "Data tables")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_editorial, "Editorial columns")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_portrait, "Portrait + stats")
+assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_photo_panel, "Landscape — photo + panel")
+assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_people, "Landscape — people")
+assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_photo_panel, "Photo + panel")
+assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_people, "People")
 
 // The landscape keys are outside every portrait menu. This is what lets the
 // render cache and the cover/contents preview queries go without an

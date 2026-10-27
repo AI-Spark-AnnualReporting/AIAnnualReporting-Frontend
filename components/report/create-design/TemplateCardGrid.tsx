@@ -42,14 +42,25 @@ const CARD_NOTES: Record<string, string> = {
   landscape_tables: "Tables in two half-page columns under their titles: group rows in a brand bar, the current year in bold. Wide tables span both.",
   landscape_editorial: "Four columns of text under a large lead paragraph, subheadings after a small square, the first sheet tinted beyond the title column.",
   landscape_portrait: "A tall portrait with the featured quote and speaker on a brand plate at its foot; the letter beside a rail of three to five key figures.",
+  landscape_photo_panel: "A big photo bleeding off the right, a solid brand panel over its left edge carrying text; body text, a lead-in and one figure beside it.",
+  landscape_people: "A lead statement and intro with the first person featured large; the other people in a grid of photos with their names.",
+  photo_panel: "A photo across the top with a brand panel over its lower edge carrying text; body text, a lead-in and one figure below.",
+  people_grid: "Intro and the first person featured, then a grid of photos with names. Needs a section that names its people.",
   custom: "Designed for this section. Every figure, paragraph, quote and table prints.",
 }
+
+/** The two People templates, one per orientation. */
+const PEOPLE_KEYS = ["people_grid", "landscape_people"]
+
+/** Shown on a People card when the section lists nobody. */
+const PEOPLE_HINT = "Re-extract this section to list its people"
 
 /**
  * The card's caption: what it loses, else the recommendation's reason, else
  * what it places, else its standing note.
  */
-function cardCaption(option: DesignOption): string {
+function cardCaption(option: DesignOption, noPeople: boolean): string {
+  if (noPeople && PEOPLE_KEYS.includes(option.key)) return PEOPLE_HINT
   if (losesContent(option.dropped)) return lossText(option.dropped, option.counts)
   if (option.recommended && option.reason) return option.reason
   // A no-break space, not an empty string, so a card with nothing to say
@@ -69,6 +80,7 @@ export function TemplateCardGrid({
   customThumb = null,
   onCreateCustom,
   customPanelOpen = false,
+  noPeople = false,
 }: {
   options: DesignOption[]
   previewKey: string | null
@@ -86,6 +98,8 @@ export function TemplateCardGrid({
   onCreateCustom?: () => void
   /** The create panel is the thing on screen, so its card reads as selected. */
   customPanelOpen?: boolean
+  /** The section's extraction lists no people, so the People cards say how to get some. */
+  noPeople?: boolean
 }) {
   const hasCustom = options.some((option) => option.key === CUSTOM_TEMPLATE_KEY)
   // Recommended first; everything else keeps the engine's order, so the grid
@@ -165,7 +179,7 @@ export function TemplateCardGrid({
             </div>
 
             <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-snug text-[#64748B]">
-              {cardCaption(option)}
+              {cardCaption(option, noPeople)}
             </div>
           </button>
         )

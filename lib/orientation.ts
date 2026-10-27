@@ -54,6 +54,8 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_tables",
   "landscape_editorial",
   "landscape_portrait",
+  "landscape_photo_panel",
+  "landscape_people",
 ] as const
 
 /** The default landscape section-page template — the first in the list. */
@@ -95,6 +97,8 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_tables: "Landscape — data tables",
   landscape_editorial: "Landscape — editorial columns",
   landscape_portrait: "Landscape — portrait + stats",
+  landscape_photo_panel: "Landscape — photo + panel",
+  landscape_people: "Landscape — people",
 }
 
 /**
@@ -113,6 +117,8 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_tables: "Data tables",
   landscape_editorial: "Editorial columns",
   landscape_portrait: "Portrait + stats",
+  landscape_photo_panel: "Photo + panel",
+  landscape_people: "People",
 }
 
 /** The names the cover picker and the rail show for the landscape covers. */

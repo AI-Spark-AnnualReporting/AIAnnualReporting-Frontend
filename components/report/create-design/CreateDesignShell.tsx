@@ -86,6 +86,8 @@ const FALLBACK_OPTIONS = [
   "statement_stat_rail",
   "stat_tiles",
   "data_tables",
+  "photo_panel",
+  "people_grid",
 ].map((key) => ({
   key,
   recommended: false,
@@ -965,6 +967,7 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                     customThumb={customThumb}
                     onCreateCustom={SHOW_CUSTOM_TEMPLATES ? () => setCustomOpen(true) : undefined}
                     customPanelOpen={customOpen}
+                    noPeople={!(unit.blocks?.profiles?.length)}
                   />
                 </div>
                 <div className="min-h-0 flex-1">

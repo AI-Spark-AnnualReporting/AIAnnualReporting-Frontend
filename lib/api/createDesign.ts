@@ -9,6 +9,8 @@
  */
 import type { Orientation } from "@/lib/orientation"
 import type { SectionBlocks } from "./sectionBlocks"
+
+export type { SectionProfile } from "./sectionBlocks"
 import { apiClient } from "./client"
 
 /** What one template would do with a unit's blocks. */

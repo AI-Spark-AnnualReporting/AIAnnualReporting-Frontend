@@ -851,6 +851,170 @@ function DataTablesMini({ accent }: { accent: string }) {
 }
 
 /**
+ * The photo + panel landscape page: body text and a figure down the left, a
+ * big photo bleeding off the top, right and bottom, and a solid brand panel
+ * laid over the photo's left edge carrying text.
+ */
+function LandscapePhotoPanelMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 0,
+        gap: 0,
+        position: "relative",
+      }}
+    >
+      <div style={{ flex: "0 0 40%", padding: 9, display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={line("48%", accent, 4)} />
+        <div style={ruledColumn} />
+        <div style={line("34%", CORAL, 5)} />
+        <div style={line("70%")} />
+      </div>
+      <div style={ph({ position: "absolute", top: 0, right: 0, bottom: 0, width: "62%", borderRadius: 0 })} />
+      <div
+        style={{
+          position: "absolute",
+          top: "26%",
+          left: "33%",
+          width: "27%",
+          bottom: "14%",
+          background: accent,
+          padding: 5,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2.5,
+        }}
+      >
+        <div style={line("90%", "rgba(255,255,255,0.95)", 3)} />
+        <div style={line("100%", "rgba(255,255,255,0.7)", 2)} />
+        <div style={line("100%", "rgba(255,255,255,0.7)", 2)} />
+        <div style={line("64%", "rgba(255,255,255,0.7)", 2)} />
+      </div>
+    </div>
+  )
+}
+
+/** The portrait photo + panel page: photo across the top, panel over its lower edge, text below. */
+function PhotoPanelMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, padding: 0, gap: 0, position: "relative" }}>
+      <div style={ph({ flex: "0 0 46%", borderRadius: 0 })} />
+      <div
+        style={{
+          position: "absolute",
+          top: "36%",
+          left: "14%",
+          width: "72%",
+          height: "24%",
+          background: accent,
+          padding: 5,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2.5,
+        }}
+      >
+        <div style={line("80%", "rgba(255,255,255,0.95)", 3)} />
+        <div style={line("100%", "rgba(255,255,255,0.7)", 2)} />
+        <div style={line("56%", "rgba(255,255,255,0.7)", 2)} />
+      </div>
+      <div style={{ flex: 1, padding: "20% 7px 6px", display: "flex", flexDirection: "column", gap: 2.5 }}>
+        <div style={line("100%")} />
+        <div style={line("90%")} />
+        <div style={line("34%", CORAL, 4)} />
+        <div style={line("100%")} />
+      </div>
+    </div>
+  )
+}
+
+/** One small headshot square with a name line under it. */
+function personCell(key: number) {
+  return (
+    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 1.5, minWidth: 0 }}>
+      <div style={ph({ aspectRatio: "1 / 1", width: "100%" })} />
+      <div style={line("80%", "#9AA0B4", 2)} />
+    </div>
+  )
+}
+
+/**
+ * The people landscape page: a short rule, a lead statement and the intro on
+ * the left with the featured person as one big square; on the right a 2 x 5
+ * grid of small squares, each with its name line.
+ */
+function LandscapePeopleMini({ accent, presentation }: { accent: string; presentation: boolean }) {
+  return (
+    <div
+      style={{
+        ...shell,
+        aspectRatio: landscapeRatio(presentation),
+        flexDirection: "row",
+        padding: 9,
+        gap: 9,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={line("16%", CORAL, 2.5)} />
+        <div style={line("88%", accent, 4)} />
+        <div style={line("60%", accent, 4)} />
+        <div style={line("100%")} />
+        <div style={line("84%")} />
+        <div style={ph({ flex: 1, minHeight: 0, aspectRatio: "1 / 1", alignSelf: "flex-start" })} />
+        <div style={line("40%", "#6B7085", 3)} />
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gridTemplateRows: "repeat(2, 1fr)",
+          gap: 4,
+          alignContent: "start",
+        }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => personCell(i))}
+      </div>
+    </div>
+  )
+}
+
+/** The portrait people page: intro and the featured person on top, the grid stacked below. */
+function PeopleGridMini({ accent }: { accent: string }) {
+  return (
+    <div style={{ ...shell, gap: 3 }}>
+      <div style={line("16%", CORAL, 2.5)} />
+      <div style={line("80%", accent, 4)} />
+      <div style={line("100%")} />
+      <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "flex-end" }}>
+        <div style={ph({ width: "34%", aspectRatio: "1 / 1" })} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={line("70%", "#6B7085", 3)} />
+          <div style={line("50%")} />
+        </div>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gridTemplateRows: "repeat(2, 1fr)",
+          gap: 3,
+          alignContent: "start",
+          marginTop: 3,
+        }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => personCell(i))}
+      </div>
+    </div>
+  )
+}
+
+/**
  * A custom template has no fixed look, so its card shows the real first sheet
  * when one has been drawn (see TemplateCardGrid). This is the stand-in until
  * then: an off-grid composition, deliberately unlike the fixed designs.
@@ -924,6 +1088,19 @@ function TemplateMiniInner({
   }
   if (templateKey === "landscape_portrait") {
     return <LandscapePortraitMini accent={accent} presentation={presentation} />
+  }
+
+  if (templateKey === "landscape_photo_panel") {
+    return <LandscapePhotoPanelMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "landscape_people") {
+    return <LandscapePeopleMini accent={accent} presentation={presentation} />
+  }
+  if (templateKey === "photo_panel") {
+    return <PhotoPanelMini accent={accent} />
+  }
+  if (templateKey === "people_grid") {
+    return <PeopleGridMini accent={accent} />
   }
 
   if (templateKey === "stat_tiles") {
@@ -1266,6 +1443,8 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   statement_stat_rail: "Statement — figure rail",
   stat_tiles: "Stat tiles",
   data_tables: "Data tables",
+  photo_panel: "Photo + panel",
+  people_grid: "People",
   custom: "Custom",
   ...LANDSCAPE_TEMPLATE_NAMES,
 }
