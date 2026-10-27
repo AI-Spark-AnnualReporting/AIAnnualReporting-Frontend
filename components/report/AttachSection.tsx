@@ -66,7 +66,11 @@ export function AttachSection({
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <SectionHeader section={section} isRtl={isRtl} />
-      <div className="flex-1 overflow-y-auto">
+      {/* `relative` keeps the hidden Replace input (absolutely positioned)
+          inside this panel. Without it the input is placed against the whole
+          page, at the foot of a long document, and the browser page itself
+          grows that tall and scrolls. */}
+      <div className="relative flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-8 py-6 space-y-5">
           {attachment ? (
             <AttachedView
