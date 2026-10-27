@@ -273,7 +273,9 @@ function ReviewScreen({
                 <p className="mb-2 text-xs font-semibold text-muted-foreground">
                   Your comments on version {view.version_no - 1}
                 </p>
-                <div className="space-y-1.5">
+                {/* Scrolls inside itself, so the panel stays short enough for
+                    Approve / Request changes to stay on screen. */}
+                <div className="max-h-32 space-y-1.5 overflow-y-auto pr-1">
                   {view.previous_comments.map((comment) => (
                     <div key={comment.id} className="rounded-md bg-muted/50 p-2 text-xs">
                       <p className="text-[11px] font-semibold text-muted-foreground" dir="auto">
@@ -317,7 +319,8 @@ function ReviewScreen({
       </div>
 
       <Dialog open={decision !== null} onOpenChange={(next) => !submitting && !next && setDecision(null)}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
+        {/* No ✕ while sending: the answer can't be stopped halfway. */}
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md" hideClose={submitting}>
           <DialogHeader>
             <DialogTitle>
               {decision === "approve" ? "Approve the report?" : "Request changes?"}

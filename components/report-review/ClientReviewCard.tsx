@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { BTN_PRIMARY, BTN_SECONDARY, CARD, RAIL_LABEL } from "@/components/communication/review/shared"
+import { Skeleton } from "@/components/ui/skeletons"
 import { formatDateTime } from "@/lib/utils"
 import type { ReportReviewState, ReportShare, VersionSummary } from "@/lib/api/reportReview"
 import { useResendReportLink } from "@/hooks/useReportReview"
@@ -231,5 +232,21 @@ export function ClientReviewCard({
         arabic={arabic}
       />
     </>
+  )
+}
+
+/** The card's shape while the client review loads: label, status, dates, buttons. */
+export function ClientReviewCardSkeleton() {
+  return (
+    <div style={{ ...CARD, padding: "14px 16px" }} aria-busy="true" aria-label="Loading the client review">
+      <div style={RAIL_LABEL}>Client review</div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="mt-3 h-9 w-full rounded-xl" />
+        <Skeleton className="h-9 w-full rounded-xl" />
+      </div>
+    </div>
   )
 }

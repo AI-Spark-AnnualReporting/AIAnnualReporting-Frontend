@@ -1,6 +1,7 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -37,7 +38,7 @@ import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
 import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
-import { ClientReviewCard } from "@/components/report-review/ClientReviewCard"
+import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
 import { useReportReview } from "@/hooks/useReportReview"
 import {
   useArabicReport,
@@ -50,6 +51,7 @@ import {
   useValidateReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -108,6 +110,22 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const withClient = !!review?.awaiting_client
   const sentToClient = !!review?.share
   const changesRequested = review?.share?.status === "changes_requested"
+
+  // The Client review card checks for the client's answer every minute; the
+  // rest of the page does not. When the answer arrives (approved locks the
+  // report; changes requested opens Edit report), re-read what depends on it,
+  // so the Report status card and the buttons change with the card.
+  const qc = useQueryClient()
+  const shareStatus = review?.share?.status
+  const lastShareStatus = useRef(shareStatus)
+  useEffect(() => {
+    const before = lastShareStatus.current
+    lastShareStatus.current = shareStatus
+    if (before === undefined || before === shareStatus) return
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_APPROVAL(cycleId) })
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+  }, [shareStatus, qc, cycleId])
   // Re-assemble only when a section changed in the Builder since this report
   // was built (the Builder's "Assemble again" flag). With nothing new it only
   // rewrites the Executive Summary and throws away a clean validation.
@@ -344,7 +362,10 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 size="sm"
                 onClick={createArabicInNewTab}
                 // Only a signed-off report is translated; the server refuses too.
-                disabled={!locked || arabicQuery.isLoading}
+                // Greyed only before the first answer: a re-check (e.g. on
+                // returning to the tab) puts a "not found" back to loading,
+                // which made the button blink. errorUpdateCount survives that.
+                disabled={!locked || (arabicQuery.isLoading && arabicQuery.errorUpdateCount === 0)}
                 title={locked ? undefined : "The client approves the report first, then the Arabic version can be created."}
                 className="h-8"
               >
@@ -494,6 +515,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
             )}
             {/* Spark sends the report to the client from here. Everyone else
                 sees the card once it has been sent, read-only. */}
+            {!review && reviewQuery.isLoading && <ClientReviewCardSkeleton />}
             {review && (isSpark || review.share) && (
               <ClientReviewCard
                 cycleId={cycleId}

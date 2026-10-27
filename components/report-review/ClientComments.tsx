@@ -234,7 +234,9 @@ export function CommentsRail({ open, api }: { open: boolean; api: ClientComments
           {open ? "Use Add comment under any section, or comment on the whole report below." : "You left no comments."}
         </p>
       )}
-      <div className="max-h-[40vh] space-y-2 overflow-y-auto">
+      {/* Scrolls inside itself, so the rail stays short enough for the
+          Approve / Request changes buttons below it to stay on screen. */}
+      <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
         {api.comments.map((comment) => (
           <CommentItem
             key={comment.id}

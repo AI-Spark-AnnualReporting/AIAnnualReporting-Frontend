@@ -32,7 +32,7 @@ import {
   withArabicCover,
 } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
-import { ClientReviewCard } from "@/components/report-review/ClientReviewCard"
+import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
 import { VersionHistory } from "@/components/report-review/VersionHistory"
 import { useAuth } from "@/contexts/AuthContext"
 import { useReportReview } from "@/hooks/useReportReview"
@@ -88,7 +88,8 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
   const isSpark = user?.role === "spark_internal"
   // The client's review of the Arabic. Once it was sent to them even once,
   // Create again is refused by the server, so the button is off.
-  const review = useReportReview(cycleId, !!arabicQuery.data, true).data
+  const reviewQuery = useReportReview(cycleId, !!arabicQuery.data, true)
+  const review = reviewQuery.data
   // Create again replaces the Arabic, hand edits included, so it asks first.
   const [confirmCreate, setConfirmCreate] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -327,6 +328,7 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
             <ArabicStatusCard />
             {/* Spark sends the Arabic to the client from here. Everyone else
                 sees the card once it has been sent, read-only. */}
+            {!review && reviewQuery.isLoading && <ClientReviewCardSkeleton />}
             {review && (isSpark || review.share) && (
               <ClientReviewCard
                 cycleId={cycleId}

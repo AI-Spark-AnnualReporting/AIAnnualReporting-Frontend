@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeletons"
 import { cn, formatDateTime } from "@/lib/utils"
 import type { DiffParagraph, DiffPart, SectionDiff, VersionSummary } from "@/lib/api/reportReview"
 import { useCompareVersions, useDownloadVersionWord } from "@/hooks/useReportReview"
@@ -220,15 +221,17 @@ function VersionChanges({
               ? "This is the first version, so there's nothing to compare."
               : "The version before this one is no longer kept, so there's nothing to compare."}
           </p>
+          {version.version_no > 1 && (
+            <p className="text-sm text-muted-foreground">
+              History keeps only the last 3 versions, so Version {version.version_no - 1} was removed.
+              Version {version.version_no} can&apos;t be compared with it.
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">Download the Word file to read it as it was.</p>
         </div>
       )}
 
-      {compare.isLoading && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Finding the changes…
-        </p>
-      )}
+      {compare.isLoading && <ChangesSkeleton />}
       {compare.error && <p className="text-sm text-red-700">Couldn&apos;t load the changes.</p>}
 
       {compare.data && (
@@ -251,6 +254,31 @@ function VersionChanges({
       )}
       </div>
     </>
+  )
+}
+
+/** The changes' shape while they load: two sections, each with its two columns. */
+function ChangesSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Finding the changes">
+      {[0, 1].map((key) => (
+        <div key={key} className="overflow-hidden rounded-lg border">
+          <div className="border-b bg-muted/40 px-3 py-2">
+            <Skeleton className="h-4 w-40" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 p-3 md:grid-cols-2">
+            {[0, 1].map((side) => (
+              <div key={side} className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-11/12" />
+                <Skeleton className="h-3 w-3/4" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
