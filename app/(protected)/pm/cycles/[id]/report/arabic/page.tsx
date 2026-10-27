@@ -32,7 +32,7 @@ import {
 } from "@/components/report/ArabicTranslation"
 import { CARD, RAIL_LABEL } from "@/components/communication/review/shared"
 import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
-import { formatApprovedDate } from "@/components/communication/review/ReportStatusCard"
+import { formatApprovedDate, ReportStatusCardSkeleton } from "@/components/communication/review/ReportStatusCard"
 import type { ReportShare } from "@/lib/api/reportReview"
 import { useAuth } from "@/contexts/AuthContext"
 import { useReportReview } from "@/hooks/useReportReview"
@@ -307,7 +307,10 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
               gap: 14,
             }}
           >
-            <ArabicStatusCard share={review?.share} />
+            {/* The status comes from the client review: its shape until that loads. */}
+            {!review && reviewQuery.isLoading
+              ? <ReportStatusCardSkeleton />
+              : <ArabicStatusCard share={review?.share} />}
             {/* Spark sends the Arabic to the client from here. Everyone else
                 sees the card once it has been sent, read-only. */}
             {!review && reviewQuery.isLoading && <ClientReviewCardSkeleton />}
@@ -341,8 +344,11 @@ function ArabicStatusCard({ share }: { share: ReportShare | null | undefined }) 
         <div className="flex items-center gap-2">
           <span className="h-[9px] w-[9px] shrink-0 rounded-full bg-green-600" />
           <span className="text-[13.5px] font-bold text-slate-900">Approved</span>
-          <span className="text-xs text-slate-600">· {on ? `approved by client ${on}` : "approved by client"}</span>
         </div>
+        {/* Its own line, as on the English card: beside "Approved" it wrapped. */}
+        <p className="mt-0.5 pl-[17px] text-xs text-slate-600">
+          {on ? `Approved by client ${on}` : "Approved by client"}
+        </p>
       </div>
     )
   }

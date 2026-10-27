@@ -36,7 +36,7 @@ import { PageLoader } from "@/components/ui/spinner"
 // import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
-import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
+import { ReportStatusCard, ReportStatusCardSkeleton } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
 import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
 import { useReportReview } from "@/hooks/useReportReview"
@@ -491,6 +491,16 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
             screen. Status lives in the card above, so the panel's own radios
             stay hidden. Only exists once the report has been assembled, since
             that is what creates the shared reports row. */}
+        {/* While the sign-off state loads, the rail shows its cards' shapes. */}
+        {!reportMissing && !approval && approvalQuery.isLoading && (
+          <aside
+            className="shrink-0 border-l px-4 py-5 print:hidden"
+            style={{ width: 290 + 32, background: "#F2F3FA", display: "flex", flexDirection: "column", gap: 14 }}
+          >
+            <ReportStatusCardSkeleton />
+            <ClientReviewCardSkeleton />
+          </aside>
+        )}
         {approval?.report_id && (
           <aside
             className="shrink-0 overflow-y-auto border-l px-4 py-5 print:hidden"
