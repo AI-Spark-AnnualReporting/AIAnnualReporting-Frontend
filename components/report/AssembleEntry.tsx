@@ -20,6 +20,7 @@ import {
   useAssemblyReadiness,
   useFinalReport,
   type MutationError,
+  useReportApproval,
 } from "@/hooks/useReportBuilder"
 import { useReportReview } from "@/hooks/useReportReview"
 import { pmApi } from "@/lib/api/pm"
@@ -64,6 +65,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   // the button only opens the report, where Edit report is.
   const sentToClient = !!useReportReview(cycleId, finalReportQuery.isSuccess).data?.share
   const qc = useQueryClient()
+  const approvalQuery = useReportApproval(cycleId)
   const router = useRouter()
   const [confirmOpen, setConfirmOpen] = useState(false)
   // "running" shows the loader while we poll. "done" lets it finish its
@@ -179,7 +181,11 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   // Wait for both: without the final report we can't tell "Assemble Report"
   // from "View Report", and guessing showed the wrong button while it loaded.
-  if (readinessQuery.isLoading || finalReportQuery.isLoading) {
+  if (
+    readinessQuery.isLoading ||
+    finalReportQuery.isLoading ||
+    approvalQuery.isLoading
+  ) {
     return (
       <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
@@ -194,7 +200,10 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   // only says stale when there is an assembled report to be out of date. The
   // second half keeps this button in step with the builder's "Assemble again"
   // banner (same `stale` flag) even when the final-report fetch failed.
-  const hasReport = finalReportQuery.isSuccess || stale
+  // An approved report is locked and is, by definition, assembled — even if the
+  // final-report read failed, assembling again is refused, so never offer it.
+  const hasReport =
+    finalReportQuery.isSuccess || stale || !!approvalQuery.data?.locked
 
   // A report exists and nothing has changed since → nothing to do but read it.
   if (hasReport && (!stale || sentToClient)) {
