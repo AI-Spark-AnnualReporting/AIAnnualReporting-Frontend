@@ -1,13 +1,27 @@
 "use client"
 
-import { createElement } from "react"
+import { createContext, createElement, useContext } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeRaw from "rehype-raw"
-import rehypeSanitize from "rehype-sanitize"
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import { cn } from "@/lib/utils"
 import { normalizeMarkdownTables } from "@/lib/report-format"
 import { headingAnchorId } from "@/lib/sectionOutline"
+import { rehypeChangeMarks } from "@/lib/undo-diff"
+
+/** The default schema drops `class` and `style`, which would flatten every
+ *  assembled report rendered through here — the report builder's HTML carries
+ *  both. They are added back deliberately: the vectors that actually execute
+ *  are script elements, `on*` handlers and `javascript:` URLs, and the schema
+ *  still removes all three. Presentation survives; code does not. */
+const SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes?.["*"] ?? []), "className", "style"],
+  },
+}
 
 interface ProsePreviewProps {
   content: string
@@ -17,6 +31,9 @@ interface ProsePreviewProps {
   // which lets the browser pick per content when the caller has no cycle
   // language to hand.
   dir?: "ltr" | "rtl" | "auto"
+  /** The content carries markChanges' marks (the Undo pop-up): show them as
+   *  green / red-crossed-out text. */
+  changeMarks?: boolean
 }
 
 // Crude detector — same pattern as the dept draft + PM session pages. If the
@@ -35,6 +52,59 @@ function flattenText(node: React.ReactNode): string {
     return flattenText(props?.children)
   }
   return ""
+}
+
+/** Text to highlight in every preview below it. Only the Build page provides
+ *  one (the open section's validation findings); everywhere else it is null
+ *  and previews render exactly as before. */
+export const ProseHighlightContext = createContext<RegExp | null>(null)
+
+// Minimal hast shapes - just what the highlighter walks.
+type HastText = { type: "text"; value: string }
+type HastNode = { type: string; value?: string; children?: HastNode[] }
+
+/** Split one text node's value into plain text and <mark> pieces. */
+function splitOnMatches(value: string, pattern: RegExp): HastNode[] {
+  const pieces: HastNode[] = []
+  let last = 0
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index ?? 0
+    if (!match[0]) continue
+    if (start > last) pieces.push({ type: "text", value: value.slice(last, start) } as HastText)
+    pieces.push({
+      type: "element",
+      tagName: "mark",
+      properties: { className: ["rounded", "bg-amber-200", "px-0.5", "text-inherit"] },
+      children: [{ type: "text", value: match[0] } as HastText],
+    } as HastNode)
+    last = start + match[0].length
+  }
+  if (pieces.length === 0) return [{ type: "text", value } as HastText]
+  if (last < value.length) pieces.push({ type: "text", value: value.slice(last) } as HastText)
+  return pieces
+}
+
+/** Wrap matches in every text node under `node`, in place. */
+function highlightTree(node: HastNode, pattern: RegExp): void {
+  if (!node.children) return
+  const next: HastNode[] = []
+  for (const child of node.children) {
+    if (child.type === "text") {
+      next.push(...splitOnMatches(child.value ?? "", pattern))
+    } else {
+      highlightTree(child, pattern)
+      next.push(child)
+    }
+  }
+  node.children = next
+}
+
+/* A rehype step that marks matches AFTER sanitizing. Adding <mark> tags to the
+ * markdown instead would need the sanitizer to allow them, and could land
+ * inside markdown syntax (a link, a table cell's pipes). Touching only text
+ * nodes cannot break either. */
+function rehypeHighlight(options: { pattern: RegExp }) {
+  return (tree: HastNode) => highlightTree(tree, options.pattern)
 }
 
 // Build a heading-demotion renderer for the given content. The shallowest
@@ -72,17 +142,35 @@ function makeHeadingRenderer(content: string): Components {
   }
 }
 
-export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewProps) {
+export function ProsePreview({
+  content,
+  className,
+  dir = "auto",
+  changeMarks = false,
+}: ProsePreviewProps) {
   const trimmed = content.trim()
   const looksLikeHtml = HTML_RE.test(trimmed.slice(0, 200))
   const style = dir === "rtl" ? { textAlign: "right" as const } : undefined
+  const highlight = useContext(ProseHighlightContext)
   return looksLikeHtml ? (
-    <div
-      dir={dir}
-      style={style}
-      className={cn("prose prose-sm max-w-none", className)}
-      dangerouslySetInnerHTML={{ __html: content }}
-    />
+    // Through the SAME pipeline as the markdown branch, not
+    // dangerouslySetInnerHTML. rehypeRaw materialises the HTML and
+    // rehypeSanitize strips anything executable from it.
+    //
+    // This used to inject the string unchecked, which was safe only while
+    // every caller fed it our own AI's output. That stopped being true when
+    // the client sign-off let an outside party write the strategic brief:
+    // Spark's review screen renders that brief here, so a brief beginning
+    // with a tag would have run as script in a spark_internal session — the
+    // one account that can reach every company's cycles.
+    //
+    // normalizeMarkdownTables is deliberately NOT applied: it inserts GFM
+    // delimiter rows for pipe tables, which HTML content has no use for.
+    <div dir={dir} style={style} className={cn("prose prose-sm max-w-none", className)}>
+      <ReactMarkdown rehypePlugins={[rehypeRaw, [rehypeSanitize, SCHEMA]]}>
+        {content}
+      </ReactMarkdown>
+    </div>
   ) : (
     (() => {
       // Insert the GFM delimiter row the AI omits so pipe tables render as
@@ -95,7 +183,13 @@ export function ProsePreview({ content, className, dir = "auto" }: ProsePreviewP
             // rehypeRaw turns raw HTML (e.g. <br> the AI stacks inside table cells)
             // into real elements; rehypeSanitize then strips anything unsafe so only
             // benign markup survives. Order matters: raw must run before sanitize.
-            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            rehypePlugins={
+              changeMarks
+                ? [rehypeRaw, [rehypeSanitize, SCHEMA], rehypeChangeMarks]
+                : highlight
+                  ? [rehypeRaw, [rehypeSanitize, SCHEMA], [rehypeHighlight, { pattern: highlight }]]
+                  : [rehypeRaw, [rehypeSanitize, SCHEMA]]
+            }
             components={makeHeadingRenderer(md)}
           >
             {md}

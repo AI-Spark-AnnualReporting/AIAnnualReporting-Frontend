@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 
 // Full-screen "AI is working" loader, ported from Centriton's
 // src/pages/onboarding/AiLoadingScreen.tsx so a long wait looks the same in
@@ -407,6 +408,10 @@ export function AiLoadingScreen({
 
         {headerExtra && <div style={{ marginBottom: 22 }}>{headerExtra}</div>}
 
+        {/* A caller with no fixed steps (the Annual Report Validator shows the
+            server's live stage instead) passes an empty list - skip the box
+            rather than draw it empty. Same change as Centriyon's copy. */}
+        {milestones.length > 0 && (
         <div
           style={{
             background: "#FAFBFE",
@@ -430,6 +435,7 @@ export function AiLoadingScreen({
             />
           ))}
         </div>
+        )}
 
         {showProgress ? (
           <>
@@ -504,4 +510,39 @@ export function AiLoadingScreen({
       </div>
     </div>
   )
+}
+
+/**
+ * AiLoadingScreen covering the whole app, for work the user must wait on.
+ *
+ * Every full-screen loader in the app renders through this, so a long wait
+ * looks the same wherever it happens — the kickoff wizard, the PM dashboard
+ * and the department draft, outline and extraction screens each used to have
+ * their own design. Each of those loaders is now only its wording.
+ *
+ * Portalled to <body> so no scrolling or transformed ancestor can clip it, and
+ * after mount only, since a portal needs the DOM. z-index 100 matches the
+ * loaders it replaced, so it stacks the same way against dialogs and toasts.
+ */
+export function AiLoadingOverlay(props: AiLoadingScreenProps) {
+  // False on the server and during hydration, true once in the browser — the
+  // portal needs document.body. Reading it this way rather than flipping a
+  // flag in an effect keeps server and client output identical on first paint.
+  const inBrowser = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  )
+  if (!inBrowser) return null
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, overflowY: "auto" }}>
+      <AiLoadingScreen {...props} />
+    </div>,
+    document.body,
+  )
+}
+
+/** Whether we're in the browser never changes, so there is nothing to subscribe to. */
+function noopSubscribe() {
+  return () => {}
 }

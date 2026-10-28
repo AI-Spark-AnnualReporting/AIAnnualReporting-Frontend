@@ -95,9 +95,13 @@ export function DraftFindingsPanel({
   cycleId,
   findings,
   locked = false,
+  scroll = true,
 }: {
   cycleId: string
   findings: DraftFinding[]
+  /** False when the list sits folded under the "all handled" summary: it
+   *  then grows with the page instead of scrolling inside it. */
+  scroll?: boolean
   // Once the PM has consented and opened the builder this is a record, not a
   // workspace: the findings and what he did to each still render in full, but
   // nothing can be changed. The server refuses these writes too — hiding the
@@ -155,14 +159,25 @@ export function DraftFindingsPanel({
     // is left — exactly while working through them.
     //
     // pr-1 keeps the scrollbar off the cards' right border; the viewport-based
-    // height is what is left below the header and the green banner.
-    <div className="max-h-[calc(100vh-18rem)] space-y-3 overflow-y-auto pr-1">
-      {findings.map((finding) => {
+    // height is what is left below the header - and, until the findings are
+    // locked, the progress box above the list. Without that the page grew a
+    // second, outer scrollbar.
+    <div
+      className={cn(
+        "space-y-3",
+        scroll && "overflow-y-auto pr-1",
+        scroll && (locked ? "max-h-[calc(100vh-18rem)]" : "max-h-[calc(100vh-27rem)]"),
+      )}
+    >
+      {findings.map((finding, index) => {
         const isOpen = finding.status === "open"
         const summary = conflictSummary(finding)
         return (
           <div
-            key={finding.id}
+            // With the position too: cycles analyzed before the numbering fix
+            // hold two findings with one id, and a shared key made React show
+            // one card twice or drop one.
+            key={`${finding.id}:${index}`}
             className={cn(
               "rounded-xl border p-4",
               isOpen ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50",

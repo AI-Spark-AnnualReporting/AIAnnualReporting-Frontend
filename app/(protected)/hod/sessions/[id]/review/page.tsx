@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useHODSession, useReviewAnswers } from "@/hooks/useHod"
 import { draftContent } from "@/lib/session"
@@ -13,6 +13,12 @@ import { ClaimLine } from "@/components/report/ClaimLine"
 import { cn } from "@/lib/utils"
 
 const isNA = (a: string) => a.trim().toUpperCase().startsWith("N/A")
+
+// After approval the facts are read in the background (10-30 s). The page
+// checks for them this often, and stops after FACTS_WAIT_MS: a read that
+// failed reaches the lead as a notification they can click to retry.
+const FACTS_POLL_MS = 4_000
+const FACTS_WAIT_MS = 3 * 60_000
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   assigned: { label: "Awaiting kickoff", cls: "bg-slate-100 text-slate-600" },
@@ -36,12 +42,28 @@ const VIEW_ONLY_NOTE: Record<string, string> = {
 export default function HODReviewPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { data: session, isLoading, isError } = useHODSession(id)
+  const { data: session, isLoading, isError, refetch } = useHODSession(id)
   const review = useReviewAnswers(id)
 
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [notes, setNotes] = useState("")
   const [activeTab, setActiveTab] = useState<"answers" | "draft" | "facts">("answers")
+  // Approved but the facts not read yet: check until they are, for a while.
+  const factsPending =
+    session?.status === "approved" && !session.department_claims_extracted_at
+  const [gaveUp, setGaveUp] = useState(false)
+  useEffect(() => {
+    if (!factsPending) return
+    const timer = setInterval(() => void refetch(), FACTS_POLL_MS)
+    const stop = setTimeout(() => {
+      clearInterval(timer)
+      setGaveUp(true)
+    }, FACTS_WAIT_MS)
+    return () => {
+      clearInterval(timer)
+      clearTimeout(stop)
+    }
+  }, [factsPending, refetch])
 
   const questions = useMemo(
     () => [...(session?.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0)),
@@ -73,8 +95,18 @@ export default function HODReviewPage() {
   // facts in these answers" reads differently from "not read yet".
   const factsRead = !!session.department_claims_extracted_at
 
+  // Stays here and opens Facts: approving is what starts reading them, and
+  // the list it used to jump to drops the session once approved.
   const approve = () =>
-    review.mutate({ action: "approved" }, { onSuccess: () => router.push("/hod/reviews") })
+    review.mutate(
+      { action: "approved" },
+      {
+        onSuccess: () => {
+          setActiveTab("facts")
+          void refetch()
+        },
+      },
+    )
   const sendBack = () => {
     if (!notes.trim()) return
     review.mutate(
@@ -220,14 +252,28 @@ export default function HODReviewPage() {
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 py-12 text-center">
-              <ListTree className="h-6 w-6 text-slate-300" />
+              {factsPending && !gaveUp ? (
+                <Loader2 className="h-6 w-6 animate-spin text-[#4040c8]" />
+              ) : (
+                <ListTree className="h-6 w-6 text-slate-300" />
+              )}
               <p className="text-sm font-semibold text-slate-500">
-                {factsRead ? "No facts found" : "Not read yet"}
+                {factsRead
+                  ? "No facts found"
+                  : factsPending
+                    ? gaveUp
+                      ? "Still reading the facts"
+                      : "Reading the facts from the answers…"
+                    : "Not read yet"}
               </p>
               <p className="max-w-sm text-xs text-slate-400">
                 {factsRead
                   ? "This department's answers don't state any facts — they were left blank, or describe what should be reported rather than what happened."
-                  : "The facts are read from the answers once you approve this submission."}
+                  : factsPending
+                    ? gaveUp
+                      ? "This is taking longer than usual. Reload the page in a minute. If reading fails, you'll get a notification to try again."
+                      : "This takes up to half a minute. They'll appear here by themselves."
+                    : "The facts are read from the answers once you approve this submission."}
               </p>
             </div>
           )}

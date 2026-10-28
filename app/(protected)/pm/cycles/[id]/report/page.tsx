@@ -1,25 +1,26 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   ChevronDown,
   FileDown,
   FileCheck,
   FileText,
+  Languages,
   Loader2,
   Lock,
+  Pencil,
   RefreshCw,
   ShieldCheck,
   Sparkles,
   Palette,
 } from "lucide-react"
-// Hidden 2026-09-24 with the Design button — the dialog's onSaved was the only
-// thing in this file that invalidated a query.
-// import { useQueryClient } from "@tanstack/react-query"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
@@ -35,11 +36,14 @@ import { PageLoader } from "@/components/ui/spinner"
 // import { DesignDialog } from "@/components/report/design/DesignDialog"
 import { FinalReportView } from "@/components/report/FinalReportView"
 import { ReportHubPanel } from "@/components/communication/review/ReportHubPanel"
-import { ReportStatusCard } from "@/components/communication/review/ReportStatusCard"
+import { ReportStatusCard, ReportStatusCardSkeleton } from "@/components/communication/review/ReportStatusCard"
 import { ReportValidateLoader } from "@/components/report/ReportValidateLoader"
+import { ClientReviewCard, ClientReviewCardSkeleton } from "@/components/report-review/ClientReviewCard"
+import { useReportReview } from "@/hooks/useReportReview"
 import {
-  useApproveReport,
+  useArabicReport,
   useAssembleReport,
+  useAssemblyReadiness,
   useAssembledReport,
   useFinalReport,
   useRenderReport,
@@ -47,8 +51,7 @@ import {
   useValidateReport,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
-// Hidden 2026-09-24 with the Design button — see the note on useQueryClient above.
-// import { QUERY_KEYS } from "@/lib/constants"
+import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
 import type { CompanyProfile, ContentLanguage, Sector } from "@/types"
 
@@ -77,8 +80,6 @@ interface DashboardData {
 
 function FinalReportShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
-  // Hidden 2026-09-24 with the Design button — see the note on its import above.
-  // const qc = useQueryClient()
   const reportQuery = useFinalReport(cycleId)
   const validate = useValidateReport(cycleId)
   // The document as the engine will print it. Only once there is something to
@@ -94,17 +95,58 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   // as its onChanged — an inline arrow there would re-run its loader forever.
   const approvalQuery = useReportApproval(cycleId)
   const approval = approvalQuery.data
-  const approve = useApproveReport(cycleId)
   // Spark doesn't send reports out for review, so the rail drops the whole
   // "Review & approval" card for them — without the share button it only
   // said "Not yet shared for review."
   const { user } = useAuth()
   const isSpark = user?.role === "spark_internal"
 
+  // The client review (Spark sends the report to the client). Once the
+  // report has been sent, the server refuses Re-assemble, Validate and every
+  // Builder edit (changes go through Edit report), so those buttons are off
+  // here too. Edit report only opens once the client asked for changes.
+  const reviewQuery = useReportReview(cycleId, reportQuery.isSuccess)
+  const review = reviewQuery.data
+  const withClient = !!review?.awaiting_client
+  const sentToClient = !!review?.share
+  const changesRequested = review?.share?.status === "changes_requested"
+
+  // The Client review card checks for the client's answer every minute; the
+  // rest of the page does not. When the answer arrives (approved locks the
+  // report; changes requested opens Edit report), re-read what depends on it,
+  // so the Report status card and the buttons change with the card.
+  const qc = useQueryClient()
+  const shareStatus = review?.share?.status
+  const lastShareStatus = useRef(shareStatus)
+  useEffect(() => {
+    const before = lastShareStatus.current
+    lastShareStatus.current = shareStatus
+    if (before === undefined || before === shareStatus) return
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_APPROVAL(cycleId) })
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+  }, [shareStatus, qc, cycleId])
+  // Re-assemble only when a section changed in the Builder since this report
+  // was built (the Builder's "Assemble again" flag). With nothing new it only
+  // rewrites the Executive Summary and throws away a clean validation.
+  const builderChanged = !!useAssemblyReadiness(cycleId).data?.stale
+
   const [reassembleOpen, setReassembleOpen] = useState(false)
   // Hidden 2026-09-24 with the Design button — see the comment beside it below.
   // const [designOpen, setDesignOpen] = useState(false)
-  const [approveOpen, setApproveOpen] = useState(false)
+
+  // The Arabic edition lives on its own page (/report/arabic), always opened in
+  // a new tab so the English report stays open here. English cycles only.
+  const isEnglishCycle = pmData?.cycle?.content_language === "english"
+  const arabicQuery = useArabicReport(cycleId, reportQuery.isSuccess && isEnglishCycle)
+  const arabicReport = arabicQuery.data
+  const arabicPage = `/pm/cycles/${cycleId}/report/arabic`
+
+  /** Opens the Arabic page in a new tab, which starts the translation itself.
+   *  The tab must open on the click: browsers block tabs opened later. */
+  const createArabicInNewTab = () => {
+    window.open(`${arabicPage}?create=1`, "_blank", "noopener")
+  }
 
   // Match the builder shell's chrome-collapse for full document width.
   useEffect(() => {
@@ -168,10 +210,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               {typeof report.word_count === "number"
                 ? ` · ${report.word_count.toLocaleString()} words`
                 : ""}
+              {review?.label ? ` · ${review.label}` : ""}
               {locked && approval?.approved_by
-                ? ` · Approved by ${approval.approved_by}${
-                    approval.version ? ` · ${approval.version}` : ""
-                  }`
+                ? ` · Approved by ${approval.approved_by}`
                 : ""}
             </p>
           )}
@@ -183,20 +224,23 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 API (409), so both buttons go away rather than failing on click. */}
             {!locked && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setReassembleOpen(true)}
-                  disabled={assemble.isPending || render.isPending}
-                  className="h-8"
-                >
-                  {assemble.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  Re-assemble
-                </Button>
+                {builderChanged && !sentToClient && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setReassembleOpen(true)}
+                    disabled={assemble.isPending || render.isPending}
+                    title="A section changed in the Builder after this report was built."
+                    className="h-8"
+                  >
+                    {assemble.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Re-assemble
+                  </Button>
+                )}
                 {/* Hidden 2026-09-24 — superseded by Create Design, which took
                     this button's Palette icon. The cover/typography/palette modal
                     itself is untouched in components/report/design/DesignDialog.tsx;
@@ -236,7 +280,9 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     it behaves. So: click here, navigate when it is done, and
                     the page that receives them only ever reads a stored
                     result. */}
-                {(!locked || hasValidation) && (
+                {/* Once sent, the report is never validated again: the
+                    button only opens a result already on file. */}
+                {(hasValidation || (!locked && !sentToClient)) && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -244,7 +290,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     // A signed-off report is never re-validated - the API
                     // refuses to change it, and a fresh verdict on a document
                     // nobody can edit is a cost with no action behind it.
-                    if (locked) {
+                    if (locked || sentToClient) {
                       router.push(`/pm/cycles/${cycleId}/validation`)
                       return
                     }
@@ -283,31 +329,55 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                       : "Validate report"}
                 </Button>
                 )}
-            {/* Not gated on completeness — the confirm dialog is where the
-                one-way consequence gets spelled out. Same as the board report. */}
-            {approval?.can_approve && (
+            {/* The client asked for changes: the PM edits the report here,
+                not in the Builder. Saving makes the next version. */}
+            {changesRequested && !locked && (
+              <Link href={`/pm/cycles/${cycleId}/report/edit`} className="shrink-0">
+                <Button variant="brand" size="sm" className="h-8">
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                  Edit report
+                </Button>
+              </Link>
+            )}
+            {/* Create Arabic the first time; afterwards it opens the Arabic
+                page, which has its own Create again and Export. Both open a
+                new tab. */}
+            {isEnglishCycle && arabicReport && (
+              <Link
+                href={arabicPage}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0"
+              >
+                <Button variant="outline" size="sm" className="h-8">
+                  <Languages className="h-3.5 w-3.5 mr-1.5" />
+                  Open Arabic
+                  <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                </Button>
+              </Link>
+            )}
+            {isEnglishCycle && !arabicReport && (
               <Button
+                variant="outline"
                 size="sm"
-                variant="brand"
-                onClick={() => setApproveOpen(true)}
-                disabled={approve.isPending}
+                onClick={createArabicInNewTab}
+                // Only a signed-off report is translated; the server refuses too.
+                // Greyed only before the first answer: a re-check (e.g. on
+                // returning to the tab) puts a "not found" back to loading,
+                // which made the button blink. errorUpdateCount survives that.
+                disabled={!locked || (arabicQuery.isLoading && arabicQuery.errorUpdateCount === 0)}
+                title={locked ? undefined : "The client approves the report first, then the Arabic version can be created."}
                 className="h-8"
               >
-                {approve.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Lock className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Approve &amp; Lock
+                <Languages className="h-3.5 w-3.5 mr-1.5" />
+                Create Arabic
               </Button>
             )}
-
             {/* Export is the last step, not a parallel one. Quarterly
                 (AssembledReportPage) and earnings (PublishBar) both hide it
                 until the report is signed off, so a draft cannot be handed
-                round as though it were the final file. Approve & Lock and
-                Export are never on the bar together, which is why both can
-                wear the brand colour. */}
+                round as though it were the final file. The client's approval
+                is what signs it off. */}
             {locked && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -380,7 +450,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
           which is the same moment `validation_stale` goes false. Hidden once
           locked - a signed-off report cannot be re-validated, so nagging about
           it asks for something that is no longer possible. */}
-      {report?.validation_stale && !locked && (
+      {report?.validation_stale && !locked && !sentToClient && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 print:hidden">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>
@@ -391,7 +461,17 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
         </div>
       )}
 
-      {validate.isPending && <ReportValidateLoader />}
+      {withClient && review?.share && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 print:hidden">
+          <Lock className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            The report is with {review.share.client_email} for review. It
+            can&apos;t be edited until they answer.
+          </span>
+        </div>
+      )}
+
+      {validate.isPending && <ReportValidateLoader stage={validate.stage} />}
 
       <div className="flex flex-1 min-h-0 print:block">
         <div className="flex-1 overflow-y-auto print:overflow-visible">
@@ -405,12 +485,22 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
         </div>
 
-        {/* The Communication Hub rail, same composition as the board report's:
+        {/* The rail. For PM / admin: the Communication Hub, same composition as the board report's:
             a plain status card, then "Share for review" (assigns a reviewer and
             starts the thread), Discuss, and the reviewer's approve / send-back
             screen. Status lives in the card above, so the panel's own radios
             stay hidden. Only exists once the report has been assembled, since
             that is what creates the shared reports row. */}
+        {/* While the sign-off state loads, the rail shows its cards' shapes. */}
+        {!reportMissing && !approval && approvalQuery.isLoading && (
+          <aside
+            className="shrink-0 border-l px-4 py-5 print:hidden"
+            style={{ width: 290 + 32, background: "#F2F3FA", display: "flex", flexDirection: "column", gap: 14 }}
+          >
+            <ReportStatusCardSkeleton />
+            <ClientReviewCardSkeleton />
+          </aside>
+        )}
         {approval?.report_id && (
           <aside
             className="shrink-0 overflow-y-auto border-l px-4 py-5 print:hidden"
@@ -429,8 +519,19 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
               <ReportHubPanel
                 reportId={approval.report_id}
                 showStatus={false}
-                readOnly={locked}
+                readOnly={locked || withClient}
                 onChanged={approvalQuery.refetch}
+              />
+            )}
+            {/* Spark sends the report to the client from here. Everyone else
+                sees the card once it has been sent, read-only. */}
+            {!review && reviewQuery.isLoading && <ClientReviewCardSkeleton />}
+            {review && (isSpark || review.share) && (
+              <ClientReviewCard
+                cycleId={cycleId}
+                state={review}
+                isSpark={isSpark}
+                locked={locked}
               />
             )}
           </aside>
@@ -481,19 +582,6 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
       />
       */}
 
-      <ConfirmDialog
-        open={approveOpen}
-        onOpenChange={setApproveOpen}
-        title="Approve and lock this report?"
-        description="By approving, you confirm the report content is final. After this you will NOT be able to edit any section, regenerate content, re-assemble, or change the plan. Export unlocks at the same moment."
-        confirmLabel="Approve & Lock"
-        variant="destructive"
-        isLoading={approve.isPending}
-        onConfirm={async () => {
-          await approve.mutateAsync()
-          setApproveOpen(false)
-        }}
-      />
     </div>
   )
 }

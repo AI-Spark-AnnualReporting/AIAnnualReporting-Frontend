@@ -184,8 +184,10 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const suggestedThemes = pmData?.cycle?.suggested_themes ?? []
 
   const plan = planQuery.data
-  const planMissing =
-    !!planQuery.error || !plan || plan.plan_generated_at === null
+  // Only a plan we don't have is missing. A failed reload keeps the last one
+  // (react-query holds its data on error); treating that error as "no plan"
+  // threw away the Start Building loader mid-run.
+  const planMissing = !plan || plan.plan_generated_at === null
 
   if (planMissing) {
     return (
@@ -237,13 +239,14 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   // making the PM wait there bought nothing. The one unavoidable wait is the
   // build, and this now happens inside it.
   //
-  // Sequential rather than parallel: within a section the mode must land before
-  // the feeders (switching to extract clears them server-side), and one at a
-  // time keeps the failure message specific and stops a wobbly connection being
-  // hit in a burst.
+  // A few sections at a time (SECTION_SAVES_AT_ONCE), each one in order inside
+  // itself: the mode must land before the feeders (switching to extract clears
+  // them server-side). One at a time took minutes for a 20-section plan on a
+  // slow server, and a single slow save timed the whole run out.
   //
-  // Returns true when everything landed; false leaves the unsaved edits in
-  // place so the caller can stop and the PM can retry without re-picking.
+  // Returns true when everything landed; false leaves the unsaved edits that
+  // did not land in place, so the caller can stop and the PM can retry without
+  // re-picking.
   const saveSources = async (
     onProgress?: (done: number, total: number) => void,
   ): Promise<boolean> => {
@@ -252,57 +255,61 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     onProgress?.(0, count)
     const remaining: PendingSources = { ...pending }
     let done = 0
-    try {
-      for (const [sectionCode, change] of Object.entries(pending)) {
-        if (change.mode) {
-          await setSourceMode.mutateAsync({ sectionCode, mode: change.mode })
-        }
-        // Only narrative and analyze sections take feeders — set_section_feeders
-        // refuses every other mode outright. Testing for "not extract" let a
-        // manual/attach/auto section through, that write 409'd, and the whole Start
-        // Building run stopped on it: the PM could neither save nor proceed, with
-        // nothing on screen saying which section was at fault. Allow-list the two
-        // modes the backend accepts, so a mode that cannot hold feeders is skipped
-        // rather than fatal.
-        const finalMode =
-          change.mode ??
-          (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode ??
-          sections.find((s) => s.section_code === sectionCode)?.mode
-        const takesFeeders = finalMode === "generate" || finalMode === "analyze"
-        // The style rides on the feeders call — one request per section. Only
-        // AI-written and analyze sections have one; the backend refuses it on
-        // any other mode. For analyze, that same call re-runs the analysis, so
-        // the findings are rewritten in the chosen style.
-        const writingStyle = takesWritingStyle(
-          finalMode,
-          sections.find((s) => s.section_code === sectionCode)?.ai_allowed ?? true,
-        )
-          ? change.writing_style
-          : undefined
-        if ((change.feeders || writingStyle) && takesFeeders) {
-          await setFeeders.mutateAsync({
-            sectionCode,
-            // A style-only change resends the departments the section already has.
-            departmentCodes:
-              change.feeders ??
-              (plan.feeders ?? []).find((f) => f.section_code === sectionCode)
-                ?.departments ??
-              [],
-            writingStyle,
-          })
-        }
-        delete remaining[sectionCode]
-        done += 1
-        onProgress?.(done, count)
+
+    const saveOne = async ([sectionCode, change]: [string, PendingSourceChange]) => {
+      if (change.mode) {
+        await setSourceMode.mutateAsync({ sectionCode, mode: change.mode })
       }
-      setPending({})
-      return true
-    } catch {
-      // The mutation already toasted the reason. Keep whatever did not land so
-      // the PM can retry without re-picking anything.
-      setPending(remaining)
-      return false
+      // Only narrative and analyze sections take feeders — set_section_feeders
+      // refuses every other mode outright. Testing for "not extract" let a
+      // manual/attach/auto section through, that write 409'd, and the whole Start
+      // Building run stopped on it: the PM could neither save nor proceed, with
+      // nothing on screen saying which section was at fault. Allow-list the two
+      // modes the backend accepts, so a mode that cannot hold feeders is skipped
+      // rather than fatal.
+      const finalMode =
+        change.mode ??
+        (plan.feeders ?? []).find((f) => f.section_code === sectionCode)?.mode ??
+        sections.find((s) => s.section_code === sectionCode)?.mode
+      const takesFeeders = finalMode === "generate" || finalMode === "analyze"
+      // The style rides on the feeders call — one request per section. Only
+      // AI-written and analyze sections have one; the backend refuses it on
+      // any other mode. For analyze, that same call re-runs the analysis, so
+      // the findings are rewritten in the chosen style.
+      const writingStyle = takesWritingStyle(
+        finalMode,
+        sections.find((s) => s.section_code === sectionCode)?.ai_allowed ?? true,
+      )
+        ? change.writing_style
+        : undefined
+      if ((change.feeders || writingStyle) && takesFeeders) {
+        await setFeeders.mutateAsync({
+          sectionCode,
+          // A style-only change resends the departments the section already has.
+          departmentCodes:
+            change.feeders ??
+            (plan.feeders ?? []).find((f) => f.section_code === sectionCode)
+              ?.departments ??
+            [],
+          writingStyle,
+        })
+      }
+      delete remaining[sectionCode]
+      done += 1
+      onProgress?.(done, count)
     }
+
+    let failed = false
+    await runFewAtATime(Object.entries(pending), SECTION_SAVES_AT_ONCE, async (entry) => {
+      try {
+        await saveOne(entry)
+      } catch {
+        // The mutation already toasted the reason; the section stays unsaved.
+        failed = true
+      }
+    })
+    setPending(failed ? remaining : {})
+    return !failed
   }
 
   return (
@@ -748,6 +755,30 @@ function ThemesStep({
 
 // ─────────────────────────── Start Building Action ───────────────────────────
 
+// Sections written by the AI at the same time during Start Building, and the
+// pause before a failed one is tried again.
+const SECTION_WRITES_AT_ONCE = 4
+// Section choices saved at the same time at the start of Start Building.
+const SECTION_SAVES_AT_ONCE = 4
+const RETRY_PAUSE_MS = 5_000
+
+/** Run `task` over `items`, never more than `limit` at once. */
+async function runFewAtATime<T>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next]
+      next += 1
+      await task(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
 function StartBuildingAction({
   cycleId,
   plan,
@@ -871,8 +902,23 @@ function StartBuildingAction({
     setCompleted(0)
     setFailed(0)
 
-    await Promise.allSettled(
-      work.map(async (s) => {
+    // At most SECTION_WRITES_AT_ONCE at a time: all at once (12+ large AI
+    // requests in one burst) went over the AI provider's per-minute limit and
+    // a section failed. A section that fails is tried once more at the end,
+    // after a pause, before it counts as failed.
+    const failedFirst: typeof work = []
+    await runFewAtATime(work, SECTION_WRITES_AT_ONCE, async (s) => {
+      try {
+        const updated = await pmApi.generateSection(cycleId, s.section_code)
+        patchSection(updated)
+        setCompleted((c) => c + 1)
+      } catch {
+        failedFirst.push(s)
+      }
+    })
+    if (failedFirst.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_PAUSE_MS))
+      await runFewAtATime(failedFirst, SECTION_WRITES_AT_ONCE, async (s) => {
         try {
           const updated = await pmApi.generateSection(cycleId, s.section_code)
           patchSection(updated)
@@ -880,8 +926,8 @@ function StartBuildingAction({
         } catch {
           setFailed((f) => f + 1)
         }
-      }),
-    )
+      })
+    }
     setPhase("done")
   }
 

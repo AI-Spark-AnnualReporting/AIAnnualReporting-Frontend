@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { MarkdownHelpChip } from "@/components/report/MarkdownHelp"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
+import { SectionUndo } from "@/components/report/UndoChangeButton"
 import {
   usePlan,
   useRefineSection,
@@ -38,11 +39,14 @@ interface DashboardData {
 export function AnalyzeSection({
   section,
   cycleId,
+  hasFindings = false,
   contentLanguage = "english",
   isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  /** Being fixed from validation findings: no Re-run Analysis (see SectionDetail). */
+  hasFindings?: boolean
   contentLanguage?: ContentLanguage
   isRtl?: boolean
 }) {
@@ -119,15 +123,26 @@ export function AnalyzeSection({
             />
           ) : (
             <DraftingView
+              // Remount per section, so the refine box starts fresh (and picks
+              // up a validation fix meant for this section).
+              key={sectionCode}
+              sectionCode={sectionCode}
               content={content}
               feederNames={feederNames}
               running={runAnalysis.isPending}
               refining={refine.isPending}
               isRtl={isRtl}
-              onRun={() => runAnalysis.mutate({ sectionCode })}
+              onRun={hasFindings ? undefined : () => runAnalysis.mutate({ sectionCode })}
               onRefine={(instruction) => refine.mutate({ sectionCode, instruction })}
               onEdit={() => setEditMode(true)}
               onClear={() => setClearOpen(true)}
+              undoSlot={
+                <SectionUndo
+                  cycleId={cycleId}
+                  sectionCode={sectionCode}
+                  disabled={runAnalysis.isPending || refine.isPending}
+                />
+              }
             />
           )}
         </div>
@@ -277,6 +292,7 @@ function PendingView({
 }
 
 function DraftingView({
+  sectionCode,
   content,
   feederNames,
   running,
@@ -286,16 +302,21 @@ function DraftingView({
   onRefine,
   onEdit,
   onClear,
+  undoSlot,
 }: {
+  sectionCode: string
   content: string
   feederNames: string[]
   running: boolean
   refining: boolean
   isRtl?: boolean
-  onRun: () => void
+  /** Left out while the section is being fixed: Re-run Analysis is hidden. */
+  onRun?: () => void
   onRefine: (instruction: string) => void
   onEdit: () => void
   onClear: () => void
+  /** Undo the last change since the validation, beside Edit. */
+  undoSlot?: React.ReactNode
 }) {
   const busy = running || refining
 
@@ -336,10 +357,11 @@ function DraftingView({
         </div>
       )}
 
-      <SectionChat refining={refining} onRefine={onRefine} />
+      <SectionChat refining={refining} onRefine={onRefine} sectionCode={sectionCode} />
 
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
+          {onRun && (
           <Button
             variant="outline"
             size="sm"
@@ -354,6 +376,7 @@ function DraftingView({
             )}
             Re-run Analysis
           </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -364,6 +387,7 @@ function DraftingView({
             <Edit2 className="h-3.5 w-3.5 mr-1.5" />
             Edit
           </Button>
+          {undoSlot}
           {content.trim() && (
             <Button
               variant="ghost"

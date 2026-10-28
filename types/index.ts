@@ -320,6 +320,9 @@ export interface FinalReport {
   // "never checked" - both arrive with `validation` null, and only one of them
   // means the Validation Report page has just dropped out of the export.
   validation_stale?: boolean
+  // Arabic translation only: the cover's lines in Arabic (company_name, title,
+  // headline, period_label, footnote). Absent on the English report.
+  cover_values?: Record<string, string> | null
 }
 
 // Readiness of a cycle to enter the Report Builder.

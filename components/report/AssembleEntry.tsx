@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { AlertTriangle, FileCheck, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
@@ -22,7 +21,9 @@ import {
   useFinalReport,
   type MutationError,
 } from "@/hooks/useReportBuilder"
+import { useReportReview } from "@/hooks/useReportReview"
 import { pmApi } from "@/lib/api/pm"
+import { waitForAssembleJob } from "@/lib/assemble-job"
 import { QUERY_KEYS, SECTION_LAYERS } from "@/lib/constants"
 import type { FinalReport } from "@/types"
 
@@ -52,20 +53,6 @@ const ASSEMBLE_TIPS = [
 // looks broken.
 const ASSEMBLE_ESTIMATE_MS = 60_000
 
-// Assembling runs in the background on the server: the click only STARTS it,
-// then the builder checks every POLL_INTERVAL_MS whether a newer report has
-// been saved. No request waits for the whole assemble, so none can time out
-// halfway — which is what used to drop the PM back on the builder while the
-// server finished anyway.
-const POLL_INTERVAL_MS = 3_000
-// The server stores nothing about a run, so a failed one is only noticed by
-// no report ever appearing. A normal run takes one to two minutes.
-const POLL_GIVE_UP_MS = 8 * 60_000
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 interface AssembleEntryProps {
   cycleId: string
 }
@@ -73,6 +60,9 @@ interface AssembleEntryProps {
 export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readinessQuery = useAssemblyReadiness(cycleId)
   const finalReportQuery = useFinalReport(cycleId)
+  // Sent to the client once: no more assembling (the server refuses it), so
+  // the button only opens the report, where Edit report is.
+  const sentToClient = !!useReportReview(cycleId, finalReportQuery.isSuccess).data?.share
   const qc = useQueryClient()
   const router = useRouter()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -113,46 +103,23 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
     qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
     qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-    toast.success("Report assembled")
+    // No toast: the loader's own "Your report is assembled" already says it.
     setPhase("done")
   }
 
-  // Is `report` one saved by this run, rather than the one already there?
-  // generated_at is the row's updated_at, stamped by a DB trigger on every
-  // save, so this compares two server timestamps — never the browser clock.
-  // With no report before the click, any report at all is new.
-  const isNewReport = (
-    previousGeneratedAt: string | null,
-    report: FinalReport,
-  ): boolean => {
-    if (previousGeneratedAt == null) return true
-    return !!report.generated_at && report.generated_at !== previousGeneratedAt
-  }
-
-  // Check for a newer report until one appears. A failed check — 404 before
-  // the first report is saved, a network blip, the dev server restarting —
-  // is just "not yet": the run lives on the server, not in this request.
-  const pollUntilFinished = async (previousGeneratedAt: string | null) => {
+  // Wait on the server's job (running -> completed / failed), then load the
+  // report it saved. A failed job shows its reason straight away.
+  const pollUntilFinished = async (jobId: string) => {
     if (pollingRef.current) return
     pollingRef.current = true
-    const giveUpAt = Date.now() + POLL_GIVE_UP_MS
     try {
-      while (Date.now() < giveUpAt) {
-        await wait(POLL_INTERVAL_MS)
-        if (!mountedRef.current) return
-        try {
-          const report = await pmApi.getFinalReport(cycleId)
-          if (isNewReport(previousGeneratedAt, report)) {
-            finishWithReport(report)
-            return
-          }
-        } catch {
-          // not saved yet
-        }
+      const finished = await waitForAssembleJob(jobId, () => !mountedRef.current)
+      if (!finished) return
+      finishWithReport(await pmApi.getFinalReport(cycleId))
+    } catch (err) {
+      if (mountedRef.current) {
+        showFailure(err instanceof Error ? err.message : "Assembling failed. Please try again.")
       }
-      showFailure(
-        "Assembling didn't finish. It may have hit an error — please try again.",
-      )
     } finally {
       pollingRef.current = false
     }
@@ -162,13 +129,11 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     setConfirmOpen(false)
     setLastRefresh(refresh)
     setPhase("running")
-    // The report as it was before this click, so the one THIS run saves can be
-    // told apart from it.
-    const previousGeneratedAt = finalReportQuery.data?.generated_at ?? null
+    let jobId: string
     try {
       // Answers straight away. If a run is already going it joins that one
       // instead of starting another, so polling below covers both.
-      await pmApi.startAssemble(cycleId, refresh)
+      jobId = (await pmApi.startAssemble(cycleId, refresh)).job_id
     } catch (err) {
       // A refusal (locked, nothing to assemble, no access) or no server.
       showFailure(
@@ -176,7 +141,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
       )
       return
     }
-    await pollUntilFinished(previousGeneratedAt)
+    await pollUntilFinished(jobId)
   }
 
   if (phase === "failed") {
@@ -197,6 +162,8 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
       <div className="fixed inset-0 z-[1400] overflow-y-auto">
         <AiLoadingScreen
           title="Assembling your report"
+          // No bar, like every other loader: it was a timer, not real progress.
+          showProgress={false}
           subtitle="Pulling every written section together and writing the executive summary."
           milestones={ASSEMBLE_MILESTONES}
           tips={ASSEMBLE_TIPS}
@@ -210,7 +177,9 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     )
   }
 
-  if (readinessQuery.isLoading) {
+  // Wait for both: without the final report we can't tell "Assemble Report"
+  // from "View Report", and guessing showed the wrong button while it loaded.
+  if (readinessQuery.isLoading || finalReportQuery.isLoading) {
     return (
       <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
@@ -221,12 +190,14 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
 
   const { can_assemble, ready, total, incomplete_sections, stale } = readiness
 
-  // Use the final-report query as the source of truth for whether a report
-  // exists — assembly-readiness may not return has_final_report reliably.
-  const hasReport = finalReportQuery.isSuccess
+  // A report exists if it loaded, or if readiness calls it stale: the server
+  // only says stale when there is an assembled report to be out of date. The
+  // second half keeps this button in step with the builder's "Assemble again"
+  // banner (same `stale` flag) even when the final-report fetch failed.
+  const hasReport = finalReportQuery.isSuccess || stale
 
   // A report exists and nothing has changed since → nothing to do but read it.
-  if (hasReport && !stale) {
+  if (hasReport && (!stale || sentToClient)) {
     return (
       <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
         <Button className="bg-indigo-600 text-white hover:bg-indigo-700">

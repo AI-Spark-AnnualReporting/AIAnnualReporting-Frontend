@@ -2,9 +2,12 @@
 
 import { use, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, ChevronDown, Loader2, ScanSearch, ListTree } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { AlertTriangle, ArrowLeft, ChevronDown, Loader2, ScanSearch, ListTree } from "lucide-react"
 
-import { useDepartmentClaims, useExtractDepartmentClaims } from "@/hooks/useReportBuilder"
+import { FACTS_SHORT_AT, useDepartmentClaims, useExtractDepartmentClaims } from "@/hooks/useReportBuilder"
+import { useRetryClaimExtraction } from "@/hooks/useNotifications"
+import { QUERY_KEYS } from "@/lib/constants"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader } from "@/components/ui/spinner"
@@ -98,6 +101,7 @@ export default function CycleClaimsPage({ params }: { params: Promise<{ id: stri
           {departments.map((dept) => (
             <DepartmentClaims
               key={dept.session_id}
+              cycleId={id}
               dept={dept}
               open={openId === dept.session_id}
               onToggle={() =>
@@ -112,10 +116,12 @@ export default function CycleClaimsPage({ params }: { params: Promise<{ id: stri
 }
 
 function DepartmentClaims({
+  cycleId,
   dept,
   open,
   onToggle,
 }: {
+  cycleId: string
   dept: DepartmentClaimsGroup
   open: boolean
   onToggle: () => void
@@ -125,6 +131,18 @@ function DepartmentClaims({
   // nothing — so a department with no facts reads differently from one nobody
   // has looked at.
   const wasRead = !!dept.extracted_at
+  // Figures the answers state that no fact carries: the list came out short,
+  // and the draft check would flag those sentences as unsupported.
+  const counted = wasRead ? (dept.figures_not_in_facts ?? 0) : 0
+  // Warned once: after a re-read nothing more is shown, so re-reading can
+  // never become a loop (the draft check allows for what is left).
+  const missing = !dept.facts_reread && counted >= FACTS_SHORT_AT ? counted : 0
+  const qc = useQueryClient()
+  const reread = useRetryClaimExtraction()
+  const readAgain = () =>
+    reread.mutate(dept.session_id, {
+      onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId) }),
+    })
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white">
@@ -149,6 +167,19 @@ function DepartmentClaims({
           )}
         />
       </button>
+
+      {missing > 0 && (
+        <div className="mx-5 mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="flex items-center gap-2 text-xs text-amber-800">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {missing} figure{missing === 1 ? "" : "s"} in the answers {missing === 1 ? "isn't" : "aren't"} in any fact.
+          </p>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={readAgain} disabled={reread.isPending}>
+            {reread.isPending && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+            {reread.isPending ? "Reading…" : "Read the facts again"}
+          </Button>
+        </div>
+      )}
 
       {open && (
         <div className="border-t border-slate-100 px-5 py-4">

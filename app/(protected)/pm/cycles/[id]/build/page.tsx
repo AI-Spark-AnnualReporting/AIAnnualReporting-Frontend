@@ -1,16 +1,27 @@
 "use client"
 
-import { use, useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, use, useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import {
   useBuildReadiness,
+  useFinalReport,
   usePMCycleSections,
   useAssemblyReadiness,
   useReportApproval,
 } from "@/hooks/useReportBuilder"
+import { useReportReview } from "@/hooks/useReportReview"
+import { SectionFindingsBanner } from "@/components/report/SectionFindingsBanner"
+import {
+  FixPrefillContext,
+  VALIDATION_SUMMARY_CODE,
+  findingsBySection,
+  highlightRegex,
+  highlightsBySection,
+} from "@/lib/validation-fixes"
+import { ProseHighlightContext } from "@/components/ui/prose-preview"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
 import { PageLoader } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -35,7 +46,11 @@ export default function ReportBuilderPage({
   const { id } = use(params)
   return (
     <RouteGuard allowedRoles={["project_manager", "admin"]}>
-      <BuilderShell cycleId={id} />
+      {/* useSearchParams (in BuilderShell) needs a Suspense boundary in the
+          App Router. */}
+      <Suspense fallback={<PageLoader />}>
+        <BuilderShell cycleId={id} />
+      </Suspense>
     </RouteGuard>
   )
 }
@@ -55,10 +70,55 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   // header's AssembleEntry reads, so the banner below and the "Assemble again"
   // button can never disagree — React Query serves both from one fetch.
   const stale = !!useAssemblyReadiness(cycleId).data?.stale
-  // Signed off — from this side's Approve & Lock or a Communication Hub reviewer.
-  const reportLocked = !!useReportApproval(cycleId).data?.locked
+  // Signed off — from this side's Approve & Lock or a Communication Hub reviewer —
+  // or with the client for review, when the server refuses edits too.
+  const signedOff = !!useReportApproval(cycleId).data?.locked
+  // Closed once the report was sent to the client: changes then go through
+  // Edit report on the report page, never back through the Builder.
+  const sentToClient = !!useReportReview(cycleId).data?.share
+  const reportLocked = signedOff || sentToClient
+  const withClient = sentToClient
 
-  const [selectedCode, setSelectedCode] = useState<string | null>(null)
+  // A Fix button on the validation page links here with ?section= (open that
+  // section) and, for an AI fix, ?fix= (the refine instruction to start with).
+  // Read once, from the router - not window.location: on a link click inside
+  // the app the new page renders before the address bar changes, so
+  // window.location still held the validation page's URL and the builder
+  // opened on its first section instead.
+  const searchParams = useSearchParams()
+  const [selectedCode, setSelectedCode] = useState<string | null>(() =>
+    searchParams.get("section"),
+  )
+  // `todo` is a fix the PM does by hand (an uncovered brief ask): shown in the
+  // banner, kept out of the refine box.
+  const [fix, setFix] = useState<{ sectionCode: string; text: string; manual: boolean } | null>(() => {
+    const sectionCode = searchParams.get("section")
+    const aiText = searchParams.get("fix")
+    const todo = searchParams.get("todo")
+    if (!sectionCode) return null
+    if (aiText) return { sectionCode, text: aiText, manual: false }
+    if (todo) return { sectionCode, text: todo, manual: true }
+    return null
+  })
+
+  // Only when the PM came from the validation page's Fix button: a PM who
+  // just went back to the Builder to change something should not be shown
+  // every finding (user decision, 2026-10-25). Read once, for the whole visit.
+  const [fromValidation] = useState(() => searchParams.get("from") === "validation")
+
+  // The last validation's findings, by section, for the banner and the rail's
+  // counts. The summary is filed under its own code in each.
+  const lastValidation = useFinalReport(cycleId).data?.validation
+  const validation = fromValidation ? lastValidation : undefined
+  const findings = validation ? findingsBySection(validation) : {}
+  if (findings[VALIDATION_SUMMARY_CODE]) {
+    findings[EXECUTIVE_SUMMARY_CODE] = findings[VALIDATION_SUMMARY_CODE]
+  }
+  const highlights = validation ? highlightsBySection(validation) : {}
+  const findingCounts: Record<string, number> = {}
+  for (const [code, lines] of Object.entries(findings)) {
+    findingCounts[code] = lines.length
+  }
 
   const readiness = readinessQuery.data
   const sections = (sectionsQuery.data ?? []).filter(
@@ -98,7 +158,13 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
   if (readinessQuery.isLoading || sectionsQuery.isLoading) return <PageLoader />
 
-  if (readinessQuery.isError || sectionsQuery.isError) {
+  // Only when there is nothing to show. A failed RELOAD (after a save, say)
+  // keeps the builder on screen with what it has; replacing it with this page
+  // made one dropped connection look like losing access.
+  if (
+    (readinessQuery.isError && !readinessQuery.data) ||
+    (sectionsQuery.isError && !sectionsQuery.data)
+  ) {
     return (
       <EmptyState
         icon={ShieldAlert}
@@ -207,27 +273,51 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
               onSelect={(code, anchorId) => {
                 setSelectedCode(code)
                 setPendingAnchor(anchorId ?? null)
+                // The suggested fix belongs to the section it came for.
+                if (code !== fix?.sectionCode) setFix(null)
               }}
               isRtl={isRtl}
               showExecutiveSummary
               onViewAll={() => setOutlineOpen(true)}
+              findingCounts={findingCounts}
             />
           </div>
         </div>
 
         {/* Right — mode-appropriate detail */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+          {effectiveCode && !reportLocked && (
+            <SectionFindingsBanner
+              cycleId={cycleId}
+              findings={findings[effectiveCode] ?? []}
+              suggestion={fix?.sectionCode === effectiveCode ? fix.text : null}
+              isSummary={execSummarySelected}
+            />
+          )}
           {execSummarySelected ? (
             <ExecutiveSummaryPanel />
           ) : (
-            <SectionDetail
-              section={selected}
-              cycleId={cycleId}
-              stale={stale}
-              reportLocked={reportLocked}
-              contentLanguage={contentLanguage}
-              isRtl={isRtl}
-            />
+            <FixPrefillContext.Provider value={fix && !fix.manual ? fix : null}>
+              {/* The open section's findings, marked in its preview. */}
+              <ProseHighlightContext.Provider
+                value={
+                  reportLocked || !effectiveCode
+                    ? null
+                    : highlightRegex(highlights[effectiveCode])
+                }
+              >
+                <SectionDetail
+                  section={selected}
+                  cycleId={cycleId}
+                  stale={stale}
+                  reportLocked={reportLocked}
+                  withClient={withClient && !signedOff}
+                  hasFindings={!!effectiveCode && (findings[effectiveCode]?.length ?? 0) > 0}
+                  contentLanguage={contentLanguage}
+                  isRtl={isRtl}
+                />
+              </ProseHighlightContext.Provider>
+            </FixPrefillContext.Provider>
           )}
         </div>
       </div>

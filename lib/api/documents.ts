@@ -8,7 +8,25 @@ export interface DocumentLanguageCheckResponse {
   expected_language: ContentLanguage
 }
 
+export interface DocumentDownloadResponse {
+  document_id: string
+  filename: string
+  download_url: string
+  expires_in: number
+}
+
 export const documentsApi = {
+  /**
+   * GET /documents/{id}/download — a short-lived signed URL. Fetch it fresh on
+   * each download; do not cache it, it expires.
+   */
+  getDownloadUrl: async (documentId: string): Promise<DocumentDownloadResponse> => {
+    const { data } = await apiClient.get<DocumentDownloadResponse>(
+      `/documents/${documentId}/download`,
+    )
+    return data
+  },
+
   // Check whether a picked document is in the expected language WITHOUT
   // uploading it — lets the UI warn the moment a file is attached instead of
   // only after the user clicks the final submit button. Mirrors the backend's

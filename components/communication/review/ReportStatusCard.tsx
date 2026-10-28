@@ -1,6 +1,7 @@
 "use client"
 
 import { isClosed, statusPill } from "@/lib/report-status"
+import { Skeleton } from "@/components/ui/skeletons"
 import { CARD, RAIL_LABEL } from "./shared"
 
 /**
@@ -71,7 +72,22 @@ export function ReportStatusCard({
         <span style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>
           {text.label}
         </span>
-        <span style={{ fontSize: 12, color: MUTED, marginLeft: 2 }}>· {hint}</span>
+      </div>
+      {/* Its own line under the status: beside it a long hint ("approved by
+          client Oct 27, 2026") wrapped and squeezed the status. */}
+      <div style={{ fontSize: 12, color: MUTED, marginTop: 3, paddingLeft: 17 }}>{hint}</div>
+    </div>
+  )
+}
+
+/** The card's shape while the report status loads. */
+export function ReportStatusCardSkeleton() {
+  return (
+    <div style={{ ...CARD, padding: "14px 16px" }} aria-busy="true" aria-label="Loading the report status">
+      <div style={RAIL_LABEL}>Report status</div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-3 w-2/3" />
       </div>
     </div>
   )

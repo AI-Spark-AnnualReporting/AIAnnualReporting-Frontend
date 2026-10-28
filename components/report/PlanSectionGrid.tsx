@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { useState } from "react"
-import { AlertCircle, Check, CheckCircle2, ChevronDown, GripVertical, Upload, X } from "lucide-react"
+import { AlertCircle, Check, CheckCircle2, ChevronDown, GripVertical, Loader2, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { useRemoveOptional, useReorderSections } from "@/hooks/useReportBuilder"
+import { useIsRemoving, useRemoveOptional, useReorderSections } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import {
@@ -203,16 +203,22 @@ function SectionTile({
   // An AI-written or analyze section with no style blocks the plan.
   const showsStyle = takesWritingStyle(effectiveMode, section.ai_allowed)
   const needsStyle = !readOnly && showsStyle && !(pendingStyle ?? section.writing_style)
+  // Being removed: faded and not clickable until the server answers (a few
+  // seconds), so it doesn't look like the click did nothing. The rest of the
+  // page stays usable.
+  const removing = useIsRemoving(cycleId, section.section_code)
 
   return (
     <div
       ref={setNodeRef}
       style={style}
+      aria-busy={removing}
       className={cn(
         "group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all",
         "hover:shadow-md",
         (needsSource || needsMode || needsStyle) && "border-amber-200",
         isDragging && "z-10 opacity-60 shadow-lg ring-2 ring-indigo-300",
+        removing && "pointer-events-none opacity-40",
       )}
     >
       {(needsSource || needsMode || needsStyle) && (
@@ -712,20 +718,27 @@ function RemoveSection({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-        onClick={onClick}
-        disabled={remove.isPending}
-        title={
-          isOptional
-            ? "Remove section"
-            : `Remove ${layerLabel} section (requires confirmation)`
-        }
-      >
-        <X className="h-3.5 w-3.5" />
-      </Button>
+      {remove.isPending && !confirmOpen ? (
+        <span className="inline-flex h-7 shrink-0 items-center gap-1.5 text-xs font-medium text-slate-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Removing…
+        </span>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+          onClick={onClick}
+          disabled={remove.isPending}
+          title={
+            isOptional
+              ? "Remove section"
+              : `Remove ${layerLabel} section (requires confirmation)`
+          }
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}
