@@ -237,28 +237,20 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    id: "bento",
-    name: "Bento tiles",
-    tagline: "Rounded tiles of text, pictures and colour, fitted together like a bento box.",
+    id: "classic",
+    name: "Annual report classic",
+    tagline: "A printed annual report page: a clear column grid, thin rules and a figure rail.",
     sentences: [
+      { text: "Lay out every page of this section like a printed corporate annual report, on a clear column grid." },
+      { text: "Set the text in two columns with a thin brand-colour rule between them." },
+      { text: "Separate the parts of each page with thin rules, not boxes or cards." },
       {
-        text: "Design every page as a bento box of rounded tiles in different sizes, fitted together with even gaps.",
-        when: noTables,
-      },
-      {
-        text: "Design every page of text as a bento box of rounded tiles in different sizes, fitted together with even gaps.",
-        when: hasTables,
-      },
-      { text: "Give every page at least one image tile and one solid brand-colour tile.", when: noTables },
-      { text: "Give most pages an image tile and a solid brand-colour tile.", when: hasTables },
-      { text: "Alternate two or three tile arrangements from page to page.", when: hasSeveralPages },
-      { text: "Make the first page the most striking, with the largest image tile." },
-      {
-        text: "Spread the key figures across the pages, each in its own tile with the number large.",
+        text: "Gather the key figures in a narrow rail beside the text, each number set large over a short label.",
         when: hasFigures,
       },
-      { text: "Spread the quotes across the pages, each set large in its own brand-coloured tile.", when: hasQuotes },
-      { text: "Keep the text tiles roomy and easy to read." },
+      { text: "Set the quotes large between the paragraphs, under a short brand-colour rule.", when: hasQuotes },
+      { text: "Put one wide image area at the top of the first page." },
+      { text: "Use the brand colour sparingly: for the rules, the figures and one small block per page." },
     ],
   },
   {
@@ -380,6 +372,8 @@ export const PRESETS: Preset[] = [
 /**
  * The idea chips, in rows. A sentence that also appears in a complete design
  * is the same on purpose: after that design is picked, its chip shows as in.
+ * No badge, solid-panel or half-moon chips (removed 2026-10-28): they pushed the
+ * designer towards web and app looks instead of printed annual-report pages.
  */
 export const IDEA_ROWS: IdeaRowDefinition[] = [
   {
@@ -404,7 +398,6 @@ export const IDEA_ROWS: IdeaRowDefinition[] = [
         text: "Put the key figures in a wide band of brand colour across the first page, above the text.",
         when: hasFewFigures,
       },
-      { text: "Spread the key figures through the section, each inside a brand-coloured circle like a badge." },
     ],
   },
   {
@@ -415,7 +408,6 @@ export const IDEA_ROWS: IdeaRowDefinition[] = [
     ideas: [
       { text: "Spread the quotes through the section, each set large between the paragraphs." },
       { text: "Hang the quotes in a wide side margin, in the brand colour." },
-      { text: "Spread the quotes through the section, each on its own solid panel of brand colour." },
     ],
   },
   {
@@ -447,11 +439,6 @@ export const IDEA_ROWS: IdeaRowDefinition[] = [
     ideas: [
       { text: "Keep the design calm and premium, with lots of white space and thin rules." },
       { text: "Make the design bold and confident, with solid blocks of brand colour and strong contrast." },
-      {
-        text:
-          "Make the design playful, with big brand-colour circles and half-moons beside the text, " +
-          "against the side edges.",
-      },
     ],
   },
   {
