@@ -1,7 +1,7 @@
 import { diffWords } from "diff"
 
-/* The Undo pop-up's change marks: green for text an undo brings back, red and
- * crossed out for text it removes.
+/* The Undo pop-up's change marks: green for text an undo brings back, red for
+ * text it removes (not crossed out: on the "Now" side that text is still there).
  *
  * The marks can't go into the markdown as <ins>/<del> tags: a tag near the
  * start makes ProsePreview treat the whole text as HTML, and a tag before a
@@ -36,16 +36,27 @@ function wrapRun(run: string, open: string, close: string, atLineStart: boolean)
  *
  * @param now   The section as it reads now.
  * @param after The section as it will read after the undo.
- * @returns Markdown with marks; `after` unchanged when it is HTML, whose tags
- *          the marks could split.
+ * @param side  "now" = only the text that goes (red), "after" = only the text
+ *              that comes back (green), "both" = both in one text.
+ * @returns Markdown with marks; the chosen side's text unchanged when it is
+ *          HTML, whose tags the marks could split.
  */
-export function markChanges(now: string, after: string): string {
-  if (/<[a-z][\s\S]*>/i.test(now.slice(0, 200) + after.slice(0, 200))) return after
+export function markChanges(
+  now: string,
+  after: string,
+  side: "both" | "now" | "after" = "both",
+): string {
+  if (/<[a-z][\s\S]*>/i.test(now.slice(0, 200) + after.slice(0, 200))) {
+    return side === "now" ? now : after
+  }
   let out = ""
   for (const part of diffWords(now, after)) {
     const atLineStart = out === "" || out.endsWith("\n")
-    if (part.added) out += wrapRun(part.value, BACK_OPEN, BACK_CLOSE, atLineStart)
-    else if (part.removed) out += wrapRun(part.value, GONE_OPEN, GONE_CLOSE, atLineStart)
+    if (part.added) {
+      if (side !== "now") out += wrapRun(part.value, BACK_OPEN, BACK_CLOSE, atLineStart)
+    } else if (part.removed) {
+      if (side !== "after") out += wrapRun(part.value, GONE_OPEN, GONE_CLOSE, atLineStart)
+    }
     else out += part.value
   }
   return out
@@ -65,7 +76,7 @@ function piece(value: string, mode: "" | "ins" | "del"): HastNode {
       className:
         mode === "ins"
           ? ["rounded", "bg-green-100", "px-0.5", "text-green-800", "no-underline"]
-          : ["rounded", "bg-red-100", "px-0.5", "text-red-700", "line-through"],
+          : ["rounded", "bg-red-100", "px-0.5", "text-red-700", "no-underline"],
     },
     children: [text],
   } as HastNode

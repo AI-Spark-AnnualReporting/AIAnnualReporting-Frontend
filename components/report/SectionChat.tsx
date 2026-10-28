@@ -27,6 +27,20 @@ export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProp
   )
   const [turns, setTurns] = useState<{ instruction: string }[]>([])
 
+  // When the page withdraws the instruction (the fix is done), empty the box -
+  // but only if it still holds that instruction untouched. When it comes back
+  // (an Undo reopened the fix), refill the box - but only if it is empty. Either
+  // way the PM's own words are never lost. Done during render, React's way to
+  // adjust state when a value it depends on changes.
+  const [shownPrefill, setShownPrefill] = useState(prefill)
+  if (prefill !== shownPrefill) {
+    setShownPrefill(prefill)
+    if (!prefill && shownPrefill && instruction === shownPrefill.text) setInstruction("")
+    if (prefill && prefill.sectionCode === sectionCode && !instruction.trim()) {
+      setInstruction(prefill.text)
+    }
+  }
+
   const trimmed = instruction.trim()
   const disabled = refining || !trimmed
 

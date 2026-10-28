@@ -15,6 +15,8 @@ import {
   findingsBySection,
   highlightRegex,
   highlightsBySection,
+  isFixedFinding,
+  redundancyInstruction,
 } from "./validation-fixes"
 
 const validation = {
@@ -117,5 +119,14 @@ assert.deepEqual(matchesIn("ops", "Utilisation 94% vs 194 sites."), ["94"])
 // A section with nothing to mark gets no pattern; repetition marks nothing.
 assert.equal(highlightRegex(marks["nothing"]), null)
 assert.equal(marks.ceo, undefined)
+
+// The finding a Fix came from is spotted in the banner list, so it isn't shown twice.
+const banned = bannedWordsInstruction(["in summary"])
+assert.equal(isFixedFinding('Word the house style rules out: "in summary"', banned), true)
+assert.equal(isFixedFinding('Word the house style rules out: "led to"', banned), false)
+const repeat = redundancyInstruction(["CEO's Message"], "Both cover strategy.")
+assert.equal(isFixedFinding("Repeats a point also made in CEO's Message: Both cover strategy.", repeat), true)
+// A bare figure is too short to match safely.
+assert.equal(isFixedFinding("Figure with no recorded source: 94", "Utilisation 94%"), false)
 
 console.log("validation-fixes: all checks passed")

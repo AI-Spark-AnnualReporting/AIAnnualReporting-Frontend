@@ -35,7 +35,7 @@ import {
   ExecutiveSummaryPanel,
   EXECUTIVE_SUMMARY_CODE,
 } from "@/components/report/ExecutiveSummaryPanel"
-import { ArrowLeft, ClipboardList, FileText, List, ShieldAlert } from "lucide-react"
+import { ArrowLeft, ChevronsRight, ClipboardList, FileText, List, ShieldAlert } from "lucide-react"
 import { isReportGeneratedSection, isSectionReady } from "@/lib/section-filters"
 
 export default function ReportBuilderPage({
@@ -100,6 +100,12 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
     if (todo) return { sectionCode, text: todo, manual: true }
     return null
   })
+  // Which side is open: the validation card ("fix") or the section list
+  // ("list"). Only one at a time, so the text keeps its width. Arriving from
+  // a Fix button opens the card; picking a section from the list opens the list.
+  const [side, setSide] = useState<"fix" | "list">(() =>
+    searchParams.get("fix") || searchParams.get("todo") ? "fix" : "list",
+  )
 
   // Only when the PM came from the validation page's Fix button: a PM who
   // just went back to the Builder to change something should not be shown
@@ -201,6 +207,21 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
   const cycleName = cycleMeta?.cycle_name
   const contentLanguage = cycleMeta?.content_language ?? "english"
   const isRtl = contentLanguage === "arabic"
+  const suggestion = fix?.sectionCode === effectiveCode ? fix.text : null
+  const sectionFindings = effectiveCode ? findings[effectiveCode] ?? [] : []
+  // The validation card shows only for a section with something to fix.
+  const hasCard = !!effectiveCode && !reportLocked && (sectionFindings.length > 0 || !!suggestion)
+  const listFolded = hasCard && side === "fix"
+  // The fix counts as done once the section was edited since the check, and,
+  // for banned words, none is left in the text. Same rule as the Validation
+  // page's "Fixed"; an Undo back to the checked text clears it again.
+  const editedSinceCheck = validation?.edited_since_check ?? []
+  const bannedLeft = effectiveCode ? validation?.voice_left?.[effectiveCode] ?? [] : []
+  const fixDone =
+    !!suggestion &&
+    !!effectiveCode &&
+    editedSinceCheck.includes(effectiveCode) &&
+    !bannedLeft.some((phrase) => suggestion.toLowerCase().includes(`"${phrase}"`))
 
   return (
     <div className="flex h-[calc(100vh-8.5rem)] flex-col gap-6">
@@ -250,8 +271,25 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
 
       {/* Body — two cards */}
       <div className="flex min-h-0 flex-1 gap-6">
+        {/* Left — folded to a strip while the validation card is open */}
+        {listFolded && (
+          <button
+            type="button"
+            onClick={() => setSide("list")}
+            title="Open the section list"
+            className="flex w-[52px] shrink-0 flex-col items-center gap-2 rounded-2xl border border-slate-100 bg-white py-3 text-indigo-600 shadow-sm transition-colors hover:bg-indigo-50"
+          >
+            <ChevronsRight className="h-4 w-4 shrink-0" />
+            <span className="text-xs font-semibold text-slate-500 [writing-mode:vertical-rl]">
+              Sections · {written} of {total} written
+            </span>
+          </button>
+        )}
+
         {/* Left — progress + section list */}
-        <div className="flex w-[360px] shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <div
+          className={`${listFolded ? "hidden" : "flex"} w-[360px] shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm`}
+        >
           <div className="shrink-0 border-b border-slate-100 px-5 py-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-slate-900">
@@ -273,6 +311,7 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
               onSelect={(code, anchorId) => {
                 setSelectedCode(code)
                 setPendingAnchor(anchorId ?? null)
+                setSide("list")
                 // The suggested fix belongs to the section it came for.
                 if (code !== fix?.sectionCode) setFix(null)
               }}
@@ -285,19 +324,12 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
         </div>
 
         {/* Right — mode-appropriate detail */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-          {effectiveCode && !reportLocked && (
-            <SectionFindingsBanner
-              cycleId={cycleId}
-              findings={findings[effectiveCode] ?? []}
-              suggestion={fix?.sectionCode === effectiveCode ? fix.text : null}
-              isSummary={execSummarySelected}
-            />
-          )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
           {execSummarySelected ? (
             <ExecutiveSummaryPanel />
           ) : (
-            <FixPrefillContext.Provider value={fix && !fix.manual ? fix : null}>
+            // Withdrawn once the fix is done, so the AI box empties itself.
+            <FixPrefillContext.Provider value={fix && !fix.manual && !fixDone ? fix : null}>
               {/* The open section's findings, marked in its preview. */}
               <ProseHighlightContext.Provider
                 value={
@@ -320,6 +352,19 @@ function BuilderShell({ cycleId }: { cycleId: string }) {
             </FixPrefillContext.Provider>
           )}
         </div>
+
+        {/* Right — the validation card, folded while the list is open */}
+        {hasCard && (
+          <SectionFindingsBanner
+            cycleId={cycleId}
+            findings={sectionFindings}
+            suggestion={suggestion}
+            fixed={fixDone}
+            isSummary={execSummarySelected}
+            folded={side === "list"}
+            onToggle={() => setSide(side === "fix" ? "list" : "fix")}
+          />
+        )}
       </div>
 
       <SectionOutlineDialog

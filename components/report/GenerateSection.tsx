@@ -277,9 +277,13 @@ function DraftingView({
             </p>
           )}
         </div>
+        {/* Sticky so a long draft still shows the pill: after Send the PM is
+            scrolled to the bottom, far below the draft's middle. It stays
+            centred until that middle scrolls above the screen's, then follows
+            the screen down, never leaving the draft. */}
         {refining && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 shadow-sm">
+            <div className="sticky top-1/2 flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 shadow-sm">
               <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
               <span className="text-sm font-medium text-slate-700">Refining…</span>
             </div>
