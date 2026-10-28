@@ -92,3 +92,45 @@ export function placementText(placed: PlacedCounts | null | undefined): string {
   const text = placedText(placed)
   return text ? `All ${text} placed` : "Nothing to place in this section"
 }
+
+/**
+ * The templates that print only the heading and the tables, by design — the
+ * same list as TABLES_ONLY_KEYS in the engine's page_filler.py. Unlike every
+ * other template, these really do leave content out.
+ */
+export const TABLES_ONLY_TEMPLATE_KEYS: readonly string[] = [
+  "borderless_table",
+  "landscape_borderless_table",
+  "grid_table",
+  "landscape_grid_table",
+  "striped_table",
+  "landscape_striped_table",
+  "zebra_table",
+  "landscape_zebra_table",
+]
+
+/**
+ * Whether a tables-only template is on screen with nothing counted for it.
+ *
+ * A section's cards are saved when it is extracted, so a section extracted
+ * before Borderless, Grid, Striped or Zebra table existed has no counts or losses for
+ * them. Without this, the panel read that silence as "nothing is dropped"
+ * while the template leaves out every paragraph, figure and quote.
+ *
+ * @param templateKey the template being drawn
+ * @param option      its card's counts and losses, or null when it has no card
+ * @returns true when the template is tables-only and its card counted nothing
+ *          (a freshly counted card with losses shows those losses instead)
+ */
+export function tablesOnlyUncounted(
+  templateKey: string | null | undefined,
+  option: { counts?: PlacedCounts | null; dropped?: DroppedCounts | null } | null | undefined,
+): boolean {
+  if (!templateKey || !TABLES_ONLY_TEMPLATE_KEYS.includes(templateKey)) return false
+  const counted = Object.keys(option?.counts ?? {}).length > 0
+  return !counted && !losesContent(option?.dropped)
+}
+
+/** The warning shown for a tables-only template that has not been counted yet. */
+export const TABLES_ONLY_UNCOUNTED_TEXT =
+  "any separate figures and quotes are not printed. Re-extract this section to count them"

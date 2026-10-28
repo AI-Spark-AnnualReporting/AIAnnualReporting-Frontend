@@ -460,7 +460,11 @@ export function ContentSection({
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <SectionHeader section={section} isRtl={isRtl} />
-      <div className="flex-1 overflow-y-auto">
+      {/* `relative` keeps the dropzone's hidden inputs (absolutely positioned)
+          inside this panel. Without it they are placed against the whole page,
+          at the foot of a long document, and the browser page itself grows
+          that tall and scrolls. */}
+      <div className="relative flex-1 overflow-y-auto">
         <div
           {...dz.getRootProps()}
           className={cn(

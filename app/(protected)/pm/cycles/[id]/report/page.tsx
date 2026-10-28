@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Palette,
+  Globe,
 } from "lucide-react"
 import { RouteGuard } from "@/components/auth/RouteGuard"
 import { useAuth } from "@/contexts/AuthContext"
@@ -266,7 +267,16 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 </Link>
               </>
             )}
-            {/* Outside the locked group above. Re-assembling a signed-off
+            {/* The microsite's sitemap. Outside the lock gate on purpose: a
+                website is usually made after sign-off, and the sitemap changes
+                nothing in the printed report. */}
+            <Link href={`/pm/cycles/${cycleId}/web`} className="shrink-0">
+              <Button variant="ghost" size="sm" className="h-8">
+                <Globe className="h-3.5 w-3.5 mr-1.5" />
+                Web
+              </Button>
+            </Link>
+                        {/* Outside the locked group above. Re-assembling a signed-off
                 report is refused by the API, so those buttons rightly go away -
                 but reading what the validation found is not a change to
                 anything, and an approved report is when someone most wants to

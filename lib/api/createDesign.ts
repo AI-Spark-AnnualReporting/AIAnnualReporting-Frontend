@@ -2,11 +2,15 @@
  * The page designer's API surface.
  *
  * Three calls: structure one section, read the whole cycle back, record a
- * choice. Extraction is per section rather than one batch call so the client
- * can fan out and count completions — the progress on the loading screen is
- * real for that reason.
+ * choice (one page at a time, or every page at once in landscape).
+ * Extraction is per section rather than one batch call so the client can fan
+ * out and count completions — the progress on the loading screen is real for
+ * that reason.
  */
+import type { Orientation } from "@/lib/orientation"
 import type { SectionBlocks } from "./sectionBlocks"
+
+export type { SectionProfile } from "./sectionBlocks"
 import { apiClient } from "./client"
 
 /** What one template would do with a unit's blocks. */
@@ -29,6 +33,182 @@ export interface DesignOption {
   }
 }
 
+/** The sheet a custom template was designed for. It prints only on that one. */
+export type CustomPaper = "portrait" | "landscape" | "presentation"
+
+/**
+ * A page layout an AI designer wrote for this one section.
+ *
+ * Only ever saved after the engine filled it with the section's real content
+ * and checked the printed result, so a stored one is known to fit.
+ */
+export interface CustomTemplate {
+  html: string
+  css: string
+  notes: string
+  paper: CustomPaper
+  /** The art director's brief it was built from; `summary_for_pm` is for people. */
+  brief: { summary_for_pm?: string; cannot_do?: string[]; [k: string]: unknown }
+  /** What the PM typed, or "" when they let the designer choose. */
+  instructions: string
+  model: string
+  /** How many checks it took to pass (1 = first try). */
+  rounds: number
+  /** "sheets": fixed sheet designs the content is dealt into; "flow": one flowing page. */
+  mode?: "flow" | "sheets"
+  /** Each of the PM's wishes and whether the printed result met it. */
+  requirements?: { wish: string; met: boolean }[]
+  /** The wishes this design does not meet, in plain words (empty when all are met). */
+  unmet?: string[]
+  /** Wishes the reviewer never answered (it did not respond), so they were not checked. */
+  unchecked?: string[]
+  /** The approved sketch version it was built from, when it was built from one. */
+  sketch_version?: number
+  /** The `created_at` of the version this one was adjusted from (its "Before"). */
+  adjusted_from?: string | null
+  /** What the latest adjustment did, note by note (absent until the PM adjusts). */
+  adjustment?: CustomAdjustment
+  /** The reviewer's one-line verdict on how well it matches the request. */
+  review_summary?: string
+  /** True after the section was re-extracted: it may no longer fit. */
+  needs_recheck: boolean
+  created_at: string
+}
+
+/** One note of an adjustment, as the result shows it. */
+export interface AdjustedNote {
+  number: number
+  /** The template page (1 = the first page after the title page), or null for the whole template. */
+  page: number | null
+  note: string
+  /** The designer's answer: what it changed, or why it could not. */
+  answer: string
+  /** The reviewer's verdict; null when the reviewer did not answer. */
+  done: boolean | null
+  evidence: string
+}
+
+/** What one adjustment of a custom template did. */
+export interface CustomAdjustment {
+  at: string
+  /** Whether the PM's preview showed the section's title page first (for sheet numbers). */
+  title_page: boolean
+  notes: AdjustedNote[]
+}
+
+/** Progress of a custom template run, read from the server's memory. */
+export interface CustomTemplateStatus {
+  /** "adjust" for an adjustment run; absent for a design run. */
+  kind?: "adjust"
+  /** When an adjustment is done: what it did. */
+  adjustment?: CustomAdjustment
+  status: "idle" | "running" | "done" | "failed"
+  /**
+   * The run's ticket. Progress lives in one server process's memory, and
+   * another process may still remember an OLDER run of this section; the
+   * screen only believes "done" or "failed" for the ticket it is following.
+   */
+  run_id?: string
+  step?: "queued" | "brief" | "build" | "check" | "judge" | "fix" | "explain" | "look" | "adjust"
+  round?: number
+  message?: string
+  ok?: boolean
+  brief?: CustomTemplate["brief"]
+  /** On failure: what went wrong, in plain words. */
+  summary?: string
+  /** After a save: the wishes the design still misses, in plain words. */
+  unmet?: string[]
+  wishes_met?: number
+  wishes_total?: number
+  review_summary?: string
+  problems?: { code: string; message: string; where?: string }[]
+  started_at?: number
+  finished_at?: number
+}
+
+/** One box of a layout sketch, from the sketch's fixed menu. */
+export interface SketchBox {
+  role: "text" | "image" | "figures" | "quotes" | "colour"
+  shape: "rectangle" | "rounded" | "circle" | "diamond" | "triangle" | "arch" | "hexagon" | "slanted"
+  /** Only a colour block has a colour; every other box says "none". */
+  colour: "brand" | "second" | "light" | "none"
+  /** % of the page, from the side where reading starts (the right in Arabic). */
+  x: number
+  /** % of the page, from the top. */
+  y: number
+  w: number
+  h: number
+  /** Text columns (text boxes only; 1 otherwise). */
+  columns: number
+  /** How many figures or quotes a spot holds (0 for other boxes). */
+  holds: number
+}
+
+/** One page layout of a sketch: the opening page, a body layout (A, B, C) or the end page. */
+export interface SketchLayout {
+  /** "opener", "A", "B", "C" or "end". */
+  id: string
+  kind: "opener" | "body" | "end"
+  /** One sentence for the PM: what sits where. */
+  summary: string
+  /** Empty on the end page, which flows. */
+  boxes: SketchBox[]
+}
+
+/** A quick layout sketch a PM shapes before a custom template is built from it. */
+export interface CustomSketch {
+  concept: string
+  layouts: SketchLayout[]
+  cannot_do: string[]
+}
+
+/** The notes that asked for a version: one per layout (by id), plus one for all pages. */
+export interface SketchNotes {
+  layouts: Record<string, string>
+  all_pages: string
+}
+
+export interface SketchVersion {
+  version: number
+  /** The ticket of the run that made it; the status route finds it by this. */
+  run_id: string
+  /** The PM's request it was sketched from. */
+  request: string
+  sketch: CustomSketch
+  /** The notes that produced it (null for a first sketch). */
+  notes: SketchNotes | null
+  /** The version those notes were written on. */
+  based_on: number | null
+  /** The designer's answer to each note, under the name the note was written under. */
+  replies: { layout: string; reply: string }[]
+  created_at: string
+}
+
+/** The layout sketches of one section for one sheet: its newest few versions. */
+export interface CustomSketchRecord {
+  paper: CustomPaper
+  language: string
+  /** [width, height] of the printed sheet in pt. */
+  page_pt: [number, number]
+  /** The strip on every side that carries the running header and footer (pt). */
+  safe_inset_pt: number
+  /** The report's brand colours, with the engine's own fallbacks. */
+  colours: { brand: string; second: string; light: string }
+  versions: SketchVersion[]
+}
+
+/** Where a sketch run has got to, looked up by its ticket. */
+export interface CustomSketchStatus {
+  /** "done" comes from the database; "unknown" means another server process has it. */
+  status: "done" | "running" | "failed" | "unknown"
+  version?: number
+  /** On "done": the section's envelope, to patch the screen's data with. */
+  design?: DesignEnvelope
+  message?: string
+  /** On "failed": what went wrong, in plain words. */
+  summary?: string
+}
+
 /** One page of a section. */
 export interface DesignUnit {
   index: number
@@ -41,8 +221,30 @@ export interface DesignUnit {
   options_error?: string
   template_key: string | null
   chosen_at: string | null
+  /**
+   * The LANDSCAPE pick for this page, kept separate from the portrait one
+   * above so switching orientation and back finds both still there. Only a
+   * person sets it — the art director never picks landscape. Absent on pages
+   * extracted before landscape existed, which reads the same as null.
+   * Read it through `pickedKey()` rather than directly.
+   */
+  landscape_template_key?: string | null
+  /** When the landscape pick was made. Absent or null when there is none. */
+  landscape_chosen_at?: string | null
   /** True when the art director chose this template and nobody has overridden it. */
   template_auto?: boolean
+  /** The portrait custom template, when one was made. Picked as "custom". */
+  custom_template?: CustomTemplate | null
+  /** The landscape (A4 or 16:9) custom template, when one was made. */
+  landscape_custom_template?: CustomTemplate | null
+  /** Older versions of the portrait custom template (newest first, at most 3). */
+  custom_template_history?: CustomTemplate[]
+  /** Older versions of the landscape custom template. */
+  landscape_custom_template_history?: CustomTemplate[]
+  /** The portrait layout sketch, while the PM shapes one before it is built. */
+  custom_sketch?: CustomSketchRecord | null
+  /** The landscape (A4 or 16:9) layout sketch. */
+  landscape_custom_sketch?: CustomSketchRecord | null
   /** block id -> the emphasis the art director gave it. */
   roles?: Record<string, string>
   /**
@@ -151,7 +353,35 @@ export const createDesignApi = {
   },
 
   /**
+   * Start structuring one section in the background.
+   *
+   * Answers straight away (202); the work carries on on the server and the
+   * caller polls `get` until the section reads as extracted. The "Designing
+   * your report pages" screen uses this: holding one long request open per
+   * section meant a request cut off in the browser lost the screen while the
+   * server finished the section anyway. `already_running` means this server
+   * was already structuring it (a refresh mid-run) and nothing new started.
+   */
+  startExtract: async (
+    cycleId: string,
+    sectionCode: string,
+    force = false,
+  ): Promise<{ status: "running"; section_code: string; already_running: boolean }> => {
+    const params = force ? "background=true&force=true" : "background=true"
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-extract?${params}`,
+    )
+    return data
+  },
+
+  /**
    * Record the template chosen for one page. `null` clears it.
+   *
+   * `orientation` says WHICH pick this is: portrait writes `template_key`,
+   * landscape writes `landscape_template_key` and leaves the portrait pick
+   * alone. The backend refuses a portrait key sent as landscape and vice versa.
    *
    * Small, but it is a read-modify-write of the section's whole envelope and
    * it is fired by a card click while the pre-warm is drawing pages. Giving it
@@ -162,14 +392,216 @@ export const createDesignApi = {
     sectionCode: string,
     unitIndex: number,
     templateKey: string | null,
+    orientation: Orientation = "portrait",
   ): Promise<{ section_code: string; design: DesignEnvelope }> => {
     const { data } = await apiClient.put(
       `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
         sectionCode,
       )}/create-design-template`,
-      { unit_index: unitIndex, template_key: templateKey },
+      { unit_index: unitIndex, template_key: templateKey, orientation },
       { timeout: 60000 },
     )
     return data
+  },
+
+  /**
+   * Start designing a custom page template for one section. Answers at once;
+   * the run takes a few minutes on the server — poll `customTemplateStatus`.
+   *
+   * With `sketchVersion` it is built from that approved layout sketch instead
+   * of from the instructions.
+   *
+   * @returns already_running true when this section was already being designed,
+   *   and the ticket of the run to follow
+   */
+  startCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    instructions: string,
+    sketchVersion?: number,
+  ): Promise<{ already_running: boolean; run_id: string | null }> => {
+    const body: Record<string, unknown> = { paper, instructions }
+    if (sketchVersion !== undefined) body.sketch_version = sketchVersion
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template`,
+      body,
+      { timeout: 60000 },
+    )
+    return { already_running: Boolean(data?.already_running), run_id: data?.run_id ?? null }
+  },
+
+  /** Where the latest custom template run for this section and sheet has got to. */
+  customTemplateStatus: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+  ): Promise<CustomTemplateStatus> => {
+    const { data } = await apiClient.get(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/status`,
+      { params: { paper }, timeout: 30000 },
+    )
+    return data
+  },
+
+  /**
+   * Check a saved custom template against the section's current content.
+   * No AI call — one render on the server.
+   */
+  recheckCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+  ): Promise<{
+    ok: boolean
+    problems: { code: string; message: string; where?: string }[]
+    design: DesignEnvelope
+  }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/recheck`,
+      { paper },
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  /**
+   * Change a finished custom template from the PM's notes, page by page.
+   * Answers at once with the run's ticket; follow it on `customTemplateStatus`.
+   *
+   * `pageNotes` are keyed by TEMPLATE page (1 = the first page after the
+   * section's title page); `titlePage` says whether the preview showed one.
+   */
+  adjustCustomTemplate: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    pageNotes: Record<number, string>,
+    templateNotes: string[],
+    titlePage: boolean,
+  ): Promise<{ already_running: boolean; run_id: string | null }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/adjust`,
+      { paper, page_notes: pageNotes, template_notes: templateNotes, title_page: titlePage },
+      { timeout: 60000 },
+    )
+    return { already_running: Boolean(data?.already_running), run_id: data?.run_id ?? null }
+  },
+
+  /** Make a kept version of the custom template the one in use again (Undo). */
+  switchCustomTemplateVersion: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    createdAt: string,
+  ): Promise<{ design: DesignEnvelope }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-template/version`,
+      { paper, created_at: createdAt },
+      { timeout: 60000 },
+    )
+    return { design: data.design }
+  },
+
+  /**
+   * Start a quick layout sketch of one section. Answers at once with a ticket;
+   * the sketch takes a minute or two on the server — poll `customSketchStatus`.
+   */
+  startCustomSketch: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    instructions: string,
+  ): Promise<{ run_id: string }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-sketch`,
+      { paper, instructions },
+      { timeout: 60000 },
+    )
+    return { run_id: String(data?.run_id ?? "") }
+  },
+
+  /** Start the next version of a sketch from the PM's notes. Answers at once with a ticket. */
+  updateCustomSketch: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    version: number,
+    notes: SketchNotes,
+  ): Promise<{ run_id: string }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-sketch/update`,
+      { paper, version, notes: notes.layouts, all_pages: notes.all_pages },
+      { timeout: 60000 },
+    )
+    return { run_id: String(data?.run_id ?? "") }
+  },
+
+  /** Where the sketch run with this ticket has got to. */
+  customSketchStatus: async (
+    cycleId: string,
+    sectionCode: string,
+    paper: CustomPaper,
+    runId: string,
+  ): Promise<CustomSketchStatus> => {
+    const { data } = await apiClient.get(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/sections/${encodeURIComponent(
+        sectionCode,
+      )}/create-design-custom-sketch/status`,
+      { params: { paper, run_id: runId }, timeout: 30000 },
+    )
+    return data
+  },
+
+  /**
+   * "Use for all sections" in landscape: give every page with no landscape
+   * pick yet this landscape template, in one request.
+   *
+   * Pages that already have a landscape pick are left alone, and portrait
+   * picks are never touched. Comes back with every section it changed, keyed
+   * by section code, so the screen can patch them in without a refetch.
+   *
+   * Same timeout as setTemplate and for the same reason, only more so: it is
+   * that read-modify-write once per section, fired while the pre-warm is busy.
+   *
+   * @returns how many pages were filled, how many sections a tables-only
+   *          template skipped for having no tables, and each changed
+   *          section's envelope
+   */
+  applyLandscapeToAll: async (
+    cycleId: string,
+    templateKey: string,
+  ): Promise<{
+    applied: number
+    // Sections a tables-only template left alone because they have no
+    // tables. 0 when the backend does not send it (an older one, or any
+    // other template).
+    skipped_no_tables: number
+    sections: Record<string, DesignEnvelope>
+  }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-landscape-all`,
+      { template_key: templateKey },
+      { timeout: 60000 },
+    )
+    return {
+      applied: data?.applied ?? 0,
+      skipped_no_tables: data?.skipped_no_tables ?? 0,
+      sections: data?.sections ?? {},
+    }
   },
 }

@@ -77,12 +77,24 @@ export interface SectionQuoteBlock {
   attribution: string | null
 }
 
+/**
+ * A person the section names together with a role, copied as written. Absent
+ * on sections extracted before the People templates existed.
+ */
+export interface SectionProfile {
+  name: string
+  role: string | null
+  bio: string | null
+}
+
 export interface SectionBlocks {
   section_code: string
   narrative_blocks: SectionNarrativeBlock[]
   numeric_data: SectionNumericBlock[]
   tables: SectionTableBlock[]
   pull_quotes: SectionQuoteBlock[]
+  /** Optional: old stored extractions have none. */
+  profiles?: SectionProfile[]
 }
 
 export interface CreateDesignStreamError {
@@ -244,6 +256,11 @@ export interface RenderedPages {
   counts: Record<string, number>
   dropped: Record<string, number>
   pages: string[]
+  /**
+   * The section opener drawn as the first page (its style name), or null when
+   * the page was drawn without one. The engine has always sent it.
+   */
+  divider?: string | null
 }
 
 export async function renderSectionPages(
@@ -266,6 +283,24 @@ export async function renderSectionPages(
      * bytes of 2. Clamped to 1..4 server-side.
      */
     scale?: number
+    /**
+     * Draw a landscape template on the 16:9 presentation sheet. Sent by the
+     * screen so the sheet drawn always matches the cache key it is filed
+     * under, even mid-switch; absent, the backend uses the saved setting.
+     */
+    presentation?: boolean
+    /**
+     * Only with template_key "custom": which section's stored custom template
+     * to draw, and which of its two (portrait or landscape). The layout
+     * itself is read from the database server-side, never sent from here.
+     */
+    section_code?: string
+    orientation?: "portrait" | "landscape"
+    /**
+     * Only with template_key "custom": draw a kept OLDER version of the custom
+     * template (its created_at) instead of the one in use: an adjustment's "Before".
+     */
+    custom_version?: string
   },
 ): Promise<RenderedPages> {
   const { data } = await apiClient.post<RenderedPages>(
@@ -301,10 +336,12 @@ export interface RenderedBatchItem {
 export async function renderSectionPagesBatch(
   cycleId: string,
   items: Array<Record<string, unknown>>,
+  presentation?: boolean,
 ): Promise<{ items: RenderedBatchItem[] }> {
   const { data } = await apiClient.post(
     `/pm/cycles/${encodeURIComponent(cycleId)}/create-design-pages`,
-    { items },
+    // The sheet for the whole batch, for the reason given on renderSectionPages.
+    presentation === undefined ? { items } : { items, presentation },
     // A batch is many renders; it needs many renders' worth of time.
     { timeout: 600000 },
   )

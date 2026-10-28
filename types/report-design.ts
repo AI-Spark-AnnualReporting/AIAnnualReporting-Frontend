@@ -7,6 +7,12 @@
  * of those lists so a bad value fails at save rather than at download.
  */
 
+import type { LandscapeFormat, Orientation } from "@/lib/orientation"
+
+// Defined once, in lib/orientation.ts beside the helpers that read it, and
+// re-exported so anything already importing design types finds it here too.
+export type { LandscapeFormat, Orientation }
+
 export type TypographyFamily =
   | "DejaVu Sans"
   | "Inter"
@@ -126,7 +132,11 @@ export interface AnnualDesign {
   /** The cycle's OWN contents-design pick, null when it has never chosen. */
   toc_template_key: string | null
   cover2_template_key: string | null
-  /** The cycle's OWN section-opener pick, null when it has never chosen. */
+  /**
+   * The cycle's OWN portrait section-opener pick, null when it has never
+   * chosen or set it back to follow the cover. Read it through
+   * `portraitOpenerChoice()`.
+   */
   divider_template_key: string | null
   /** The cycle's OWN running-band settings, null when it has never chosen. */
   header_footer: HeaderFooter | null
@@ -144,6 +154,40 @@ export interface AnnualDesign {
    * because it already said approved.
    */
   locked: boolean
+  /**
+   * Which way the report prints. The backend sends "portrait" for a report
+   * that has never chosen, but read it through `orientationOf()` anyway: a
+   * backend deployed before landscape existed omits the key entirely.
+   */
+  orientation: Orientation
+  /**
+   * The cycle's OWN landscape cover pick, null when it has never chosen (the
+   * report then prints the default, "landscape"). Read it through
+   * `landscapeCoverKey()`: a backend deployed before there was a choice omits
+   * the key entirely.
+   */
+  landscape_cover_template_key?: string | null
+  /** The cycle's OWN landscape contents pick. Same rules — read it through `landscapeTocKey()`. */
+  landscape_toc_template_key?: string | null
+  /**
+   * The landscape section opener chosen on its own, null when the opener
+   * follows the cover. Read it through `landscapeOpenerChoice()`.
+   */
+  landscape_divider_template_key?: string | null
+  /**
+   * The title page each section chose on its own, { section_code: key }, in
+   * portrait. A section missing from it opens on the report's title page.
+   * Read it through `sectionOpenerChoice()`.
+   */
+  section_divider_keys?: Record<string, string> | null
+  /** The same for landscape, kept apart so each page shape keeps its own picks. */
+  landscape_section_divider_keys?: Record<string, string> | null
+  /**
+   * The sheet a landscape report prints on: "a4" or the 16:9 "presentation"
+   * sheet. Kept while the report is portrait. Read it through
+   * `landscapeFormatOf()`: a backend deployed before the format existed omits it.
+   */
+  landscape_format?: LandscapeFormat | null
 }
 
 /** Which of the three running-band looks the renderer draws. */
@@ -194,9 +238,11 @@ export interface DesignSelection {
   brand?: BrandColors
   typography?: Typography | null
   /**
-   * One of the five section-opener designs. Absent is the OPT-OUT, as with
-   * the contents page below: the engine then derives the opener from the
-   * cover, exactly as it always has.
+   * One of the six portrait section-opener designs (Split artwork among
+   * them), or "" to have the opener follow the cover again. Absent leaves the
+   * saved choice alone. Never chosen is the OPT-OUT, as with the contents
+   * page below: the engine then derives the opener from the cover, exactly as
+   * it always has.
    */
   divider_template_key?: string
   /** The running bands. Absent = today's behaviour, derived from the cover. */
@@ -212,6 +258,43 @@ export interface DesignSelection {
   toc_template_key?: string
   /** Which of the four annual covers this report prints. Absent = the original. */
   cover2_template_key?: string
+  /**
+   * Portrait or landscape. Absent leaves the saved orientation alone, like
+   * every other field here. Switching keeps both orientations' page picks —
+   * it only decides which set the screen and the export read.
+   */
+  orientation?: Orientation
+  /**
+   * Which of the three landscape covers a landscape report prints. Kept apart
+   * from `cover2_template_key`, so each orientation remembers its own cover.
+   * Absent leaves the saved pick alone.
+   */
+  landscape_cover_template_key?: string
+  /** Which of the three landscape contents pages a landscape report prints. Same rules. */
+  landscape_toc_template_key?: string
+  /**
+   * The landscape section opener chosen on its own (e.g. "landscape_split"),
+   * or "" to have it follow the cover again. Absent leaves the saved choice alone.
+   */
+  landscape_divider_template_key?: string
+  /**
+   * The sheet a landscape report prints on. Sent with `orientation:
+   * "landscape"` by the page-format switch; absent leaves it alone.
+   */
+  landscape_format?: LandscapeFormat
+  /**
+   * ONE section's own title page: key "" sets it back to the report's title
+   * page. Absent leaves every section's pick alone.
+   */
+  section_divider?: SectionDividerPick
+}
+
+/** One section's own title page, as saved through the design PATCH. */
+export interface SectionDividerPick {
+  section_code: string
+  /** An opener key for that page shape, or "" to follow the report again. */
+  key: string
+  orientation: "portrait" | "landscape"
 }
 
 /** One contents-page design, as the engine that owns them describes it. */
@@ -221,6 +304,8 @@ export interface CoverDesign {
   full_bleed: boolean
   /** The divider treatment this cover brings with it. */
   divider: string
+  /** The engine's own name for it. Sent for the landscape designs only. */
+  name?: string
 }
 
 export interface CoverPreview {
@@ -235,6 +320,33 @@ export interface TocDesign {
   purpose: string
   full_bleed: boolean
   sub_page_numbers: boolean
+  /** The engine's own name for it. Sent for the landscape designs only. */
+  name?: string
+}
+
+/**
+ * The cover designs, as `/pm/cover-designs` lists them.
+ *
+ * `templates` is the portrait menu only. The landscape covers sit apart so no
+ * portrait picker can offer them: `landscape` is the default one and
+ * `landscape_templates` all three, default first. Both are optional because an
+ * engine deployed before landscape existed sends neither; an engine from
+ * before there was a choice sends only `landscape`, and annualDesignApi then
+ * fills `landscape_templates` with that one.
+ */
+export interface CoverDesignSpecs {
+  templates: CoverDesign[]
+  default: string
+  landscape?: CoverDesign
+  landscape_templates?: CoverDesign[]
+}
+
+/** The contents designs, as `/pm/toc-designs` lists them. Same split as covers. */
+export interface TocDesignSpecs {
+  templates: TocDesign[]
+  default: string
+  landscape?: TocDesign
+  landscape_templates?: TocDesign[]
 }
 
 /** A rendered preview of one design — one PNG data URI per sheet. */

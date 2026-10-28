@@ -24,8 +24,10 @@ import type {
   CoverTemplate,
   DesignSelection,
   CoverDesign,
+  CoverDesignSpecs,
   CoverPreview,
   TocDesign,
+  TocDesignSpecs,
   TocPreview,
 } from "@/types/report-design"
 
@@ -66,6 +68,25 @@ export interface AssembledReport {
    * of the file and one that is simply wrong.
    */
   normalised?: boolean
+}
+
+/**
+ * The landscape designs a spec response offers, default first.
+ *
+ * An engine from before there was a choice sends only the one default design
+ * (`landscape`), so that one becomes the list. An engine from before landscape
+ * existed sends neither, and the list stays undefined so the picker can say so.
+ *
+ * @returns the landscape designs, or undefined when the engine has none
+ */
+function landscapeDesignsOf<T>(
+  data: { landscape_templates?: T[] | null; landscape?: T | null } | undefined,
+): T[] | undefined {
+  if (Array.isArray(data?.landscape_templates) && data.landscape_templates.length > 0) {
+    return data.landscape_templates
+  }
+  if (data?.landscape) return [data.landscape]
+  return undefined
 }
 
 export const annualDesignApi = {
@@ -141,10 +162,19 @@ export const annualDesignApi = {
    *
    * Proxied, so it waits on the render engine — the same engine the pre-warm
    * is keeping busy — and then on this backend. Two queues, one list of names.
+   *
+   * `landscape` is the default landscape cover and `landscape_templates` all
+   * of them, kept out of `templates` so the portrait picker never lists them.
+   * Undefined from an engine that predates them — see landscapeDesignsOf.
    */
-  coverDesigns: async (): Promise<{ templates: CoverDesign[]; default: string }> => {
+  coverDesigns: async (): Promise<CoverDesignSpecs> => {
     const { data } = await apiClient.get(`/pm/cover-designs`, { timeout: 60000 })
-    return { templates: data?.templates ?? [], default: data?.default ?? "statement" }
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "statement",
+      landscape: data?.landscape ?? undefined,
+      landscape_templates: landscapeDesignsOf<CoverDesign>(data),
+    }
   },
 
   /** Draw this cycle's cover in one design, with its real title and brand. */
@@ -159,12 +189,17 @@ export const annualDesignApi = {
     return data
   },
 
-  /** The five contents designs. Proxied too — see coverDesigns for the timeout. */
-  tocDesigns: async (): Promise<{ templates: TocDesign[]; default: string }> => {
+  /**
+   * The five contents designs. Proxied too — see coverDesigns for the timeout
+   * and for why the landscape designs come back separately.
+   */
+  tocDesigns: async (): Promise<TocDesignSpecs> => {
     const { data } = await apiClient.get(`/pm/toc-designs`, { timeout: 60000 })
     return {
       templates: data?.templates ?? [],
       default: data?.default ?? "classic",
+      landscape: data?.landscape ?? undefined,
+      landscape_templates: landscapeDesignsOf<TocDesign>(data),
     }
   },
 

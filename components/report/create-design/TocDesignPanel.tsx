@@ -13,6 +13,11 @@
  * this document's hierarchy in five treatments. They are fetched one design at
  * a time, on demand: each is a real Chromium render, and firing five at once
  * to fill a grid nobody has looked at yet would cost five browsers per visit.
+ *
+ * In landscape it offers the three landscape contents pages instead. The pick
+ * is saved as the report's LANDSCAPE contents page, beside the portrait one,
+ * so switching orientation never loses either. Until somebody picks, the
+ * default (Brand panel) is the one in use.
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -21,18 +26,39 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { annualDesignApi } from "@/lib/api/annual-design"
+import {
+  keyForFormat, LANDSCAPE_DESIGN_KEY, LANDSCAPE_TOC_NAMES,
+  type LandscapeFormat, type Orientation,
+} from "@/lib/orientation"
 import { cn } from "@/lib/utils"
+import type { TocDesign } from "@/types/report-design"
 
-/** Display names. The engine sends keys and prose; the noun is ours. */
+/**
+ * Display names. The engine sends keys and prose; the noun is ours. The
+ * landscape keys never collide with the portrait ones, so one map serves both.
+ */
 const NAMES: Record<string, string> = {
   classic: "Classic",
   editorial: "Editorial",
   modular: "Modular",
   minimal: "Minimal",
   brand_band: "Brand Band",
+  ...LANDSCAPE_TOC_NAMES,
 }
 
 const title = (key: string) => NAMES[key] ?? key
+
+/**
+ * The designs the list offers: the portrait menu, or the landscape ones.
+ * Empty in landscape when the engine is too old to send any.
+ */
+function designsToList(
+  specs: { templates: TocDesign[]; landscape_templates?: TocDesign[] } | undefined,
+  orientation: Orientation,
+): TocDesign[] {
+  if (orientation === "landscape") return specs?.landscape_templates ?? []
+  return specs?.templates ?? []
+}
 
 export function TocDesignPanel({
   cycleId,
@@ -40,12 +66,24 @@ export function TocDesignPanel({
   locked,
   onChoose,
   saving,
+  orientation = "portrait",
+  format = "a4",
 }: {
   cycleId: string
+  /**
+   * The contents design in use in the orientation on screen. Portrait: the
+   * saved pick, or null when none. Landscape: the saved landscape pick, else
+   * the default.
+   */
   chosen: string | null
   locked: boolean
+  /** Save a pick for the orientation on screen. */
   onChoose: (key: string) => void
   saving: boolean
+  /** Portrait offers the five designs; landscape offers the three landscape ones. */
+  orientation?: Orientation
+  /** The landscape sheet the preview is drawn on: A4 or 16:9. */
+  format?: LandscapeFormat
 }) {
   const [active, setActive] = useState<string | null>(null)
 
@@ -54,22 +92,37 @@ export function TocDesignPanel({
     queryFn: () => annualDesignApi.tocDesigns(),
     staleTime: Infinity, // static reference data owned by the engine
   })
-  const designs = catalogue.data?.templates ?? []
-  const fallbackKey = catalogue.data?.default ?? "classic"
+  const landscape = orientation === "landscape"
+  const designs = designsToList(catalogue.data, orientation)
+  const fallbackKey = landscape
+    ? LANDSCAPE_DESIGN_KEY
+    : catalogue.data?.default ?? "classic"
+  // An engine deployed before landscape existed sends no landscape design.
+  // Asking it to draw "landscape" anyway would fail, or worse quietly draw a
+  // portrait default, so the panel says so instead.
+  const landscapeMissing = landscape && catalogue.isSuccess && designs.length === 0
 
-  // What the right pane shows: the design being inspected, else the one saved,
-  // else the engine's default. Derived during render — this screen's lint
-  // rules reject setState inside an effect, and a "which preview is loading"
-  // flag kept by hand is exactly that.
+  // What the right pane shows: the design being inspected, else the one in
+  // use, else the default. Derived during render — this screen's lint rules
+  // reject setState inside an effect, and a "which preview is loading" flag
+  // kept by hand is exactly that. The parent remounts this panel when the
+  // orientation flips, so a design inspected in one never shows in the other.
   const showing = active ?? chosen ?? fallbackKey
+  const inUse = chosen
+  // Landscape draws only a design the engine listed, so an engine from before
+  // there was a choice is never asked for one it does not have.
+  const canDraw = !landscape || designs.some((design) => design.key === showing)
 
   // One query per design, cached for the visit. React Query handles the
   // in-flight flag, the error and the memo that makes re-picking a design
   // already looked at free — which is the whole point of comparing five.
   const previewQuery = useQuery({
-    queryKey: ["pm", "cycle", cycleId, "toc-preview", showing],
+    // See CoverDesignPanel: the same key PreviewAllPanel reads.
+    queryKey: ["pm", "cycle", cycleId, "toc-preview", keyForFormat(showing, format)],
     queryFn: () => annualDesignApi.previewToc(cycleId, showing),
-    enabled: Boolean(showing),
+    // Landscape waits for the list, so an old engine is never asked to draw a
+    // design it does not have.
+    enabled: Boolean(showing) && canDraw,
     staleTime: Infinity,
     retry: false,
   })
@@ -94,14 +147,27 @@ export function TocDesignPanel({
     <div className="flex min-h-0 flex-1">
       <div className="w-[300px] shrink-0 overflow-y-auto border-r p-4">
         <p className="mb-1 text-xs font-semibold text-slate-900">Contents page</p>
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-          How the table of contents is set. Every design prints every entry —
-          they differ in how the levels are shown, never in what survives.
-        </p>
+        {landscape ? (
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+            The table of contents of the landscape report. Every design prints
+            every entry. Your portrait contents page is kept as it is.
+          </p>
+        ) : (
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+            How the table of contents is set. Every design prints every entry —
+            they differ in how the levels are shown, never in what survives.
+          </p>
+        )}
+        {landscapeMissing && (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+            The export engine on this server does not have the landscape
+            contents pages yet, so they cannot be previewed.
+          </p>
+        )}
 
         <div className="space-y-2">
           {designs.map((design) => {
-            const isChosen = chosen === design.key
+            const isChosen = inUse === design.key
             const isShowing = showing === design.key
             return (
               <button
@@ -154,7 +220,7 @@ export function TocDesignPanel({
             size="sm"
             variant={chosen === showing ? "outline" : "brand"}
             className="h-8 shrink-0"
-            disabled={locked || saving || chosen === showing}
+            disabled={locked || saving || chosen === showing || !canDraw}
             title={
               locked
                 ? "This report has been approved and locked."
@@ -188,7 +254,12 @@ export function TocDesignPanel({
                   key={index}
                   src={src}
                   alt={`${title(showing)} contents page ${index + 1}`}
-                  className="mx-auto w-full max-w-2xl rounded border border-slate-300 bg-white shadow-sm"
+                  // A sideways sheet gets more width, or its type would be
+                  // drawn smaller than the portrait designs'.
+                  className={cn(
+                    "mx-auto w-full rounded border border-slate-300 bg-white shadow-sm",
+                    landscape ? "max-w-4xl" : "max-w-2xl",
+                  )}
                 />
               ))}
               {preview.estimated_pages && (
