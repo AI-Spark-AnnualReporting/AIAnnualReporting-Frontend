@@ -1124,6 +1124,20 @@ const BORDERLESS_STATEMENT: BorderlessRowKind[] = [
 const BORDERLESS_LIST: BorderlessRowKind[] = ["item", "item", "item", "item", "item", "item"]
 
 /**
+ * The section's text the tables-only pages set above their tables: a few
+ * plain lines, no quote and no figure boxes.
+ */
+function tablesOnlyText() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, marginBottom: 2 }}>
+      <div style={line("92%")} />
+      <div style={line("84%")} />
+      <div style={line("58%")} />
+    </div>
+  )
+}
+
+/**
  * The borderless table page: a dark heading, then the tables at the full
  * width, nothing else — no text, no figure boxes, no quotes.
  */
@@ -1131,6 +1145,7 @@ function BorderlessTableMini({ accent }: { accent: string }) {
   return (
     <div style={{ ...shell, gap: 6 }}>
       <div style={{ ...line("62%", BT_INK, 4), marginBottom: 2 }} />
+      {tablesOnlyText()}
       {borderlessTable(accent, BORDERLESS_STATEMENT)}
       {borderlessTable(accent, BORDERLESS_LIST)}
     </div>
@@ -1142,6 +1157,7 @@ function LandscapeBorderlessTableMini({ accent, presentation }: { accent: string
   return (
     <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
       <div style={{ ...line("40%", BT_INK, 4), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {borderlessTable(accent, BORDERLESS_STATEMENT)}
       {borderlessTable(accent, BORDERLESS_LIST)}
     </div>
@@ -1270,6 +1286,7 @@ function GridTableMini({ accent }: { accent: string }) {
   return (
     <div style={{ ...shell, gap: 5 }}>
       <div style={{ ...line("46%", GT_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {gridTable(accent, GRID_STATEMENT, false)}
       {gridTable(accent, GRID_SHORT, true)}
     </div>
@@ -1289,6 +1306,7 @@ function LandscapeGridTableMini({ accent, presentation }: { accent: string; pres
     <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, flexDirection: "row", gap: 14 }}>
       <div style={half}>
         <div style={{ ...line("52%", GT_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
         {gridTable(accent, statement, false)}
       </div>
       <div style={{ ...half, paddingTop: 5 }}>
@@ -1442,6 +1460,7 @@ function StripedTableMini({ accent }: { accent: string }) {
   return (
     <div style={{ ...shell, gap: 5 }}>
       <div style={{ ...line("46%", ST_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {stripedTable(accent, STRIPED_STATEMENT, false, 2)}
       {stripedTable(accent, STRIPED_LIST_LONG, true, 2)}
     </div>
@@ -1457,6 +1476,7 @@ function LandscapeStripedTableMini({ accent, presentation }: { accent: string; p
   return (
     <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
       <div style={{ ...line("34%", ST_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {stripedTable(accent, statement, false, 4)}
       {stripedTable(accent, STRIPED_LIST, true, 4)}
     </div>
@@ -1579,6 +1599,7 @@ function ZebraTableMini({ accent }: { accent: string }) {
   return (
     <div style={{ ...shell, gap: 5 }}>
       <div style={{ ...line("46%", ST_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {zebraTable(accent, ZEBRA_STATEMENT, false, 2)}
       {zebraTable(accent, ZEBRA_LIST_LONG, true, 2)}
     </div>
@@ -1595,6 +1616,7 @@ function LandscapeZebraTableMini({ accent, presentation }: { accent: string; pre
   return (
     <div style={{ ...shell, aspectRatio: landscapeRatio(presentation), padding: 9, gap: 5 }}>
       <div style={{ ...line("34%", ST_INK, 3), marginBottom: 1 }} />
+      {tablesOnlyText()}
       {zebraTable(accent, statement, false, 4)}
       {zebraTable(accent, list, true, 4)}
     </div>

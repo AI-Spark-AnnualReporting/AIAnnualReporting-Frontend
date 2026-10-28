@@ -133,4 +133,4 @@ export function tablesOnlyUncounted(
 
 /** The warning shown for a tables-only template that has not been counted yet. */
 export const TABLES_ONLY_UNCOUNTED_TEXT =
-  "any text, figures and quotes are not printed. Re-extract this section to count them"
+  "any separate figures and quotes are not printed. Re-extract this section to count them"
