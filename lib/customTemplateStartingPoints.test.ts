@@ -111,7 +111,7 @@ function everyMix(): ContentCounts[] {
 
   const rich = counts({ figures: 7, quotes: 2 })
   assert.deepEqual(presetsFor("presentation", rich).map((p) => p.id),
-    ["keynote", "numbers", "bento", "shapes", "magazine", "split", "momentum", "gallery"])
+    ["keynote", "numbers", "classic", "shapes", "magazine", "split", "momentum", "gallery"])
   assert.ok(!presetsFor("portrait", rich).some((p) => p.id === "keynote"), "keynote is 16:9 only")
   assert.ok(!presetsFor("landscape", rich).some((p) => p.id === "keynote"))
   assert.ok(presetsFor("portrait", counts({ figures: 3 })).some((p) => p.id === "numbers"))
