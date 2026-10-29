@@ -1407,8 +1407,14 @@ export const pmApi = {
 
   // Ignore validation findings (ignored=true), or undo that (false). Several
   // keys go in one save.
+  // 120 s, not the default 30: a save takes a few seconds, but a backend busy
+  // with an assemble or a validation can make it wait well past 30 s.
   ignoreFindings: async (cycleId: string, keys: string[], ignored: boolean): Promise<void> => {
-    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { keys, ignored })
+    await apiClient.put(
+      `/pm/cycles/${cycleId}/validation/ignore`,
+      { keys, ignored },
+      { timeout: 120000 },
+    )
   },
 
   // Undo the latest `steps` changes to a section since the validation. Returns

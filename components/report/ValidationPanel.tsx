@@ -29,6 +29,7 @@ import {
   type ReportValidation,
   type UndoChange,
 } from "@/lib/api/pm"
+import { isTimeoutError } from "@/lib/api/client"
 import type { FinalReport } from "@/types"
 import { QUERY_KEYS } from "@/lib/constants"
 import { cn, formatDateTime } from "@/lib/utils"
@@ -136,6 +137,24 @@ export function ValidationPanel({
     if (!savingNow.current) void saveIgnores(cycleId)
   }
 
+  /**
+   * Save one batch, trying again after a timeout (up to 3 tries in all).
+   * Safe to repeat: the server skips a finding that is already ignored, and
+   * undoing one that isn't ignored changes nothing. Other errors are thrown
+   * at once, since a retry would only get the same answer.
+   */
+  const saveWithRetry = async (cycleId: string, keys: string[], ignore: boolean): Promise<void> => {
+    const tries = 3
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      try {
+        await pmApi.ignoreFindings(cycleId, keys, ignore)
+        return
+      } catch (err) {
+        if (!isTimeoutError(err) || attempt === tries) throw err
+      }
+    }
+  }
+
   /** Save the waiting Ignore clicks, in batches, until none are left. */
   const saveIgnores = async (cycleId: string) => {
     savingNow.current = true
@@ -146,9 +165,11 @@ export function ValidationPanel({
         const toIgnore = batch.filter(([, ignore]) => ignore).map(([key]) => key)
         const toUndo = batch.filter(([, ignore]) => !ignore).map(([key]) => key)
         try {
-          if (toIgnore.length) await pmApi.ignoreFindings(cycleId, toIgnore, true)
-          if (toUndo.length) await pmApi.ignoreFindings(cycleId, toUndo, false)
+          if (toIgnore.length) await saveWithRetry(cycleId, toIgnore, true)
+          if (toUndo.length) await saveWithRetry(cycleId, toUndo, false)
         } catch (err) {
+          // Only after every try failed. Re-assemble stays locked (onSaving)
+          // until the report below has been reloaded from the server.
           toast.error(readError(err as MutationError, "Couldn't save that change"))
           await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
         }
