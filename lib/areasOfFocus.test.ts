@@ -8,7 +8,10 @@
  */
 
 import assert from "node:assert/strict"
-import { roleSelectionSaveable, type AreaOfFocus, type AreaRole } from "./areasOfFocus.ts"
+import {
+  roleSelectionSaveable, roleSelectionComplete,
+  type AreaOfFocus, type AreaRole,
+} from "./areasOfFocus.ts"
 
 const areas = (...roles: AreaRole[]): AreaOfFocus[] =>
   roles.map((role, i) => ({ slogan: `slogan ${i}`, sub_slogans: [], role }))
@@ -52,5 +55,47 @@ assert.equal(
 )
 // The default bounds are unchanged by the override existing.
 assert.equal(roleSelectionSaveable(areas("primary", "none")), false, "default min still 2")
+
+// ── A freshly generated area has NO role key ──────────────────────────────
+// The generator writes {slogan, summary, sub_slogans} and nothing else. Read
+// raw, `undefined !== "none"` counted every untouched area as SELECTED, so a
+// brand-new set of five looked like "five chosen, no primary" — invalid, for
+// entirely the wrong reason. It happened to block the right button, which is
+// how it went unnoticed.
+{
+  const fresh = [
+    { slogan: "One", sub_slogans: [] },
+    { slogan: "Two", sub_slogans: [] },
+  ] as unknown as AreaOfFocus[]
+
+  assert.equal(
+    roleSelectionSaveable(fresh), true,
+    "an untouched set must be saveable — nobody has chosen yet",
+  )
+  assert.equal(
+    roleSelectionComplete(fresh), false,
+    "but it is NOT a decision, so it must not open a gate",
+  )
+}
+
+// ── complete vs saveable ──────────────────────────────────────────────────
+{
+  const chosen = [
+    { slogan: "Lead", sub_slogans: [], role: "primary" },
+    { slogan: "Second", sub_slogans: [], role: "secondary" },
+    { slogan: "Unused", sub_slogans: [], role: "none" },
+  ] as AreaOfFocus[]
+  assert.equal(roleSelectionComplete(chosen), true)
+  assert.equal(roleSelectionSaveable(chosen), true)
+
+  const noPrimary = chosen.map((a) =>
+    a.role === "primary" ? { ...a, role: "secondary" as AreaRole } : a,
+  )
+  assert.equal(roleSelectionComplete(noPrimary), false, "used, but nothing leads")
+  assert.equal(roleSelectionSaveable(noPrimary), false)
+
+  const onlyOne = [{ slogan: "Lead", sub_slogans: [], role: "primary" }] as AreaOfFocus[]
+  assert.equal(roleSelectionComplete(onlyOne), false, "below the minimum of 2")
+}
 
 console.log("roleSelectionSaveable: all checks passed")

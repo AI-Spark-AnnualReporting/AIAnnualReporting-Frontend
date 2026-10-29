@@ -42,9 +42,13 @@ export function AttachedReportCard({
   subtitle = "Linked · read-only snapshot",
   onClick,
   disabled = false,
+  hasValidation = false,
 }: {
   report: ThreadReport
   subtitle?: string
+  // A validation is on file for this report. Only the fact of it - the
+  // findings are on the reviewer's screen, which is where they can be acted on.
+  hasValidation?: boolean
   // When set the whole card becomes a button (opens the report in review).
   onClick?: () => void
   // A summary and nothing else. The share modal sets it: a link there walks the
@@ -173,6 +177,7 @@ export function AttachedReportCard({
           and its click means something different (go to the report, not open
           the review). */}
       <GenerationRow generation={report.generation} status={report.status} />
+      <ValidationRow hasValidation={hasValidation} />
     </div>
   )
 }
@@ -183,6 +188,46 @@ export function AttachedReportCard({
    anything written" — see ReportGeneration. No buttons: the card itself is the
    link (or the button beside it is), and a second control saying the same
    thing twice is just noise. */
+/* Whether a validation is on file.
+
+   Its own row, deliberately not part of GenerationRow. That row hides itself
+   once the report is signed off, so that "92% written" does not sit under an
+   APPROVED badge reading as a contradiction - and it was taking this line down
+   with it. But this is not progress. It is a fact about the finished document,
+   and an approved report is when someone most wants to know it was checked.
+
+   Only whether one exists - the findings live on the reviewer screen, which is
+   where they can be acted on. */
+function ValidationRow({ hasValidation }: { hasValidation?: boolean }) {
+  if (!hasValidation) return null
+  return (
+    <div style={{ padding: "7px 15px 9px", borderTop: "1px solid #E6E8F4" }}>
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontSize: 11.5,
+          fontWeight: 700,
+          color: "#5A6080",
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M3.5 8.5l3 3 6-6"
+            stroke="#16A34A"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        Validation report linked
+      </span>
+    </div>
+  )
+}
+
+
 function GenerationRow({
   generation,
   status,

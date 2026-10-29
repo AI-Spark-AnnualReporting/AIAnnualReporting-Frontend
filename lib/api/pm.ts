@@ -4,12 +4,397 @@ import {
   BuildReadiness, CycleReportSection,
   PlanResponse, ReportTheme, AvailableOptionalSection,
   AssemblyReadiness, FinalReport, ReportApproval, SectionMode,
-  ContentLanguage,
+  ContentLanguage, WritingStyle,
 } from "@/types"
 
 export interface ReviewPayload {
   action: PMReviewAction
   review_notes?: string
+}
+
+// ---------------------------------------------------------------------------
+// Pre-build draft checks
+// The PM runs these from the Report Builder card once every department is
+// approved and before the builder opens — the last point at which a correction
+// still reaches the generated report.
+// ---------------------------------------------------------------------------
+
+// One department's side of a finding. `sentence` is verbatim from that
+// department's submission, which is what makes the inline edit safe: the
+// backend replaces this exact string.
+export interface FindingSide {
+  session_id: string
+  department: string
+  sentence: string
+  // Which copy of this sentence, when the draft repeats it verbatim. Sent back
+  // untouched on resolve so the backend edits the flagged one.
+  occurrence: number
+  // Populated on a figure_conflict, from the claim behind the sentence.
+  value?: string | null
+  period?: string | null
+  // company | department. Shown on the finding so a wrong call by the model is
+  // obvious to the PM, who can clear it in one click.
+  scope?: string | null
+  // What this department was asked. Often the reason two figures differ.
+  question?: string | null
+}
+
+// One fact a department stated, read out of its ANSWERS - never its draft,
+// which is model-written from those same answers.
+/** What a Validate-report run found. Only figures_traced/figures_total is ever
+ *  printed in the annual report; the rest are model judgements and stay on the
+ *  PM's screen. */
+export interface CoverageStat {
+  title: string
+  sections: number
+  percent: number
+}
+
+export interface ReportValidation {
+  figures_total: number
+  figures_traced: number
+  // Which of the two recorded sources each figure matched. Absent on a
+  // validation stored before documents were checked, which is why the panel
+  // and the statement both fall back to the plain ratio without it.
+  figures_by_source?: {
+    submission: number
+    document: number
+    // Typed by the PM by hand. Absent on validations stored before it existed.
+    pm?: number
+    neither: number
+  } | null
+  // context is the sentence the figure sits in. Optional: validations stored
+  // before it was captured have the bare value only.
+  // Every finding carries `key`, sent back to ignore it. Absent on
+  // validations stored before Ignore existed.
+  untraced: { section_code: string; title: string; value: string; context?: string; key?: string }[]
+  instruction_text: { section_code: string; title: string; line: string; marker: string; key?: string }[]
+  voice: { section_code: string; title: string; phrase: string; key?: string }[]
+  preferred_words: Record<string, number>
+  // The house style this run was judged against, kept with the verdict rather
+  // than read back from the company later - brand_voice is edited over time,
+  // and a finding made under one rule set must not be explained by another.
+  // Null when the company stores no style at all.
+  tone_rules?: {
+    person: string
+    register: string
+    sentence_style: string
+    tone_adjectives: string[]
+    banned_words: string[]
+    preferred_words: string[]
+    do: string[]
+    dont: string[]
+  } | null
+  // `sections`: which section carries which value. Absent on validations
+  // stored before the fix workflow, which then offer no Edit buttons.
+  conflicts: {
+    measure: string
+    detail: string
+    sections?: { section_code: string; title: string; value: string }[]
+    key?: string
+  }[]
+  redundancy: { sections: string[]; detail: string; key?: string }[]
+  brief_gaps: { ask: string; detail: string; key?: string }[]
+  // How many explicit asks the brief made in all, so the gaps can be read as a
+  // share. Null when the judgement gave no usable count, and on any validation
+  // stored before it was asked for.
+  brief_asks_total?: number | null
+  // Every ask the brief made, covered or not, and which section covers it.
+  // Empty on a validation stored before the covered ones were named - at full
+  // coverage there are no gaps, and without this a card reading "7 of 7"
+  // cannot say seven of what.
+  brief_asks?: { ask: string; covered?: boolean; where?: string; detail?: string }[]
+  emphasis: { primary_leads?: boolean; detail?: string; missing?: string[] } | null
+  // How much of the report carries each concept message, and the house style.
+  // Counted over the sections that were read, never the whole report. Null on a
+  // validation stored before coverage was measured.
+  coverage?: {
+    sections_checked: number
+    // Per metric, because they are not scored over the same sections: an
+    // auditor's report carries neither the brand theme nor the house style, and
+    // a risk disclosure is governed by the house style but is no place for a
+    // theme. Absent on a validation stored before that was asked.
+    concept_sections?: number
+    tone_sections?: number
+    // What was left out of those bases, and what the section is for.
+    excluded?: {
+      section_code: string
+      title: string
+      purpose: string
+      concept: boolean
+      tone: boolean
+    }[]
+    // Null when no message is marked primary, which one live cycle is.
+    primary: CoverageStat | null
+    secondary: CoverageStat[]
+    secondary_any: { sections: number; percent: number }
+    // Null when the company stored no house style. It must not score: with no
+    // rules nothing can be flagged, so every such company would read 100%.
+    tone: { sections: number; percent: number } | null
+  } | null
+  // Sections the model never returned a verdict for. NOT the same as clean —
+  // nobody looked at these.
+  sections_unchecked: string[]
+  sections: Record<string, {
+    title?: string
+    covers?: string
+    concept?: string
+    // Which concept messages this section carries, by title. The evidence
+    // behind the coverage percentages.
+    concepts?: string[]
+    unsupported?: { label: string; detail: string }[]
+    // Every figure the section states, named by the measure it belongs to.
+    // Counting the distinct measures is what gives the conflict check a base.
+    figures?: { label?: string; value?: string; measure?: string }[]
+    // Whether the concept / tone checks apply to this section at all.
+    applies?: { concept?: boolean; tone?: boolean }
+    // A table-only section, never read by the AI.
+    data_only?: boolean
+  }>
+  validated_at: string
+  // false on an external report (Annual Report Validator), which has no
+  // sources to trace figures to. Absent on older results, which all traced.
+  figure_tracing?: boolean
+  // External report only: checks that didn't run because their input held
+  // nothing usable (e.g. a concepts file with no messages), with the reason.
+  skipped?: { check: string; file: string | null; reason: string }[]
+  // The uploaded file's name, on an external report only.
+  filename?: string
+  // Sections the PM edited since this check (own report, from the stored
+  // per-section fingerprints). Absent on older validations and fresh runs.
+  edited_since_check?: string[]
+  // House-style phrases still in those edited sections, lowercased. A
+  // house-style row shows Fixed only when none of its phrases is left.
+  voice_left?: Record<string, string[]>
+  // A fingerprint of each section's text when checked (own report only).
+  section_hashes?: Record<string, string>
+  // The section the PM sent each uncovered brief ask or concept message to,
+  // keyed by its text. Cleared by the next validation run.
+  chosen_sections?: Record<string, string>
+  // Findings the PM ignored, by key.
+  ignored?: Record<string, IgnoredFinding>
+  // Sections with changes since this check that Undo can take back, by
+  // section code. The old texts stay on the server. Cleared by the next
+  // validation run.
+  undo_changes?: Record<string, UndoChange>
+}
+
+// The changes Undo can take back in one section, and the last of them.
+export interface UndoChange {
+  // How many changes are kept (at most 10).
+  count: number
+  // The last change, e.g. "Refined with AI" or "Edited by hand".
+  what: string
+  by: string
+  at: string | null
+}
+
+// One kept change in the Undo pop-up, with the section text from just before
+// it. Loaded only when the pop-up opens.
+export interface UndoHistoryEntry {
+  what: string
+  by: string
+  at: string | null
+  text: string | null
+}
+
+// A finding the PM ignored, kept out of every later validation until one of
+// its sections is edited. `findings` are the finding(s) as they stood (a word
+// used twice in a section is one ignore, two findings); empty for a concept
+// message, which has no list in the result.
+export interface IgnoredFinding {
+  kind: string
+  findings: {
+    measure?: string
+    detail?: string
+    sections?: (string | { section_code: string; title?: string })[]
+    section_code?: string
+    title?: string
+    phrase?: string
+    value?: string
+    line?: string
+    ask?: string
+  }[]
+  by: string
+  at: string
+}
+
+// One section the AI suggests for a brief ask or concept message nothing covers.
+export interface SectionSuggestion {
+  section_code: string
+  title: string
+  reason: string
+}
+
+// House-style rules, in the shape the backend stores as companies.brand_voice.
+export interface ToneRules {
+  person: string
+  register: string
+  sentence_style: string
+  tone_adjectives: string[]
+  banned_words: string[]
+  preferred_words: string[]
+  do: string[]
+  dont: string[]
+}
+
+// What the user gives the Annual Report Validator. Everything is required;
+// the brief, concept messages and tone may be typed/pasted or uploaded as a
+// file. Tone has no typed/structured path like concepts does - paste and
+// file both arrive as free text, which the server always reads with the
+// model (see ToneRules, the shape it comes back as once read).
+export interface ExternalReportInput {
+  report: File
+  brief: string
+  // Used by the server only when `brief` is empty.
+  briefFile: File | null
+  // No title to type - the server draws a short one from the message when
+  // none is given.
+  concepts: { message: string }[]
+  // Used by the server only when `concepts` is empty.
+  conceptFile: File | null
+  // A pasted house-style guide.
+  toneText: string
+  // Used by the server only when `toneText` is empty.
+  toneFile: File | null
+}
+
+// A validation running in the background (GET /pm/validation-jobs/{id}).
+export interface ValidationJob {
+  job_id: string
+  status: "running" | "completed" | "failed"
+  // What it is doing now, while running.
+  stage: string | null
+  validation: ReportValidation | null
+  error: string | null
+  // Whether "Validate again" can re-run it without a new upload. False for a
+  // run that failed while reading its inputs (nothing was saved to reuse).
+  retryable?: boolean
+}
+
+// One row of GET /pm/validation-jobs (list) - lightweight, so the list of
+// past runs doesn't pull the full validation payload for every one. `score`
+// is the same weighted "Overall" percentage the results panel shows,
+// computed server-side; null until the run completes.
+export interface ValidationJobSummary {
+  job_id: string
+  filename: string
+  status: "running" | "completed" | "failed"
+  created_at: string
+  score: number | null
+  error: string | null
+  // Same meaning as ValidationJob.retryable.
+  retryable?: boolean
+}
+
+// An Arabic translation running in the background (GET /pm/translation-jobs/{id}).
+export interface TranslationJob {
+  job_id: string
+  // "timeout" = the run was stuck for over 15 minutes and was given up.
+  status: "running" | "completed" | "failed" | "timeout"
+  // "brief" while the shared instruction sheet is written, then "translate".
+  stage: "brief" | "translate" | null
+  // Sections finished / in all, while translating.
+  done: number | null
+  total: number | null
+  error: string | null
+}
+
+const JOB_POLL_MS = 3000
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export interface DepartmentClaim {
+  id: string
+  text: string
+  metric?: string | null
+  // A numeric string, or null for a fact with no number. Non-numeric facts are
+  // kept: without them every ordinary draft sentence would look unsupported.
+  value?: string | null
+  unit?: string | null
+  period?: string | null
+  // Only company-scoped facts are compared across departments.
+  scope: string
+  question_id?: string | null
+  // What another department said that disagrees with this fact. Null means
+  // nothing disagrees — which only reads as "no issue" once the drafts have
+  // actually been analyzed (see findings_checked_at on the response).
+  dispute?: string | null
+}
+
+export interface DepartmentClaimsGroup {
+  session_id: string
+  department: string
+  claims: DepartmentClaim[]
+  // null means this department's claims were never read - extraction failed, or
+  // the cycle predates the feature. The page offers Extract claims.
+  extracted_at: string | null
+  /** Distinct figures in the answers that no fact carries; above 0 = the
+   *  fact list may be short. */
+  figures_not_in_facts?: number
+  /** Read again after approval: the page stops offering another re-read. */
+  facts_reread?: boolean
+}
+
+export interface DepartmentClaimsResponse {
+  success: boolean
+  cycle_id: string
+  departments: DepartmentClaimsGroup[]
+  total_claims: number
+  // When the drafts were last analyzed. Null means never, which is what
+  // separates "no issue found" from "nothing has checked yet".
+  findings_checked_at?: string | null
+}
+
+// What the PM did about a finding. `from` is the pre-correction sentence — the
+// only record that an approved submission was edited, since the department and
+// its HOD are not notified.
+export interface FindingResolution {
+  session_id: string | null
+  action: "edited" | "removed" | "accepted"
+  // The submission exactly as it stood before this edit, so Undo can restore
+  // it verbatim. Absent on findings resolved before Undo existed.
+  before_text?: string | null
+  from: string | null
+  to: string | null
+  by: string
+  at: string
+}
+
+// invented_claim — a sentence the department's own answers do not support; one
+// entry in `sides`. figure_conflict — departments disagreeing on one measure;
+// two or more entries in `sides`.
+export interface DraftFinding {
+  id: string
+  kind: "invented_claim" | "figure_conflict"
+  label: string
+  detail: string
+  status: "open" | "corrected" | "removed" | "accepted"
+  sides: FindingSide[]
+  resolution?: FindingResolution | null
+}
+
+export interface DraftFindingsResponse {
+  success: boolean
+  cycle_id: string
+  findings: DraftFinding[]
+  open_count: number
+  // null means the check has never been run for this cycle — not the same as
+  // "ran and found nothing".
+  checked_at: string | null
+  // Set when the PM consented and opened the Report Builder. Non-null means the
+  // findings page is a read-only record: no more resolves, no re-running the
+  // check. One-way — there is no unlock.
+  locked_at: string | null
+  locked_by: string | null
+}
+
+export interface ResolveFindingPayload {
+  action: "edited" | "removed" | "accepted" | "undo"
+  session_id?: string
+  sentence?: string
 }
 
 export interface ReminderPayload {
@@ -72,6 +457,99 @@ export interface PreviousManualSectionsResponse {
   sections: PreviousManualSection[]
 }
 
+// POST /pm/cycles/{id}/sections/{code}/draft — a whole first version of one of
+// the human-voice statements (Chairman's Statement, CEO's Review), written from
+// this cycle's material.
+//
+// The endpoint saves nothing. The text comes back for the PM to read, and the
+// existing manual-content save is what stores it if they accept it. It is an
+// LLM call, so it is only ever sent on an explicit press.
+//
+// "Not enough material yet" is a legitimate answer here, not a failure: the
+// reply carries no content and a plain-language `reason` to show in its place.
+export interface StatementDraft {
+  // The drafted statement, or null when there wasn't enough to draft from.
+  content: string | null
+  // Why nothing was drafted, in the server's own words. Null when text came back.
+  reason: string | null
+  // The subheadings carried over verbatim from the company's previous
+  // statement. Empty when they write in unbroken prose, or when there is no
+  // previous statement — in both cases the draft has no subheadings either.
+  mirroredHeadings: string[]
+  // Which of those this year's approved material did not support. The heading
+  // is still in `content`; naming it lets the PM chase the department that did
+  // not report, or delete it.
+  thinHeadings: string[]
+}
+
+// Read the draft reply tolerantly. This endpoint is new, so take the statement
+// from whichever of the usual keys carries it and the refusal from whichever
+// carries the sentence. Anything blank is read as "nothing was drafted", which
+// is an answer this endpoint is allowed to give — the caller renders the reason
+// rather than an error.
+function readStatementDraft(payload: unknown): StatementDraft {
+  const body = (payload ?? {}) as Record<string, unknown>
+  const section = (body.section ?? {}) as Record<string, unknown>
+  const content = firstSentence([
+    body.content,
+    body.draft,
+    body.text,
+    section.content,
+  ])
+  const reason = firstSentence([body.reason, body.message, body.detail])
+  return {
+    content,
+    reason: content ? null : reason,
+    mirroredHeadings: stringList(body.mirrored_headings),
+    thinHeadings: stringList(body.thin_headings),
+  }
+}
+
+// A list of non-empty strings, or nothing. Same tolerance as the readers above:
+// these two fields only ever ADD a note to the screen, so an unexpected shape
+// must read as "no note" rather than throw away the draft beside it.
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  )
+}
+
+function firstSentence(candidates: unknown[]): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+  }
+  return null
+}
+
+// GET /pm/cycles/{id}/sections/{code}/draft-availability — whether there is
+// anything to draft this statement FROM, asked before the option is offered.
+//
+// Cheap and model-free, unlike the draft itself, so it is safe to send when the
+// source picker renders. It answers in advance the same question the draft
+// endpoint answers by refusing — which is what lets the app stop offering a
+// statement it cannot write.
+export interface StatementDraftAvailability {
+  available: boolean
+  // Why not, in the server's own words. Not shown to the PM: the option is
+  // simply absent, and a company with nothing to draft from has no reason to be
+  // told about a feature that doesn't apply to it yet.
+  reason: string | null
+}
+
+// Read the availability reply tolerantly, and default to AVAILABLE. Only an
+// explicit `false` takes the option away; a reply in a shape we don't recognise
+// must never remove a feature, because the draft endpoint still refuses
+// gracefully and the cost of being wrong in this direction is one explained
+// refusal.
+function readDraftAvailability(payload: unknown): StatementDraftAvailability {
+  const body = (payload ?? {}) as Record<string, unknown>
+  return {
+    available: body.available !== false,
+    reason: firstSentence([body.reason, body.message, body.detail]),
+  }
+}
+
 // GET /pm/cycles/{id}/survey-questions — the questionnaire feeding the
 // Strategic Brief wizard. Order is stable per cycle (safe to index by
 // position for a stepper). `options: null` means a plain free-text question;
@@ -90,8 +568,14 @@ export interface PreviousManualSectionsResponse {
 export interface SurveyQuestion {
   id: string
   text: string
-  source: "template" | "generated"
+  // "manual" = typed in by Spark. Those sort just before the catch-all and are
+  // always free text — no option pills.
+  source: "template" | "generated" | "manual"
   options: string[] | null
+  /** Who rejected it — absent while it's in use. The question stays in the
+   *  list so the rejection can be traced. */
+  rejected_by?: "spark" | "pm" | "client" | null
+  rejected_at?: string | null
 }
 
 export interface SurveyQuestionsResponse {
@@ -344,6 +828,12 @@ export interface PMCycleSession {
   submitted_at: string | null
 }
 
+/** The PM's edits to a whole report (Edit report / Edit Arabic): the summary and each text section. */
+export interface ArabicEditBody {
+  executive_summary: string
+  sections: { section_code: string; content: string }[]
+}
+
 export const pmApi = {
   /**
    * Fetch PM cycle dashboard directly from the backend.
@@ -393,6 +883,35 @@ export const pmApi = {
     return data
   },
 
+  // Draft a whole human-voice statement. Costs an LLM call server-side and
+  // stores nothing, so it is sent only when the PM presses the button — never
+  // on mount. Long timeout, same order as generateSection.
+  draftStatement: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraft> => {
+    const { data } = await apiClient.post<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft`,
+      undefined,
+      { timeout: 120000 },
+    )
+    return readStatementDraft(data)
+  },
+
+  // Ask whether a draft is possible before offering it. No model call and no
+  // write, so — unlike draftStatement — this may be sent on render. Read
+  // tolerantly: anything other than an explicit `available: false` leaves the
+  // option in place.
+  draftAvailability: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<StatementDraftAvailability> => {
+    const { data } = await apiClient.get<unknown>(
+      `/pm/cycles/${cycleId}/sections/${sectionCode}/draft-availability`,
+    )
+    return readDraftAvailability(data)
+  },
+
   // Fetch the questionnaire that drives the Strategic Brief wizard's Step 1.
   // 403 → PM doesn't own this cycle; 404 → cycle not found (also returned for
   // cross-tenant access — treat both the same as "not found"). 200 with
@@ -400,6 +919,35 @@ export const pmApi = {
   getSurveyQuestions: async (cycleId: string): Promise<SurveyQuestionsResponse> => {
     const { data } = await apiClient.get<SurveyQuestionsResponse>(
       `/pm/cycles/${cycleId}/survey-questions`,
+    )
+    return data
+  },
+
+  // Replace the whole question set — how Spark's own questions are added and
+  // removed. 409 while the client holds the link: they are answering the list
+  // as it was sent.
+  // PUT /pm/cycles/{id}/questions/{qid}/rejection — reject one question, or
+  // bring it back, recording who. Changes one question's flags, never which
+  // questions exist, so it is allowed after the questionnaire has been shared.
+  setQuestionRejection: async (
+    cycleId: string,
+    questionId: string,
+    rejected: boolean,
+  ): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.put<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/questions/${encodeURIComponent(questionId)}/rejection`,
+      { rejected },
+    )
+    return data
+  },
+
+  saveSurveyQuestions: async (
+    cycleId: string,
+    questions: SurveyQuestion[],
+  ): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.put<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/survey-questions`,
+      { questions },
     )
     return data
   },
@@ -664,6 +1212,69 @@ export const pmApi = {
     return data
   },
 
+  // Pre-build draft checks. Runs the AI checks across every approved department
+  // draft — one call per department for unsupported claims, plus one across all
+  // of them for figures that disagree. Slow by nature (it is N+1 model calls run
+  // concurrently server-side), so the caller shows a pending state.
+  // Up to 3 minutes: the check reads any missing facts and runs one AI call
+  // per department, and took ~57 s on a 3-department test cycle. The 30 s
+  // default gave up while the server finished, and the PM landed on "Not
+  // analyzed yet" with the result already saved.
+  checkDrafts: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/check-drafts`, undefined, {
+      timeout: 180_000,
+    })
+    return data
+  },
+
+  // The stored findings from the last check — does NOT re-run it.
+  // checked_at is null when the PM has never run the check, which is what
+  // distinguishes "nothing wrong" from "not looked yet".
+  draftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/draft-findings`)
+    return data
+  },
+
+  // Record the PM's consent and close the findings. One-way, and the server
+  // refuses if any finding is still open.
+  lockDraftFindings: async (cycleId: string): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/lock`,
+    )
+    return data
+  },
+
+  // What each approved department stated, read from its answers. Read-only and
+  // cheap - it never triggers extraction.
+  departmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.get(`/pm/cycles/${cycleId}/department-claims`)
+    return data
+  },
+
+  // Fill in claims for any approved department missing them. The fallback when
+  // the background extraction at approval failed. One model call per missing
+  // department, so it is slow - callers show a pending state.
+  extractDepartmentClaims: async (cycleId: string): Promise<DepartmentClaimsResponse> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/department-claims/extract`)
+    return data
+  },
+
+  // Resolve one finding. action "edited" rewrites the sentence inside that
+  // department's approved submission and requires `sentence`; "removed" deletes
+  // it; "accepted" changes no text. session_id picks which department's sentence
+  // to act on and is required for edited/removed on a figure_conflict.
+  resolveFinding: async (
+    cycleId: string,
+    findingId: string,
+    payload: ResolveFindingPayload,
+  ): Promise<DraftFindingsResponse> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/draft-findings/${findingId}/resolve`,
+      payload,
+    )
+    return data
+  },
+
   // Resolved report sections for a cycle (PM-access).
   getCycleSections: async (cycleId: string): Promise<CycleReportSection[]> => {
     const { data } = await apiClient.get(`/pm/cycles/${cycleId}/sections`)
@@ -681,7 +1292,7 @@ export const pmApi = {
     const formData = new FormData()
     formData.append("file", file)
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/attachment`,
       formData,
       { headers: { "Content-Type": undefined }, timeout: 120000 },
     )
@@ -694,30 +1305,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/extract-content`,
-      { content },
-    )
-    return data.section
-  },
-
-  lockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/lock`,
-    )
-    return data.section
-  },
-
-  unlockSection: async (
-    cycleId: string,
-    sectionCode: string,
-  ): Promise<CycleReportSection> => {
-    const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/unlock`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/extract-content`,
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -727,7 +1320,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.delete<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/attachment`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/attachment`,
     )
     return data.section
   },
@@ -740,7 +1333,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/generate`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/generate`,
       undefined,
       { timeout: 120000 },
     )
@@ -755,7 +1348,7 @@ export const pmApi = {
     sectionCode: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/analyze`,
       undefined,
       { timeout: 120000 },
     )
@@ -768,10 +1361,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string | null,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/analyze-content`,
-      { content },
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/analyze-content`,
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -785,10 +1380,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/content`,
-      { content },
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/content`,
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -797,13 +1394,66 @@ export const pmApi = {
   // Backend takes the current section + the instruction, runs an LLM pass, and
   // returns the wholly-rewritten section. Stateless on the backend: each call
   // stands alone (no transcript), so the latest content IS the persisted state.
+  // Up to 3 sections that could cover something the validation found nothing
+  // covering. Empty when none fits - the PM can still pick any section.
+  suggestSections: async (cycleId: string, text: string): Promise<SectionSuggestion[]> => {
+    const { data } = await apiClient.post<{ suggestions: SectionSuggestion[] }>(
+      `/pm/cycles/${cycleId}/validation/suggest-sections`,
+      { text },
+      { timeout: 60000 },
+    )
+    return data.suggestions
+  },
+
+  // Ignore validation findings (ignored=true), or undo that (false). Several
+  // keys go in one save.
+  ignoreFindings: async (cycleId: string, keys: string[], ignored: boolean): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { keys, ignored })
+  },
+
+  // Undo the latest `steps` changes to a section since the validation. Returns
+  // how many changes are still to undo there.
+  undoSectionChange: async (
+    cycleId: string,
+    sectionCode: string,
+    steps = 1,
+  ): Promise<number> => {
+    const { data } = await apiClient.post<{ section_code: string; remaining: number }>(
+      `/pm/cycles/${cycleId}/validation/undo-change`,
+      { section_code: sectionCode, steps },
+    )
+    return data.remaining
+  },
+
+  // A section's kept changes since the validation, newest first, each with the
+  // text from just before it.
+  /** The section's kept changes (newest first) and its text as it is now. */
+  getUndoHistory: async (
+    cycleId: string,
+    sectionCode: string,
+  ): Promise<{ changes: UndoHistoryEntry[]; current_text: string }> => {
+    const { data } = await apiClient.get<{
+      section_code: string
+      changes: UndoHistoryEntry[]
+      current_text: string
+    }>(`/pm/cycles/${cycleId}/validation/undo-history/${sectionCode}`)
+    return { changes: data.changes, current_text: data.current_text ?? "" }
+  },
+
+  chooseSection: async (cycleId: string, text: string, sectionCode: string): Promise<void> => {
+    await apiClient.put(`/pm/cycles/${cycleId}/validation/chosen-section`, {
+      text,
+      section_code: sectionCode,
+    })
+  },
+
   refineSection: async (
     cycleId: string,
     sectionCode: string,
     instruction: string,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.post<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/refine`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/refine`,
       { instruction },
       { timeout: 120000 },
     )
@@ -816,10 +1466,12 @@ export const pmApi = {
     cycleId: string,
     sectionCode: string,
     content: string,
+    typedByPm = false,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/manual-content`,
-      { content },
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/manual-content`,
+      // typed_by_pm: figures new in the text are then not flagged as unsourced.
+      { content, typed_by_pm: typedByPm },
     )
     return data.section
   },
@@ -833,10 +1485,11 @@ export const pmApi = {
     return data.plan ?? data
   },
 
-  // refresh=true regenerates and overwrites manual edits.
-  buildPlan: async (cycleId: string, refresh = false): Promise<PlanResponse> => {
+  // Builds the plan once. Idempotent — a cycle that already has a plan gets the
+  // stored one back, untouched.
+  buildPlan: async (cycleId: string): Promise<PlanResponse> => {
     const { data } = await apiClient.post(
-      `/pm/cycles/${cycleId}/plan${refresh ? "?refresh=true" : ""}`,
+      `/pm/cycles/${cycleId}/plan`,
       undefined,
       { timeout: 180000 }, // two LLM passes — generous timeout
     )
@@ -866,22 +1519,23 @@ export const pmApi = {
     return data
   },
 
-  // Approve and lock the assembled report. One-way: afterwards every section,
-  // plan, and assemble write returns 409. 409 here too if the report has not
-  // been assembled, or was already signed off (including from the Hub).
-  approveReport: async (cycleId: string): Promise<ReportApproval> => {
-    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/approve`)
-    return data
-  },
-
+  // Also carries the section's writing style when given, so Start Building
+  // saves feeders and style in one request. Omitted = style left unchanged.
   setFeeders: async (
     cycleId: string,
     sectionCode: string,
     departmentCodes: string[],
+    writingStyle?: WritingStyle,
   ): Promise<PlanResponse> => {
     const { data } = await apiClient.put(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/feeders`,
-      { departments: departmentCodes },
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/feeders`,
+      {
+        departments: departmentCodes,
+        ...(writingStyle ? { writing_style: writingStyle } : {}),
+      },
+      // An analyze section re-runs its analysis on this call; and Start
+      // Building saves many sections at once on a server that is often slow.
+      { timeout: 120_000 },
     )
     return data.plan ?? data
   },
@@ -895,8 +1549,10 @@ export const pmApi = {
     mode: SectionMode,
   ): Promise<CycleReportSection> => {
     const { data } = await apiClient.put<{ success: boolean; section: CycleReportSection }>(
-      `/pm/cycles/${cycleId}/sections/${sectionCode}/source-mode`,
+      `/pm/cycles/${cycleId}/sections/${encodeURIComponent(sectionCode)}/source-mode`,
       { mode },
+      // Start Building saves many of these at once; 30 s timed one out.
+      { timeout: 120_000 },
     )
     return data.section
   },
@@ -922,6 +1578,23 @@ export const pmApi = {
     return data.sections ?? data
   },
 
+  // A PM-authored section that isn't in the catalogue. `mode` picks the source:
+  // "generate" writes it from `feeders` (the departments; may be empty, the card
+  // then flags "Needs a source"), "extract" means a document gets uploaded later
+  // and feeders are ignored. Both are switchable afterwards from the card.
+  // `name` doubles as the section_code server-side, so it is capped at 50 chars
+  // and cannot contain / \ or %.
+  addCustomSection: async (
+    cycleId: string,
+    payload: { name: string; feeders: string[]; mode: "generate" | "extract" },
+  ): Promise<CycleReportSection[]> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/sections/custom`,
+      payload,
+    )
+    return data.sections ?? data
+  },
+
   // `force=true` lets the PM remove required sections after confirming the
   // warning dialog. Locked sections still 409 either way — caller must unlock
   // first.
@@ -931,7 +1604,7 @@ export const pmApi = {
     force = false,
   ): Promise<CycleReportSection[]> => {
     const { data } = await apiClient.delete(
-      `/pm/cycles/${cycleId}/sections/optional/${sectionCode}${force ? "?force=true" : ""}`,
+      `/pm/cycles/${cycleId}/sections/optional/${encodeURIComponent(sectionCode)}${force ? "?force=true" : ""}`,
     )
     return data.sections ?? data
   },
@@ -954,7 +1627,96 @@ export const pmApi = {
     return data
   },
 
-  // 120s — backend writes exec summary + assembles. refresh=true regenerates.
+  // Check the assembled report against what the departments submitted.
+  //
+  // ~16 model calls server-side, so the 30s client default would abort a run
+  // that was about to succeed — and the work is saved before the response is
+  // sent, so an aborted request loses the answer while the server carries on.
+  //
+  // Now started in the background and polled, so a long report can never
+  // time out: each request is short, however long the run. Callers still get
+  // one promise that resolves with the validation. `onStage` hears the
+  // server's progress line on every poll.
+  validateReport: async (
+    cycleId: string,
+    onStage?: (stage: string | null) => void,
+  ): Promise<{ validation: ReportValidation }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/validate`,
+      undefined,
+      { params: { background: true } },
+    )
+    const validation = await pmApi.waitForValidationJob(data.job_id, onStage)
+    return { validation }
+  },
+
+  getValidationJob: async (jobId: string): Promise<ValidationJob> => {
+    const { data } = await apiClient.get(`/pm/validation-jobs/${jobId}`)
+    return data
+  },
+
+  // This admin's own past Annual Report Validator runs, newest first.
+  listExternalValidations: async (): Promise<ValidationJobSummary[]> => {
+    const { data } = await apiClient.get("/pm/validation-jobs")
+    return data.jobs ?? []
+  },
+
+  // Re-run a job with the report, brief, concepts and tone it already saved
+  // - no re-upload.
+  retryExternalValidation: async (jobId: string): Promise<{ job_id: string }> => {
+    const { data } = await apiClient.post(`/pm/validation-jobs/${jobId}/retry`)
+    return data
+  },
+
+  // Poll a validation job until it finishes. Resolves with the validation,
+  // or throws with the job's own error so the toast says what went wrong.
+  waitForValidationJob: async (
+    jobId: string,
+    onStage?: (stage: string | null) => void,
+  ): Promise<ReportValidation> => {
+    while (true) {
+      const job = await pmApi.getValidationJob(jobId)
+      if (job.status === "completed" && job.validation) return job.validation
+      if (job.status === "failed") {
+        throw new Error(job.error || "Validation failed. Please try again.")
+      }
+      onStage?.(job.stage)
+      await wait(JOB_POLL_MS)
+    }
+  },
+
+  // Same checks on any report the PM uploads, against the sources uploaded
+  // with it. Nothing is stored. Longer timeout than validateReport: department
+  // files go through the fact extractor first.
+  // Annual Report Validator: start validating an external report. Answers
+  // with a job id straight away; the run page polls it.
+  startExternalValidation: async (input: ExternalReportInput): Promise<{ job_id: string }> => {
+    const form = new FormData()
+    form.append("report", input.report)
+    form.append("brief", input.brief)
+    if (input.briefFile) {
+      form.append("brief_file", input.briefFile)
+    }
+    form.append("concepts", JSON.stringify(input.concepts))
+    if (input.conceptFile) {
+      form.append("concept_file", input.conceptFile)
+    }
+    form.append("tone_text", input.toneText)
+    if (input.toneFile) {
+      form.append("tone_file", input.toneFile)
+    }
+    const { data } = await apiClient.post("/pm/validate-upload", form, {
+      headers: { "Content-Type": undefined },
+      // Only the upload itself; the checks run after this answers.
+      timeout: 120_000,
+    })
+    return data
+  },
+
+  // 5 min — backend writes the exec summary, checks every section's title,
+  // embeds the report and extracts its figures, one AI call after another. A
+  // long report ran past the old 120s; the browser then gave up while the
+  // server carried on and saved the report anyway. refresh=true regenerates.
   assembleReport: async (
     cycleId: string,
     refresh = false,
@@ -964,9 +1726,32 @@ export const pmApi = {
     >(
       `/pm/cycles/${cycleId}/assemble${refresh ? "?refresh=true" : ""}`,
       undefined,
-      { timeout: 120000 },
+      { timeout: 300000 },
     )
     return (data as { report?: FinalReport }).report ?? (data as FinalReport)
+  },
+
+  // Start assembling in the background — answers in about a second, so the
+  // normal timeout is plenty. The caller then polls getAssembleJob(job_id)
+  // (see waitForAssembleJob). already_running = the cycle was already
+  // assembling (a double click); job_id is that run's job.
+  startAssemble: async (
+    cycleId: string,
+    refresh = false,
+  ): Promise<{ status: "running"; job_id: string; already_running: boolean }> => {
+    const params = refresh ? "background=true&refresh=true" : "background=true"
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/assemble?${params}`,
+    )
+    return data
+  },
+
+  /** A background assemble's state; `error` is set when it failed. */
+  getAssembleJob: async (
+    jobId: string,
+  ): Promise<{ status: "running" | "completed" | "failed"; error: string | null }> => {
+    const { data } = await apiClient.get(`/pm/assemble-jobs/${jobId}`)
+    return data
   },
 
   getFinalReport: async (cycleId: string): Promise<FinalReport> => {
@@ -976,6 +1761,52 @@ export const pmApi = {
     return (data as { report?: FinalReport }).report ?? (data as FinalReport)
   },
 
+  // Start translating the assembled report into Arabic. Answers at once; the
+  // caller polls getTranslationJob(job_id). already_running = a translation
+  // was already going (a double click); job_id is that run's job.
+  startTranslation: async (
+    cycleId: string,
+  ): Promise<{ status: "running"; job_id: string; already_running: boolean }> => {
+    const { data } = await apiClient.post(`/pm/cycles/${cycleId}/translate`)
+    return data
+  },
+
+  /** A translation's state: "brief" first, then "translate" with done/total. */
+  getTranslationJob: async (jobId: string): Promise<TranslationJob> => {
+    const { data } = await apiClient.get(`/pm/translation-jobs/${jobId}`)
+    return data
+  },
+
+  /** The Arabic translation of the assembled report. 404 if never translated. */
+  getArabicReport: async (cycleId: string): Promise<FinalReport> => {
+    const { data } = await apiClient.get<FinalReport>(
+      `/pm/cycles/${cycleId}/final-report/arabic`,
+    )
+    return data
+  },
+
+  /** Edit report: saves the PM's hand edits to the whole English report.
+   *  Only after the client asked for changes; the first save makes the next
+   *  version. 409 otherwise, or once the report is locked. */
+  saveReport: async (cycleId: string, body: ArabicEditBody): Promise<FinalReport> => {
+    const { data } = await apiClient.put<FinalReport>(`/pm/cycles/${cycleId}/final-report`, body)
+    return data
+  },
+
+  /** Saves the PM's hand edits to the whole Arabic report. Only the text
+   *  changes; after the client asked for changes this makes the next Arabic
+   *  version. 409 while the Arabic is with the client or after they approved it. */
+  saveArabicReport: async (
+    cycleId: string,
+    body: ArabicEditBody,
+  ): Promise<FinalReport> => {
+    const { data } = await apiClient.put<FinalReport>(
+      `/pm/cycles/${cycleId}/final-report/arabic`,
+      body,
+    )
+    return data
+  },
+
   // Stage 9a — render the assembled report to a downloadable file.
   // Backend returns the file as a binary stream with Content-Disposition for
   // the filename. 9a supports docx; pdf returns 501 until 9b ships.
@@ -983,7 +1814,7 @@ export const pmApi = {
   // binary and corrupts the file.
   renderReport: async (
     cycleId: string,
-    format: "docx" | "pdf",
+    format: "docx" | "pdf" | "idml",
   ): Promise<{ blob: Blob; filename: string }> => {
     try {
       const response = await apiClient.post(

@@ -18,18 +18,33 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { useState } from "react"
-import { AlertCircle, CheckCircle2, GripVertical, Upload, X } from "lucide-react"
+import { AlertCircle, Check, CheckCircle2, ChevronDown, GripVertical, Loader2, Upload, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
-  useRemoveOptional,
-  useReorderSections,
-  useSetSourceMode,
-  useIsSettingFeeders,
-} from "@/hooks/useReportBuilder"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useIsRemoving, useRemoveOptional, useReorderSections } from "@/hooks/useReportBuilder"
 import { SECTION_LAYERS, SECTION_MODES } from "@/lib/constants"
 import { cn } from "@/lib/utils"
-import type { CycleReportSection, FeederMapEntry } from "@/types"
+import {
+  PICKABLE_SECTION_MODES,
+  type CycleReportSection,
+  type FeederMapEntry,
+  type PickableSectionMode,
+  type SectionMode,
+  type WritingStyle,
+} from "@/types"
+import {
+  THEME_SOURCE_NOTE,
+  isThemeSection,
+  takesWritingStyle,
+  type PendingSourceChange,
+  type PendingSources,
+} from "@/lib/pendingSectionSources"
 import { FeederPicker, type FeederDepartment } from "./FeederPicker"
 
 interface PlanSectionGridProps {
@@ -37,6 +52,10 @@ interface PlanSectionGridProps {
   sections: CycleReportSection[]
   feeders: FeederMapEntry[]
   departments: FeederDepartment[]
+  /** Report a source edit upward; the step saves them all on Continue. */
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  /** Unsaved edits, so a staged mode shows on the card and stops it reading as undecided. */
+  pending?: PendingSources
   readOnly?: boolean
   /** Arabic cycles render section titles right-to-left. */
   isRtl?: boolean
@@ -47,6 +66,8 @@ export function PlanSectionGrid({
   sections,
   feeders,
   departments,
+  onPendingChange,
+  pending = {},
   readOnly,
   isRtl,
 }: PlanSectionGridProps) {
@@ -85,8 +106,14 @@ export function PlanSectionGrid({
       <SortableContext items={ids} strategy={rectSortingStrategy}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {sections.map((s, i) => {
+            // `feeders` already carries any unsaved edits (applyPending runs
+            // once at the top of the step), so this is what the PM sees.
             const entry = feederByCode.get(s.section_code)
-            const effectiveMode = entry?.mode ?? s.mode
+            // A staged mode wins over both. It has to be read separately rather than
+            // off the merged feeder map, because manual sections are not IN that map —
+            // the backend's feeder view carries only generate/extract/analyze.
+            const pendingMode = pending[s.section_code]?.mode
+            const effectiveMode = pendingMode ?? entry?.mode ?? s.mode
             const isExtract = effectiveMode === "extract"
             const isAnalyze = effectiveMode === "analyze"
             return (
@@ -101,6 +128,9 @@ export function PlanSectionGrid({
                 isAnalyze={isAnalyze}
                 departments={departments}
                 deptByCode={deptByCode}
+                onPendingChange={onPendingChange}
+                pendingMode={pendingMode}
+                pendingStyle={pending[s.section_code]?.writing_style}
                 readOnly={readOnly}
                 isRtl={isRtl}
               />
@@ -122,6 +152,9 @@ function SectionTile({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
+  pendingMode,
+  pendingStyle,
   readOnly,
   isRtl,
 }: {
@@ -134,6 +167,9 @@ function SectionTile({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  pendingMode?: SectionMode
+  pendingStyle?: WritingStyle
   readOnly?: boolean
   isRtl?: boolean
 }) {
@@ -153,27 +189,39 @@ function SectionTile({
 
   // The feeder map's mode wins (the sections list can lag a mode switch).
   const effectiveMode = isExtract ? "extract" : isAnalyze ? "analyze" : section.mode
-  const mode = SECTION_MODES[effectiveMode]
   const layer = SECTION_LAYERS[section.layer]
   // Generate and analyze sections both require department feeders as their source.
   const needsSource =
     !isExtract &&
+    !isThemeSection(section.section_code) &&
     (isAnalyze || section.mode === "generate") &&
     section.ai_allowed &&
     feederCodes.length === 0
+  // A section whose mode nobody has chosen yet gets the same amber treatment: it is
+  // the other thing that blocks Continue, so it should look the same.
+  const needsMode = !section.mode_confirmed
+  // An AI-written or analyze section with no style blocks the plan.
+  const showsStyle = takesWritingStyle(effectiveMode, section.ai_allowed)
+  const needsStyle = !readOnly && showsStyle && !(pendingStyle ?? section.writing_style)
+  // Being removed: faded and not clickable until the server answers (a few
+  // seconds), so it doesn't look like the click did nothing. The rest of the
+  // page stays usable.
+  const removing = useIsRemoving(cycleId, section.section_code)
 
   return (
     <div
       ref={setNodeRef}
       style={style}
+      aria-busy={removing}
       className={cn(
         "group relative rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all",
         "hover:shadow-md",
-        needsSource && "border-amber-200",
+        (needsSource || needsMode || needsStyle) && "border-amber-200",
         isDragging && "z-10 opacity-60 shadow-lg ring-2 ring-indigo-300",
+        removing && "pointer-events-none opacity-40",
       )}
     >
-      {needsSource && (
+      {(needsSource || needsMode || needsStyle) && (
         <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-amber-400" />
       )}
       {/* dir on the row so the drag handle, the "01" number chip and the badges
@@ -208,22 +256,23 @@ function SectionTile({
             >
               {layer?.label ?? section.layer}
             </span>
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
-                mode?.color ?? "bg-slate-100 text-slate-600",
-              )}
-            >
-              {mode?.label ?? section.mode}
-            </span>
-            {!section.ai_allowed && !isExtract && (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                Manual
-              </span>
+            <ModePicker
+              section={section}
+              effectiveMode={effectiveMode}
+              pendingMode={pendingMode}
+              onPendingChange={onPendingChange}
+              readOnly={readOnly}
+            />
+            {showsStyle && (
+              <StylePicker
+                section={section}
+                pendingStyle={pendingStyle}
+                onPendingChange={onPendingChange}
+                readOnly={readOnly}
+              />
             )}
           </div>
           <FeederArea
-            cycleId={cycleId}
             section={section}
             feederCodes={feederCodes}
             documentUploaded={documentUploaded}
@@ -231,6 +280,7 @@ function SectionTile({
             isAnalyze={isAnalyze}
             departments={departments}
             deptByCode={deptByCode}
+            onPendingChange={onPendingChange}
             readOnly={readOnly}
           />
         </div>
@@ -241,8 +291,192 @@ function SectionTile({
   )
 }
 
+// How this section gets produced. Three choices, and they are the PM's — a section
+// arrives preselected only when the extraction-time classifier was at least 95% sure,
+// and `mode_confirmed: false` means nobody has decided, so the trigger shows nothing
+// chosen rather than quietly claiming the section is AI-written.
+//
+// 'analyze', 'auto' and 'attach' are not offered. Analyze is reached from the source
+// dropdown below (it is a department-feeder configuration, not a source choice), and the
+// other two are set by the system. Those render as a plain badge, as before.
+function ModePicker({
+  section,
+  effectiveMode,
+  pendingMode,
+  onPendingChange,
+  readOnly,
+}: {
+  section: CycleReportSection
+  effectiveMode: string
+  pendingMode?: SectionMode
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  readOnly?: boolean
+}) {
+  // Stages the choice rather than saving it, so this and the "Upload document later"
+  // tick below write to ONE place. Two controls posting the same field straight to the
+  // server is how they end up disagreeing — the tick batches, so this must too.
+  const badge = SECTION_MODES[effectiveMode as keyof typeof SECTION_MODES]
+  const pickable = (PICKABLE_SECTION_MODES as readonly string[]).includes(effectiveMode)
+  // A staged choice counts as decided, matching what the plan screen's "needs a mode"
+  // counter reads — otherwise picking one left the card still flagged until Start Building.
+  const undecided = !section.mode_confirmed && !pendingMode
+
+  const pill = (extra?: string) =>
+    cn(
+      "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+      extra,
+    )
+
+  if (readOnly || !pickable) {
+    return (
+      <span className={pill(badge?.color ?? "bg-slate-100 text-slate-600")}>
+        {badge?.label ?? section.mode}
+      </span>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={pill(
+            cn(
+              "border transition-colors",
+              undecided
+                ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                : cn(badge?.color, "hover:brightness-95"),
+            ),
+          )}
+        >
+          {undecided ? (
+            <>
+              <AlertCircle className="h-3 w-3" />
+              Choose a mode
+            </>
+          ) : (
+            badge?.label ?? section.mode
+          )}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {PICKABLE_SECTION_MODES.map((m: PickableSectionMode) => {
+          const meta = SECTION_MODES[m]
+          const active = !undecided && effectiveMode === m
+          return (
+            <DropdownMenuItem
+              key={m}
+              className="flex items-start gap-2"
+              onSelect={() =>
+                onPendingChange(section.section_code, {
+                  mode: m,
+                  // Switching to extract clears feeders server-side, so clear them
+                  // locally too and the card shows exactly what the save will produce.
+                  ...(m === "generate" ? {} : { feeders: [] }),
+                })
+              }
+            >
+              <Check
+                className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", !active && "opacity-0")}
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-medium">{meta.label}</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground">
+                  {meta.hint}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const WRITING_STYLES: { value: WritingStyle; label: string; hint: string }[] = [
+  { value: "paragraphs", label: "Paragraphs", hint: "Flowing narrative text" },
+  { value: "bullets", label: "Bullet points", hint: "Short points under each subheading" },
+  { value: "ai", label: "Let AI decide", hint: "Paragraphs, bullets or a mix — whatever suits the material" },
+]
+
+// How the AI lays this section out. Staged like the mode, and saved with the
+// feeders on Start Building. Required: until the PM picks, the pill is amber
+// ("Choose writing style") and the plan can't advance — the same treatment as
+// an unchosen mode. A locked plan from before the rule shows an unpicked
+// section as "Paragraphs", since that is what the AI used.
+function StylePicker({
+  section,
+  pendingStyle,
+  onPendingChange,
+  readOnly,
+}: {
+  section: CycleReportSection
+  pendingStyle?: WritingStyle
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
+  readOnly?: boolean
+}) {
+  const current = pendingStyle ?? section.writing_style ?? null
+  const label = WRITING_STYLES.find((s) => s.value === current)?.label
+  const pill = "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+
+  if (readOnly) {
+    return (
+      <span className={cn(pill, "bg-slate-100 text-slate-600")}>
+        {label ?? "Paragraphs"}
+      </span>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            pill,
+            "border transition-colors",
+            // Amber, like "Choose a mode": an unpicked style blocks Continue.
+            label
+              ? "border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200"
+              : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+          )}
+          title="How the AI writes this section"
+        >
+          {!label && <AlertCircle className="h-3 w-3" />}
+          {label ?? "Choose writing style"}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {WRITING_STYLES.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            className="flex items-start gap-2"
+            onSelect={() =>
+              onPendingChange(section.section_code, { writing_style: option.value })
+            }
+          >
+            <Check
+              className={cn(
+                "mt-0.5 h-3.5 w-3.5 shrink-0",
+                current !== option.value && "opacity-0",
+              )}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-medium">{option.label}</span>
+              <span className="block text-[11px] leading-snug text-muted-foreground">
+                {option.hint}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function FeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -250,9 +484,9 @@ function FeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -260,10 +494,19 @@ function FeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
   // Manual sections (PM writes/uploads directly) — no sources to assign.
-  if (!section.ai_allowed && !isExtract && !isAnalyze) {
+  // Two ways to be manual now. The catalogue's human-voice sections say so with
+  // ai_allowed=false; a company section says so with mode='manual' while keeping
+  // ai_allowed=true, because on those rows the flag means "AI is permitted if you
+  // choose it" and the PM must stay able to switch back.
+  // Theme Rationale reads the theme, not departments — nothing to pick.
+  if (isThemeSection(section.section_code) && !isExtract && !isAnalyze) {
+    return <p className="text-xs text-muted-foreground italic">{THEME_SOURCE_NOTE}</p>
+  }
+  if ((section.mode === "manual" || !section.ai_allowed) && !isExtract && !isAnalyze) {
     return (
       <p className="text-xs text-muted-foreground italic">
         {section.content_source === "narrative"
@@ -284,7 +527,6 @@ function FeederArea({
   // analyze and generate are department-based.
   return (
     <SourcesFeederArea
-      cycleId={cycleId}
       section={section}
       feederCodes={feederCodes}
       documentUploaded={documentUploaded}
@@ -292,16 +534,16 @@ function FeederArea({
       isAnalyze={isAnalyze}
       departments={departments}
       deptByCode={deptByCode}
+      onPendingChange={onPendingChange}
       readOnly={readOnly}
     />
   )
 }
 
-// One dropdown holds all three sources: department feeders (checkboxes), an
-// "Upload document later" toggle (→ extract mode), and an "Analyze mode" toggle
-// (→ analyze mode, keeps department feeders). Modes are mutually exclusive.
+// One dropdown holds the sources: department feeders (checkboxes) and an
+// "Upload document later" toggle (→ extract mode). Neither is written here —
+// both are reported upward and saved together when the PM continues.
 function SourcesFeederArea({
-  cycleId,
   section,
   feederCodes,
   documentUploaded,
@@ -309,9 +551,9 @@ function SourcesFeederArea({
   isAnalyze,
   departments,
   deptByCode,
+  onPendingChange,
   readOnly,
 }: {
-  cycleId: string
   section: CycleReportSection
   feederCodes: string[]
   documentUploaded: boolean
@@ -319,11 +561,9 @@ function SourcesFeederArea({
   isAnalyze: boolean
   departments: FeederDepartment[]
   deptByCode: Map<string, string>
+  onPendingChange: (sectionCode: string, change: PendingSourceChange) => void
   readOnly?: boolean
 }) {
-  const setSourceMode = useSetSourceMode(cycleId)
-  const saving =
-    useIsSettingFeeders(cycleId, section.section_code) || setSourceMode.isPending
   const hasDoc = documentUploaded || !!section.attachment
   const hasDepts = feederCodes.length > 0
 
@@ -389,9 +629,11 @@ function SourcesFeederArea({
 
   return (
     <FeederPicker
-      cycleId={cycleId}
       sectionCode={section.section_code}
       departments={departments}
+      onFeedersChange={(sectionCode, departmentCodes) =>
+        onPendingChange(sectionCode, { feeders: departmentCodes })
+      }
       // An AI-written section keeps its departments live even in extract mode:
       // the two sources are a reversible choice, and clicking a department flips
       // the section back to generate (the picker sequences that). Only a section
@@ -416,13 +658,13 @@ function SourcesFeederArea({
           ? undefined
           : {
               checked: isExtract,
-              pending: setSourceMode.isPending,
-              // mutateAsync + return: the picker awaits this before writing
-              // feeders, since the switch clears them server-side.
+              // Switching to extract clears feeders server-side, so the local
+              // edit clears them too — what the card shows is then exactly what
+              // the save will produce.
               onChange: (next) =>
-                setSourceMode.mutateAsync({
-                  sectionCode: section.section_code,
+                onPendingChange(section.section_code, {
                   mode: next ? "extract" : "generate",
+                  ...(next ? { feeders: [] } : {}),
                 }),
             }
       }
@@ -431,7 +673,6 @@ function SourcesFeederArea({
         type="button"
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-all text-left",
-          saving && "opacity-50",
           showAmber
             ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
             : "border-input bg-background hover:bg-accent",
@@ -477,20 +718,27 @@ function RemoveSection({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-        onClick={onClick}
-        disabled={remove.isPending}
-        title={
-          isOptional
-            ? "Remove section"
-            : `Remove ${layerLabel} section (requires confirmation)`
-        }
-      >
-        <X className="h-3.5 w-3.5" />
-      </Button>
+      {remove.isPending && !confirmOpen ? (
+        <span className="inline-flex h-7 shrink-0 items-center gap-1.5 text-xs font-medium text-slate-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Removing…
+        </span>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+          onClick={onClick}
+          disabled={remove.isPending}
+          title={
+            isOptional
+              ? "Remove section"
+              : `Remove ${layerLabel} section (requires confirmation)`
+          }
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}

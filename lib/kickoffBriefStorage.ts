@@ -8,17 +8,27 @@ import { GenerateBriefAnswer } from "@/lib/api/pm"
  * Two keys per cycle:
  *  - `answers`: the payload itself. Kept around (not deleted) so "Regenerate"
  *    on the review screen can resend it after the initial auto-generate.
- *  - `trigger`: a one-shot flag. Present only right after Step 1's "Generate
- *    brief" click; consumed (and removed) by Step 2's mount effect so a plain
- *    page reload never re-fires generation — it falls back to whatever the
- *    cycle already has persisted instead.
+ *  - `trigger`: a one-shot flag. Consumed (and removed) by Step 2's mount
+ *    effect so a plain page reload never re-fires generation — it falls back to
+ *    whatever the cycle already has persisted instead.
+ *
+ *    Set only when Step 1 actually wants a NEW brief. Once a brief exists,
+ *    going forward again must not silently rewrite it (and with it the areas of
+ *    focus and every concept message hanging off them) — Step 2 has an explicit
+ *    Regenerate button for when that is the intent.
  */
 const answersKey = (cycleId: string) => `kickoff-answers-${cycleId}`
 const triggerKey = (cycleId: string) => `kickoff-trigger-${cycleId}`
 
-export function storeKickoffAnswers(cycleId: string, answers: GenerateBriefAnswer[]) {
+export function storeKickoffAnswers(
+  cycleId: string,
+  answers: GenerateBriefAnswer[],
+  { generate = true }: { generate?: boolean } = {},
+) {
   sessionStorage.setItem(answersKey(cycleId), JSON.stringify(answers))
-  sessionStorage.setItem(triggerKey(cycleId), "1")
+  // Kept either way so Step 2's Regenerate has something to resend.
+  if (generate) sessionStorage.setItem(triggerKey(cycleId), "1")
+  else sessionStorage.removeItem(triggerKey(cycleId))
 }
 
 export function readKickoffAnswers(cycleId: string): GenerateBriefAnswer[] | null {

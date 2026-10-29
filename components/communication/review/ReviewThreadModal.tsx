@@ -527,6 +527,7 @@ export function ReviewThreadModal({
                 <div style={{ marginTop: 14 }}>
                   <AttachedReportCard
                     report={report}
+                    hasValidation={!!thread?.has_validation}
                     subtitle={
                       assignment || !openReview
                         ? "Linked · read-only snapshot"

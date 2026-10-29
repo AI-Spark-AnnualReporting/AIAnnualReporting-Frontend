@@ -266,6 +266,7 @@ export function ReportHubPanel({
         <ShareReportModal
           reportId={reportId}
           report={report}
+          hasValidation={!!hub?.has_validation}
           ownerUserId={owner?.user_id}
           onClose={() => setShowShare(false)}
           onShared={(payload) => {

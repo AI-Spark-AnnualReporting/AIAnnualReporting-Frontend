@@ -28,6 +28,7 @@ export function ConceptMessageCard({
   title,
   description,
   areaSlogan,
+  areaRole,
   isPrimary,
   primaryGroup,
   isRtl,
@@ -45,18 +46,24 @@ export function ConceptMessageCard({
   /** Slogan of the area this message was written from. Read-only, and absent on
    *  hand-added messages — the row is simply dropped then. */
   areaSlogan?: string
+  /** The role of the area this message was written for. Display-only — the
+   *  client sets it, and it is shown so the person reviewing their response can
+   *  see what they actually chose. */
+  areaRole?: "primary" | "secondary" | "none"
   /** True for the message at the top of the list. A concept message carries no
    *  role of its own, so position is what marks the primary one. */
-  isPrimary: boolean
+  isPrimary?: boolean
   /** Shared radio name so only one message can be primary. */
-  primaryGroup: string
+  primaryGroup?: string
   isRtl?: boolean
   /** An AI call is in flight — freeze the controls to prevent double-submit. */
   disabled?: boolean
   onTitleChange: (value: string) => void
   onDescriptionChange: (value: string) => void
   /** Promotes this message's area to primary (and demotes the previous one). */
-  onMakePrimary: () => void
+  /** Omitted where the lead is decided elsewhere — the client sets it on the
+   *  area of focus, and a second control here could disagree with theirs. */
+  onMakePrimary?: () => void
   onRemove: () => void
   /** Resolve true to clear the instruction box. */
   onRefine: (instruction: string) => Promise<boolean>
@@ -96,6 +103,24 @@ export function ConceptMessageCard({
                   <span className="truncate" title={areaSlogan}>
                     <span className="font-medium">Area of focus:</span> {areaSlogan}
                   </span>
+                  {areaRole && (
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                        areaRole === "primary"
+                          ? "bg-indigo-100 text-indigo-700"
+                          : areaRole === "secondary"
+                            ? "bg-indigo-50 text-indigo-600"
+                            : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {areaRole === "primary"
+                        ? "Primary"
+                        : areaRole === "secondary"
+                          ? "Secondary"
+                          : "Not used"}
+                    </span>
+                  )}
                 </p>
               )}
               {/* Title follows the Edit toggle: a heading while previewing, a
@@ -136,8 +161,8 @@ export function ConceptMessageCard({
                 </h4>
               )}
               <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-                {/* Position marks the primary, so picking this moves the card
-                    to the top of the list. */}
+                {/* Only rendered where this screen owns the choice. */}
+                {onMakePrimary && (
                 <label
                   className={cn(
                     "inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium",
@@ -161,6 +186,7 @@ export function ConceptMessageCard({
                   />
                   Primary
                 </label>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">

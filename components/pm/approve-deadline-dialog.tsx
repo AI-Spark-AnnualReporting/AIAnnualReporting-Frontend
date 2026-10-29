@@ -1,6 +1,6 @@
 "use client"
 
-import { CalendarClock, CheckCircle2, Loader2 } from "lucide-react"
+import { AlertTriangle, CalendarClock, CheckCircle2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -29,6 +29,7 @@ export function ApproveDeadlineDialog({
   submitting,
   onConfirm,
   cycleLabel,
+  changedSinceResponse = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -42,6 +43,9 @@ export function ApproveDeadlineDialog({
   submitting: boolean
   onConfirm: () => void
   cycleLabel: string
+  /** Spark edited the brief, areas or messages after the client sent them
+   *  back. Kickoff is the point of no return, so it is said again here. */
+  changedSinceResponse?: boolean
 }) {
   // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
   const isPast = !!value && value < min
@@ -63,6 +67,19 @@ export function ApproveDeadlineDialog({
             </p>
           </div>
         </DialogHeader>
+
+        {changedSinceResponse && (
+          <div className="mx-6 mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <p className="flex items-start gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              You&apos;ve changed this since they sent it
+            </p>
+            <p className="mt-1.5 ps-6 text-xs text-amber-800">
+              Kickoff writes every department&apos;s questions from this version, and
+              the client&apos;s link still shows theirs.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-2 px-6 py-5">
           <label htmlFor="questions-deadline" className="text-sm font-medium text-foreground">

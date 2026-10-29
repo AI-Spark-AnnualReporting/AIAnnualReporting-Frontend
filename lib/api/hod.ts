@@ -1,4 +1,5 @@
 import apiClient from "./client"
+import type { DepartmentClaim } from "./pm"
 
 // ── HOD (Head of Department) curation API ──────────────────────────────────
 
@@ -30,6 +31,7 @@ export interface HODSession {
   progress_percentage?: number | null
   review_notes?: string | null
   submitted_at?: string | null
+  reviewed_at?: string | null
   // The department's finalized report, surfaced so the HOD reviews the actual
   // draft — not only the raw Q&A. Resolve for display via draftContent() in
   // lib/session.ts (final_submission ?? draft_content ?? ai_generated_draft):
@@ -38,8 +40,16 @@ export interface HODSession {
   final_submission?: string | null
   draft_content?: string | null
   ai_generated_draft?: string | null
+  // The facts read out of this department's answers, written when the HOD
+  // approves. Empty while the session is still under review — with extraction
+  // happening at approval, there is nothing to show until then. Already on the
+  // response: GET /hod/sessions/{id} selects the whole session row.
+  department_claims?: DepartmentClaim[] | null
+  department_claims_extracted_at?: string | null
   hod_user_id?: string | null
   user_id?: string | null
+  /** When the HOD sent the questions on (Assign & send); null while still in review. */
+  routed_at?: string | null
   departments?: { department_name?: string; department_code?: string } | null
   reporting_cycles?: {
     cycle_name?: string

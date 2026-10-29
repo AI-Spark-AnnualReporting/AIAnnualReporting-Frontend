@@ -1,20 +1,50 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
+import type { CSSProperties } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { toast } from "sonner"
 
+import { useQueryClient } from "@tanstack/react-query"
+
 import { annualDesignApi } from "@/lib/api/annual-design"
 import {
-  DEFAULT_LAYOUT_KEY, LAYOUT_TYPOGRAPHY,
+  DEFAULT_LAYOUT_KEY, HEADER_FOOTER_DEFAULTS, HEADER_STYLES, LAYOUT_TYPOGRAPHY,
   type AnnualDesign, type BrandColors, type ColorPalette,
-  type CoverTemplate, type Typography,
+  type CoverTemplate, type DesignSelection, type HeaderFooter, type Typography,
 } from "@/types/report-design"
-import { CoverPreview } from "./CoverPreview"
-import { MiniCover } from "./MiniCover"
-import { PagePreview } from "./PagePreview"
-import { PreviewFrame } from "./PreviewFrame"
-import { TypographyControls, hasCustomTypography } from "./TypographyControls"
+// MiniCover and TypographyControls belonged to the Layout picker and the
+// Typography tab, both of which this dialog no longer shows. The components
+// are untouched and still serve their other callers.
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+/**
+ * The four groups the dialog is divided into.
+ *
+ * Grouped rather than one tab per setting: a tab holding a single row of
+ * thumbnails is a worse place to look than a heading, and the strip has to fit
+ * the dialog's existing width. "Pages" collects the three "pick a design"
+ * choices — cover, contents and section openers — because they read as one
+ * decision even though they write three different keys.
+ */
+export type CustomizeTab = "brand" | "headerFooter"
+
+const TABS: { key: CustomizeTab; label: string; blurb: string }[] = [
+  { key: "brand", label: "Brand",
+    blurb: "Five brand inks, or a preset. Changes preview live." },
+  { key: "headerFooter", label: "Header & Footer",
+    blurb: "The running band at the top and foot of every page." },
+]
+
+// The shared Tabs component styles itself from theme tokens, while this dialog
+// is pinned to literal hex (see the note at the top of the file). Restyling the
+// shared component would change it everywhere, so the palette is overridden
+// here instead.
+const TAB_LIST = "h-auto gap-1 rounded-full bg-[#F1F5F9] p-1"
+const TAB_TRIGGER =
+  "rounded-full px-3 py-1.5 text-[12px] font-semibold text-[#64748B] "
+  + "data-[state=active]:bg-white data-[state=active]:text-[#0F172A] "
+  + "data-[state=active]:shadow-sm"
 
 /**
  * How this report should look: cover layout, brand colours, type.
@@ -36,7 +66,6 @@ import { TypographyControls, hasCustomTypography } from "./TypographyControls"
  */
 
 /** The fourth catalogue entry, `branded`, has never been offered in any picker. */
-const HIDDEN_TEMPLATES = new Set(["branded"])
 
 // The reference writes rounded-2xl / rounded-lg / rounded-md / rounded, which
 // are 16 / 10 / 8 / 4 px there. Under Tailwind v4 here the same four classes
@@ -51,6 +80,13 @@ const HIDDEN_TEMPLATES = new Set(["branded"])
 // slate-700 #334155 -> #314158. Close enough to miss by eye, far enough that a
 // pixel diff of the two modals lit up every label. Written as hex so they
 // cannot drift again.
+/** The shell holds this exact query; reading it back is what makes the modal
+ *  open instantly instead of refetching what is already on screen. */
+export const reportDesignKey = (cycleId: string) => ["pm", "cycle", cycleId, "report-design"]
+/** Cover templates and colour palettes: reference data, identical for every
+ *  cycle and every user, so it is fetched once per session and never again. */
+export const DESIGN_CATALOGUE_KEY = ["pm", "report-design", "catalogue"]
+
 const PANEL = "rounded-[16px]"
 const TILE = "rounded-[10px]"
 const FIELD = "rounded-[8px]"
@@ -71,13 +107,15 @@ function normalizeHex(v: string): string | null {
 }
 
 /**
- * Relative luminance, transcribed from Centrion's types/brand.ts:166-172 —
- * including its blue coefficient of 0.4152, where WCAG says 0.0722.
+ * Relative luminance per WCAG.
  *
- * Copied rather than corrected on purpose: this only decides whether the "may
- * be hard to read" warning appears, and the point of this file is that the two
- * modals warn on exactly the same colours. Fixing it here alone would make them
- * disagree. #FFD700 is the visible case — it warns today and will not now.
+ * This used to carry the reference modal's blue coefficient of 0.4152, kept on
+ * purpose so the two pickers warned on the same colours. It is corrected here
+ * because five roles now go through these numbers rather than one warning: the
+ * three weights have to sum to 1 to be a luminance at all, and at 1.343 every
+ * blue-ish ink read far lighter than it is. Centrion's types/brand.ts:218-231
+ * is the corrected copy this follows; the two quarterly files still carrying
+ * the wrong number are another team's screens and are left alone.
  */
 function luminance(hex: string): number {
   const h = normalizeHex(hex) ?? "#000000"
@@ -85,14 +123,67 @@ function luminance(hex: string): number {
     const c = parseInt(h.slice(i, i + 2), 16) / 255
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
   })
-  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.4152 * ch[2]
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
 }
 
 const isLight = (hex?: string) => (hex ? luminance(hex) > 0.7 : false)
 
-function templateName(templates: CoverTemplate[], key: string): string {
-  return templates.find((t) => t.key === key)?.name || key || "Classic"
+/** WCAG contrast ratio, 1 (identical) to 21 (black on white). */
+function contrastRatio(a: string, b: string): number {
+  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (l1 + 0.05) / (l2 + 0.05)
 }
+
+/**
+ * Ink to put ON a filled swatch — whichever of white / near-black actually
+ * reads, measured both ways rather than decided by a lightness threshold. A
+ * mid gold sits under `isLight`, so a threshold hands it white at about 2.4:1
+ * where measuring picks the dark ink at about 6.9:1.
+ */
+function onColor(hex: string): string {
+  const dark = "#1A1D2E"
+  return contrastRatio(hex, dark) >= contrastRatio(hex, "#FFFFFF") ? dark : "#FFFFFF"
+}
+
+/**
+ * The five inks, in the order they are shown — fields and legend both walk
+ * this, so a role cannot appear in one and not the other, or in a different
+ * order in each. The notes are the same sentences the other app shows for the
+ * same roles.
+ *
+ * Only `primary` and `secondary` have ever been stored for an older cycle, so
+ * every one of these is optional on BrandColors and an absent key stays absent:
+ * nothing here invents a colour for a role the report has not set.
+ */
+type BrandRole = "primary" | "secondary" | "accent" | "text" | "light"
+
+const BRAND_ROLES: readonly { key: BrandRole; label: string; note: string }[] = [
+  {
+    key: "primary",
+    label: "Primary",
+    note: "Used for main headings, section titles, cover page, and table headers.",
+  },
+  {
+    key: "secondary",
+    label: "Secondary",
+    note: "Used for highlights, KPI numbers, dividers, and accent borders.",
+  },
+  {
+    key: "accent",
+    label: "Accent",
+    note: "A third colour for emphasis marks and small display details.",
+  },
+  {
+    key: "text",
+    label: "Text",
+    note: "Body ink — a dark, readable colour for running text.",
+  },
+  {
+    key: "light",
+    label: "Light",
+    note: "A pale tone for rules, dividers and tinted panels.",
+  },
+]
 
 export interface DesignDialogProps {
   cycleId: string
@@ -110,21 +201,48 @@ export interface DesignDialogProps {
     coverImage?: string | null
     isArabic?: boolean
   }
+  /**
+   * Colours only: the Layout tiles and the type controls are hidden, and Apply
+   * sends `brand` alone.
+   *
+   * SUPERSEDED BY TABS, and kept only so existing callers keep compiling. It
+   * existed because the Create Design screen owned the cover in its own rail,
+   * so showing the Layout tiles here too would give one report two places to
+   * pick a cover. Tabs solve that properly: the cover now lives in the Pages
+   * tab and the old Layout picker — a different field, `cover_template_key`,
+   * against the rail's `cover2_template_key` — is not offered at all.
+   *
+   * New callers should pass `defaultTab` instead.
+   */
+  colorsOnly?: boolean
+  /** Which group to open on. Defaults to Brand. */
+  defaultTab?: CustomizeTab
+  /**
+   * Who performs the save. Given, it replaces the internal call — so a screen
+   * holding this record in a query cache can write through its own mutation and
+   * invalidate what the change touched, rather than having the modal write
+   * behind its back. Must reject on failure; the error strip reads its message.
+   */
+  onApply?: (selection: DesignSelection) => Promise<void>
   onSaved?: () => void
 }
 
 export function DesignDialog({
-  cycleId, open, onOpenChange, cover, onSaved,
+  cycleId, open, onOpenChange, cover, defaultTab, onApply, onSaved,
 }: DesignDialogProps) {
+  // Which group is showing. The rail's Cover and Contents entries open this
+  // dialog straight onto "pages", so the setting a person clicked for is the
+  // one in front of them.
+  const [tab, setTab] = useState<CustomizeTab>(defaultTab ?? "brand")
+  useEffect(() => { if (open) setTab(defaultTab ?? "brand") }, [open, defaultTab])
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [templates, setTemplates] = useState<CoverTemplate[]>([])
   const [palettes, setPalettes] = useState<ColorPalette[]>([])
   const [design, setDesign] = useState<AnnualDesign | null>(null)
 
-  const [layoutKey, setLayoutKey] = useState<string>(DEFAULT_LAYOUT_KEY)
   const [brand, setBrand] = useState<BrandColors>({})
   const [typography, setTypography] = useState<Typography>(
     LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY])
@@ -132,47 +250,64 @@ export function DesignDialog({
   // `palette_key === "custom"`, so opening the panel to look at the numbers
   // does not itself mark the palette as custom.
   const [customOpen, setCustomOpen] = useState(false)
-  // Raised when someone picks a different layout while their type is
-  // customised: the layout changes immediately, the type waits for an answer.
-  const [swapPrompt, setSwapPrompt] = useState<
-    { to: string; toDefaults: Typography } | null>(null)
+  // Which ink the pointer/keyboard is on in the legend. The proof sheet dims
+  // every other one, so "what does Light even do?" is answered by looking.
+  // Refused for an unset role: lighting up a fallback would teach the wrong
+  // colour.
+  const [focusRole, setFocusRole] = useState<BrandRole | null>(null)
+  const focusIfSet = (r: BrandRole | null) =>
+    setFocusRole(r && normalizeHex(brand[r] ?? "") ? r : null)
+  // The layout-swap prompt lived here. It only ever fired from the Layout
+  // picker, which this dialog no longer shows.
 
-  const visible = useMemo(
-    () => templates.filter((t) => !HIDDEN_TEMPLATES.has(t.key)),
-    [templates])
+  // Pages tab. Each is its own key on the design record, and each is an
+  // OPT-OUT: undefined means "this report has never chosen one", which the
+  // engine reads as "render what you always did". Never default them here —
+  // seeding a value would silently opt every report in.
+  const [cover2Key, setCover2Key] = useState<string | undefined>(undefined)
+  const [tocKey, setTocKey] = useState<string | undefined>(undefined)
+  const [dividerKey, setDividerKey] = useState<string | undefined>(undefined)
 
-  const recommended = useMemo(
-    // The company default outranks the layout blueprint, so someone matching
-    // their own company's look is not flagged as having customised anything.
-    () => design?.company_default?.typography
-       ?? LAYOUT_TYPOGRAPHY[layoutKey]
-       ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY],
-    [design, layoutKey])
+  // Header & Footer. Same rule — undefined until someone touches the tab.
+  const [headerFooter, setHeaderFooter] = useState<HeaderFooter | undefined>(undefined)
+
+  // `visible` (the filtered cover catalogue) and `recommended` (the type this
+  // layout suggests) both existed for the Layout picker and the Typography
+  // tab. The catalogue is still fetched, because the design record comes back
+  // with it and the Create Design shell shares the query.
+
+  const qc = useQueryClient()
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setLoading(true)
     setError(null)
-    setSwapPrompt(null)
 
-    Promise.all([
-      annualDesignApi.get(cycleId),
-      annualDesignApi.catalogue(),
-    ])
-      .then(([current, { cover_templates: tpls, color_palettes: pals }]) => {
-        if (cancelled) return
+    // Everything this modal needs is usually already in the cache: the design
+    // record is the same query the Create Design shell holds open, and the
+    // catalogue is reference data that never changes. Reading both back
+    // synchronously means the controls come up populated instead of showing
+    // five dashes and an empty pill row for as long as the round trip takes.
+    //
+    // Seeded ONCE per open, and only when it has not already been seeded from
+    // the cache. A later background refetch must not reach back in and
+    // overwrite colours the user is part-way through picking.
+    const seed = (
+      current: AnnualDesign,
+      tpls: CoverTemplate[],
+      pals: ColorPalette[],
+    ) => {
         setDesign(current)
-        setTemplates(tpls)
         setPalettes(pals)
 
-        // Seed from the report's own choice, then the company default, then the
-        // catalogue — the same ladder the backend resolves at render time.
+        // The cover template is no longer editable here, but it still decides
+        // which type the report falls back to, so the same ladder the backend
+        // resolves at render time is walked for that alone: the report's own
+        // choice, then the company default, then the catalogue.
         const key = current.cover_template_key
           ?? current.company_default?.cover_template_key
           ?? tpls.find((t) => t.is_default)?.key
           ?? DEFAULT_LAYOUT_KEY
-        setLayoutKey(key)
         // `??` only falls back on null/undefined, and the backend sends `{}`
         // for a report that has not chosen colours — which is truthy, so the
         // company default was never reached and the controls seeded empty. The
@@ -187,47 +322,108 @@ export function DesignDialog({
           ?? current.company_default?.typography
           ?? LAYOUT_TYPOGRAPHY[key]
           ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY])
+
+        // The Pages and Header tabs seed WITHOUT a final fallback, unlike the
+        // ladder above. Absence is meaningful for these four: it is how the
+        // engine knows the report has never chosen, and so should keep
+        // rendering what it always rendered. Substituting a "sensible default"
+        // here would opt every existing report into a new look the moment
+        // somebody opened this dialog and pressed Apply.
+        // `?? undefined` because the API sends null for "never chosen" while
+        // these hold undefined for it; without it a null would be sent back on
+        // Apply as a real value.
+        setCover2Key(current.cover2_template_key
+          ?? current.company_default?.cover2_template_key ?? undefined)
+        setTocKey(current.toc_template_key
+          ?? current.company_default?.toc_template_key ?? undefined)
+        setDividerKey(current.divider_template_key
+          ?? current.company_default?.divider_template_key ?? undefined)
+        setHeaderFooter(current.header_footer
+          ?? current.company_default?.header_footer ?? undefined)
+    }
+
+    const cachedDesign = qc.getQueryData<AnnualDesign>(reportDesignKey(cycleId))
+    const cachedCat = qc.getQueryData<{
+      cover_templates: CoverTemplate[]
+      color_palettes: ColorPalette[]
+    }>(DESIGN_CATALOGUE_KEY)
+
+    const warm = Boolean(cachedDesign && cachedCat)
+    if (warm) {
+      seed(cachedDesign!, cachedCat!.cover_templates, cachedCat!.color_palettes)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+
+    // ensureQueryData resolves from the cache when it is warm, so this is a
+    // no-op refresh in the common case and the only fetch in the cold one.
+    Promise.all([
+      qc.ensureQueryData({
+        queryKey: reportDesignKey(cycleId),
+        queryFn: () => annualDesignApi.get(cycleId),
+      }),
+      qc.ensureQueryData({
+        queryKey: DESIGN_CATALOGUE_KEY,
+        queryFn: () => annualDesignApi.catalogue(),
+        staleTime: Infinity,
+      }),
+    ])
+      .then(([current, cat]) => {
+        if (cancelled || warm) return
+        seed(current, cat.cover_templates, cat.color_palettes)
       })
       .catch((e: { message?: string }) => {
-        if (!cancelled) setError(e?.message || "Couldn't load the design options.")
+        if (!cancelled && !warm) setError(e?.message || "Couldn't load the design options.")
       })
       .finally(() => !cancelled && setLoading(false))
 
     return () => { cancelled = true }
-  }, [open, cycleId])
+  }, [open, cycleId, qc])
 
   const applyPalette = (p: ColorPalette) => {
     setCustomOpen(false)
-    setBrand({ primary: p.primary, secondary: p.secondary, palette_key: p.key })
-  }
-
-  const setCustom = (patch: Partial<Pick<BrandColors, "primary" | "secondary">>) =>
-    setBrand((b) => ({ ...b, ...patch, palette_key: "custom" }))
-
-  const pickLayout = (nextKey: string) => {
-    if (nextKey === layoutKey) return
-    const nextDefaults = LAYOUT_TYPOGRAPHY[nextKey] ?? LAYOUT_TYPOGRAPHY[DEFAULT_LAYOUT_KEY]
-    // Silent switch while the type still matches what this layout recommends;
-    // otherwise ask, because silently overwriting a deliberate choice is worse
-    // than a mismatch.
-    if (hasCustomTypography(typography, recommended)) {
-      setSwapPrompt({ to: templateName(visible, nextKey), toDefaults: nextDefaults })
-      setLayoutKey(nextKey)
-    } else {
-      setLayoutKey(nextKey)
-      setTypography(nextDefaults)
+    // Built role by role from the shared table, and a role the preset does not
+    // carry is LEFT OUT rather than written as undefined — an older catalogue
+    // response has only the two colours, and a preset must not plant an empty
+    // `accent` key that then looks like a deliberate choice.
+    const next: BrandColors = { palette_key: p.key }
+    for (const role of BRAND_ROLES) {
+      const hex = p[role.key]
+      if (hex) next[role.key] = hex
     }
+    setBrand(next)
   }
+
+  /** Sets one role, or clears it when the field is emptied. */
+  const setRole = (role: BrandRole, hex?: string) =>
+    setBrand((b) => {
+      const next: BrandColors = { ...b, palette_key: "custom" }
+      if (hex) next[role] = hex
+      else delete next[role]
+      return next
+    })
 
   const apply = async () => {
     setSaving(true)
     setError(null)
     try {
-      await annualDesignApi.save(cycleId, {
-        cover_template_key: layoutKey,
-        brand,
-        typography,
-      })
+      // OMITTED KEYS ARE LEFT ALONE SERVER-SIDE, and that is what makes the
+      // tabs safe. Each key is sent only when this dialog actually holds a
+      // value for it, so opening Customize to change one colour cannot wipe a
+      // cover, a contents design or a header setting chosen elsewhere.
+      //
+      // `cover_template_key` is deliberately never sent: the old Layout picker
+      // is gone, and writing the value we happened to load would be a phantom
+      // edit nobody made.
+      const selection: DesignSelection = { brand, typography }
+      if (cover2Key) selection.cover2_template_key = cover2Key
+      if (tocKey) selection.toc_template_key = tocKey
+      if (dividerKey) selection.divider_template_key = dividerKey
+      if (headerFooter) selection.header_footer = headerFooter
+
+      if (onApply) await onApply(selection)
+      else await annualDesignApi.save(cycleId, selection)
       toast.success("Design saved", {
         description: "Your next export will use it.",
       })
@@ -240,36 +436,25 @@ export function DesignDialog({
     }
   }
 
-  const locked = design?.locked
-  const applyDisabled = saving || loading || !!locked || visible.length === 0
-  const accent = brand.primary || "#3C0866"
-  const layoutName = templateName(visible, layoutKey)
+  const locked = !!design?.locked
+  // The Layout picker is gone, so an empty cover-template catalogue is no
+  // longer a reason to refuse a save — there is nothing left on this dialog
+  // that depends on it.
+  const applyDisabled = saving || loading || locked
+  // `thumbAccent` and `layoutName` were the Layout picker's; both went with it.
 
-  const coverNode = (
-    <CoverPreview
-      templateKey={layoutKey}
+  // The preview follows the tab. The ink proof sheet answers "where does each
+  // colour land", which is the wrong question once you are switching a footer
+  // on and off — against that panel every control on the Header tab looked
+  // like it did nothing at all.
+  const proofSheet = tab === "headerFooter" ? (
+    <HeaderFooterProof
+      value={headerFooter}
       brand={brand}
-      typography={typography}
       companyName={cover?.companyName}
-      title={cover?.title}
-      headline={cover?.headline}
-      periodLabel={cover?.periodLabel}
-      preparedOn={cover?.preparedOn}
-      footnote={cover?.footnote}
-      logoUrl={cover?.logoUrl}
-      coverImage={cover?.coverImage}
-      isArabic={cover?.isArabic}
     />
-  )
-  const pageNode = (
-    <PagePreview
-      templateKey={layoutKey}
-      brand={brand}
-      typography={typography}
-      companyName={cover?.companyName}
-      periodLabel={cover?.periodLabel}
-      logoUrl={cover?.logoUrl}
-    />
+  ) : (
+    <InkProofSheet brand={brand} focusRole={focusRole} companyName={cover?.companyName} />
   )
 
   return (
@@ -292,15 +477,29 @@ export function DesignDialog({
                       -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden ${PANEL}
                       bg-white shadow-2xl focus:outline-none`}
         >
+        <Tabs
+          value={tab}
+          onValueChange={(v) => setTab(v as CustomizeTab)}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           {/* Header */}
-          <div className="flex items-center justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
-            <div>
+          <div className="flex items-start justify-between gap-3 border-b border-[#F1F5F9] px-6 py-4">
+            <div className="min-w-0">
               <DialogPrimitive.Title className="text-[15px] font-extrabold text-[#0F172A]">
-                Report design
+                Customize
               </DialogPrimitive.Title>
+              {/* The blurb follows the tab, so the subtitle always describes
+                  what is actually on screen rather than the dialog in general. */}
               <DialogPrimitive.Description className="mt-0.5 text-[12px] text-[#64748B]">
-                Layout, colours and type. Changes preview live.
+                {TABS.find((t) => t.key === tab)?.blurb}
               </DialogPrimitive.Description>
+              <TabsList className={`mt-3 ${TAB_LIST}`}>
+                {TABS.map((t) => (
+                  <TabsTrigger key={t.key} value={t.key} className={TAB_TRIGGER}>
+                    {t.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
             <DialogPrimitive.Close
               aria-label="Close"
@@ -318,65 +517,7 @@ export function DesignDialog({
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,40%)]">
             {/* Left pane */}
             <div className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
-              {/* Layout */}
-              <section aria-label="Layout">
-                <SectionHeader>Layout</SectionHeader>
-                {loading ? (
-                  <div className="py-2 text-[12px] text-[#94A3B8]">Loading…</div>
-                ) : visible.length === 0 ? (
-                  <div className="py-2 text-[12px] text-[#94A3B8]">No cover designs available.</div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-3">
-                    {visible.map((t) => {
-                      const active = t.key === layoutKey
-                      return (
-                        <button
-                          key={t.key}
-                          type="button"
-                          onClick={() => pickLayout(t.key)}
-                          aria-pressed={active}
-                          className={
-                            `cursor-pointer ${TILE} border-2 p-2 text-left transition-colors `
-                            + (active
-                              ? "border-[#6366F1] bg-[#EEF2FF]"
-                              : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
-                          }
-                        >
-                          <div className={`relative mb-2 overflow-hidden ${THUMB}`}>
-                            {t.preview_image_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={t.preview_image_url} alt={t.name}
-                                   className="block aspect-[1/1.3] w-full object-cover" />
-                            ) : (
-                              <MiniCover templateKey={t.key} accent={accent} />
-                            )}
-                            {active && (
-                              <span
-                                aria-hidden
-                                className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#6366F1] text-white"
-                              >
-                                <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
-                                  <path d="M2.5 6.2L5 8.7l4.5-5" stroke="#fff" strokeWidth="1.7"
-                                        strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </span>
-                            )}
-                          </div>
-                          <div className={"text-[12px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
-                            {t.name}
-                          </div>
-                          {t.description && (
-                            <div className="mt-0.5 text-[10.5px] leading-snug text-[#64748B]">
-                              {t.description}
-                            </div>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-
+              <TabsContent value="brand" className="mt-0 flex flex-col gap-6">
               {/* Brand colour */}
               <section aria-label="Brand colour">
                 <SectionHeader>Brand colour</SectionHeader>
@@ -418,12 +559,69 @@ export function DesignDialog({
                     Custom
                   </button>
                 </div>
+                {/* The legend. Same table as the fields below, so the two can
+                    never fall out of step. A role this report has not set shows
+                    a dashed empty tile and an em dash — never a plausible hex
+                    that would read as a choice someone made. */}
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {BRAND_ROLES.map((role) => {
+                    const hex = normalizeHex(brand[role.key] ?? "")
+                    return (
+                      <button
+                        key={role.key}
+                        type="button"
+                        onMouseEnter={() => focusIfSet(role.key)}
+                        onMouseLeave={() => focusIfSet(null)}
+                        onFocus={() => focusIfSet(role.key)}
+                        onBlur={() => focusIfSet(null)}
+                        onClick={() => focusIfSet(focusRole === role.key ? null : role.key)}
+                        aria-pressed={focusRole === role.key}
+                        aria-label={hex ? `Show where ${role.label} is used` : `${role.label} is not set`}
+                        title={role.note}
+                        className={`flex items-center gap-2 text-left ${FIELD} border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1] `
+                          + (hex ? "border-[#E2E8F0] bg-white" : "border-dashed border-[#CBD5E1] bg-[#F8FAFC]")
+                          + (focusRole === role.key ? " ring-2 ring-[#6366F1]" : "")}
+                      >
+                        <span
+                          aria-hidden
+                          className={`flex h-6 w-6 items-center justify-center ${THUMB} `
+                            + (hex ? "border border-[#E2E8F0]" : "border border-dashed border-[#CBD5E1]")}
+                          style={{
+                            background: hex ?? "transparent",
+                            // Measured both ways rather than thresholded, so the
+                            // initial sits legibly on a mid gold as well as on a
+                            // navy.
+                            color: hex ? onColor(hex) : "#94A3B8",
+                          }}
+                        >
+                          <span className="text-[9px] font-extrabold">{role.label[0]}</span>
+                        </span>
+                        <span>
+                          <span className="block text-[10.5px] font-bold text-[#334155]">
+                            {role.label}
+                          </span>
+                          <span
+                            className="block text-[10px] text-[#64748B]"
+                            style={{ fontFamily: "var(--font-dm-mono), monospace" }}
+                          >
+                            {hex ?? "—"}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
                 {customOpen && (
                   <div className={`flex flex-wrap gap-4 ${TILE} border border-[#E2E8F0] bg-[#F8FAFC] p-3`}>
-                    <HexField label="Primary" value={brand.primary}
-                              onChange={(v) => setCustom({ primary: v })} />
-                    <HexField label="Secondary" value={brand.secondary}
-                              onChange={(v) => setCustom({ secondary: v })} />
+                    {BRAND_ROLES.map((role) => (
+                      <HexField
+                        key={role.key}
+                        label={role.label}
+                        note={role.note}
+                        value={brand[role.key]}
+                        onChange={(v) => setRole(role.key, v)}
+                      />
+                    ))}
                   </div>
                 )}
                 {isLight(brand.primary) && (
@@ -432,50 +630,42 @@ export function DesignDialog({
                     This colour may be hard to read as an accent — it&apos;ll be darkened for text on white.
                   </div>
                 )}
+                {/* Body ink is the one role that is read rather than looked at,
+                    so it is measured against the page it is printed on instead
+                    of being judged on lightness. 4.5:1 is WCAG AA for text. */}
+                {brand.text && contrastRatio(brand.text, "#FFFFFF") < 4.5 && (
+                  <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[#B45309]">
+                    <span aria-hidden>⚠</span>
+                    Body text in this colour is only{" "}
+                    {contrastRatio(brand.text, "#FFFFFF").toFixed(1)}:1 against the
+                    page — under 4.5:1, so it will be hard to read at body size.
+                  </div>
+                )}
               </section>
 
-              {/* Typography */}
-              {swapPrompt && (
-                <div
-                  role="alert"
-                  className={`flex flex-wrap items-center justify-between gap-2 ${TILE} border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#78350F]`}
-                >
-                  <span>Switch to {swapPrompt.to}&apos;s recommended type?</span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSwapPrompt(null)}
-                      className={`cursor-pointer ${FIELD} border border-[#FCD34D] bg-white px-2 py-1 text-[11.5px] font-semibold text-[#78350F] hover:bg-[#FEF3C7]`}
-                    >
-                      Keep mine
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setTypography(swapPrompt.toDefaults); setSwapPrompt(null) }}
-                      className={`cursor-pointer ${FIELD} bg-[#78350F] px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-[#451A03]`}
-                    >
-                      Switch
-                    </button>
-                  </div>
-                </div>
-              )}
-              <TypographyControls
-                value={typography}
-                onChange={setTypography}
-                recommended={recommended}
-                layoutName={layoutName}
-              />
+              </TabsContent>
+
+              {/* Typography and Pages were tabs here briefly and were removed
+                  on request. Their state is still loaded and still sent on
+                  Apply — dropping the keys instead would make this dialog
+                  erase choices made elsewhere, which is the one thing the
+                  partial-save contract exists to prevent. Cover and Contents
+                  went back to their own panels in the rail. */}
+
+              <TabsContent value="headerFooter" className="mt-0 flex flex-col gap-6">
+                <HeaderFooterTab value={headerFooter} onChange={setHeaderFooter} />
+              </TabsContent>
             </div>
 
             {/* Right pane — preview */}
             <div className="hidden overflow-y-auto border-l border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-5 lg:block">
               <div className="mx-auto max-w-[380px]">
-                <PreviewFrame cover={coverNode} page={pageNode} />
+                {proofSheet}
               </div>
             </div>
 
             {/* Compact preview at the foot on smaller widths — collapsible */}
-            <MobilePreview cover={coverNode} page={pageNode} />
+            <MobilePreview sheet={proofSheet} />
           </div>
 
           {error && (
@@ -499,6 +689,7 @@ export function DesignDialog({
               {locked ? "Report is locked" : saving ? "Applying…" : "Apply"}
             </button>
           </div>
+        </Tabs>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
@@ -515,7 +706,324 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   )
 }
 
-function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.ReactNode }) {
+/**
+ * A labelled switch.
+ *
+ * Hand-built because this app has no `switch` component and the Radix package
+ * is not installed; adding a dependency for four toggles would be the more
+ * expensive choice. It is a real `role="switch"` button so it reads correctly
+ * to a screen reader and answers the space bar.
+ */
+function ToggleRow({
+  label, hint, checked, onChange, disabled, disabledHint,
+}: {
+  label: string
+  hint?: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+  disabledHint?: string
+}) {
+  return (
+    <div className={"flex items-start justify-between gap-4 py-2 " + (disabled ? "opacity-50" : "")}>
+      <div className="min-w-0">
+        <div className="text-[12.5px] font-semibold text-[#0F172A]">{label}</div>
+        {(disabled && disabledHint ? disabledHint : hint) && (
+          <div className="mt-0.5 text-[11px] leading-snug text-[#64748B]">
+            {disabled && disabledHint ? disabledHint : hint}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={
+          "relative mt-0.5 h-[22px] w-[38px] shrink-0 rounded-full transition-colors "
+          + (disabled ? "cursor-not-allowed " : "cursor-pointer ")
+          + (checked ? "bg-[#6366F1]" : "bg-[#CBD5E1]")
+        }
+      >
+        <span
+          aria-hidden
+          className={
+            "absolute top-[3px] h-4 w-4 rounded-full bg-white shadow transition-[left] "
+            + (checked ? "left-[19px]" : "left-[3px]")
+          }
+        />
+      </button>
+    </div>
+  )
+}
+
+/**
+ * What the running bands will actually look like.
+ *
+ * The ink proof sheet next door answers "where does each colour land", which
+ * is the wrong question on this tab — it shows no header and no footer, so
+ * every control here appeared to do nothing. This draws the page furniture
+ * instead: the same slots the renderer draws, in the same places, responding
+ * to every control on the left.
+ *
+ * A drawing rather than a real render. The bands are stamped onto the merged
+ * PDF at export time, so there is nothing to ask the server for that would not
+ * mean producing the whole document; and at this size the only questions worth
+ * answering are "is there a band", "what is in it" and "how loud is it".
+ */
+function HeaderFooterProof({
+  value, brand, companyName,
+}: {
+  value: HeaderFooter | undefined
+  brand: BrandColors
+  companyName?: string
+}) {
+  const v = value ?? HEADER_FOOTER_DEFAULTS
+  const primary = normalizeHex(brand.primary ?? "") || "#3C0866"
+  const accent = normalizeHex(brand.accent ?? "") || "#E2725B"
+  const onBrand = onColor(primary)
+  const company = companyName || "Your company"
+
+  // `auto` has no look of its own — it follows the cover, which this dialog
+  // cannot see. Drawing classic and SAYING so is honest; drawing nothing would
+  // make the default look broken.
+  const style = v.style === "auto" ? "classic" : v.style
+  const bold = style === "bold"
+  const showHeadText = style !== "minimal"
+
+  const rule = (color: string) => (
+    <div style={{ height: 1, background: color, opacity: 0.55 }} />
+  )
+  const line = (w: string) => (
+    <div className="h-[3px] rounded-full bg-[#E2E8F0]" style={{ width: w }} />
+  )
+
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-extrabold uppercase tracking-wider text-[#64748B]">
+        On the page
+      </div>
+      <p className="mb-2 text-[11px] leading-snug text-[#64748B]">
+        {v.style === "auto"
+          ? "Your cover decides the look. Classic is shown as an example."
+          : "A body page — the cover never carries a header or footer."}
+      </p>
+
+      <div className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
+        <div className="flex aspect-[1/1.414] flex-col">
+          {/* ── header ───────────────────────────────────────────── */}
+          {v.header.enabled ? (
+            bold ? (
+              <div className="flex items-center gap-1.5 px-2 py-1.5"
+                   style={{ background: primary }}>
+                {v.header.show_logo && (
+                  <span className="rounded-[3px] bg-white px-1.5 py-[3px] text-[6px] font-black tracking-tight"
+                        style={{ color: primary }}>LOGO</span>
+                )}
+                {["Risk", "Governance", "Financials"].map((s, i) => (
+                  <span key={s}
+                        className="rounded-full px-1.5 py-[2px] text-[6px] font-semibold"
+                        style={i === 0
+                          ? { background: accent, color: onColor(accent) }
+                          : { color: onBrand, opacity: 0.75 }}>
+                    {s}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="px-3 pt-2.5">
+                <div className="mb-1 flex items-end justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {v.header.show_logo && (
+                      <span className="rounded-[2px] px-1 py-[2px] text-[6px] font-black tracking-tight"
+                            style={{ background: primary, color: onBrand }}>LOGO</span>
+                    )}
+                    {showHeadText && v.header.show_section_name && (
+                      <span className="text-[6.5px] font-semibold text-[#475569]">
+                        Risk Management
+                      </span>
+                    )}
+                  </div>
+                  {showHeadText && (
+                    <span className="text-[6.5px] text-[#94A3B8]">
+                      Annual Report · FY 2025
+                    </span>
+                  )}
+                </div>
+                {rule(primary)}
+              </div>
+            )
+          ) : (
+            <div className="px-3 pt-3" />
+          )}
+
+          {/* ── body, suggested ──────────────────────────────────── */}
+          <div className="flex flex-1 flex-col gap-[5px] px-3 py-3">
+            <div className="mb-1 h-[6px] w-1/2 rounded-full"
+                 style={{ background: primary, opacity: 0.85 }} />
+            {["100%", "96%", "99%", "88%", "100%", "94%", "70%"].map((w, i) => (
+              <div key={i}>{line(w)}</div>
+            ))}
+          </div>
+
+          {/* ── footer ───────────────────────────────────────────── */}
+          {v.footer.enabled ? (
+            bold ? (
+              <div className="flex items-center justify-between px-2 py-1.5"
+                   style={{ background: primary }}>
+                <span className="text-[6px] font-semibold" style={{ color: onBrand }}>
+                  {company}
+                </span>
+                {v.footer.show_page_numbers && (
+                  <span className="text-[6px]" style={{ color: onBrand, opacity: 0.85 }}>
+                    Annual · Page 7
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="px-3 pb-2.5">
+                {rule(primary)}
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-[6.5px] text-[#94A3B8]">{company}</span>
+                  {v.footer.show_page_numbers && (
+                    <span className="text-[6.5px] text-[#94A3B8]">Page 7 of 42</span>
+                  )}
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="pb-3" />
+          )}
+        </div>
+      </div>
+
+      {!v.header.enabled && !v.footer.enabled && (
+        <p className="mt-2 text-[11px] leading-snug text-[#B45309]">
+          With both switched off nothing is stamped at all — pages carry no
+          running title and no page numbers.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Header & Footer.
+ *
+ * The three styles are not new rendering — the engine has always drawn them,
+ * but only ever chose between them as a side-effect of which cover was picked.
+ * This tab makes that choice explicit, which is the thing that went missing
+ * when the old Design dialog was hidden.
+ *
+ * `undefined` value means the report has never been near this tab. The first
+ * edit seeds the defaults, which are exactly what the renderer already does,
+ * so opening the tab and toggling something back changes nothing.
+ */
+function HeaderFooterTab({
+  value, onChange,
+}: {
+  value: HeaderFooter | undefined
+  onChange: (v: HeaderFooter) => void
+}) {
+  const v = value ?? HEADER_FOOTER_DEFAULTS
+  const set = (patch: Partial<HeaderFooter>) => onChange({ ...v, ...patch })
+  const setHeader = (patch: Partial<HeaderFooter["header"]>) =>
+    onChange({ ...v, header: { ...v.header, ...patch } })
+  const setFooter = (patch: Partial<HeaderFooter["footer"]>) =>
+    onChange({ ...v, footer: { ...v.footer, ...patch } })
+
+  // Under bold the section strip IS the header, so the running title has no
+  // meaning. Greyed rather than hidden, so the control does not appear to
+  // vanish when someone is comparing styles.
+  const boldish = v.style === "bold"
+
+  return (
+    <>
+      <section aria-label="Style">
+        <SectionHeader>Style</SectionHeader>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {HEADER_STYLES.map((s) => {
+            const active = v.style === s.value
+            return (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => set({ style: s.value })}
+                aria-pressed={active}
+                className={
+                  `cursor-pointer ${TILE} border-2 px-3 py-2 text-left transition-colors `
+                  + (active
+                    ? "border-[#6366F1] bg-[#EEF2FF]"
+                    : "border-[#E2E8F0] bg-white hover:border-[#CBD5E1]")
+                }
+              >
+                <div className={"text-[12.5px] font-bold " + (active ? "text-[#3730A3]" : "text-[#0F172A]")}>
+                  {s.label}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-[#64748B]">{s.blurb}</div>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section aria-label="Header">
+        <SectionHeader>Header</SectionHeader>
+        <div className="divide-y divide-[#F1F5F9]">
+          <ToggleRow
+            label="Show the header"
+            hint="The band across the top of every page after the cover."
+            checked={v.header.enabled}
+            onChange={(b) => setHeader({ enabled: b })}
+          />
+          <ToggleRow
+            label="Show the logo"
+            checked={v.header.show_logo}
+            onChange={(b) => setHeader({ show_logo: b })}
+            disabled={!v.header.enabled}
+          />
+          <ToggleRow
+            label="Show the section name"
+            hint="The running title on the left, naming the section you are in."
+            checked={v.header.show_section_name}
+            onChange={(b) => setHeader({ show_section_name: b })}
+            disabled={!v.header.enabled || boldish}
+            disabledHint={boldish
+              ? "Bold draws a section strip instead, so this does not apply."
+              : undefined}
+          />
+        </div>
+      </section>
+
+      <section aria-label="Footer">
+        <SectionHeader>Footer</SectionHeader>
+        <div className="divide-y divide-[#F1F5F9]">
+          <ToggleRow
+            label="Show the footer"
+            checked={v.footer.enabled}
+            onChange={(b) => setFooter({ enabled: b })}
+          />
+          <ToggleRow
+            label="Show page numbers"
+            hint="Reads “Page 7 of 42”. Counted from the cover."
+            checked={v.footer.show_page_numbers}
+            onChange={(b) => setFooter({ show_page_numbers: b })}
+            disabled={!v.footer.enabled}
+          />
+        </div>
+        <p className="mt-3 text-[11px] leading-snug text-[#94A3B8]">
+          Word exports carry the header and footer on/off switches and page
+          numbers. The three styles are PDF only — Word has no equivalent, and
+          pretending otherwise would make the two downloads disagree.
+        </p>
+      </section>
+    </>
+  )
+}
+
+function MobilePreview({ sheet }: { sheet: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="border-t border-[#F1F5F9] bg-[#F8FAFC]/50 px-4 py-3 lg:hidden">
@@ -527,18 +1035,152 @@ function MobilePreview({ cover, page }: { cover: React.ReactNode; page: React.Re
         {open ? "Hide preview" : "Show preview"}
       </button>
       {open && (
-        <div className="mx-auto max-w-[360px]">
-          <PreviewFrame cover={cover} page={page} />
-        </div>
+        <div className="mx-auto max-w-[360px]">{sheet}</div>
       )}
     </div>
   )
 }
 
-function HexField({ label, value, onChange }: {
+// A proof sheet: the cover and a data page from the report these inks are for.
+// Swatches say what a colour IS; this says where it LANDS, which is the only
+// question a person picking five of them has.
+//
+// This replaces the live CoverPreview/PagePreview pair in the colours modal.
+// Those render the real templates faithfully, which is exactly the problem
+// here: the cover is mostly white space and the body page spends `accent` and
+// `light` on a rule and a tint, so a five-ink palette read as two. Every role
+// gets real area below, and hovering a legend chip dims the rest.
+//
+// Ported from Centrion_Frontend's BrandColorPicker so the two screens teach the
+// same thing. Inline styles, matching this file's existing literal-hex idiom.
+const PAGE_SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif"
+const UNSET_INK = "#D7DAE4"
+
+function InkProofSheet({
+  brand,
+  focusRole,
+  companyName,
+}: {
+  brand: BrandColors
+  focusRole: BrandRole | null
+  companyName?: string
+}) {
+  const hex = (k: BrandRole, fallback: string) => normalizeHex(brand[k] ?? "") ?? fallback
+  const primary = hex("primary", "#3C0866")
+  const secondary = hex("secondary", "#5BC9E2")
+  // An unset role draws in a flat neutral, never in another role's colour: the
+  // legend shows a dashed tile for these and the page has to agree with it.
+  const accent = hex("accent", UNSET_INK)
+  const text = hex("text", "#1A1D2E")
+  const light = hex("light", "#F1F3F8")
+
+  // Dim the rest, halo the match. The halo is OUTSIDE the element: an inset
+  // stroke on a 3px rule covers the rule, so the one thing being asked about
+  // would render as a dark bar.
+  const ink = (role: BrandRole, halo = false): CSSProperties => {
+    const transition = "opacity .16s ease, box-shadow .16s ease"
+    if (!focusRole) return { opacity: 1, transition }
+    if (focusRole !== role) return { opacity: 0.4, transition }
+    return {
+      opacity: 1,
+      transition,
+      ...(halo ? { boxShadow: "0 0 0 2px #fff, 0 0 0 3.5px rgba(26,29,46,.5)" } : {}),
+    }
+  }
+
+  const page: CSSProperties = {
+    boxSizing: "border-box",
+    background: "#fff",
+    borderRadius: 1,
+    overflow: "hidden",
+    boxShadow: "0 1px 2px rgba(16,24,40,.10), 0 8px 18px -10px rgba(16,24,40,.28)",
+  }
+  const company = companyName?.trim() || "Your Company"
+  const mono = "var(--font-dm-mono), monospace"
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-[11.5px] font-bold text-[#334155]">How these look on the page</span>
+        <span className="text-[11px] text-[#64748B]">Point at a colour above, or tap it, to see where it lands.</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap", padding: 14, borderRadius: 12, background: "#EDEFF5" }}>
+        {/* Cover */}
+        <div style={{ ...page, width: 128, height: 181, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ background: primary, flex: "0 0 58%", padding: "12px 10px", display: "flex", flexDirection: "column", justifyContent: "space-between", ...ink("primary") }}>
+            <div style={{ fontSize: 6.5, letterSpacing: 1.3, textTransform: "uppercase", color: onColor(primary), opacity: 0.75 }}>Annual Report</div>
+            <div style={{ fontFamily: PAGE_SERIF, fontSize: 27, lineHeight: 1, color: onColor(primary) }}>2025</div>
+          </div>
+          <div style={{ background: secondary, padding: "4px 10px", ...ink("secondary") }}>
+            <span style={{ fontSize: 6.5, fontWeight: 700, letterSpacing: 0.7, textTransform: "uppercase", color: onColor(secondary) }}>Year in review</span>
+          </div>
+          <div style={{ position: "relative", flex: 1, padding: "8px 10px", display: "flex", alignItems: "flex-end" }}>
+            <span aria-hidden style={{ position: "absolute", inset: 0, background: light, ...ink("light") }} />
+            <div style={{ position: "relative", fontFamily: PAGE_SERIF, fontSize: 8.5, color: text, ...ink("text") }}>{company}</div>
+          </div>
+        </div>
+
+        {/* Data page */}
+        <div style={{ ...page, flex: "1 1 260px", minWidth: 240, height: 181, padding: "12px 13px", display: "flex", flexDirection: "column" }}>
+          <div style={{ fontFamily: PAGE_SERIF, fontSize: 13.5, color: primary, ...ink("primary") }}>Financial highlights</div>
+
+          <div style={{ display: "flex", marginTop: 8, background: primary, color: onColor(primary), fontSize: 7, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", padding: "4px 7px", ...ink("primary") }}>
+            <span style={{ flex: 1 }}>Metric</span>
+            <span style={{ width: 56, textAlign: "right" }}>2025</span>
+            <span style={{ width: 44, textAlign: "right" }}>Change</span>
+          </div>
+          {[["Revenue", "4.2bn", "+12.4%"], ["Net income", "0.9bn", "+6.1%"]].map((row, i) => (
+            <div key={row[0]} style={{ position: "relative", display: "flex", alignItems: "center", padding: "5px 7px" }}>
+              {/* The band is a layer, not the row's background: dimming the row
+                  would cap the accent chip inside it. */}
+              {i % 2 === 0 && (
+                <span aria-hidden style={{ position: "absolute", inset: 0, background: light, ...ink("light") }} />
+              )}
+              <span style={{ position: "relative", flex: 1, fontSize: 8.5, color: text, ...ink("text") }}>{row[0]}</span>
+              <span style={{ position: "relative", width: 56, textAlign: "right", fontFamily: mono, fontSize: 9, fontWeight: 600, color: text, ...ink("text") }}>SAR {row[1]}</span>
+              <span style={{ position: "relative", width: 44, textAlign: "right" }}>
+                <span style={{ display: "inline-block", padding: "1px 4px", borderRadius: 3, background: accent, color: onColor(accent), fontSize: 7.5, fontWeight: 700, ...ink("accent", true) }}>{row[2]}</span>
+              </span>
+            </div>
+          ))}
+
+          {/* The legend promises secondary carries highlights, so it has to
+              carry one somewhere with real area. */}
+          <div style={{ marginTop: 8, padding: "5px 8px", background: secondary, color: onColor(secondary), display: "flex", alignItems: "baseline", gap: 6, ...ink("secondary") }}>
+            <span style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600 }}>+12.4%</span>
+            <span style={{ fontSize: 7.5, letterSpacing: 0.2 }}>revenue growth year on year</span>
+          </div>
+
+          <p style={{ margin: "8px 0 0", fontFamily: PAGE_SERIF, fontSize: 8.5, lineHeight: 1.6, color: text, ...ink("text") }}>
+            Growth held across every segment, with margin steady against rising input costs.
+          </p>
+
+          <div style={{ marginTop: "auto", paddingTop: 6 }}>
+            <div style={{ height: 2, background: light, ...ink("light") }} />
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 6.5, color: text, opacity: 0.55, ...ink("text") }}>
+              <span>{company} · Annual Report 2025</span>
+              <span>24</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] leading-[1.5] text-[#64748B]">
+        Body text always prints in your Text colour. The other four tint headings,
+        table headers, highlights and rules.
+      </p>
+    </div>
+  )
+}
+
+function HexField({ label, note, value, onChange }: {
   label: string
+  /** What this ink is used for, from BRAND_ROLES. */
+  note?: string
   value?: string
-  onChange: (v: string) => void
+  /** `undefined` when the field is emptied — the role goes back to unset. */
+  onChange: (v: string | undefined) => void
 }) {
   // The field keeps its own text so a half-typed hex is not rewritten under the
   // cursor, but it has to follow `value` when the colour changes from outside
@@ -551,32 +1193,58 @@ function HexField({ label, value, onChange }: {
     setLastValue(value)
     setText(value ?? "")
   }
+  const hex = normalizeHex(value ?? "")
   return (
-    <div className="max-w-[220px]">
+    <div className="w-[210px] max-w-full">
       <div className="mb-1 text-[11px] font-bold text-[#475569]">{label}</div>
       <div className="flex items-center gap-2">
-        <input
-          type="color"
-          // The preview falls back to #3C0866 when no colour is set, so the
-          // swatch has to claim the colour that is actually being drawn.
-          value={normalizeHex(value ?? "") ?? "#3c0866"}
-          onChange={(e) => onChange(e.target.value)}
-          className={`h-9 w-10 cursor-pointer ${FIELD} border border-[#E2E8F0] bg-white p-0`}
-          aria-label={`${label} color`}
-        />
+        {/* The native colour input cannot represent "no colour" — it always
+            paints a swatch, and any hex put in it would look like a choice. So
+            it is laid transparently over a tile that draws the state itself: a
+            dashed outline with a + while the role is unset, the colour once it
+            is set. Clicking anywhere on the tile still opens the picker. */}
+        <span
+          className={`relative flex h-9 w-10 shrink-0 items-center justify-center ${FIELD} border `
+            + (hex ? "border-[#E2E8F0]" : "border-dashed border-[#CBD5E1] bg-white")}
+          style={hex ? { background: hex } : undefined}
+        >
+          {!hex && (
+            <span aria-hidden className="text-[13px] font-bold leading-none text-[#94A3B8]">
+              +
+            </span>
+          )}
+          <input
+            type="color"
+            // Only ever the seed the picker opens on while the role is unset;
+            // nothing is written until the user actually picks.
+            value={hex ?? "#3c0866"}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label={`${label} colour`}
+          />
+        </span>
         <input
           type="text"
           value={text}
           onChange={(e) => {
             setText(e.target.value)
-            const hex = normalizeHex(e.target.value)
-            if (hex) onChange(hex)
+            // Emptying the field unsets the role. Junk that is not yet a hex is
+            // simply not written anywhere, so a half-typed "#1a" neither clears
+            // the colour nor sets a wrong one.
+            if (e.target.value.trim() === "") onChange(undefined)
+            else {
+              const next = normalizeHex(e.target.value)
+              if (next) onChange(next)
+            }
           }}
-          placeholder="#4040C8"
+          placeholder="Not set"
           className={`w-[110px] ${FIELD} border border-[#E2E8F0] bg-white px-2 py-2 text-[13px] text-[#1E293B] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#A5B4FC]`}
           style={{ fontFamily: "var(--font-dm-mono), monospace" }}
         />
       </div>
+      {note && (
+        <div className="mt-1 text-[10.5px] leading-snug text-[#64748B]">{note}</div>
+      )}
     </div>
   )
 }

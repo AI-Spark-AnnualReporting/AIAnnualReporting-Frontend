@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useHODSession, useReviewAnswers } from "@/hooks/useHod"
 import { draftContent } from "@/lib/session"
@@ -8,10 +8,17 @@ import { PageLoader } from "@/components/ui/spinner"
 import { ProsePreview } from "@/components/ui/prose-preview"
 import { QuestionText } from "@/components/ui/question-text"
 import { dirOf } from "@/lib/lang"
-import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks } from "lucide-react"
+import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks, ListTree } from "lucide-react"
+import { ClaimLine } from "@/components/report/ClaimLine"
 import { cn } from "@/lib/utils"
 
 const isNA = (a: string) => a.trim().toUpperCase().startsWith("N/A")
+
+// After approval the facts are read in the background (10-30 s). The page
+// checks for them this often, and stops after FACTS_WAIT_MS: a read that
+// failed reaches the lead as a notification they can click to retry.
+const FACTS_POLL_MS = 4_000
+const FACTS_WAIT_MS = 3 * 60_000
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   assigned: { label: "Awaiting kickoff", cls: "bg-slate-100 text-slate-600" },
@@ -35,12 +42,28 @@ const VIEW_ONLY_NOTE: Record<string, string> = {
 export default function HODReviewPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { data: session, isLoading, isError } = useHODSession(id)
+  const { data: session, isLoading, isError, refetch } = useHODSession(id)
   const review = useReviewAnswers(id)
 
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [notes, setNotes] = useState("")
-  const [activeTab, setActiveTab] = useState<"answers" | "draft">("answers")
+  const [activeTab, setActiveTab] = useState<"answers" | "draft" | "facts">("answers")
+  // Approved but the facts not read yet: check until they are, for a while.
+  const factsPending =
+    session?.status === "approved" && !session.department_claims_extracted_at
+  const [gaveUp, setGaveUp] = useState(false)
+  useEffect(() => {
+    if (!factsPending) return
+    const timer = setInterval(() => void refetch(), FACTS_POLL_MS)
+    const stop = setTimeout(() => {
+      clearInterval(timer)
+      setGaveUp(true)
+    }, FACTS_WAIT_MS)
+    return () => {
+      clearInterval(timer)
+      clearTimeout(stop)
+    }
+  }, [factsPending, refetch])
 
   const questions = useMemo(
     () => [...(session?.questions || [])].sort((a, b) => (a.order || 0) - (b.order || 0)),
@@ -67,9 +90,23 @@ export default function HODReviewPage() {
   // report the department submitted (empty until the backend returns it / the
   // draft exists, which the Draft tab handles with its own empty state).
   const draft = draftContent(session)
+  const facts = session.department_claims ?? []
+  // Stamped whenever the read runs, including when it finds nothing — so "no
+  // facts in these answers" reads differently from "not read yet".
+  const factsRead = !!session.department_claims_extracted_at
 
+  // Stays here and opens Facts: approving is what starts reading them, and
+  // the list it used to jump to drops the session once approved.
   const approve = () =>
-    review.mutate({ action: "approved" }, { onSuccess: () => router.push("/hod/reviews") })
+    review.mutate(
+      { action: "approved" },
+      {
+        onSuccess: () => {
+          setActiveTab("facts")
+          void refetch()
+        },
+      },
+    )
   const sendBack = () => {
     if (!notes.trim()) return
     review.mutate(
@@ -124,6 +161,15 @@ export default function HODReviewPage() {
           )}
         >
           <FileText className="h-3.5 w-3.5" /> Draft report
+        </button>
+        <button
+          onClick={() => setActiveTab("facts")}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors",
+            activeTab === "facts" ? "bg-[#4040c8] text-white" : "text-slate-500 hover:bg-slate-50",
+          )}
+        >
+          <ListTree className="h-3.5 w-3.5" /> Facts
         </button>
       </div>
 
@@ -187,6 +233,47 @@ export default function HODReviewPage() {
               <p className="text-sm font-semibold text-slate-500">No draft to show yet</p>
               <p className="max-w-xs text-xs text-slate-400">
                 The department&apos;s finalized report will appear here once it&apos;s submitted.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* What this department stated, read out of its own answers. Scoped to
+          this session, so an HOD only ever sees their own department's figures
+          — comparing figures BETWEEN departments is the PM's job. */}
+      {activeTab === "facts" && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          {facts.length > 0 ? (
+            <div className="space-y-4">
+              {facts.map((claim) => (
+                <ClaimLine key={claim.id} claim={claim} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-12 text-center">
+              {factsPending && !gaveUp ? (
+                <Loader2 className="h-6 w-6 animate-spin text-[#4040c8]" />
+              ) : (
+                <ListTree className="h-6 w-6 text-slate-300" />
+              )}
+              <p className="text-sm font-semibold text-slate-500">
+                {factsRead
+                  ? "No facts found"
+                  : factsPending
+                    ? gaveUp
+                      ? "Still reading the facts"
+                      : "Reading the facts from the answers…"
+                    : "Not read yet"}
+              </p>
+              <p className="max-w-sm text-xs text-slate-400">
+                {factsRead
+                  ? "This department's answers don't state any facts — they were left blank, or describe what should be reported rather than what happened."
+                  : factsPending
+                    ? gaveUp
+                      ? "This is taking longer than usual. Reload the page in a minute. If reading fails, you'll get a notification to try again."
+                      : "This takes up to half a minute. They'll appear here by themselves."
+                    : "The facts are read from the answers once you approve this submission."}
               </p>
             </div>
           )}

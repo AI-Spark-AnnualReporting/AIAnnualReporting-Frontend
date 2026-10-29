@@ -2,7 +2,9 @@ import { cn } from "@/lib/utils"
 
 interface PageHeaderProps {
   title: string
-  description?: string
+  // A node, not just a string, so a page can skeleton part of the line while
+  // the value behind it loads.
+  description?: React.ReactNode
   action?: React.ReactNode
   className?: string
 }

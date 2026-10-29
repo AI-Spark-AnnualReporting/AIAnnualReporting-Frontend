@@ -23,6 +23,12 @@ import type {
   ColorPalette,
   CoverTemplate,
   DesignSelection,
+  CoverDesign,
+  CoverDesignSpecs,
+  CoverPreview,
+  TocDesign,
+  TocDesignSpecs,
+  TocPreview,
 } from "@/types/report-design"
 
 /** The document, exactly as the export engine will print it. */
@@ -64,11 +70,38 @@ export interface AssembledReport {
   normalised?: boolean
 }
 
+/**
+ * The landscape designs a spec response offers, default first.
+ *
+ * An engine from before there was a choice sends only the one default design
+ * (`landscape`), so that one becomes the list. An engine from before landscape
+ * existed sends neither, and the list stays undefined so the picker can say so.
+ *
+ * @returns the landscape designs, or undefined when the engine has none
+ */
+function landscapeDesignsOf<T>(
+  data: { landscape_templates?: T[] | null; landscape?: T | null } | undefined,
+): T[] | undefined {
+  if (Array.isArray(data?.landscape_templates) && data.landscape_templates.length > 0) {
+    return data.landscape_templates
+  }
+  if (data?.landscape) return [data.landscape]
+  return undefined
+}
+
 export const annualDesignApi = {
-  /** The cycle's current cover/brand/type choice, for pre-selecting the controls. */
+  /**
+   * The cycle's current cover/brand/type choice, for pre-selecting the controls.
+   *
+   * Cheap, but it runs on the Create Design screen alongside a pre-warm that
+   * is drawing pages, so it is queueing behind render work rather than doing
+   * any of its own. The client default cut it off at 30s and left the cover
+   * and contents pickers with nothing selected.
+   */
   get: async (cycleId: string): Promise<AnnualDesign> => {
     const { data } = await apiClient.get(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
+      { timeout: 60000 },
     )
     return data
   },
@@ -83,6 +116,9 @@ export const annualDesignApi = {
     const { data } = await apiClient.patch(
       `/pm/cycles/${encodeURIComponent(cycleId)}/design`,
       selection,
+      // Same queue as get, above, and this one is a person's choice — losing it
+      // to a timeout means they pick the cover again and wonder why.
+      { timeout: 60000 },
     )
     return data
   },
@@ -114,6 +150,77 @@ export const annualDesignApi = {
       color_palettes: data?.color_palettes ?? [],
     }
   },
+
+  /**
+   * The five contents-page designs.
+   *
+   * Proxied from the render engine, which owns them — there is no second list
+   * of names and descriptions on this side to fall out of date.
+   */
+  /**
+   * The four annual covers. Proxied from the engine that owns them.
+   *
+   * Proxied, so it waits on the render engine — the same engine the pre-warm
+   * is keeping busy — and then on this backend. Two queues, one list of names.
+   *
+   * `landscape` is the default landscape cover and `landscape_templates` all
+   * of them, kept out of `templates` so the portrait picker never lists them.
+   * Undefined from an engine that predates them — see landscapeDesignsOf.
+   */
+  coverDesigns: async (): Promise<CoverDesignSpecs> => {
+    const { data } = await apiClient.get(`/pm/cover-designs`, { timeout: 60000 })
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "statement",
+      landscape: data?.landscape ?? undefined,
+      landscape_templates: landscapeDesignsOf<CoverDesign>(data),
+    }
+  },
+
+  /** Draw this cycle's cover in one design, with its real title and brand. */
+  previewCover: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<CoverPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/cover-preview`,
+      { design, scale },
+      { timeout: 120000 },
+    )
+    return data
+  },
+
+  /**
+   * The five contents designs. Proxied too — see coverDesigns for the timeout
+   * and for why the landscape designs come back separately.
+   */
+  tocDesigns: async (): Promise<TocDesignSpecs> => {
+    const { data } = await apiClient.get(`/pm/toc-designs`, { timeout: 60000 })
+    return {
+      templates: data?.templates ?? [],
+      default: data?.default ?? "classic",
+      landscape: data?.landscape ?? undefined,
+      landscape_templates: landscapeDesignsOf<TocDesign>(data),
+    }
+  },
+
+  /**
+   * Draw this cycle's contents page in one design.
+   *
+   * Uses the report's real sections, so a PM compares this document's own
+   * hierarchy rather than a mockup of someone else's. The long timeout is
+   * load-bearing: the engine launches a browser per render and the axios
+   * default would kill it.
+   */
+  previewToc: async (
+    cycleId: string, design: string, scale?: number,
+  ): Promise<TocPreview> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${encodeURIComponent(cycleId)}/toc-preview`,
+      { design, scale },
+      { timeout: 120000 },
+    )
+    return data
+  },
 }
 
 /**
@@ -124,10 +231,12 @@ export const annualDesignApi = {
  * failed every real report while looking like a network fault.
  */
 export async function downloadAnnualReport(
-  cycleId: string, format: "pdf" | "docx",
+  cycleId: string, format: "pdf" | "docx" | "idml", arabic = false,
 ): Promise<{ blob: Blob; filename: string }> {
+  // arabic: the cycle's Arabic edition (Word or PDF only), from its own page.
+  const path = arabic ? "render/arabic" : "render"
   const res = await apiClient.post(
-    `/pm/cycles/${encodeURIComponent(cycleId)}/render`,
+    `/pm/cycles/${encodeURIComponent(cycleId)}/${path}`,
     null,
     { params: { format }, responseType: "blob", timeout: 180000 },
   )

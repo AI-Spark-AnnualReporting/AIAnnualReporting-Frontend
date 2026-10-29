@@ -29,6 +29,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/pm/reviews")) return "Pending Reviews"
   if (pathname.startsWith("/pm/documents")) return "Document Bank"
   if (pathname.startsWith("/pm/sessions")) return "Review Submission"
+  if (pathname.startsWith("/pm/annual-report-validator")) return "Annual Report Validator"
   return "Dashboard"
 }
 

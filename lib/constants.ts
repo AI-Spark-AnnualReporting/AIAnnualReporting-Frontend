@@ -68,6 +68,11 @@ export const SECTION_MODES: Record<
     color: "bg-neutral-100 text-neutral-700 border-neutral-200",
     hint: "Generated automatically at render (cover, contents)",
   },
+  manual: {
+    label: "Manual",
+    color: "bg-amber-100 text-amber-700 border-amber-200",
+    hint: "You write or paste it yourself; nothing is generated",
+  },
   extract: {
     label: "Extract",
     color: "bg-emerald-100 text-emerald-700 border-emerald-200",
@@ -88,6 +93,7 @@ export const SECTION_LAYERS: Record<
   cma: { label: "CMA Required", color: "bg-blue-100 text-blue-700 border-blue-200" },
   sector: { label: "Sector", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
   optional: { label: "Optional", color: "bg-gray-100 text-gray-700 border-gray-200" },
+  custom: { label: "Custom", color: "bg-violet-50 text-violet-700 border-violet-200" },
 }
 
 export const SECTION_STATUSES: Record<
@@ -124,14 +130,21 @@ export const QUERY_KEYS = {
   PM_DASHBOARD: ["pm", "dashboard"],
   PM_CYCLE: (id: string) => ["pm", "cycle", id],
   BUILD_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "readiness"],
+  DRAFT_FINDINGS: (cycleId: string) => ["pm", "cycle", cycleId, "draft-findings"],
+  DEPARTMENT_CLAIMS: (cycleId: string) => ["pm", "cycle", cycleId, "department-claims"],
   PM_CYCLE_SECTIONS: (cycleId: string) => ["pm", "cycle", cycleId, "sections"],
   PM_CYCLE_PLAN: (cycleId: string) => ["pm", "cycle", cycleId, "plan"],
   PM_AVAILABLE_OPTIONAL: (cycleId: string) => ["pm", "cycle", cycleId, "optional-available"],
   PM_ASSEMBLY_READINESS: (cycleId: string) => ["pm", "cycle", cycleId, "assembly-readiness"],
   PM_FINAL_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report"],
   PM_ASSEMBLED_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "assembled"],
+  PM_ARABIC_REPORT: (cycleId: string) => ["pm", "cycle", cycleId, "final-report-arabic"],
   PM_REPORT_APPROVAL: (cycleId: string) => ["pm", "cycle", cycleId, "approval"],
+  PM_REPORT_REVIEW: (cycleId: string) => ["pm", "cycle", cycleId, "report-review"],
+  PM_CYCLE_CREATE_DESIGN: (cycleId: string) => ["pm", "cycle", cycleId, "create-design"],
+  PM_CYCLE_WEB_SITEMAP: (cycleId: string) => ["pm", "cycle", cycleId, "web-sitemap"],
   PM_COMPANY_PREV_MANUAL: (companyId: string, contentLanguage?: string) => ["pm", "company", companyId, "manual-sections", "previous", contentLanguage ?? "any"],
+  PM_DRAFT_AVAILABILITY: (cycleId: string, sectionCode: string) => ["pm", "cycle", cycleId, "sections", sectionCode, "draft-availability"],
   DEPT_DASHBOARD: ["dept", "dashboard"],
   SESSION: (id: string) => ["session", id],
   DOCUMENTS: ["documents"],

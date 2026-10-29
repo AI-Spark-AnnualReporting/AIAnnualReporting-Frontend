@@ -6,8 +6,6 @@ import {
   AlertCircle,
   ClipboardList,
   Loader2,
-  Lock,
-  LockOpen,
   Pencil,
   RefreshCw,
   Sparkles,
@@ -18,16 +16,15 @@ import { ProsePreview } from "@/components/ui/prose-preview"
 import { SectionBodyEditor } from "@/components/report/SectionBodyEditor"
 import { SectionChat } from "@/components/report/SectionChat"
 import { SectionHeader } from "@/components/report/SectionDetail"
-import { LockedBanner } from "@/components/report/LockedBanner"
+import { SectionUndo } from "@/components/report/UndoChangeButton"
 import {
   useGenerateSection,
-  useLockSection,
   usePlan,
   useRefineSection,
   useSaveGenerateContent,
-  useUnlockSection,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { isThemeSection } from "@/lib/pendingSectionSources"
 import { cn } from "@/lib/utils"
 import type { CycleReportSection } from "@/types"
 
@@ -38,10 +35,13 @@ interface DashboardData {
 export function GenerateSection({
   section,
   cycleId,
+  hasFindings = false,
   isRtl = false,
 }: {
   section: CycleReportSection
   cycleId: string
+  /** Being fixed from validation findings: no Regenerate (see SectionDetail). */
+  hasFindings?: boolean
   isRtl?: boolean
 }) {
   const sectionCode = section.section_code
@@ -58,12 +58,14 @@ export function GenerateSection({
   const deptByCode = new Map(
     (pmData?.departments ?? []).map((d) => [d.department_code, d.department_name]),
   )
-  const feederNames = feederCodes.map((c) => deptByCode.get(c) ?? c)
+  // Theme Rationale has no departments: it is written from the theme.
+  const isTheme = isThemeSection(sectionCode)
+  const feederNames = isTheme
+    ? ["the strategic brief, areas of focus and concept messages"]
+    : feederCodes.map((c) => deptByCode.get(c) ?? c)
 
   const generate = useGenerateSection(cycleId)
   const refine = useRefineSection(cycleId)
-  const lock = useLockSection(cycleId)
-  const unlock = useUnlockSection(cycleId)
 
   const [regenOpen, setRegenOpen] = useState(false)
 
@@ -76,17 +78,9 @@ export function GenerateSection({
             <PendingView
               cycleId={cycleId}
               feederNames={feederNames}
-              hasFeeders={feederCodes.length > 0}
+              hasFeeders={isTheme || feederCodes.length > 0}
               generating={generate.isPending}
               onGenerate={() => generate.mutate({ sectionCode })}
-            />
-          ) : status === "locked" ? (
-            <LockedView
-              content={content}
-              lockedAt={section.locked_at}
-              unlocking={unlock.isPending}
-              isRtl={isRtl}
-              onUnlock={() => unlock.mutate({ sectionCode })}
             />
           ) : (
             <DraftingView
@@ -98,11 +92,9 @@ export function GenerateSection({
               sectionCode={sectionCode}
               content={content}
               regenerating={generate.isPending}
-              locking={lock.isPending}
               refining={refine.isPending}
               isRtl={isRtl}
-              onRegenerate={() => setRegenOpen(true)}
-              onLock={() => lock.mutate({ sectionCode })}
+              onRegenerate={hasFindings ? undefined : () => setRegenOpen(true)}
               onRefine={(instruction) =>
                 refine.mutate({ sectionCode, instruction })
               }
@@ -204,27 +196,24 @@ function DraftingView({
   sectionCode,
   content,
   regenerating,
-  locking,
   refining,
   isRtl,
   onRegenerate,
-  onLock,
   onRefine,
 }: {
   cycleId: string
   sectionCode: string
   content: string
   regenerating: boolean
-  locking: boolean
   refining: boolean
   isRtl: boolean
-  onRegenerate: () => void
-  onLock: () => void
+  /** Left out while the section is being fixed: Regenerate is hidden. */
+  onRegenerate?: () => void
   onRefine: (instruction: string) => void
 }) {
   const save = useSaveGenerateContent(cycleId)
   const [editing, setEditing] = useState(false)
-  const busy = regenerating || locking || refining
+  const busy = regenerating || refining
 
   const handleSave = async (next: string) => {
     try {
@@ -243,17 +232,20 @@ function DraftingView({
           {editing ? "Editing section" : "Draft"}
         </p>
         {!editing && (
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setEditing(true)}
-            disabled={busy}
-            title="Edit this section"
-            aria-label="Edit this section"
-            className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <SectionUndo cycleId={cycleId} sectionCode={sectionCode} disabled={busy} />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setEditing(true)}
+              disabled={busy}
+              title="Edit this section"
+              aria-label="Edit this section"
+              className="h-7 w-7 border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         )}
       </div>
 
@@ -285,9 +277,13 @@ function DraftingView({
             </p>
           )}
         </div>
+        {/* Sticky so a long draft still shows the pill: after Send the PM is
+            scrolled to the bottom, far below the draft's middle. It stays
+            centred until that middle scrolls above the screen's, then follows
+            the screen down, never leaving the draft. */}
         {refining && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 shadow-sm">
+            <div className="sticky top-1/2 flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 shadow-sm">
               <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
               <span className="text-sm font-medium text-slate-700">Refining…</span>
             </div>
@@ -297,16 +293,12 @@ function DraftingView({
 
       {/* Hidden while the editor is open. Refine and Regenerate both replace the
           body from the server, which would pull the text out from under the
-          textarea mid-edit; Lock would 409 the save that follows it. */}
+          textarea mid-edit. */}
       {!editing && (
         <>
-          <SectionChat refining={refining} onRefine={onRefine} />
+          <SectionChat refining={refining} onRefine={onRefine} sectionCode={sectionCode} />
 
-          <p className="text-xs text-slate-500">
-            Review the draft. Lock it when you&apos;re satisfied — you can unlock
-            and regenerate any time.
-          </p>
-
+          {onRegenerate && (
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
@@ -321,75 +313,10 @@ function DraftingView({
               )}
               Regenerate
             </Button>
-            <Button
-              onClick={onLock}
-              disabled={busy}
-              className="bg-indigo-600 text-white hover:bg-indigo-700"
-            >
-              {locking ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Locking…
-                </>
-              ) : (
-                <>
-                  <Lock className="h-4 w-4 mr-2" />
-                  Lock section
-                </>
-              )}
-            </Button>
           </div>
+          )}
         </>
       )}
-    </div>
-  )
-}
-
-function LockedView({
-  content,
-  lockedAt,
-  unlocking,
-  isRtl,
-  onUnlock,
-}: {
-  content: string
-  lockedAt: string | null
-  unlocking: boolean
-  isRtl: boolean
-  onUnlock: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      {/* No pencil here: a locked section is read-only and the save endpoint
-          409s. Unlock first. */}
-      <div
-        dir={isRtl ? "rtl" : "ltr"}
-        className={cn("rounded-xl border border-slate-200 bg-white p-6", isRtl && "text-right")}
-      >
-        {content.trim() ? (
-          <ProsePreview content={content} />
-        ) : (
-          <p className="text-sm text-slate-400 italic">No content available.</p>
-        )}
-      </div>
-
-      <LockedBanner lockedAt={lockedAt} />
-
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          onClick={onUnlock}
-          disabled={unlocking}
-          className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          {unlocking ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <LockOpen className="h-4 w-4 mr-2" />
-          )}
-          Unlock
-        </Button>
-      </div>
     </div>
   )
 }

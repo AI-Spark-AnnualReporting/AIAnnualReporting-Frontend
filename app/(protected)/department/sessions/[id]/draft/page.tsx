@@ -183,7 +183,6 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
     }
     setSaveState("idle")
     refetch()
-    toast.success("Draft regenerated")
   }
 
   const handleAdjustTone = async (tone: string) => {

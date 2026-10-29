@@ -1,22 +1,58 @@
 "use client"
 
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { FileCheck, Loader2 } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { AlertTriangle, FileCheck, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AiLoadingScreen } from "@/components/report/AiLoadingScreen"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
-  useAssembleReport,
+  readError,
   useAssemblyReadiness,
   useFinalReport,
+  type MutationError,
+  useReportApproval,
 } from "@/hooks/useReportBuilder"
-import { SECTION_LAYERS } from "@/lib/constants"
+import { useReportReview } from "@/hooks/useReportReview"
+import { pmApi } from "@/lib/api/pm"
+import { waitForAssembleJob } from "@/lib/assemble-job"
+import { QUERY_KEYS, SECTION_LAYERS } from "@/lib/constants"
+import type { FinalReport } from "@/types"
+
+// The four phases assemble_report actually runs, in order: read the sections,
+// write the executive summary from the AI-written ones, lay the report out
+// (including the per-section title-echo pass), then save it and index it for
+// the dashboard.
+const ASSEMBLE_MILESTONES = [
+  "Collecting your written sections",
+  "Writing the executive summary",
+  "Laying out the report",
+  "Saving and indexing it",
+]
+
+const ASSEMBLE_TIPS = [
+  "Empty sections are skipped — assemble again once you have filled them in.",
+  "The executive summary is written last, from the sections the AI wrote.",
+  "Assembling is not approving — you review the whole report before signing it off.",
+  "Attached documents go into the report exactly as you uploaded them.",
+]
+
+// The server reports no progress at all — only, eventually, a saved report —
+// so the bar is a timed climb rather than a real percentage. This is how long it
+// takes to reach 90%, where it then holds: one long LLM call for the summary,
+// a short one per narrative section, then the embedding pass. Retune it from a
+// real run if reports get much longer — a bar that parks at 90% for a minute
+// looks broken.
+const ASSEMBLE_ESTIMATE_MS = 60_000
 
 interface AssembleEntryProps {
   cycleId: string
@@ -25,10 +61,131 @@ interface AssembleEntryProps {
 export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readinessQuery = useAssemblyReadiness(cycleId)
   const finalReportQuery = useFinalReport(cycleId)
-  const assemble = useAssembleReport(cycleId)
+  // Sent to the client once: no more assembling (the server refuses it), so
+  // the button only opens the report, where Edit report is.
+  const sentToClient = !!useReportReview(cycleId, finalReportQuery.isSuccess).data?.share
+  const qc = useQueryClient()
+  const approvalQuery = useReportApproval(cycleId)
   const router = useRouter()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  // "running" shows the loader while we poll. "done" lets it finish its
+  // animation, then onDone navigates. "failed" swaps it for an error card —
+  // the PM leaves that only by clicking, never by being dropped back.
+  const [phase, setPhase] = useState<"idle" | "running" | "done" | "failed">(
+    "idle",
+  )
+  const [failureMessage, setFailureMessage] = useState("")
+  // Remembered so "Try again" on the error card re-runs the same kind of build.
+  const [lastRefresh, setLastRefresh] = useState(false)
+  // Stops a second polling loop starting (a fast "Try again", say).
+  const pollingRef = useRef(false)
+  // Stops a polling loop once the PM has left the builder.
+  const mountedRef = useRef(true)
 
-  if (readinessQuery.isLoading) {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const goToReport = useCallback(
+    () => router.push(`/pm/cycles/${cycleId}/report`),
+    [router, cycleId],
+  )
+
+  const showFailure = (message: string) => {
+    setFailureMessage(message)
+    setPhase("failed")
+  }
+
+  // The run succeeded: put the new report into the cache the report page
+  // reads, refresh the builder's own queries, and let the loader finish.
+  const finishWithReport = (report: FinalReport) => {
+    qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+    // No toast: the loader's own "Your report is assembled" already says it.
+    setPhase("done")
+  }
+
+  // Wait on the server's job (running -> completed / failed), then load the
+  // report it saved. A failed job shows its reason straight away.
+  const pollUntilFinished = async (jobId: string) => {
+    if (pollingRef.current) return
+    pollingRef.current = true
+    try {
+      const finished = await waitForAssembleJob(jobId, () => !mountedRef.current)
+      if (!finished) return
+      finishWithReport(await pmApi.getFinalReport(cycleId))
+    } catch (err) {
+      if (mountedRef.current) {
+        showFailure(err instanceof Error ? err.message : "Assembling failed. Please try again.")
+      }
+    } finally {
+      pollingRef.current = false
+    }
+  }
+
+  const runAssemble = async (refresh: boolean) => {
+    setConfirmOpen(false)
+    setLastRefresh(refresh)
+    setPhase("running")
+    let jobId: string
+    try {
+      // Answers straight away. If a run is already going it joins that one
+      // instead of starting another, so polling below covers both.
+      jobId = (await pmApi.startAssemble(cycleId, refresh)).job_id
+    } catch (err) {
+      // A refusal (locked, nothing to assemble, no access) or no server.
+      showFailure(
+        readError(err as MutationError, "Couldn't start assembling the report."),
+      )
+      return
+    }
+    await pollUntilFinished(jobId)
+  }
+
+  if (phase === "failed") {
+    return (
+      <AssembleFailedCard
+        message={failureMessage}
+        onRetry={() => runAssemble(lastRefresh)}
+        onBack={() => setPhase("idle")}
+      />
+    )
+  }
+
+  // Before every other early return: assembling makes the final-report query
+  // succeed, and the `hasReport` branch below would swap the loader out for a
+  // "View Report" link halfway through its finish animation.
+  if (phase !== "idle") {
+    return (
+      <div className="fixed inset-0 z-[1400] overflow-y-auto">
+        <AiLoadingScreen
+          title="Assembling your report"
+          // No bar, like every other loader: it was a timer, not real progress.
+          showProgress={false}
+          subtitle="Pulling every written section together and writing the executive summary."
+          milestones={ASSEMBLE_MILESTONES}
+          tips={ASSEMBLE_TIPS}
+          estimatedMs={ASSEMBLE_ESTIMATE_MS}
+          done={phase === "done"}
+          doneTitle="Your report is assembled"
+          doneSubtitle="Opening it so you can review and sign it off."
+          onDone={goToReport}
+        />
+      </div>
+    )
+  }
+
+  // Wait for both: without the final report we can't tell "Assemble Report"
+  // from "View Report", and guessing showed the wrong button while it loaded.
+  if (
+    readinessQuery.isLoading ||
+    finalReportQuery.isLoading ||
+    approvalQuery.isLoading
+  ) {
     return (
       <span className="h-10 w-44 rounded-lg bg-slate-100 animate-pulse shrink-0" />
     )
@@ -37,23 +194,19 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const readiness = readinessQuery.data
   if (!readiness) return null
 
-  // Backend's assembly_readiness now correctly excludes auto-mode sections
-  // from the lock requirement (Stage 6 spec §11 — shipped). Read its values
-  // directly; no client-side massaging needed.
-  const {
-    can_assemble,
-    locked,
-    total,
-    unlocked_sections,
-  } = readiness
+  const { can_assemble, ready, total, incomplete_sections, stale } = readiness
 
-  // Use the final-report query as the source of truth for whether a report
-  // exists — assembly-readiness may not return has_final_report reliably.
-  const hasReport = finalReportQuery.isSuccess
+  // A report exists if it loaded, or if readiness calls it stale: the server
+  // only says stale when there is an assembled report to be out of date. The
+  // second half keeps this button in step with the builder's "Assemble again"
+  // banner (same `stale` flag) even when the final-report fetch failed.
+  // An approved report is locked and is, by definition, assembled — even if the
+  // final-report read failed, assembling again is refused, so never offer it.
+  const hasReport =
+    finalReportQuery.isSuccess || stale || !!approvalQuery.data?.locked
 
-  // Final report already exists → View Report only (redirect, no API call).
-  // Re-assemble is available on the report page itself.
-  if (hasReport) {
+  // A report exists and nothing has changed since → nothing to do but read it.
+  if (hasReport && (!stale || sentToClient)) {
     return (
       <Link href={`/pm/cycles/${cycleId}/report`} className="shrink-0">
         <Button className="bg-indigo-600 text-white hover:bg-indigo-700">
@@ -64,77 +217,142 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     )
   }
 
-  // Ready, no final report yet → primary Assemble button.
-  if (can_assemble) {
-    const onAssemble = async () => {
-      try {
-        await assemble.mutateAsync({})
-        router.push(`/pm/cycles/${cycleId}/report`)
-      } catch {
-        // Error already toasted by the mutation
-      }
-    }
+  // A report exists but a section has been edited since it was built. Offer
+  // the rebuild instead of the link — refresh: true is what makes it a rebuild
+  // rather than a re-read, since assemble_report returns the stored report
+  // untouched without it.
+  if (hasReport) {
     return (
       <Button
-        onClick={onAssemble}
-        disabled={assemble.isPending}
-        className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
+        onClick={() => runAssemble(true)}
+        className="shrink-0 bg-amber-500 text-white hover:bg-amber-600"
+        title="A section changed after this report was built — rebuild it to include the change."
       >
-        {assemble.isPending ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            Assembling…
-          </>
-        ) : (
-          <>
-            <FileCheck className="h-4 w-4 mr-1.5" />
-            Assemble Report
-          </>
-        )}
+        <RefreshCw className="h-4 w-4 mr-1.5" />
+        Assemble again
       </Button>
     )
   }
 
-  // Not ready → disabled-style button with a popover listing what's left.
+  const run = () => runAssemble(false)
+
+  const missing = incomplete_sections.length
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          className="shrink-0 cursor-help border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-        >
-          <FileCheck className="h-4 w-4 mr-1.5" />
-          Assemble Report ({locked}/{total})
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[260px]">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          Lock the remaining sections to assemble:
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {unlocked_sections.length === 0 ? (
-          <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-            All sections locked — refresh to enable.
-          </div>
-        ) : (
-          <ul className="py-1 max-h-[280px] overflow-y-auto">
-            {unlocked_sections.map((s) => {
-              const layer = SECTION_LAYERS[s.layer]
-              return (
-                <li
-                  key={s.section_code}
-                  className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm"
-                >
-                  <span className="truncate">{s.title}</span>
-                  <span className="text-[10px] text-muted-foreground shrink-0">
-                    {layer?.label ?? s.layer}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
+    <>
+      <Button
+        // Assembling with empty sections is allowed — they are simply left
+        // out. The confirm below is what stops that happening silently.
+        onClick={() => (missing > 0 ? setConfirmOpen(true) : run())}
+        disabled={!can_assemble}
+        title={
+          can_assemble
+            ? undefined
+            : "Nothing has been written yet — there is no report to assemble."
+        }
+        className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
+      >
+        <FileCheck className="h-4 w-4 mr-1.5" />
+        Assemble Report
+        {missing > 0 && (
+          <span className="ml-1.5 font-normal opacity-80">
+            ({ready}/{total})
+          </span>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Button>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              {missing} section{missing === 1 ? "" : "s"} will be left out
+            </DialogTitle>
+            <DialogDescription>
+              Nothing has been written in {missing === 1 ? "it" : "them"} yet,
+              so {missing === 1 ? "it" : "they"} won&apos;t appear in the
+              report. You can assemble again after filling{" "}
+              {missing === 1 ? "it" : "them"} in.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="max-h-[240px] space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+            {incomplete_sections.map((s) => (
+              <li
+                key={s.section_code}
+                className="flex items-center justify-between gap-2 text-sm"
+              >
+                <span className="truncate text-slate-700">{s.title}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {SECTION_LAYERS[s.layer]?.label ?? s.layer}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Keep editing
+            </Button>
+            <Button
+              onClick={run}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              Assemble anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+interface AssembleFailedCardProps {
+  message: string
+  onRetry: () => void
+  onBack: () => void
+}
+
+// Shown over the builder, on the loader's own backdrop, when assembling
+// failed. The PM chooses what happens next.
+function AssembleFailedCard({ message, onRetry, onBack }: AssembleFailedCardProps) {
+  return (
+    <div
+      role="alertdialog"
+      aria-labelledby="assemble-failed-title"
+      className="fixed inset-0 z-[1400] flex items-center justify-center overflow-y-auto p-5"
+      style={{
+        background:
+          "radial-gradient(120% 80% at 50% -10%, #EEEFFE 0%, #F4F5FB 45%, #F4F5FB 100%)",
+      }}
+    >
+      <div className="w-full max-w-[520px] rounded-2xl border border-[#E2E4F0] bg-white px-8 py-9 text-center shadow-[0_30px_70px_rgba(20,22,40,.14)]">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50">
+          <AlertTriangle className="h-6 w-6 text-amber-500" />
+        </div>
+        <h2
+          id="assemble-failed-title"
+          className="mt-4 text-xl font-bold text-slate-900"
+        >
+          We couldn&apos;t assemble the report
+        </h2>
+        <p className="mt-2 text-sm text-slate-600">{message}</p>
+        <p className="mt-1 text-xs text-slate-400">
+          Your sections are safe — nothing you wrote was changed.
+        </p>
+        <div className="mt-6 flex justify-center gap-3">
+          <Button variant="outline" onClick={onBack}>
+            Back to builder
+          </Button>
+          <Button
+            onClick={onRetry}
+            className="bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+            Try again
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }

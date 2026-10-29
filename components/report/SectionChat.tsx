@@ -1,13 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useContext, useState } from "react"
 import { Loader2, MessageSquareText, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { FixPrefillContext } from "@/lib/validation-fixes"
 
 interface SectionChatProps {
   refining: boolean
   onRefine: (instruction: string) => void
+  /** This box's section. When the PM arrived from a validation finding for it,
+   *  the box starts with that finding's instruction - sent only on their click. */
+  sectionCode?: string
 }
 
 const SUGGESTED_CHIPS = [
@@ -16,9 +20,26 @@ const SUGGESTED_CHIPS = [
   "Expand detail",
 ] as const
 
-export function SectionChat({ refining, onRefine }: SectionChatProps) {
-  const [instruction, setInstruction] = useState("")
+export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProps) {
+  const prefill = useContext(FixPrefillContext)
+  const [instruction, setInstruction] = useState(() =>
+    prefill && prefill.sectionCode === sectionCode ? prefill.text : "",
+  )
   const [turns, setTurns] = useState<{ instruction: string }[]>([])
+
+  // When the page withdraws the instruction (the fix is done), empty the box -
+  // but only if it still holds that instruction untouched. When it comes back
+  // (an Undo reopened the fix), refill the box - but only if it is empty. Either
+  // way the PM's own words are never lost. Done during render, React's way to
+  // adjust state when a value it depends on changes.
+  const [shownPrefill, setShownPrefill] = useState(prefill)
+  if (prefill !== shownPrefill) {
+    setShownPrefill(prefill)
+    if (!prefill && shownPrefill && instruction === shownPrefill.text) setInstruction("")
+    if (prefill && prefill.sectionCode === sectionCode && !instruction.trim()) {
+      setInstruction(prefill.text)
+    }
+  }
 
   const trimmed = instruction.trim()
   const disabled = refining || !trimmed
@@ -84,7 +105,9 @@ export function SectionChat({ refining, onRefine }: SectionChatProps) {
           rows={2}
           placeholder="Try: 'make this more concise' or 'add the cost-reduction figure'"
           disabled={refining}
-          className="resize-none rounded-xl"
+          // Grows to fit, so a Fix button's long instruction shows in full.
+          // field-sizing is Chrome/Edge only; elsewhere it stays 2 rows.
+          className="max-h-48 resize-none rounded-xl [field-sizing:content]"
         />
         <Button
           onClick={send}

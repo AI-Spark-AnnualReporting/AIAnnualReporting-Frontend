@@ -1,6 +1,8 @@
+import type { ReportValidation } from "@/lib/api/pm"
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { getActingCompany } from "@/lib/actingCompany"
+import { agentRunPath } from "@/lib/reportReadiness"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -329,6 +331,9 @@ export interface ThreadDetail {
   assignment: ReviewAssignment | null
   // See ThreadSummary — true once this thread has ever been a review.
   has_review: boolean
+  // A validation is on file for this report. The boolean only - the findings
+  // live on the reviewer screen, which is where they can be read.
+  has_validation?: boolean
   // True only for the assigned reviewer — gates "Open as reviewer".
   can_review: boolean
   created_at: string
@@ -510,6 +515,9 @@ export interface ReportStatusOption {
 }
 
 export interface ReportHubResponse {
+  // A validation is on file for this report. The boolean only - the findings
+  // are on the reviewer screen, which is where they are read.
+  has_validation?: boolean
   report: ThreadReport
   statuses: ReportStatusOption[]
   // False once locked/published — render the panel read-only.
@@ -587,6 +595,12 @@ export interface ReviewViewResponse {
   // screen is read-only. `can_comment` is the derived form — use that.
   removed_at: string | null
   can_comment: boolean
+  // What the Validate run found, for annual reports that have one. Null for
+  // quarterly and earnings reviews, for a report never validated, and for a
+  // validation the server judged stale - re-assembling clears it, because a
+  // verdict about a previous version of the document reads as current while
+  // quoting figures that are no longer on the page.
+  validation?: ReportValidation | null
   // Only the ticked sections (e.g. 11 of 19). Empty when the narrative hasn't
   // been generated — hide the per-section rail.
   sections: ReviewSection[]
@@ -684,6 +698,23 @@ interface AssembledReportResponse {
     cover_template_key?: string | null
     brand?: ReviewReportBrand | null
   } | null
+}
+
+/** What a "get this report ready for the AI assistant again" call returns. The
+ *  work runs in the background, so this is only a handle on it. */
+export interface ReindexResponse {
+  report_id: string
+  run_id: string | null
+  /** An agent_runs URL, already prefixed with /api/v1 — see getAgentRun. */
+  poll_url: string | null
+  /** "Q3 2025 earnings report" — names the report in the success toast. */
+  report_label?: string | null
+}
+
+export interface AgentRunStatus {
+  id: string
+  status: string
+  error_message?: string | null
 }
 
 export const communicationsApi = {
@@ -1037,6 +1068,66 @@ export const communicationsApi = {
   // Saved drafts (only surface for drafts — they're not in the History list).
   drafts: async (): Promise<DraftListResponse> => {
     const { data } = await commClient.get(`/communications/history/drafts`)
+    return data
+  },
+  // ── Report readiness for the AI assistant ────────────────────────────────
+  //
+  // When a quarterly or earnings report is approved, Centriton indexes it so the
+  // AI assistant can answer questions about it. If that fails, the approver gets
+  // a notification row in the SHARED notifications table — which this app's bell
+  // reads too. These three let that bell fix the problem in place instead of
+  // sending the user to an app they may not use.
+  //
+  // Nothing new is needed to call them: commClient already points at Centriton's
+  // backend with the same JWT, and already calls both of these route families.
+
+  reindexEarningsReport: async (reportId: string): Promise<ReindexResponse> => {
+    const { data } = await commClient.post(
+      `/earnings/reports/${encodeURIComponent(reportId)}/reindex`, {},
+    )
+    return data
+  },
+
+  reindexQuarterlyReport: async (
+    companyId: string, reportId: string,
+  ): Promise<ReindexResponse> => {
+    const { data } = await commClient.post(
+      `/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/reindex`,
+      {},
+    )
+    return data
+  },
+
+  // poll_url comes back as "/api/v1/agent_runs/{id}", and commClient's baseURL
+  // ALREADY ends in /api/v1 — passing it raw would request /api/v1/api/v1/...
+  // Centriton's own client strips the same prefix for the same reason.
+  getAgentRun: async (pollUrl: string): Promise<AgentRunStatus> => {
+    const { data } = await commClient.get(agentRunPath(pollUrl))
+    return data
+  },
+
+}
+
+// ── Board report vector index ─────────────────────────────────────────────
+//
+// Not a Communication Hub endpoint, but it lives on the same Centrion backend
+// and needs the same client — the Centriyon-issued JWT, the same base URL, the
+// same 401 bounce. A second axios instance would only be a second copy of all
+// of that.
+//
+// Approving a board report kicks off the embedding that lets the AI assistant
+// read it. When that fails, Centriton writes the notification this bell renders
+// (notification_type 'alert', related_type 'report'), and this is the way back:
+// it re-runs the job.
+//
+// Returns 202 with a run id — the work is NOT done when this resolves. The
+// notification clears only once the index lands and Centriton marks it read,
+// which the 60s notification poll picks up on its own.
+export const boardIndexApi = {
+  retry: async (reportId: string): Promise<{ run_id: string | null; status: string }> => {
+    const { data } = await commClient.post(
+      `/board/reports/${encodeURIComponent(reportId)}/index/retry`,
+    )
     return data
   },
 }

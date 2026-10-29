@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { ProsePreview } from "@/components/ui/prose-preview"
-import { AreasOfFocusSummary } from "@/components/report/AreasOfFocusSummary"
 import {
   ConceptMessagesSummary,
   ErrorPanel,
@@ -125,17 +124,10 @@ export default function CycleBriefPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
-      {/* Areas of focus — the component draws its own heading and empty state,
-          so it gets a plain wrapper rather than a SectionCard, or "Areas of
-          Focus" would appear twice. */}
+      {/* Areas of focus and their concept messages, one card per area — the
+          component draws its own heading, empty state and error state. */}
       <div className="rounded-2xl border bg-card p-6 shadow-sm">
-        <AreasOfFocusSummary areas={areas} isRtl={isRtl} />
-      </div>
-
-      {/* Concept messages — same reasoning as the areas above: the component
-          draws its own heading, empty state and error state. */}
-      <div className="rounded-2xl border bg-card p-6 shadow-sm">
-        <ConceptMessagesSummary cycleId={id} isRtl={isRtl} />
+        <ConceptMessagesSummary cycleId={id} areas={areas} isRtl={isRtl} />
       </div>
     </div>
   )

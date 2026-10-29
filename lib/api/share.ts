@@ -1,0 +1,262 @@
+import axios from "axios"
+import { apiClient } from "@/lib/api/client"
+import type { AreaOfFocus } from "@/lib/areasOfFocus"
+import type { ConceptMessage, GenerateBriefAnswer, SurveyQuestion } from "@/lib/api/pm"
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Client sign-off on the kickoff wizard.
+
+   Two callers live here and they must not share a transport:
+
+   - Spark's own screens use `apiClient`, which attaches the Centriyon JWT and
+     the acting-company header.
+   - The client's page uses `publicClient` below. It has NO interceptors. The
+     person holding the link has no account, no token and no company, and
+     apiClient's 401 handler would bounce them to a Centriyon login they can
+     never complete.
+──────────────────────────────────────────────────────────────────────────── */
+
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://anualreport-hmc4gyfnc9e9emdf.canadacentral-01.azurewebsites.net/api/v1"
+
+/** Deliberately bare: no auth header, no company header, no redirect-on-401. */
+export const publicClient = axios.create({
+  baseURL: BASE_URL,
+  headers: { "Content-Type": "application/json" },
+  timeout: 30000,
+})
+
+export type ShareStage = "questionnaire" | "brief" | "areas"
+export type ShareStatus = "pending" | "responded" | "approved"
+export type ShareEmailStatus = "pending" | "sent" | "failed"
+
+/** One thing that happened to a gate — see the backend's history_service. */
+export interface KickoffHistoryEntry {
+  id: string
+  /** Which gate it belongs to. */
+  stage: ShareStage
+  /** "generated" = the AI wrote it; "refined" = the AI changed it on an
+   *  instruction, which is kept in `note`. */
+  action:
+    | "shared"
+    | "client_sent"
+    | "sent_back"
+    | "approved"
+    | "reminded"
+    | "edited"
+    | "generated"
+    | "refined"
+  actor_type: "spark" | "client"
+  actor_id?: string | null
+  /** A Spark user's name, or the client's email. */
+  actor_label?: string | null
+  /** The gate's content before and after, shaped per stage. */
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  /** Send-back comment, the client's note, or the address it was shared with. */
+  note?: string | null
+  at: string
+  /** Moves when Spark's autosaves are folded into one edit. */
+  updated_at: string
+}
+
+/** What the client sent back. Shape follows the stage. */
+export interface ShareResponsePayload {
+  answers?: GenerateBriefAnswer[]
+  /** Questions the client wrote themselves. The server renumbers the ids and
+   *  re-points their answers, so these are only ever a suggestion of an id. */
+  added_questions?: { id: string; text: string }[]
+  /** Questions the client rejected, recorded on the server as theirs. */
+  rejected_question_ids?: string[]
+  strategic_brief?: string
+  areas_of_focus?: AreaOfFocus[]
+  concept_messages?: ConceptMessage[]
+}
+
+/** What the client is being asked about. Shape follows the stage. */
+export interface SharePayload {
+  questions?: SurveyQuestion[]
+  strategic_brief?: string
+  areas_of_focus?: AreaOfFocus[]
+  concept_messages?: ConceptMessage[]
+}
+
+export interface ShareRequest {
+  id: string
+  cycle_id: string
+  stage: ShareStage
+  status: ShareStatus
+  url: string
+  client_email: string
+  /** SMTP acceptance, not delivery — a bounce afterwards is invisible to us. */
+  email_status: ShareEmailStatus
+  reminder_count: number
+  last_reminded_at?: string | null
+  /** The latest note sent back to the client, and how many rounds so far. */
+  review_comment?: string | null
+  revision_count: number
+  /** Their own note back to Spark. Brief and areas gates. */
+  client_note?: string | null
+  response: ShareResponsePayload
+  /** The file the client attached, on the questionnaire gate only. Carried
+   *  because it feeds the AI — the brief generator summarises its text — so
+   *  approving the client's answers approves its influence on the brief. */
+  document_name?: string | null
+  document_id?: string | null
+  created_at?: string | null
+  responded_at?: string | null
+  approved_at?: string | null
+  approved_by?: string | null
+}
+
+export interface CycleShares {
+  cycle_id: string
+  questionnaire?: ShareRequest | null
+  brief?: ShareRequest | null
+  areas?: ShareRequest | null
+}
+
+export interface ShareActionResult {
+  share: ShareRequest
+  message: string
+}
+
+/** The client's view. Carries no cycle id, company or user — only this one share. */
+export interface ClientShareView {
+  stage: ShareStage
+  status: ShareStatus
+  cycle_name: string
+  payload: SharePayload
+  response: ShareResponsePayload
+  submitted_at?: string | null
+  /** Set when their work came back for changes — shown at the top of the page. */
+  review_comment?: string | null
+  revision_count: number
+  /** The note they sent with their response, shown back to them read-only. */
+  client_note?: string | null
+  /** Who sent the link — shown as "Questions? <name> · <email>". */
+  contact_name?: string | null
+  contact_email?: string | null
+  /** The file the client attached, if any. */
+  document_name?: string | null
+}
+
+export const shareApi = {
+  /** Every gate's state. Readable by any PM, so a blocked screen can explain itself. */
+  list: async (cycleId: string): Promise<CycleShares> => {
+    const { data } = await apiClient.get<CycleShares>(`/pm/cycles/${cycleId}/shares`)
+    return data
+  },
+
+  /** spark_internal only. Re-sharing rotates the token and kills the old link. */
+  create: async (
+    cycleId: string,
+    body: { stage: ShareStage; client_email: string },
+  ): Promise<ShareActionResult> => {
+    const { data } = await apiClient.post<ShareActionResult>(
+      `/pm/cycles/${cycleId}/share`,
+      body,
+    )
+    return data
+  },
+
+  /** spark_internal only. This is what unblocks the wizard.
+   *
+   *  Approving the BRIEF also builds the areas of focus and concept messages
+   *  from it, server-side — two LLM calls, so this one can take about a
+   *  minute. Callers must show a loader rather than assume a status flip. */
+  approve: async (cycleId: string, stage: ShareStage): Promise<ShareActionResult> => {
+    const { data } = await apiClient.post<ShareActionResult>(
+      `/pm/cycles/${cycleId}/share/${stage}/approve`,
+      undefined,
+      // The client default of 30s would abort mid-generation on the brief
+      // gate, and the approval itself has already been written by then — the
+      // PM would see a failure for something that actually succeeded.
+      { timeout: 180000 },
+    )
+    return data
+  },
+
+  /** spark_internal only. Rebuilds the areas of focus and concept messages
+   *  from the signed-off brief.
+   *
+   *  Approving the brief normally does this. This is the retry for when that
+   *  generation failed: the approval cannot be repeated, so without it the PM
+   *  is stuck on an empty card. */
+  /** One gate's history, newest first. spark_internal only. */
+  history: async (cycleId: string, stage: ShareStage): Promise<KickoffHistoryEntry[]> => {
+    const { data } = await apiClient.get<{ entries: KickoffHistoryEntry[] }>(
+      `/pm/cycles/${cycleId}/history`,
+      { params: { stage } },
+    )
+    return data.entries
+  },
+
+  generateAreas: async (cycleId: string) => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/areas-of-focus/generate`,
+      undefined,
+      { timeout: 180000 },
+    )
+    return data
+  },
+
+  /** spark_internal only. Reopens the same link with their answers still on
+   *  it, plus a note saying what to change. */
+  sendBack: async (
+    cycleId: string,
+    stage: ShareStage,
+    comment: string,
+  ): Promise<ShareActionResult> => {
+    const { data } = await apiClient.post<ShareActionResult>(
+      `/pm/cycles/${cycleId}/share/${stage}/send-back`,
+      { comment },
+    )
+    return data
+  },
+
+  /** spark_internal only. Emails a reminder; unblocks nothing. */
+  escalate: async (cycleId: string, stage: ShareStage): Promise<ShareActionResult> => {
+    const { data } = await apiClient.post<ShareActionResult>(
+      `/pm/cycles/${cycleId}/share/${stage}/escalate`,
+    )
+    return data
+  },
+}
+
+/** The client's calls. No auth anywhere. */
+export const clientShareApi = {
+  view: async (token: string): Promise<ClientShareView> => {
+    const { data } = await publicClient.get<ClientShareView>(
+      `/share/${encodeURIComponent(token)}`,
+    )
+    return data
+  },
+
+  /** The client attaching their own strategic brief. Replace semantics: a
+   *  second upload removes the first. No auth — the token is the credential. */
+  uploadDocument: async (token: string, file: File): Promise<{ filename: string }> => {
+    const form = new FormData()
+    form.append("file", file)
+    const { data } = await publicClient.post<{ filename: string }>(
+      `/share/${encodeURIComponent(token)}/document`,
+      form,
+      // Let the browser set the multipart boundary; the instance default of
+      // application/json would make the server reject the body.
+      { headers: { "Content-Type": undefined } },
+    )
+    return data
+  },
+
+  submit: async (
+    token: string,
+    body: { response: ShareResponsePayload; client_note?: string },
+  ): Promise<ClientShareView> => {
+    const { data } = await publicClient.post<ClientShareView>(
+      `/share/${encodeURIComponent(token)}/submit`,
+      body,
+    )
+    return data
+  },
+}

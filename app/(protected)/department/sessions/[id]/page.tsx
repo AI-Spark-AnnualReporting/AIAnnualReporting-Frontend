@@ -102,6 +102,10 @@ function extractAiText(res: unknown): string | null {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export default function SessionWorkspacePage({
   params,
 }: {
@@ -442,14 +446,17 @@ export default function SessionWorkspacePage({
           (a) => a.status === "already_answered"
         ).length,
       })
-      // Let the success state breathe before returning to the workspace.
-      setTimeout(() => { setUploading(false); refetch() }, 2200)
+      // Let the success state breathe, and reload the answers meanwhile: the
+      // loader closes on the drafted answers, not on the old empty ones.
+      await Promise.all([refetch(), wait(2200)])
+      setUploading(false)
     } catch (err: unknown) {
       toast.error(
         (err as { message?: string })?.message ||
           "We couldn't extract answers from your documents — you can still answer each question manually."
       )
-      setTimeout(() => { setUploading(false); refetch() }, 1400)
+      await Promise.all([refetch(), wait(1400)])
+      setUploading(false)
     } finally {
       docCheck.reset()
     }

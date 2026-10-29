@@ -1,22 +1,30 @@
-import {
-  useIsMutating,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useState } from "react"
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { annualDesignApi, downloadAnnualReport } from "@/lib/api/annual-design"
 import { pmApi } from "@/lib/api/pm"
+import type {
+  ArabicEditBody,
+  DepartmentClaimsResponse,
+  DraftFindingsResponse,
+  ExternalReportInput,
+  ResolveFindingPayload,
+} from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
+import {
+  addSubsectionInstruction,
+  insertSubsection,
+  type Placement,
+} from "@/lib/sectionOutline"
 import type {
   ContentLanguage,
   CycleReportSection,
   FinalReport,
   PlanResponse,
-  ReportApproval,
   ReportTheme,
   SectionMode,
+  WritingStyle,
 } from "@/types"
 
 // Whether a cycle is ready to enter the Report Builder.
@@ -27,6 +35,312 @@ export function useBuildReadiness(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
   })
+}
+
+// The cycle's stored pre-build draft findings. Read-only — it never triggers
+// the check, so landing on the cycle page costs nothing. `checked_at: null`
+// means the PM has not run the check yet.
+export function useDraftFindings(cycleId: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId),
+    queryFn: () => pmApi.draftFindings(cycleId),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+}
+
+// The PM's consent, and the end of the findings stage. Not optimistic: the
+// caller navigates into the builder on success, so a failure must stay put
+// rather than land him on a page he never actually unlocked.
+/**
+ * Validate the assembled report.
+ *
+ * Not optimistic and deliberately slow: the run is ~16 model calls. The result
+ * is stored server-side before the response is sent, so a dropped connection
+ * costs the response and never the work — the panel reads the stored validation
+ * on the next load either way.
+ */
+// `stage` is the server's progress line while the run is polled.
+export function useValidateReport(cycleId: string) {
+  const qc = useQueryClient()
+  const [stage, setStage] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: () => {
+      setStage(null)
+      return pmApi.validateReport(cycleId, setStage)
+    },
+    // No success toast. The result is a panel and a statement page on screen,
+    // both of which say more than a count in a corner, and the toast landed on
+    // top of them the moment they appeared.
+    onSuccess: async () => {
+      // The assembled report now carries a validation, which changes both what
+      // the document prints and what the report page shows beneath it.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+      // Awaited, so the loader closes on the result: it used to close first
+      // and show the old copy ("Not checked yet") until the reload landed.
+      await qc.refetchQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't validate the report")),
+  })
+  return { ...mutation, stage }
+}
+
+// Annual Report Validator: upload an external report and start its job.
+// No toast on failure: the form shows the server's reason next to the
+// Validate button, the way admin's Centriyon page does.
+export function useStartExternalValidation() {
+  return useMutation({
+    mutationFn: (input: ExternalReportInput) => pmApi.startExternalValidation(input),
+  })
+}
+
+// Re-run a past external validation with no re-upload.
+export function useRetryExternalValidation() {
+  return useMutation({
+    mutationFn: (jobId: string) => pmApi.retryExternalValidation(jobId),
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't start the retry")),
+  })
+}
+
+// A validation job, re-read every 3s until it finishes.
+export function useValidationJob(jobId: string) {
+  return useQuery({
+    queryKey: ["validation-job", jobId],
+    queryFn: () => pmApi.getValidationJob(jobId),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" || !query.state.data ? 3000 : false,
+  })
+}
+
+// This admin's own past Annual Report Validator runs, for the "previous
+// validations" list above the form.
+export function useExternalValidations() {
+  return useQuery({
+    queryKey: ["external-validations"],
+    queryFn: () => pmApi.listExternalValidations(),
+    // Re-read whenever the form opens. Under the app's 60s default, a run
+    // finished a moment ago was missing from the list after Back.
+    staleTime: 0,
+    // And keep no copy once the form is left: otherwise coming back shows the
+    // old list for a moment before the fresh one replaces it. With none kept,
+    // the cards show their loading placeholders, then the fresh list - the
+    // same as admin's page in Centriyon.
+    gcTime: 0,
+  })
+}
+
+export function useLockDraftFindings(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.lockDraftFindings(cycleId),
+    onSuccess: (data) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), data)
+    },
+    onError: (err: MutationError) => {
+      // Already locked is not a failure — it is the state the PM was asking
+      // for. It happens when the page was rendered before an earlier lock
+      // (another tab, or a back-navigation to stale data). Refresh instead of
+      // blocking them, and let the caller carry on to the builder.
+      if (isAlreadyLocked(err)) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(cycleId) })
+        return
+      }
+      toast.error(readError(err, "Could not open the Report Builder"))
+    },
+  })
+}
+
+/** A lock refused because the cycle is already locked, rather than a real error. */
+export function isAlreadyLocked(err: unknown): boolean {
+  return (err as { response?: { status?: number } })?.response?.status === 409
+}
+
+// Run the checks. N+1 model calls server-side, so this is slow by design —
+// callers show a pending state rather than an optimistic one.
+export function useCheckDrafts(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.checkDrafts(cycleId),
+    onSuccess: (result: DraftFindingsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DRAFT_FINDINGS(cycleId), result)
+      toast.success(
+        result.findings.length === 0
+          ? "No problems found in the department drafts"
+          : `${result.findings.length} thing${result.findings.length === 1 ? "" : "s"} to check`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't check the drafts")),
+  })
+}
+
+// What each approved department stated. Read-only — landing on the claims page
+// costs nothing. A department with an empty list and a null extracted_at never
+// had its claims read, which the page turns into its Extract-claims state.
+export function useDepartmentClaims(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId),
+    queryFn: () => pmApi.departmentClaims(cycleId),
+    enabled: !!cycleId && enabled,
+    staleTime: 0,
+  })
+}
+
+// A department's facts look short when this many figures in its answers are
+// in no fact. Below it, a figure the department repeated in passing is not
+// worth a warning.
+export const FACTS_SHORT_AT = 5
+
+/** Departments whose fact list looks short, by name. The draft check trusts
+ *  that list, so their "unsupported claim" findings may be wrong. */
+export function departmentsWithShortFacts(data: DepartmentClaimsResponse | undefined): string[] {
+  return (data?.departments ?? [])
+    // A department already read again is not warned about twice: the re-read
+    // filled what it could, and the draft check allows for the rest.
+    .filter((d) => !d.facts_reread && (d.figures_not_in_facts ?? 0) >= FACTS_SHORT_AT)
+    .map((d) => d.department)
+}
+
+/** "Human Resources'" / "Human Resources' and Finance's" */
+export function possessiveNames(names: string[]): string {
+  const owned = names.map((n) => (n.endsWith("s") ? `${n}'` : `${n}'s`))
+  if (owned.length <= 1) return owned.join("")
+  return `${owned.slice(0, -1).join(", ")} and ${owned[owned.length - 1]}`
+}
+
+// Fill in claims for departments missing them. One model call per missing
+// department, so it is slow by design — the caller shows a pending state.
+export function useExtractDepartmentClaims(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => pmApi.extractDepartmentClaims(cycleId),
+    onSuccess: (result: DepartmentClaimsResponse) => {
+      qc.setQueryData(QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId), result)
+      toast.success(
+        result.total_claims === 0
+          ? "Nothing could be read from the answers"
+          : `Read ${result.total_claims} facts`,
+      )
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't read the departments' answers")),
+  })
+}
+
+// Resolve one finding. "edited"/"removed" rewrite the department's approved
+// submission, so the session caches are invalidated too — the PM can open that
+// submission from the finding and would otherwise see the pre-correction text.
+// Shared mutation key for every resolve on a cycle, so the page can tell when
+// all writes have settled and do one reconciling refetch.
+export const FINDING_WRITE_KEY = (cycleId: string) => ["pm", "cycle", cycleId, "finding-write"]
+
+// Serialize the resolves for a cycle. The server does a read-modify-write on the
+// whole draft_findings JSONB, so two concurrent writes would lose one another's
+// change — working through a list of findings is exactly the case that produces
+// rapid successive clicks. Same approach as HOD question curation
+// (hooks/useHod.ts): the screen updates instantly, only the network sends queue.
+const cycleWriteChains = new Map<string, Promise<unknown>>()
+function serializeWrite<T>(cycleId: string, run: () => Promise<T>): Promise<T> {
+  const prev = cycleWriteChains.get(cycleId) ?? Promise.resolve()
+  const result = prev.then(run, run)
+  cycleWriteChains.set(cycleId, result.then(() => undefined, () => undefined))
+  return result
+}
+
+/* Resolve one finding.
+ *
+ * Optimistic rather than batched: the click lands on screen with no wait, and
+ * the write still goes immediately. Holding a session's worth of decisions in
+ * memory and saving once would lose the lot on a closed tab — and an edit
+ * rewrites the department's real submission, so the report text and the
+ * findings would disagree until the save.
+ *
+ * The server response is deliberately NOT written back per call: a queued write
+ * returning mid-sequence would overwrite the optimistic state of findings the
+ * PM has clicked since. The page reconciles once, when the queue drains. */
+export function useResolveFinding(cycleId: string) {
+  const qc = useQueryClient()
+  const key = QUERY_KEYS.DRAFT_FINDINGS(cycleId)
+
+  return useMutation({
+    mutationKey: FINDING_WRITE_KEY(cycleId),
+    mutationFn: ({
+      findingId,
+      payload,
+    }: {
+      findingId: string
+      payload: ResolveFindingPayload
+    }) => serializeWrite(cycleId, () => pmApi.resolveFinding(cycleId, findingId, payload)),
+
+    onMutate: async ({ findingId, payload }) => {
+      await qc.cancelQueries({ queryKey: key })
+      const prev = qc.getQueryData<DraftFindingsResponse>(key)
+      if (prev) qc.setQueryData<DraftFindingsResponse>(key, applyResolve(prev, findingId, payload))
+      return { prev }
+    },
+
+    // Put the previous state back, so a failed write does not leave the screen
+    // claiming a correction that never landed.
+    onError: (err: MutationError, _vars, context) => {
+      const prev = (context as { prev?: DraftFindingsResponse } | undefined)?.prev
+      if (prev) qc.setQueryData(key, prev)
+      toast.error(readError(err, "Couldn't save that change"))
+    },
+
+    onSettled: (_data, _err, variables) => {
+      if (variables.payload.action !== "accepted") {
+        qc.invalidateQueries({ queryKey: ["pm", "session"] })
+        qc.invalidateQueries({ queryKey: ["session"] })
+      }
+    },
+  })
+}
+
+/* The optimistic shape of one resolve, matching what the server will store.
+ *
+ * `undo` reopens and drops the resolution; everything else marks the finding
+ * and records who did it. The text this writes is only what the screen shows
+ * until the reconciling refetch — the server remains the source of truth. */
+function applyResolve(
+  prev: DraftFindingsResponse,
+  findingId: string,
+  payload: ResolveFindingPayload,
+): DraftFindingsResponse {
+  const now = new Date().toISOString()
+
+  const findings = prev.findings.map((f) => {
+    if (f.id !== findingId) return f
+    if (payload.action === "undo") {
+      return { ...f, status: "open" as const, resolution: null }
+    }
+    const status =
+      payload.action === "edited"
+        ? ("corrected" as const)
+        : payload.action === "removed"
+          ? ("removed" as const)
+          : ("accepted" as const)
+    const side = f.sides.find((sd) => sd.session_id === payload.session_id) ?? f.sides[0]
+    return {
+      ...f,
+      status,
+      resolution: {
+        session_id: payload.action === "accepted" ? null : (side?.session_id ?? null),
+        action: payload.action,
+        from: payload.action === "accepted" ? null : (side?.sentence ?? null),
+        to: payload.action === "edited" ? (payload.sentence ?? null) : null,
+        by: "",
+        at: now,
+      },
+    }
+  })
+
+  return {
+    ...prev,
+    findings,
+    open_count: findings.filter((f) => f.status === "open").length,
+  }
 }
 
 // Resolved report sections for a cycle (PM-access).
@@ -61,11 +375,61 @@ export function usePreviousManualSections(
   })
 }
 
+// Draft a whole human-voice statement (Chairman's Statement, CEO's Review) on
+// demand.
+//
+// A mutation, not a query, and deliberately so: this is an LLM call that must
+// fire on the PM's press and on nothing else. A query would invite a refetch on
+// mount, on window focus, or as a side effect of an unrelated invalidation.
+//
+// It writes nothing server-side, so there is no section cache to patch — the
+// drafted text lands in the panel's editor, and the existing manual-content save
+// is what stores it once the PM accepts. Failures are rendered in the panel next
+// to the button that caused them (with a Try again) instead of toasted, because
+// "not enough material yet" needs a sentence, not a red flash.
+export function useDraftStatement(cycleId: string) {
+  return useMutation({
+    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
+      pmApi.draftStatement(cycleId, sectionCode),
+  })
+}
+
+// Whether a draft is possible for one of the assisted statements, asked before
+// the option is offered. A brand-new company has no previous statement and often
+// no submitted department material, so the draft would refuse — and we should
+// not offer something we cannot deliver.
+//
+// A query, unlike the draft itself, and safely so: it costs no model call and
+// writes nothing, so a refetch on mount or on an unrelated invalidation is
+// harmless. `enabled` is the caller's promise that this is one of the two
+// assisted codes AND that the picker is actually on screen; nothing else asks.
+//
+// One short retry and no more: the picker is held in front of the PM until this
+// answers, and the caller reads a failure as "available" anyway, so a long
+// backoff would only delay a fallback it is going to make regardless.
+export function useDraftAvailability(
+  cycleId: string,
+  sectionCode: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_DRAFT_AVAILABILITY(cycleId, sectionCode),
+    queryFn: () => pmApi.draftAvailability(cycleId, sectionCode),
+    enabled: enabled && !!cycleId && !!sectionCode,
+    // Material keeps arriving as departments submit, so don't hold the answer
+    // for long — but don't re-ask every time the PM flips back to the picker
+    // either.
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  })
+}
+
 // Shared error shape. apiClient normalizes errors to { message, status, ... } but
 // keep the legacy .response.data.detail path too in case anything bypasses the
 // interceptor. Whatever we surface, coerce to string — toast.error/React crash
 // if handed an object child.
-type MutationError = {
+export type MutationError = {
   message?: unknown
   // HTTP status, set by the apiClient error normalizer. Callers that treat a
   // specific code as a state (e.g. 409 = locked) read it from here.
@@ -85,6 +449,31 @@ type MutationError = {
 // which GET /sections now returns complete (attachment/verified/locked_at
 // included), so it no longer risks snapping the panel back to a field-less
 // version. Readiness is invalidated too (independent query).
+/**
+ * Mark a just-saved section as edited in the cached validation result, so the
+ * validation page shows it "Fixed" the moment the PM goes back, instead of
+ * after its (slow) refetch. The refetch still runs and has the final word -
+ * e.g. an edit undone exactly stops counting. Only for validations that stored
+ * section fingerprints; older ones are left alone, as the server leaves them.
+ */
+function markEditedSinceCheck(
+  qc: ReturnType<typeof useQueryClient>,
+  cycleId: string,
+  sectionCode: string,
+) {
+  qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), (old) => {
+    const validation = old?.validation
+    if (!old || !validation?.section_hashes?.[sectionCode]) return old
+    const edited = validation.edited_since_check ?? []
+    if (edited.includes(sectionCode)) return old
+    return {
+      ...old,
+      validation: { ...validation, edited_since_check: [...edited, sectionCode] },
+    }
+  })
+  qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
+}
+
 function patchSectionInList(
   qc: ReturnType<typeof useQueryClient>,
   cycleId: string,
@@ -105,6 +494,7 @@ function patchSectionInList(
       )
     },
   )
+  markEditedSinceCheck(qc, cycleId, updated.section_code)
   qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
   qc.invalidateQueries({ queryKey: QUERY_KEYS.BUILD_READINESS(cycleId) })
   // Lock/unlock changes the assemble gate (locked count, can_assemble,
@@ -114,7 +504,7 @@ function patchSectionInList(
   qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
 }
 
-function readError(err: MutationError, fallback: string): string {
+export function readError(err: MutationError, fallback: string): string {
   const candidate = err?.message ?? err?.response?.data?.detail
   if (typeof candidate === "string" && candidate.trim()) return candidate
   return fallback
@@ -144,42 +534,18 @@ export function useSetExtractContent(cycleId: string) {
     mutationFn: ({
       sectionCode,
       content,
+      typedByPm = true,
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.setExtractContent(cycleId, sectionCode, content),
+      typedByPm?: boolean
+    }) => pmApi.setExtractContent(cycleId, sectionCode, content, typedByPm),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Content saved")
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to save content")),
-  })
-}
-
-export function useLockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.lockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section locked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to lock section")),
-  })
-}
-
-export function useUnlockSection(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sectionCode }: { sectionCode: string }) =>
-      pmApi.unlockSection(cycleId, sectionCode),
-    onSuccess: (section) => {
-      patchSectionInList(qc, cycleId, section)
-      toast.success("Section unlocked")
-    },
-    onError: (err: MutationError) => toast.error(readError(err, "Failed to unlock section")),
   })
 }
 
@@ -219,10 +585,14 @@ export function useSaveManualContent(cycleId: string) {
     mutationFn: ({
       sectionCode,
       content,
+      typedByPm = true,
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.saveManualContent(cycleId, sectionCode, content),
+      // False when the text is an AI statement draft: its figures must still
+      // trace to a source.
+      typedByPm?: boolean
+    }) => pmApi.saveManualContent(cycleId, sectionCode, content, typedByPm),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Section saved")
@@ -257,7 +627,7 @@ export function useSetAnalyzeContent(cycleId: string) {
     }: {
       sectionCode: string
       content: string | null
-    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content),
+    }) => pmApi.setAnalyzeContent(cycleId, sectionCode, content, true),
     onSuccess: (section) => {
       patchSectionInList(qc, cycleId, section)
       toast.success("Content saved")
@@ -282,7 +652,7 @@ export function useSaveGenerateContent(cycleId: string) {
     }: {
       sectionCode: string
       content: string
-    }) => pmApi.saveContent(cycleId, sectionCode, content),
+    }) => pmApi.saveContent(cycleId, sectionCode, content, true),
     // Write the typed text into the cache before the round-trip so the preview
     // swaps the instant the editor closes, and roll it back if the PUT fails —
     // same shape as useReorderSections.
@@ -337,10 +707,88 @@ export function useRefineSection(cycleId: string) {
       instruction: string
     }) => pmApi.refineSection(cycleId, sectionCode, instruction),
     onSuccess: (section) => {
+      // The AI can hand the text back unchanged (it may think it already
+      // does what was asked). Said out loud, or Send looks broken: there is
+      // no new text and no Undo.
+      const before = qc
+        .getQueryData<CycleReportSection[]>(QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId))
+        ?.find((s) => s.section_code === section.section_code)?.content
+      if (before !== undefined && (before ?? "").trim() === (section.content ?? "").trim()) {
+        toast.info("The AI made no change. Edit the text by hand, or Ignore the finding.")
+      }
       patchSectionInList(qc, cycleId, section)
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Refinement failed")),
+  })
+}
+
+// Add one subsection to a section.
+//
+// Two different operations behind one call, because a subsection is a heading
+// in the body and the two kinds of section own their bodies differently:
+//
+//   generate / analyze — refine rewrites the whole body, so the AI writes the
+//     new subsection's prose from the department material and places it where
+//     the instruction says. Rule 4 of the refiner prompt reproduces every other
+//     heading verbatim, so nothing else moves.
+//
+//   manual / extract — refine refuses these modes outright; the PM owns the
+//     text. The heading is spliced into the body and they write under it.
+//
+// The caller passes the section itself rather than a code, because the branch
+// and the splice both need its mode and its current content.
+export function useAddSubsection(cycleId: string) {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      section,
+      name,
+      placement,
+    }: {
+      section: CycleReportSection
+      name: string
+      placement: Placement
+    }) => {
+      const sectionCode = section.section_code
+
+      // pmApi directly rather than the useRefineSection / useSaveManualContent
+      // wrappers: each announces its own outcome ("Section saved", "Refinement
+      // failed"), which for one click of "Add" is either a second toast or the
+      // wrong description of what happened. Going under them lets this hook say
+      // one true thing, once, on both paths. The cache patch they do is the
+      // line below.
+      const saved =
+        section.mode === "generate" || section.mode === "analyze"
+          ? await pmApi.refineSection(
+              cycleId,
+              sectionCode,
+              addSubsectionInstruction(name, placement),
+            )
+          : section.mode === "extract"
+            ? await pmApi.setExtractContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
+            : await pmApi.saveManualContent(
+                cycleId,
+                sectionCode,
+                insertSubsection(section.content, name, placement),
+              )
+
+      patchSectionInList(qc, cycleId, saved)
+      return saved
+    },
+    onSuccess: () => {
+      // The refetch is what makes the rail's new subsection row appear without
+      // a reload — the parse reads whatever content came back.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      toast.success("Subsection added")
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Could not add the subsection")),
   })
 }
 
@@ -362,6 +810,68 @@ export function useFinalReport(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
     retry: false, // 404 = "not assembled yet" — drive empty state from it
+  })
+}
+
+// The Arabic translation of the report. 404 = not translated yet, which the
+// page reads as "show the Translate button", so no retry.
+export function useArabicReport(cycleId: string, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PM_ARABIC_REPORT(cycleId),
+    queryFn: () => pmApi.getArabicReport(cycleId),
+    enabled: !!cycleId && enabled,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+/** Saves the PM's hand edits to the Arabic report. */
+export function useSaveArabicReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ArabicEditBody) => pmApi.saveArabicReport(cycleId, body),
+    onSuccess: (report) => {
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_ARABIC_REPORT(cycleId), report)
+      // A save can make the next Arabic version, which History shows.
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't save the Arabic report")),
+  })
+}
+
+// Edit report: saves the PM's edits to the English report. The report page
+// reads the saved text from the cache straight away; a save can make the next
+// version, which History shows.
+export function useSaveReport(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ArabicEditBody) => pmApi.saveReport(cycleId, body),
+    onSuccess: (report) => {
+      qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_REPORT_REVIEW(cycleId) })
+    },
+    onError: (err: MutationError) =>
+      toast.error(readError(err, "Couldn't save the report")),
+  })
+}
+
+// Starts a translation; the page then follows it with useTranslationJob.
+export function useStartTranslation(cycleId: string) {
+  return useMutation({
+    mutationFn: () => pmApi.startTranslation(cycleId),
+  })
+}
+
+// A translation job, re-read every 3s until it finishes. Off while jobId is null.
+export function useTranslationJob(jobId: string | null) {
+  return useQuery({
+    queryKey: ["translation-job", jobId],
+    queryFn: () => pmApi.getTranslationJob(jobId as string),
+    enabled: !!jobId,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" || !query.state.data ? 3000 : false,
   })
 }
 
@@ -396,7 +906,18 @@ export function useAssembleReport(cycleId: string) {
       qc.setQueryData<FinalReport>(QUERY_KEYS.PM_FINAL_REPORT(cycleId), report)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLED_REPORT(cycleId) })
-      toast.success("Report assembled")
+      toast.success(
+        report.validation_stale
+          ? "Report assembled — validate it again"
+          : "Report assembled",
+        report.validation_stale
+          ? {
+              description:
+                "The earlier validation describes the previous version, so it is no longer shown or printed.",
+              duration: 8000,
+            }
+          : undefined,
+      )
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to assemble report")),
@@ -418,39 +939,25 @@ export function useReportApproval(cycleId: string) {
   })
 }
 
-// One-way. Everything the report page and the builder gate on has to re-read.
-export function useApproveReport(cycleId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => pmApi.approveReport(cycleId),
-    onSuccess: (approval) => {
-      qc.setQueryData<ReportApproval>(
-        QUERY_KEYS.PM_REPORT_APPROVAL(cycleId),
-        approval,
-      )
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_FINAL_REPORT(cycleId) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_ASSEMBLY_READINESS(cycleId) })
-      toast.success("Report approved and locked")
-    },
-    onError: (err: MutationError) =>
-      toast.error(readError(err, "Failed to approve the report")),
-  })
-}
-
 // Stage 9a — render the assembled report to a downloadable file (docx now,
 // pdf in 9b). On success, triggers a browser save via anchor-click; pmApi's
 // renderReport already decodes blob error bodies so toast messages are
 // meaningful.
-export function useRenderReport(cycleId: string) {
+export function useRenderReport(cycleId: string, arabic = false) {
   return useMutation({
     // Typeset by the shared export engine on the Centriyon side, not by this
     // app's own renderer — that is where the engine lives, and it is the only
     // way the cover, colours and type chosen in the design controls reach the
     // file. The document that comes back is the one the preview showed.
-    mutationFn: ({ format }: { format: "docx" | "pdf" }) =>
-      downloadAnnualReport(cycleId, format),
-    onSuccess: ({ blob, filename }) => {
+    mutationFn: ({ format }: { format: "docx" | "pdf" | "idml" }) =>
+      downloadAnnualReport(cycleId, format, arabic),
+    onSuccess: ({ blob: rendered, filename }) => {
+      // An IDML is a zip inside. Left typed as such, the browser sniffs it and
+      // saves "Annual_Report.idml.zip", which then gets unpacked into a folder
+      // InDesign cannot open. A generic binary type keeps the name as given.
+      const blob = filename.toLowerCase().endsWith(".idml")
+        ? new Blob([rendered], { type: "application/octet-stream" })
+        : rendered
       const url = URL.createObjectURL(blob)
       const a = window.document.createElement("a")
       a.href = url
@@ -476,6 +983,10 @@ export function usePlan(cycleId: string) {
     enabled: !!cycleId,
     staleTime: 0,
     retry: false, // 404 / 422 are meaningful — drive empty/error states from them
+    // Not on tab focus: Start Building keeps the server busy for minutes, a
+    // reload then could fail, and a failed reload used to replace the whole
+    // plan page - loader included - with "no plan".
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -525,12 +1036,12 @@ function setSectionsCache(
   )
 }
 
-// Generate or regenerate the plan. Backend runs two LLM passes.
+// Generate the plan. Backend runs two LLM passes. There is no regenerate —
+// the plan is built once, then edited by hand.
 export function useBuildPlan(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ refresh = false }: { refresh?: boolean } = {}) =>
-      pmApi.buildPlan(cycleId, refresh),
+    mutationFn: () => pmApi.buildPlan(cycleId),
     onSuccess: (plan) => {
       setPlanCache(qc, cycleId, plan)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
@@ -564,9 +1075,12 @@ export function useLockPlan(cycleId: string) {
   return useMutation({
     mutationFn: () => pmApi.lockPlan(cycleId),
     onSuccess: (plan) => {
+      // No success toast: the only caller is Start Building, whose loader is
+      // already on screen ticking "Locking the report plan" as this resolves.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Sections locked")
     },
+    // The error toast stays — StartBuildingAction aborts the run on a failed
+    // lock and relies on this to say why.
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to lock sections")),
   })
@@ -632,20 +1146,6 @@ export function useSetSourceMode(cycleId: string) {
 
 const SET_FEEDERS_KEY = (cycleId: string) => ["setFeeders", cycleId] as const
 
-// True while THIS section's feeder write is in flight, so the card can dim its
-// source badge. Keyed off the mutation's own variables — cheaper than threading
-// pending state down from the picker that owns the mutation.
-export function useIsSettingFeeders(cycleId: string, sectionCode: string) {
-  return (
-    useIsMutating({
-      mutationKey: SET_FEEDERS_KEY(cycleId),
-      predicate: (m) =>
-        (m.state.variables as { sectionCode?: string } | undefined)
-          ?.sectionCode === sectionCode,
-    }) > 0
-  )
-}
-
 export function useSetFeeders(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -653,10 +1153,12 @@ export function useSetFeeders(cycleId: string) {
     mutationFn: ({
       sectionCode,
       departmentCodes,
+      writingStyle,
     }: {
       sectionCode: string
       departmentCodes: string[]
-    }) => pmApi.setFeeders(cycleId, sectionCode, departmentCodes),
+      writingStyle?: WritingStyle
+    }) => pmApi.setFeeders(cycleId, sectionCode, departmentCodes, writingStyle),
     // Optimistically update the plan cache so the pill and counter update the
     // moment the popover closes — independent of what the backend returns
     // (some setFeeders responses are shape-inconsistent in practice).
@@ -697,13 +1199,28 @@ export function useSetFeeders(cycleId: string) {
       }
       return { previous }
     },
-    onSuccess: (plan) => {
+    onSuccess: (plan, vars) => {
       // Backend persists and returns the post-update plan now that the field
       // rename has shipped (was `department_codes` on the server, silently
       // dropping our `departments` key). Cache write is safe again; matches
       // the optimistic patch on the happy path.
+      // No toast: the only caller is the Sections step's batch save, which
+      // reports once for the whole set. Toasting here fired once per section.
       setPlanCache(qc, cycleId, plan)
-      toast.success("Feeders updated")
+      // The style lives on the section row, not the feeder map, so patch the
+      // sections cache too — otherwise the card falls back to the old style
+      // until the next refetch.
+      if (vars.writingStyle) {
+        qc.setQueryData<CycleReportSection[]>(
+          QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId),
+          (sections) =>
+            sections?.map((s) =>
+              s.section_code === vars.sectionCode
+                ? { ...s, writing_style: vars.writingStyle }
+                : s,
+            ),
+        )
+      }
     },
     onError: (err: MutationError, _vars, context) => {
       if (context?.previous) {
@@ -801,9 +1318,36 @@ export function useAddOptional(cycleId: string) {
   })
 }
 
+// A section the PM invents, rather than one picked from the catalogue. Same
+// cache handling as useAddOptional — the response is the full section list.
+export function useAddCustomSection(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      name: string
+      feeders: string[]
+      mode: "generate" | "extract"
+    }) => pmApi.addCustomSection(cycleId, payload),
+    onSuccess: (sections) => {
+      setSectionsCache(qc, cycleId, sections)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
+      toast.success("Section added")
+    },
+    // No error toast: every failure here is about the name or the departments
+    // the PM just typed, and the dialog shows it inline beside that field. A
+    // toast in the far corner left them hunting for what to change.
+  })
+}
+
+/** Shared by every section removal on a cycle, so a card can tell it is being
+ *  removed (useIsRemoving) and the list reloads once the last one settles. */
+export const REMOVE_SECTION_KEY = (cycleId: string) => ["pm", "cycle", cycleId, "remove-section"]
+
 export function useRemoveOptional(cycleId: string) {
   const qc = useQueryClient()
   return useMutation({
+    mutationKey: REMOVE_SECTION_KEY(cycleId),
     mutationFn: ({
       sectionCode,
       force = false,
@@ -811,13 +1355,30 @@ export function useRemoveOptional(cycleId: string) {
       sectionCode: string
       force?: boolean
     }) => pmApi.removeOptionalSection(cycleId, sectionCode, force),
+    // No success toast: the card disappearing says it.
     onSuccess: (sections) => {
       setSectionsCache(qc, cycleId, sections)
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_AVAILABLE_OPTIONAL(cycleId) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_PLAN(cycleId) })
-      toast.success("Section removed")
     },
     onError: (err: MutationError) =>
       toast.error(readError(err, "Failed to remove section")),
+    // Two removals in a row can answer out of order, and the earlier answer's
+    // list still holds the later section, so it briefly came back. Reload the
+    // list once, when the last removal has settled (1 = this one).
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: REMOVE_SECTION_KEY(cycleId) }) <= 1) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.PM_CYCLE_SECTIONS(cycleId) })
+      }
+    },
   })
+}
+
+/** Whether this section's removal is in flight, for its card to fade. */
+export function useIsRemoving(cycleId: string, sectionCode: string): boolean {
+  const pending = useMutationState({
+    filters: { mutationKey: REMOVE_SECTION_KEY(cycleId), status: "pending" },
+    select: (m) => (m.state.variables as { sectionCode?: string } | undefined)?.sectionCode,
+  })
+  return pending.includes(sectionCode)
 }

@@ -2,10 +2,12 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   useDepartmentDashboard,
   useUploadSessionDocument,
   useExtractAnswers,
+  loadFreshSession,
 } from "@/hooks/useSessions"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PageLoader } from "@/components/ui/spinner"
@@ -77,10 +79,15 @@ function StatusPill({ status, deptCode }: { status: SessionStatus; deptCode?: st
   )
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
   const uploadDocument = useUploadSessionDocument()
   const extractAnswers = useExtractAnswers()
+  const qc = useQueryClient()
   const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
   const sort = useSort(SORT_FIELDS)
@@ -167,14 +174,17 @@ export default function DepartmentDashboard() {
           (a) => a.status === "already_answered"
         ).length,
       })
-      // Let the success state breathe before entering the workspace.
-      setTimeout(() => router.push(`/department/sessions/${sessionId}`), 2200)
+      // Let the success state breathe before entering the workspace, and load
+      // the session with its new answers meanwhile so they're there on arrival.
+      await Promise.all([loadFreshSession(qc, sessionId), wait(2200)])
+      router.push(`/department/sessions/${sessionId}`)
     } catch (err: unknown) {
       toast.error(
         (err as { message?: string })?.message ||
           "We couldn't extract answers from your documents — you can still answer each question manually."
       )
-      setTimeout(() => router.push(`/department/sessions/${sessionId}`), 1400)
+      await Promise.all([loadFreshSession(qc, sessionId), wait(1400)])
+      router.push(`/department/sessions/${sessionId}`)
     } finally {
       docCheck.reset()
     }

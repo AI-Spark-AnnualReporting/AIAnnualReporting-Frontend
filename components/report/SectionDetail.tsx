@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import {
+  AlertTriangle,
   CheckCircle2,
   FileCheck,
   FileText,
@@ -218,19 +219,18 @@ function AutoSection({
   )
 }
 
-// Read-only view shown for every section once the report has been assembled.
-// Auto sections are excluded — they have no user content and are already
-// handled by AutoSection's own read-only UI. Once the report is APPROVED this
-// covers every section, and the wording changes: assembly is undoable,
-// sign-off is not.
+// Read-only view for a signed-off report. Assembly alone no longer lands here
+// — it is undoable and the backend still takes writes, so an assembled report
+// stays editable. Sign-off is the one thing that is final.
 function AssembledView({
   section,
   isRtl,
-  reportLocked = false,
+  withClient = false,
 }: {
   section: CycleReportSection
   isRtl?: boolean
-  reportLocked?: boolean
+  /** Read-only because the client has the review link, not because it is signed off. */
+  withClient?: boolean
 }) {
   const content = section.content ?? ""
   const attachment = section.attachment
@@ -243,9 +243,9 @@ function AssembledView({
           <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
             <FileCheck className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              {reportLocked
-                ? "This report is approved and locked — it can no longer be edited."
-                : "The report has been assembled — this section is view-only. Re-assemble the report to apply any further changes."}
+              {withClient
+                ? "The report was sent to the client, so the Builder is closed. Make changes with Edit report on the report page."
+                : "This report is approved and locked — it can no longer be edited."}
             </span>
           </div>
 
@@ -281,17 +281,27 @@ function AssembledView({
 export function SectionDetail({
   section,
   cycleId,
-  assembled = false,
+  stale = false,
   reportLocked = false,
+  withClient = false,
+  hasFindings = false,
   contentLanguage = "english",
   isRtl = false,
 }: {
   section: CycleReportSection | null
   cycleId: string
-  assembled?: boolean
+  // A report was assembled and a section has changed since, so what is on the
+  // report page no longer matches what is on screen here.
+  stale?: boolean
   // The report has been signed off. Every write path 409s, so nothing is
   // editable.
   reportLocked?: boolean
+  // Locked because the client has the review link (it opens again after).
+  withClient?: boolean
+  // The last validation found something in this section. It is being fixed,
+  // so the start-over buttons (Regenerate, Re-run Analysis) are hidden: a
+  // fresh draft would make the findings meaningless.
+  hasFindings?: boolean
   contentLanguage?: ContentLanguage
   isRtl?: boolean
 }) {
@@ -309,14 +319,72 @@ export function SectionDetail({
 
   // Approved and locked → everything is read-only.
   if (reportLocked) {
-    return <AssembledView section={section} isRtl={isRtl} reportLocked />
+    return <AssembledView section={section} isRtl={isRtl} withClient={withClient} />
   }
 
-  // Once assembled, all non-auto sections are view-only.
-  if (assembled && section.mode !== "auto") {
-    return <AssembledView section={section} isRtl={isRtl} />
-  }
+  // Assembling is not approving: the report is still a draft and the backend
+  // still accepts section writes (`_assert_report_editable` only fires on the
+  // signed-off statuses). So an assembled report is editable — it just goes
+  // stale until it is assembled again, which the notice says out loud.
+  //
+  // Keyed off `stale`, not "a report exists", so this and the header button
+  // are driven by one fact. Wired to the latter it appeared the moment a
+  // report was assembled, telling the PM to press an "Assemble again" button
+  // that only appears once something has actually changed.
+  const panel = (
+    <SectionPanel
+      section={section}
+      cycleId={cycleId}
+      hasFindings={hasFindings}
+      contentLanguage={contentLanguage}
+      isRtl={isRtl}
+    />
+  )
+  if (!stale) return panel
 
+  return (
+    <div className="flex flex-1 flex-col min-h-0">
+      <StaleReportNotice />
+      {panel}
+    </div>
+  )
+}
+
+// Editing after an assemble leaves the assembled report behind — say so, and
+// say what to do about it. A banner rather than a wall: the edit is allowed.
+//
+// It points at the header button rather than linking anywhere: once a section
+// changes, AssembleEntry turns itself into "Assemble again", so the fix is
+// already on screen.
+function StaleReportNotice() {
+  return (
+    <div className="flex items-start gap-2.5 border-b border-amber-200 bg-amber-50 px-8 py-3 text-sm text-amber-800">
+      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+      <span>
+        This report has already been assembled. Anything you change here
+        won&apos;t appear in it until you press{" "}
+        <span className="font-medium">Assemble again</span> at the top of the
+        page.
+      </span>
+    </div>
+  )
+}
+
+// The mode switch. Every branch here is editable — the read-only cases are
+// handled by SectionDetail above, before this is reached.
+function SectionPanel({
+  section,
+  cycleId,
+  hasFindings,
+  contentLanguage,
+  isRtl,
+}: {
+  section: CycleReportSection
+  cycleId: string
+  hasFindings: boolean
+  contentLanguage: ContentLanguage
+  isRtl?: boolean
+}) {
   // Extract-mode takes its content from a person: upload a document (the
   // backend extracts its text) OR type it — either alone is enough to lock.
   // Same panel as the manual sections below. Takes priority over the
@@ -330,7 +398,7 @@ export function SectionDetail({
   // Analyze-mode: structured Markdown findings from the analyze agent. No
   // document — department digests are the source. Locks like generate.
   if (section.mode === "analyze") {
-    return <AnalyzeSection section={section} cycleId={cycleId} contentLanguage={contentLanguage} isRtl={isRtl} />
+    return <AnalyzeSection section={section} cycleId={cycleId} hasFindings={hasFindings} contentLanguage={contentLanguage} isRtl={isRtl} />
   }
 
   // Manual sections (PM provides the content themselves) override mode-based
@@ -338,7 +406,15 @@ export function SectionDetail({
   // the section's content_source:
   //   - narrative → upload-or-type editor (ContentSection)
   //   - structured / financials / composite → file upload (AttachSection)
-  if (!section.ai_allowed) {
+  //
+  // Two ways to be manual. The catalogue's human-voice sections say so with
+  // ai_allowed=false. A company's own section says so with mode='manual' while
+  // keeping ai_allowed=true, because on those rows the flag means "AI is
+  // permitted if you choose it" and the PM must stay able to switch back.
+  // Testing only the flag sent those straight past every branch below into the
+  // switch's `default:` — "Unknown section mode.", a dead screen, right after
+  // the PM had explicitly chosen Manual on the plan.
+  if (section.mode === "manual" || !section.ai_allowed) {
     if (section.content_source === "narrative") {
       // key by section_code so the editor remounts (and its draft/seed state
       // resets) when switching sections — without it, an unsaved section's
@@ -349,9 +425,12 @@ export function SectionDetail({
     return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
   }
 
+  // Only generate / attach / auto can still be here — tsc narrows the rest away, so
+  // adding a `case "manual"` below is a compile error. That narrowing is the proof the
+  // branch above catches every manual section.
   switch (section.mode) {
     case "generate":
-      return <GenerateSection section={section} cycleId={cycleId} isRtl={isRtl} />
+      return <GenerateSection section={section} cycleId={cycleId} hasFindings={hasFindings} isRtl={isRtl} />
     case "attach":
       return <AttachSection section={section} cycleId={cycleId} isRtl={isRtl} />
     case "auto":

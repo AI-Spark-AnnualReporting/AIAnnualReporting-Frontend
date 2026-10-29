@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils"
  * The Executive Summary is written at assembly time from the finished sections
  * and has no row in `cycle_report_sections` — so it appears in the builder rail
  * as a synthetic, frontend-only entry rather than a faked `CycleReportSection`.
- * A real row would drag in readiness, the locked counter, lock/unlock
- * affordances and a `mode` that means nothing for something nobody can edit.
+ * A real row would drag in readiness, the written counter and a `mode` that
+ * means nothing for something nobody can edit.
  *
  * The code is deliberately un-DB-like so it can never collide with a section
  * the backend sends (it reserves `executive_summary` / `exec_summary`).

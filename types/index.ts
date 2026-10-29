@@ -25,8 +25,14 @@ export type PMReviewAction = "approved" | "rejected" | "reopened"
 export type CompanyProfile = "listed" | "private"
 export type Sector = "bank" | "insurance" | "general" | "reit" | "finance_co"
 export type ContentLanguage = "english" | "arabic"
-export type SectionMode = "generate" | "attach" | "auto" | "extract" | "analyze"
-export type SectionLayer = "common" | "cma" | "sector" | "optional"
+export type SectionMode = "generate" | "attach" | "auto" | "manual" | "extract" | "analyze"
+// The subset a PM actually picks on the plan screen. "attach" is embed-a-file-as-filed
+// (no catalogue row uses it) and "auto" is drawn by the renderer, so neither is offered.
+export const PICKABLE_SECTION_MODES = ["generate", "extract", "manual"] as const
+export type PickableSectionMode = (typeof PICKABLE_SECTION_MODES)[number]
+// "custom" is not a catalogue layer — the backend reports it for a
+// PM-authored section, which has no catalogue row to take a layer from.
+export type SectionLayer = "common" | "cma" | "sector" | "optional" | "custom"
 export type SectionStatus = "pending" | "drafting" | "locked"
 // Analyze-mode only (null for other modes):
 //   "ready"   → findings present in `content`.
@@ -127,8 +133,14 @@ export interface CycleReportSection {
   section_code: string
   title: string
   layer: SectionLayer
-  content_source: "narrative" | "structured" | "financials" | "composite"
+  // "" for a PM-authored section: no catalogue row, so no content_source.
+  content_source: "narrative" | "structured" | "financials" | "composite" | ""
   mode: SectionMode
+  // false = nobody has chosen this section's mode yet, so `mode` is only a
+  // placeholder. The plan screen renders the picker EMPTY and blocks Continue
+  // until the PM decides. Sections the extraction-time classifier was at least
+  // 95% sure about arrive true and preselected.
+  mode_confirmed: boolean
   status: SectionStatus
   display_order: number
   ai_allowed: boolean
@@ -145,7 +157,14 @@ export interface CycleReportSection {
   // Analyze-mode only: the analyze pipeline's state. Null/omitted for other
   // modes and for older responses (treat missing as "pending").
   analysis_state?: SectionAnalysisState | null
+  // How the AI lays out a generate-mode section. Null/missing = the PM has not
+  // chosen yet; the card says "Choose writing style" and the AI writes it as
+  // paragraphs, which is how every section was written before the choice.
+  writing_style?: WritingStyle | null
 }
+
+/** Paragraphs (the default), bullet points, or the AI chooses. */
+export type WritingStyle = "paragraphs" | "bullets" | "ai"
 
 export interface ResolveSectionsResponse {
   success: boolean
@@ -217,7 +236,15 @@ export interface AvailableOptionalSection {
   section_code: string
   title: string
   layer: SectionLayer
+  // "optional" = always optional; "required" = a required section that was removed
+  // from this cycle and can be re-added.
+  tag: "optional" | "required"
+  // True for the company's OWN sections (read from their report, or typed by a PM).
+  // Only these can be permanently deleted — a shared catalogue section belongs to
+  // every company on the platform.
+  is_company_section: boolean
 }
+
 
 // ──────────────────────────────────────────────────────────────────────
 // Stage 8 — Assemble & Final Report
@@ -226,13 +253,20 @@ export interface AvailableOptionalSection {
 export interface AssemblyReadiness {
   cycle_id: string
   total: number
-  locked: number
+  /** Sections that would appear in the report — i.e. have something in them. */
+  ready: number
+  /** False only when nothing has been written anywhere. Empty sections no
+   *  longer block: they are listed below and left out of the report. */
   can_assemble: boolean
-  unlocked_sections: Array<{
+  incomplete_sections: Array<{
     section_code: string
     title: string
     layer: SectionLayer
   }>
+  /** A report was assembled and a section has changed since — the assembled
+   *  report is a snapshot, so it no longer matches the cycle. Re-assembling
+   *  requires refresh=true; without it the server returns the stored one. */
+  stale?: boolean
   has_final_report: boolean
   final_report_generated_at: string | null
 }
@@ -278,6 +312,17 @@ export interface FinalReport {
   // through the last sub-heading). Optional — absent on older backends, in
   // which case the preview falls back to the per-section `number` field.
   outline?: OutlineEntry[]
+  // The last Validate-report run, or null. The server drops it when it predates
+  // the current assembly, so what arrives here is always about this document.
+  validation?: import("@/lib/api/pm").ReportValidation | null
+  // True when a validation exists but describes an earlier assembly, so the
+  // server withheld it. Tells "re-assembled since it was checked" apart from
+  // "never checked" - both arrive with `validation` null, and only one of them
+  // means the Validation Report page has just dropped out of the export.
+  validation_stale?: boolean
+  // Arabic translation only: the cover's lines in Arabic (company_name, title,
+  // headline, period_label, footnote). Absent on the English report.
+  cover_values?: Record<string, string> | null
 }
 
 // Readiness of a cycle to enter the Report Builder.
@@ -469,6 +514,13 @@ export interface Notification {
   title?: string
   message: string
   priority?: "normal" | "high" | "urgent" | "critical"
+  /** What `related_id` points at — "session", "cycle", "report". Returned by
+   *  the backend (NotificationResponse.related_type) but was never declared
+   *  here. Needed to tell a report-readiness row and Centriton's board-index
+   *  warning (identified by ("report", <report id>)) apart from any other
+   *  "alert". "session_claims" marks a failed fact read, which the bell turns
+   *  into a click-to-retry row instead of a link. */
+  related_type?: string | null
   related_id?: string
   action_url?: string
   created_at: string
