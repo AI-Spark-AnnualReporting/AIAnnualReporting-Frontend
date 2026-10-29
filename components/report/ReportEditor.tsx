@@ -38,6 +38,15 @@ function textsOf(report: FinalReport): Texts {
   return { summary: report.executive_summary ?? "", sections }
 }
 
+/** The sections whose text differs from the last save, ready to send. */
+function changedSections(current: Texts, saved: Texts): { section_code: string; content: string }[] {
+  const changed: { section_code: string; content: string }[] = []
+  for (const [code, content] of Object.entries(current.sections)) {
+    if (content !== saved.sections[code]) changed.push({ section_code: code, content })
+  }
+  return changed
+}
+
 /** True when two sets of text differ anywhere. */
 function textsDiffer(a: Texts, b: Texts): boolean {
   if (a.summary !== b.summary) return true
@@ -138,7 +147,10 @@ export function ReportEditor({
     setTexts((prev) => ({ ...prev, sections: { ...prev.sections, [code]: value } }))
 
   const save = async () => {
-    const sections = Object.entries(texts.sections).map(([section_code, content]) => ({ section_code, content }))
+    // Only the sections whose text changed. The texts shown here are cleaned
+    // (a repeated section name at the top is hidden), so sending every section
+    // rewrote untouched ones without that line and History showed it removed.
+    const sections = changedSections(texts, saved)
     let savedReport: FinalReport
     try {
       savedReport = await onSave({ executive_summary: texts.summary, sections })
