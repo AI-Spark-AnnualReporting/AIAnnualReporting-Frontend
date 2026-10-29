@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeletons"
@@ -82,12 +82,26 @@ export function AreaConceptCard({
       !message.description?.trim(),
   )
   const [refineOpen, setRefineOpen] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  /** Opens or closes the edit fields. On open, scrolls the card into view
+   *  so the title and text boxes aren't half hidden below the list's edge. */
+  function toggleEditing(): void {
+    const opening = !editing
+    setEditing(opening)
+    if (!opening) return
+    // Wait one frame so the fields are on screen before measuring the card.
+    requestAnimationFrame(() => {
+      cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    })
+  }
   const canRefine = !!onRefine && !readOnly
   const role = area.role ?? "none"
   const used = role !== "none"
 
   return (
     <div
+      ref={cardRef}
       className={cn(
         "rounded-2xl border bg-card p-5 shadow-sm transition-colors",
         role === "primary"
@@ -212,7 +226,7 @@ export function AreaConceptCard({
               type="button"
               size="sm"
               variant="ghost"
-              onClick={() => setEditing((e) => !e)}
+              onClick={toggleEditing}
               className="h-7 shrink-0 px-2 text-xs"
             >
               {editing ? (

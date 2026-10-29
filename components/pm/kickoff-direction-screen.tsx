@@ -1098,7 +1098,10 @@ export function KickoffDirectionScreen({
       // bar + the shell's 2rem top and bottom padding (AppShell, PM branch).
       // Every other screen scrolls the page as normal — non-Spark roles keep
       // the brief and areas on one screen, which can't fit a window anyway.
-      className={cn(fitScreen && "flex h-[calc(100dvh-136px)] flex-col")}
+      // min-h: on a short window the banners above the list used to squeeze
+      // it to one line. Below 50rem the screen stops shrinking and the page
+      // scrolls instead (the footer is sticky, so it stays in view).
+      className={cn(fitScreen && "flex h-[calc(100dvh-136px)] min-h-[50rem] flex-col")}
     >
       <div className={cn(fitScreen ? "flex min-h-0 flex-1 flex-col space-y-3" : "space-y-6")}>
         {/* ── Header ── */}
@@ -1183,6 +1186,7 @@ export function KickoffDirectionScreen({
         <ClientDriftNotice
           changed={changedSinceResponse}
           canSendBack={screenShare?.status !== "approved"}
+          compact={fitScreen}
         />
 
         {screenShare?.client_note &&
