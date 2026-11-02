@@ -13,7 +13,7 @@
  * minimum and you can never get there.
  */
 
-import { ChevronDown, Maximize2, Minus, MoveHorizontal, Plus } from "lucide-react"
+import { BookOpen, ChevronDown, Maximize2, Minus, MoveHorizontal, Plus } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -41,11 +41,16 @@ export function PreviewZoomBar({
   onZoom,
   onFitWidth,
   onFitPage,
+  twoPages,
+  onTwoPages,
 }: {
   zoom: number
   onZoom: (z: number) => void
   onFitWidth: () => void
   onFitPage: () => void
+  /** Pages side by side like an open book. Shown only when onTwoPages is given. */
+  twoPages?: boolean
+  onTwoPages?: (on: boolean) => void
 }) {
   const [draft, setDraft] = useState(pct(zoom))
 
@@ -69,6 +74,19 @@ export function PreviewZoomBar({
 
   return (
     <div className="flex shrink-0 items-center gap-1">
+      {onTwoPages && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-7 px-2 text-[11px] ${twoPages ? "bg-slate-100 text-slate-900" : ""}`}
+          onClick={() => onTwoPages(!twoPages)}
+          aria-pressed={!!twoPages}
+          title="Show pages side by side, like an open book"
+        >
+          <BookOpen className="mr-1 h-3.5 w-3.5" />
+          Two pages
+        </Button>
+      )}
       <Button
         variant="ghost"
         size="sm"
