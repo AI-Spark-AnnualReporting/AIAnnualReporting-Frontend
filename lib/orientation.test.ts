@@ -53,7 +53,6 @@ const PORTRAIT_PAGE_KEYS = [
   "narrative_text_heavy",
   "narrative_with_stats",
   "kpi_stat_grid",
-  "financial_table",
   "statement_letter",
   "executive_statement",
   "editorial_alternating",
@@ -70,7 +69,7 @@ const PORTRAIT_PAGE_KEYS = [
   "zebra_table",
 ]
 // Eighteen portrait section cards, the same count /reports/page-options returns.
-assert.equal(PORTRAIT_PAGE_KEYS.length, 18)
+assert.equal(PORTRAIT_PAGE_KEYS.length, 17)
 const PORTRAIT_COVER_KEYS = ["statement", "band", "panel", "monolith"]
 const PORTRAIT_TOC_KEYS = ["classic", "columns", "spread", "index", "brand_band"]
 const PORTRAIT_DIVIDER_KEYS = ["rule", "banded", "full", "figure", "numeral", "split"]
@@ -91,8 +90,8 @@ assert.equal(pickedKey(both, "portrait"), "kpi_stat_grid")
 assert.equal(pickedKey(both, "landscape"), LANDSCAPE_TEMPLATE_KEY)
 
 // A page extracted before landscape existed has no landscape field at all.
-const portraitOnly = { template_key: "financial_table" }
-assert.equal(pickedKey(portraitOnly, "portrait"), "financial_table")
+const portraitOnly = { template_key: "data_tables" }
+assert.equal(pickedKey(portraitOnly, "portrait"), "data_tables")
 assert.equal(pickedKey(portraitOnly, "landscape"), null)
 
 // A landscape pick never leaks into portrait.

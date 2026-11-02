@@ -78,7 +78,6 @@ const FALLBACK_OPTIONS = [
   "narrative_text_heavy",
   "narrative_with_stats",
   "kpi_stat_grid",
-  "financial_table",
   "statement_letter",
   "executive_statement",
   "editorial_alternating",
@@ -101,6 +100,9 @@ const FALLBACK_OPTIONS = [
   dropped: {},
 }))
 
+/** Templates no longer offered anywhere (the engine's RETIRED_KEYS). */
+const RETIRED_TEMPLATES = new Set(["financial_table"])
+
 /**
  * A section's saved cards plus any template it does not list.
  *
@@ -111,9 +113,11 @@ const FALLBACK_OPTIONS = [
  * draws the real page.
  */
 function withEveryTemplate(options: DesignOption[]): DesignOption[] {
-  const listed = new Set(options.map((option) => option.key))
+  // Older sections stored a card for a template that has since been retired.
+  const current = options.filter((option) => !RETIRED_TEMPLATES.has(option.key))
+  const listed = new Set(current.map((option) => option.key))
   const missing = FALLBACK_OPTIONS.filter((option) => !listed.has(option.key))
-  return [...options, ...missing]
+  return [...current, ...missing]
 }
 
 /** The toast after a custom template is saved: how many of the PM's wishes it met. */

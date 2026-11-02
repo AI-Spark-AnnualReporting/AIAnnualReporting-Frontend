@@ -1966,34 +1966,6 @@ function TemplateMiniInner({
     )
   }
 
-  if (templateKey === "financial_table") {
-    return (
-      <div style={shell}>
-        <div style={line("14%", accent, 3)} />
-        <div style={line("68%", "#9AA0B4", 5)} />
-        <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, marginTop: 3 }}>
-          <div style={{ height: 6, background: accent, flexShrink: 0 }} />
-          {Array.from({ length: 6 }, (_, i) => (
-            <div
-              key={i}
-              style={{
-                height: 6,
-                background: i % 2 ? "#F7F4F9" : "#fff",
-                borderBottom: "0.5px solid #EDEFF6",
-                display: "flex",
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ width: "55%", borderRight: "1px solid #fff" }} />
-              <div style={{ width: "25%", borderRight: "1px solid #fff" }} />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   const withStats = templateKey === "narrative_with_stats"
   return (
     <div style={shell}>
@@ -2041,7 +2013,6 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   narrative_text_heavy: "Prose",
   narrative_with_stats: "Prose + figures",
   kpi_stat_grid: "Figure grid",
-  financial_table: "Table",
   statement_letter: "Letter",
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
