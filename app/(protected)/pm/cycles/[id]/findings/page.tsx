@@ -44,6 +44,10 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeletons";
 import { formatDateTime } from "@/lib/utils";
+import {
+  pickReportBuilderDestination,
+  type ReportBuilderDestination,
+} from "@/lib/reportBuilderDestination";
 
 /* What the analysis found, and the only route into the Report Builder.
    Putting Open Report Builder here rather than on the cycle page means the PM
@@ -167,6 +171,9 @@ export default function CycleFindingsPage({
               <OpenBuilderButton
                 cycleId={id}
                 canBuild={!!readiness?.can_build}
+                destination={
+                  readiness ? pickReportBuilderDestination(id, readiness) : null
+                }
                 // From the screen, not the server's open_count, which lags
                 // until saves finish: locking while a click is still saving
                 // made the server refuse that save.
@@ -404,9 +411,12 @@ function OpenBuilderButton({
   locked,
   findingCount,
   saving,
+  destination,
 }: {
   cycleId: string;
   canBuild: boolean;
+  /** Where the builder button lands; null while it is still being read. */
+  destination: ReportBuilderDestination | null;
   openCount: number;
   locked: boolean;
   findingCount: number;
@@ -417,11 +427,22 @@ function OpenBuilderButton({
   const [open, setOpen] = useState(false);
   const lock = useLockDraftFindings(cycleId);
 
+  // Not known yet: wait rather than guess. Guessing "plan" is how approved
+  // reports used to open on the plan screen.
+  if (!destination) {
+    return (
+      <Button disabled>
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Checking…
+      </Button>
+    );
+  }
+
   if (locked) {
     return (
-      <Link href={`/pm/cycles/${cycleId}/plan`}>
+      <Link href={destination.href}>
         <Button>
-          Open Report Builder
+          {destination.label}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </Link>
@@ -484,12 +505,12 @@ function OpenBuilderButton({
                 lock.mutate(undefined, {
                   // Only on success: a failed lock must not land the PM in a
                   // builder he never actually consented to.
-                  onSuccess: () => router.push(`/pm/cycles/${cycleId}/plan`),
+                  onSuccess: () => router.push(destination.href),
                   // Except when it was already locked — the consent has
                   // happened, this page was just showing an older view of it.
                   onError: (err) => {
                     if (isAlreadyLocked(err)) {
-                      router.push(`/pm/cycles/${cycleId}/plan`)
+                      router.push(destination.href)
                     }
                   },
                 })

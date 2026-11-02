@@ -334,6 +334,11 @@ export interface BuildReadiness {
   all_approved: boolean
   status_breakdown: Record<string, number>
   can_build: boolean
+  // Where "Open Report Builder" lands (lib/reportBuilderDestination.ts).
+  plan_locked?: boolean
+  findings_locked?: boolean
+  report_assembled?: boolean
+  report_approved?: boolean
 }
 
 export interface BriefQuality {
