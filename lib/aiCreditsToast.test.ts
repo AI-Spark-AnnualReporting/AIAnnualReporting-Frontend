@@ -1,5 +1,5 @@
 /**
- * Self-check for the "AI features are paused" toast trigger. No framework — run it with:
+ * Self-check for the "AI features are unavailable" toast trigger. No framework — run it with:
  *   node lib/aiCreditsToast.test.ts
  *
  * sonner's toast() works outside React (it only queues), so this calls the real one and

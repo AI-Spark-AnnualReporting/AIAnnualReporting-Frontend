@@ -32,7 +32,9 @@ import {
 } from "@/lib/customTemplate"
 import { cacheKey, has, prime } from "@/lib/createDesignCache"
 import type { DesignSection, DesignUnit } from "@/lib/api/createDesign"
-import type { LandscapeFormat, Orientation } from "@/lib/orientation"
+import {
+  keyUnlessRetired, RETIRED_TEMPLATES, type LandscapeFormat, type Orientation,
+} from "@/lib/orientation"
 
 // How many pages go in one request. Large enough that browser startup is
 // amortised, small enough that the first pages appear early rather than the
@@ -73,16 +75,20 @@ interface Job {
  * Which template to pre-draw for one page, or null to skip the page.
  *
  * Portrait draws the pick, else the art director's recommendation — what the
- * panel will show when the page is opened. Landscape draws only a real pick:
+ * panel will show when the page is opened. A page with neither (a section
+ * with a real table) shows the plain-layout card, so nothing is drawn. Landscape draws only a real pick:
  * the art director never recommends landscape, and a page with no landscape
  * pick shows a "no landscape template" card rather than a picture, so drawing
  * one would spend a render on something nobody will see.
  */
 function templateToDraw(unit: DesignUnit, orientation: Orientation): string | null {
+  // A retired key (an old Data tables pick) is skipped like no pick: the
+  // engine no longer has that page, so drawing it would only fail.
   if (orientation === "landscape") {
-    return unit.landscape_template_key ?? null
+    return keyUnlessRetired(unit.landscape_template_key)
   }
-  return unit.template_key ?? unit.options.find((o) => o.recommended)?.key ?? null
+  const recommended = unit.options.find((o) => o.recommended && !RETIRED_TEMPLATES.has(o.key))
+  return keyUnlessRetired(unit.template_key) ?? recommended?.key ?? null
 }
 
 /**

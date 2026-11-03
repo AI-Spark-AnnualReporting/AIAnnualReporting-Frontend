@@ -11,11 +11,11 @@ const EXHAUSTED_VALUE = "exhausted"
 const REPEAT_AFTER_MS = 5 * 60 * 1000
 let lastShownAt: number | null = null
 
-export const AI_CREDITS_TITLE = "AI features are paused"
+export const AI_CREDITS_TITLE = "AI features are unavailable"
 export const AI_CREDITS_MESSAGE =
-  "Your account has reached its AI usage limit. Please contact support to restore access."
+  "AI features can't be used at the moment. Please contact the support team for help."
 
-/** Show the "AI features are paused" toast, at most once every 5 minutes. */
+/** Show the "AI features are unavailable" toast, at most once every 5 minutes. */
 export function showAiCreditsPausedToast(): void {
   const now = Date.now()
   if (lastShownAt !== null && now - lastShownAt < REPEAT_AFTER_MS) return

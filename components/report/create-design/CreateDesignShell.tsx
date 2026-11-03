@@ -48,10 +48,11 @@ import {
   CUSTOM_TEMPLATE_KEY, SHOW_CUSTOM_TEMPLATES, customTemplateFor, paperFor, renderTemplateTag,
 } from "@/lib/customTemplate"
 import {
-  applyToAllLabel, countPicked, LANDSCAPE_OPENER_NAMES, LANDSCAPE_TEMPLATE_SHORT_NAMES,
+  applyToAllLabel, countPicked, keyUnlessRetired, LANDSCAPE_OPENER_NAMES, LANDSCAPE_TEMPLATE_SHORT_NAMES,
   landscapeAppliedText, landscapeCoverKey, landscapeKeyToApply, landscapeOpenerChoice,
   landscapeOptions, landscapeTocKey, orientationOf,
-  pageFormatOf, pickedKey, PORTRAIT_OPENER_NAMES, portraitOpenerChoice, sectionOpenerChoice,
+  pageFormatOf, pickedKey, PORTRAIT_OPENER_NAMES, portraitOpenerChoice, RETIRED_TEMPLATES,
+  sectionOpenerChoice,
   sectionOpenerOptions, selectionForPageFormat, type LandscapeFormat, type Orientation,
   type PageFormat,
 } from "@/lib/orientation"
@@ -72,8 +73,9 @@ import { CoverDesignPanel } from "./CoverDesignPanel"
 import { TocDesignPanel } from "./TocDesignPanel"
 import { UnitJsonPanel } from "./UnitJsonPanel"
 
-// Mirrors the engine's template list. Used only when the per-page
-// recommendation lookup failed, so the column still offers every choice.
+// Mirrors the engine's template list. Appended to a section's saved cards so
+// the column always offers every choice, even when the recommendation lookup
+// failed. Never drawn on its own: a page with no pick shows the plain layout.
 const FALLBACK_OPTIONS = [
   "narrative_text_heavy",
   "narrative_with_stats",
@@ -85,7 +87,6 @@ const FALLBACK_OPTIONS = [
   "editorial_columns",
   "statement_stat_rail",
   "stat_tiles",
-  "data_tables",
   "photo_panel",
   "people_grid",
   "borderless_table",
@@ -99,9 +100,6 @@ const FALLBACK_OPTIONS = [
   counts: {},
   dropped: {},
 }))
-
-/** Templates no longer offered anywhere (the engine's RETIRED_KEYS). */
-const RETIRED_TEMPLATES = new Set(["financial_table"])
 
 /**
  * A section's saved cards plus any template it does not list.
@@ -160,7 +158,10 @@ function cardsFor(
  * The template the right-hand panel draws for a page.
  *
  * Portrait: the card being looked at, else the pick, else the art director's
- * recommendation, else the first template — as it always was. Landscape: the
+ * recommendation, else nothing. A page with no pick and no recommendation
+ * (a section with a real table, or a failed lookup) prints in the plain
+ * layout, so drawing some other template there would show a page the export
+ * never prints; null shows the "Plain layout" card instead. Landscape: the
  * card being looked at, else the landscape pick, and nothing else. Falling
  * back to a portrait key or a recommendation would draw a page the landscape
  * export will never print; null shows the "no landscape template" card.
@@ -174,7 +175,7 @@ function templateToShow(
   format: LandscapeFormat,
 ): string | null {
   if (orientation === "landscape") {
-    const picked = unit?.landscape_template_key ?? null
+    const picked = keyUnlessRetired(unit?.landscape_template_key)
     // A custom layout made for the other landscape sheet does not print on
     // this one, so it is not the page to draw. While custom templates are
     // hidden, a saved custom pick is not drawn either.
@@ -188,13 +189,9 @@ function templateToShow(
   // the recommendation like a page with no pick.
   const portraitPick = unit?.template_key === CUSTOM_TEMPLATE_KEY && !SHOW_CUSTOM_TEMPLATES
     ? null
-    : unit?.template_key
-  return (
-    previewKey ??
-    portraitPick ??
-    unit?.options.find((o) => o.recommended)?.key ??
-    (unit ? FALLBACK_OPTIONS[0].key : null)
-  )
+    : keyUnlessRetired(unit?.template_key)
+  const recommended = unit?.options.find((o) => o.recommended && !RETIRED_TEMPLATES.has(o.key))
+  return previewKey ?? portraitPick ?? recommended?.key ?? null
 }
 
 /** The card behind the template being drawn, for its counts and losses. */
@@ -874,10 +871,14 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                   {/* Portrait only: the art director never looks at
                       landscape, so its sentence would be about a page that
                       is not the one on screen. */}
-                  {!landscape && section.plan?.why && (
+                  {/* A plan for a retired template (an old "Data tables"
+                      pick) describes a page that no longer exists, so it
+                      is hidden and the panel's "Plain layout" stands alone. */}
+                  {!landscape && section.plan?.why && !RETIRED_TEMPLATES.has(section.plan.template_key ?? "") && (
                     <p className="mt-1 text-[11px] italic text-indigo-700">
                       {section.plan.why}
-                      {unit.template_auto && " — laid out for you; pick another below to change it."}
+                      {unit.template_auto && keyUnlessRetired(unit.template_key) &&
+                        " — laid out for you; pick another below to change it."}
                     </p>
                   )}
                 </div>

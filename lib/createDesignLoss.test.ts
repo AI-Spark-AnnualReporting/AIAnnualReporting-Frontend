@@ -69,7 +69,7 @@ assert.equal(tablesOnlyUncounted("grid_table", { counts: { table: 2 }, dropped: 
   "counted: the real placement shows")
 assert.equal(tablesOnlyUncounted("grid_table", { counts: {}, dropped: { narrative_blocks: 3 } }), false,
   "counted losses: the real red line shows instead")
-assert.equal(tablesOnlyUncounted("landscape_tables", { counts: {}, dropped: {} }), false, "prints everything")
+assert.equal(tablesOnlyUncounted("landscape_tiles", { counts: {}, dropped: {} }), false, "prints everything")
 assert.equal(tablesOnlyUncounted(null, null), false)
 
 console.log("createDesignLoss: all checks passed")

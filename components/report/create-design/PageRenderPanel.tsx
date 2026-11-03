@@ -104,6 +104,31 @@ function NoLandscapePickCard({ format }: { format: LandscapeFormat }) {
   )
 }
 
+/**
+ * What a portrait page with no template and no recommendation shows.
+ *
+ * Such a page (a section with a real table, for one) prints in the plain
+ * layout, so no template is drawn and nothing is sent to render-page.
+ * Drawn the shape of the portrait sheet, so the panel does not change size
+ * the moment a template is picked.
+ */
+function PlainLayoutCard() {
+  const { width, height } = pageSize("portrait")
+  return (
+    <div className="flex h-full items-start justify-center overflow-y-auto bg-slate-100 p-5">
+      <div
+        className="flex w-full flex-col items-center justify-center gap-2 rounded-[6px] border border-dashed border-slate-300 bg-white p-8 text-center"
+        style={{ maxWidth: maxPageWidth("portrait"), aspectRatio: `${width} / ${height}` }}
+      >
+        <p className="text-sm font-medium text-slate-700">Plain layout</p>
+        <p className="max-w-md text-[12px] leading-relaxed text-slate-500">
+          This section prints in the plain layout. Pick a template to design it.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 /** An open Adjust view: the page it is for, and its notes so far. */
 interface AdjustOpening extends AdjustNotes {
   /** Section, page and sheet, so the view shows only on the page it was opened on. */
@@ -243,11 +268,7 @@ export function PageRenderPanel({
   }
 
   if (!templateKey) {
-    return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-slate-400">
-        Pick a template on the left to see this page.
-      </div>
-    )
+    return <PlainLayoutCard />
   }
 
   const chosen = pickedKey(unit, orientation) === templateKey
