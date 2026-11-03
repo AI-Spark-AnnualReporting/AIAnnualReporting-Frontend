@@ -1,4 +1,5 @@
 import axios from "axios"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { apiClient } from "@/lib/api/client"
 import type { AreaOfFocus } from "@/lib/areasOfFocus"
 import type { ConceptMessage, GenerateBriefAnswer, SurveyQuestion } from "@/lib/api/pm"
@@ -26,6 +27,18 @@ export const publicClient = axios.create({
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
 })
+
+// Out of AI credit: the backend says so on every response, failed ones included.
+publicClient.interceptors.response.use(
+  (response) => {
+    checkAiCreditsHeader(response.headers)
+    return response
+  },
+  (error) => {
+    checkAiCreditsHeader(error.response?.headers)
+    return Promise.reject(error)
+  },
+)
 
 export type ShareStage = "questionnaire" | "brief" | "areas"
 export type ShareStatus = "pending" | "responded" | "approved"

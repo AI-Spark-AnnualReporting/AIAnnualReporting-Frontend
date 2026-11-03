@@ -3,6 +3,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { getActingCompany } from "@/lib/actingCompany"
 import { agentRunPath } from "@/lib/reportReadiness"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -49,8 +50,12 @@ commClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // Normalize errors to { error, message, status, details } (matching the main
 // client) so components can read `.status`. 401 → bounce to Centriyon login.
 commClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    checkAiCreditsHeader(response.headers)
+    return response
+  },
   (error) => {
+    checkAiCreditsHeader(error.response?.headers)
     if (error.response?.status === 401 && typeof window !== "undefined") {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")

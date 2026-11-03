@@ -6,6 +6,7 @@ import axios, {
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
 import { getActingCompany } from "@/lib/actingCompany"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -116,8 +117,13 @@ apiClient.interceptors.request.use(
 //   this exception a stale token would loop the user back to Centriyon before
 //   SAR's info page can render.
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => response,
+  (response: AxiosResponse) => {
+    checkAiCreditsHeader(response.headers)
+    return response
+  },
   async (error) => {
+    // Out of AI credit: the backend says so on every response, failed ones included.
+    checkAiCreditsHeader(error.response?.headers)
     if (error.response?.status === 401 && typeof window !== "undefined") {
       const url: string = error.config?.url ?? ""
       const isAuthEndpoint =
