@@ -8,6 +8,7 @@ import React, {
   useCallback,
 } from "react"
 import { useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
 import { centriyonLoginUrl } from "@/lib/centriyon"
@@ -15,6 +16,7 @@ import {
   clearPostLoginRedirect,
   consumePostLoginRedirect,
   isSafeRedirectPath,
+  rememberSignedInUser,
 } from "@/lib/postLoginRedirect"
 import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
 import { clearBackUrl, setBackUrl } from "@/lib/backUrl"
@@ -52,9 +54,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
+  const queryClient = useQueryClient()
+
   const refreshUser = useCallback(async () => {
     try {
       const userData = await authApi.me()
+      rememberSignedInUser(userData.user_id)
       setUser(userData)
     } catch {
       setUser(null)
@@ -98,11 +103,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Centriyon-origin URL is kept — see lib/backUrl.
       setBackUrl(opts?.back)
       const userData = await authApi.me()
+      // A new sign-in may be a different person (e.g. Spark, then a client
+      // PM in the same browser). Drop everything cached for the previous one,
+      // or their open pages refetch with this login and fail.
+      queryClient.clear()
+      rememberSignedInUser(userData.user_id)
       setUser(userData)
       // An explicit destination wins: it is the whole point of the handoff.
       // Otherwise resume a session that expired mid-work, then fall back to the
       // role home. RouteGuard re-routes if the role can't see the page.
-      const back = consumePostLoginRedirect()
+      const back = consumePostLoginRedirect(userData.user_id)
       const target = isSafeRedirectPath(opts?.next)
         ? opts.next
         : back ?? ROLE_ROUTES[userData.role] ?? "/login"
@@ -110,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // press away, and for a super-admin's token that is worth avoiding.
       router.replace(target)
     },
-    [router]
+    [router, queryClient]
   )
 
   const logout = useCallback(async () => {
