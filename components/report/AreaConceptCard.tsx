@@ -44,6 +44,9 @@ export function AreaConceptCard({
   onRoleChange,
   onRemove,
   onRefine,
+  groupedMessages,
+  onGroupedMessageChange,
+  onGroupedRoleChange,
 }: {
   index: number
   area: AreaOfFocus
@@ -63,6 +66,14 @@ export function AreaConceptCard({
   onMessageChange: (next: Partial<ConceptMessage>) => void
   onRoleChange: (role: AreaRole) => void
   onRemove?: () => void
+  /** New cycles (3 messages per area): this area's messages, each with its
+   *  position in the full list. When given, the card shows all of them, each
+   *  with its own Primary/Secondary pick, and `message` is ignored. */
+  groupedMessages?: { message: ConceptMessage; position: number }[]
+  /** Edit one of the grouped messages, by its position in the full list. */
+  onGroupedMessageChange?: (position: number, next: Partial<ConceptMessage>) => void
+  /** Set one grouped message's role within this area. */
+  onGroupedRoleChange?: (position: number, role: AreaRole) => void
   /** One instruction, both halves of the card: the area's slogan AND its
    *  concept message. They say the same thing in two lengths, so refining one
    *  alone left the other describing something else.
@@ -70,38 +81,13 @@ export function AreaConceptCard({
    *  to spend OpenAI budget. Absent means no button at all, not a dead one. */
   onRefine?: (instruction: string) => Promise<boolean>
 }) {
-  // A card someone just added arrives with an empty message and nothing to
-  // read, so it opens ready to write instead of behind an Edit click. A message
-  // that is merely still loading is undefined, not empty, which is what keeps
-  // every card on the page from springing open while the messages arrive.
-  const [editing, setEditing] = useState(
-    () =>
-      !readOnly &&
-      !!message &&
-      !message.title?.trim() &&
-      !message.description?.trim(),
-  )
   const [refineOpen, setRefineOpen] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
-
-  /** Opens or closes the edit fields. On open, scrolls the card into view
-   *  so the title and text boxes aren't half hidden below the list's edge. */
-  function toggleEditing(): void {
-    const opening = !editing
-    setEditing(opening)
-    if (!opening) return
-    // Wait one frame so the fields are on screen before measuring the card.
-    requestAnimationFrame(() => {
-      cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-    })
-  }
   const canRefine = !!onRefine && !readOnly
   const role = area.role ?? "none"
   const used = role !== "none"
 
   return (
     <div
-      ref={cardRef}
       className={cn(
         "rounded-2xl border bg-card p-5 shadow-sm transition-colors",
         role === "primary"
@@ -182,90 +168,51 @@ export function AreaConceptCard({
         )}
       </div>
 
-      {/* ── Its concept message ──
-          Indented under the area and held by a left rule: the message BELONGS
-          to the area above it, and two stacked boxes of equal weight read as
-          two separate things rather than one inside the other. */}
-      <div className="ms-10 mt-4 border-s-2 border-indigo-200 ps-4">
-        <div className="rounded-xl border border-border/70 bg-muted/40 p-4">
-        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <MessageSquareQuote className="h-3.5 w-3.5" />
-          Concept message for this area
-        </div>
-        {messageLoading ? (
-          // Shaped like what is coming: a short title bar, then three lines
-          // of body, so the card does not jump when the real text lands.
-          <div aria-busy="true" aria-label="Loading concept message" className="space-y-2.5">
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-3.5 w-full" />
-            <Skeleton className="h-3.5 w-[94%]" />
-            <Skeleton className="h-3.5 w-[72%]" />
-          </div>
-        ) : (
-        <>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {readOnly || !editing ? (
-              <p className="text-base font-bold text-indigo-700">
-                {message?.title || "No concept message yet"}
-              </p>
-            ) : (
-              <input
-                type="text"
-                value={message?.title ?? ""}
-                onChange={(e) => onMessageChange({ title: e.target.value })}
-                placeholder="Two-word title"
-                aria-label={`Concept message title for area ${index + 1}`}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-base font-bold text-indigo-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
-            )}
-          </div>
-
-          {!readOnly && message && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={toggleEditing}
-              className="h-7 shrink-0 px-2 text-xs"
-            >
-              {editing ? (
-                <>
-                  <Check className="h-3.5 w-3.5" /> Done
-                </>
-              ) : (
-                <>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-
-        <div className="mt-2">
-          {!readOnly && editing ? (
-            <Textarea
-              value={message?.description ?? ""}
-              onChange={(e) => onMessageChange({ description: e.target.value })}
-              rows={10}
-              placeholder="Three paragraphs, separated by blank lines…"
-              className="text-sm"
-            />
-          ) : message?.description?.trim() ? (
-            // Blank-line-separated paragraphs render as separate <p>s.
-            <ProsePreview content={message.description} className="prose-indigo" />
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              {readOnly
-                ? "No concept message was written for this area."
-                : "Nothing written yet — hit Edit to write it."}
+      {/* ── Its concept message(s) ──
+          Indented under the area and held by a left rule: the messages BELONG
+          to the area above them. */}
+      <div className="ms-10 mt-4 space-y-3 border-s-2 border-indigo-200 ps-4">
+        {groupedMessages ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {readOnly &&
+              groupedMessages.every(({ message: m }) => (m.role ?? "none") !== "none")
+                ? "The concept messages used for this area."
+                : readOnly || lockRole
+                  ? "Three concept messages for this area."
+                  : "Three concept messages for this area — pick one Primary, and mark the others Secondary or leave them out."}
             </p>
-          )}
-        </div>
-        </>
+            {groupedMessages.map(({ message: m, position }, k) => (
+              <ConceptMessageBox
+                key={position}
+                label={`Concept message ${k + 1}`}
+                message={m}
+                loading={messageLoading}
+                readOnly={readOnly}
+                areaNumber={index + 1}
+                onChange={(next) => onGroupedMessageChange?.(position, next)}
+                role={m.role ?? "none"}
+                roleGroup={`${roleGroup}-area-${index}`}
+                lockRole={lockRole}
+                onRoleChange={
+                  onGroupedRoleChange
+                    ? (r) => onGroupedRoleChange(position, r)
+                    : undefined
+                }
+                dimmed={!used}
+              />
+            ))}
+          </>
+        ) : (
+          <ConceptMessageBox
+            label="Concept message for this area"
+            message={message}
+            loading={messageLoading}
+            readOnly={readOnly}
+            areaNumber={index + 1}
+            onChange={onMessageChange}
+          />
         )}
-
-        </div>
       </div>
 
       {/* Outside the message's indent rule: this box rewrites BOTH halves of
@@ -306,6 +253,177 @@ export function AreaConceptCard({
           <RoleToggle role={role} group={roleGroup} onChange={onRoleChange} />
         )}
       </div>
+    </div>
+  )
+}
+
+
+/* ── One concept message: title, copy, edit toggle, and (on new 3-per-area
+   cycles) its own Primary / Secondary / not-used pick within its area. ── */
+function ConceptMessageBox({
+  label,
+  message,
+  loading,
+  readOnly,
+  areaNumber,
+  onChange,
+  role,
+  roleGroup,
+  lockRole = false,
+  onRoleChange,
+  dimmed = false,
+}: {
+  label: string
+  message?: ConceptMessage
+  loading: boolean
+  readOnly: boolean
+  areaNumber: number
+  onChange: (next: Partial<ConceptMessage>) => void
+  /** Only on grouped messages. Absent = no role row (old one-per-area cycles,
+   *  where the area's own role decides). */
+  role?: AreaRole
+  roleGroup?: string
+  lockRole?: boolean
+  onRoleChange?: (role: AreaRole) => void
+  /** The area itself is not used, so none of its messages will be either. */
+  dimmed?: boolean
+}) {
+  // A message someone just added arrives empty, so it opens ready to write. A
+  // message that is merely still loading is undefined, not empty, which keeps
+  // every box from springing open while the messages arrive.
+  const [editing, setEditing] = useState(
+    () =>
+      !readOnly &&
+      !!message &&
+      !message.title?.trim() &&
+      !message.description?.trim(),
+  )
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  /** Opens or closes the edit fields, scrolling the box into view on open. */
+  function toggleEditing(): void {
+    const opening = !editing
+    setEditing(opening)
+    if (!opening) return
+    requestAnimationFrame(() => {
+      boxRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    })
+  }
+
+  const showsRole = role !== undefined
+
+  return (
+    <div
+      ref={boxRef}
+      className={cn(
+        "rounded-xl border bg-muted/40 p-4",
+        showsRole && role === "primary" ? "border-indigo-300 bg-indigo-50/40" : "border-border/70",
+        dimmed && "opacity-60",
+      )}
+    >
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+        <MessageSquareQuote className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      {loading ? (
+        // Shaped like what is coming, so the box does not jump when it lands.
+        <div aria-busy="true" aria-label="Loading concept message" className="space-y-2.5">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-[94%]" />
+          <Skeleton className="h-3.5 w-[72%]" />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              {readOnly || !editing ? (
+                <p className="text-base font-bold text-indigo-700">
+                  {message?.title || "No concept message yet"}
+                </p>
+              ) : (
+                <input
+                  type="text"
+                  value={message?.title ?? ""}
+                  onChange={(e) => onChange({ title: e.target.value })}
+                  placeholder="Two-word title"
+                  aria-label={`${label} title for area ${areaNumber}`}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-base font-bold text-indigo-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                />
+              )}
+            </div>
+
+            {!readOnly && message && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={toggleEditing}
+                className="h-7 shrink-0 px-2 text-xs"
+              >
+                {editing ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" /> Done
+                  </>
+                ) : (
+                  <>
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-2">
+            {!readOnly && editing ? (
+              <Textarea
+                value={message?.description ?? ""}
+                onChange={(e) => onChange({ description: e.target.value })}
+                rows={10}
+                placeholder="Three paragraphs, separated by blank lines…"
+                className="text-sm"
+              />
+            ) : message?.description?.trim() ? (
+              // Blank-line-separated paragraphs render as separate <p>s.
+              <ProsePreview content={message.description} className="prose-indigo" />
+            ) : (
+              <p className="text-sm italic text-muted-foreground">
+                {readOnly
+                  ? "No concept message was written here."
+                  : "Nothing written yet — hit Edit to write it."}
+              </p>
+            )}
+          </div>
+
+          {showsRole && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-2.5">
+              <p className="text-xs text-muted-foreground">
+                {role === "primary"
+                  ? "This area's leading message."
+                  : role === "secondary"
+                    ? "Also used."
+                    : "Not used."}
+              </p>
+              {readOnly || lockRole || !onRoleChange ? (
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-xs font-semibold",
+                    role === "primary"
+                      ? "bg-indigo-100 text-indigo-700"
+                      : role === "secondary"
+                        ? "bg-muted text-foreground"
+                        : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {role === "primary" ? "Primary" : role === "secondary" ? "Secondary" : "Not used"}
+                </span>
+              ) : (
+                <RoleToggle role={role ?? "none"} group={roleGroup ?? "messages"} onChange={onRoleChange} />
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

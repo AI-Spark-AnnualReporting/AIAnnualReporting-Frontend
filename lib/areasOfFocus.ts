@@ -26,7 +26,25 @@ export const MAX_SELECTED_AREAS = 5
  *  The server enforces both bounds in save_brief (app/schemas/brief.py
  *  MIN/MAX_AREAS_ON_PAGE), so these only keep the buttons honest. */
 export const MIN_AREAS_ON_PAGE = 2
-export const MAX_AREAS_ON_PAGE = 5
+/** 3 since 2026-11-09 (3 areas x 3 concept messages). Older cycles that hold
+ *  more still display and save; they just can't grow. */
+export const MAX_AREAS_ON_PAGE = 3
+/** Cycles from before the 3-area rule (one concept message per area, no
+ *  area_index) keep the old cap. Mirrors brief_generation_service.max_areas_for. */
+export const LEGACY_MAX_AREAS_ON_PAGE = 5
+
+/** The area cap for a cycle. Old if it already holds old-shape messages or
+ *  more than 3 areas (an empty message list alone proves nothing). The server
+ *  makes the final call (brief_generation_service.max_areas_for). */
+export function maxAreasFor(
+  messages: readonly { area_index?: number | null }[],
+  areaCount: number,
+): number {
+  const oldMessages =
+    messages.length > 0 && !messages.some((m) => typeof m.area_index === "number")
+  const isOld = oldMessages || areaCount > MAX_AREAS_ON_PAGE
+  return isOld ? LEGACY_MAX_AREAS_ON_PAGE : MAX_AREAS_ON_PAGE
+}
 
 /**
  * Mirrors the server's validator (app/schemas/brief.py — `validate_areas`).

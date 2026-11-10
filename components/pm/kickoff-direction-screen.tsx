@@ -13,7 +13,7 @@ import {
 // "has a choice been made" (used to gate kickoff). See lib/areasOfFocus.
 import {
   roleSelectionComplete,
-  MAX_AREAS_ON_PAGE,
+  maxAreasFor,
   MIN_AREAS_ON_PAGE,
 } from "@/lib/areasOfFocus"
 import { readKickoffAnswers, consumeKickoffTrigger } from "@/lib/kickoffBriefStorage"
@@ -37,6 +37,15 @@ import {
   useSendBackShare,
 } from "@/hooks/useShare"
 import type { ShareRequest, ShareStage } from "@/lib/api/share"
+import {
+  areasMissingPrimaryMessage,
+  blankAreaMessages,
+  isGrouped,
+  messagesOfArea,
+  removeAreaMessages,
+  setMessageRole,
+} from "@/lib/conceptMessages"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { LucideIcon } from "lucide-react"
 import {
   KickoffBuildLoader, AREAS_REFRESH_LOADER, BRIEF_LOADER, BRIEF_ONLY_LOADER,
@@ -372,6 +381,19 @@ export function KickoffDirectionScreen({
   const areasShared = !!areasShare
   const areasNeedsApproval = areasShare?.status === "responded"
   const areasApproved = areasShare?.status === "approved"
+
+  // ── Kicking off without the client (spark_internal ONLY) ──
+  // areasShare is undefined for every other role (see above), so none of this
+  // can ever show for a normal user.
+  // Already done: the departments were started before the client signed off.
+  const keptGoingWithoutClient = !!areasShare?.continued_without_client_at
+  // The box is offered only while the areas are actually with the client: you
+  // can't skip a client you never asked, and once they've replied Spark just
+  // approves their answer (the server refuses it too).
+  const canSkipClient =
+    sparkFlow && areasAwaiting && !keptGoingWithoutClient
+  const [skipClient, setSkipClient] = useState(false)
+  const skippingClient = canSkipClient && skipClient
 
   // In Spark's flow the areas do not exist until the brief is signed off —
   // approving it is what commissions them. Every other role generates them
@@ -842,7 +864,12 @@ export function KickoffDirectionScreen({
   ) => {
     setResult((prev) => (prev ? { ...prev, areas: next } : prev))
     if (!roleSelectionSaveable(next)) {
+      // Drop only the half-made areas. Message edits waiting on the debounce
+      // are valid on their own and must not be thrown away with them.
+      const { areas_of_focus: _halfMadeAreas, ...waiting } = pendingSave.current
+      void _halfMadeAreas
       cancelPendingSave()
+      if (Object.keys(waiting).length > 0) runSave(waiting)
       setSaveState("blocked")
       return
     }
@@ -864,17 +891,17 @@ export function KickoffDirectionScreen({
   const areaSelectionValid = areas.length >= MIN_SELECTED_AREAS
 
   const addArea = () => {
-    if (!result || areasShared || areas.length >= MAX_AREAS_ON_PAGE) return
+    if (!result || areasShared || areas.length >= maxAreas) return
     // Only where the list is its own scroll box (Spark's step 3). Elsewhere the
     // page scrolls normally and the new card lands where it always did.
     if (fitScreen) revealNewestArea.current = true
     // Areas and messages stay parallel, so a new card gets an empty message
     // beside it rather than shifting every existing pairing along. Both go to
     // the server in one save — see commitAreas.
-    const nextMessages: ConceptMessage[] = [
-      ...list,
-      { title: "", description: "", role: "secondary" },
-    ]
+    // New cycles get 3 blank, unused messages to write under the new area.
+    const nextMessages: ConceptMessage[] = grouped
+      ? [...list, ...blankAreaMessages(areas.length)]
+      : [...list, { title: "", description: "", role: "secondary" }]
     setMessages(nextMessages)
     commitAreas(
       [...areas, { slogan: "", sub_slogans: [], role: "none" }],
@@ -899,7 +926,9 @@ export function KickoffDirectionScreen({
 
   const deleteArea = (idx: number) => {
     if (!result || areasShared || areas.length <= MIN_AREAS_ON_PAGE) return
-    const nextMessages = list.filter((_, i) => i !== idx)
+    const nextMessages = grouped
+      ? removeAreaMessages(list, idx)
+      : list.filter((_, i) => i !== idx)
     setMessages(nextMessages)
     commitAreas(
       areas.filter((_, i) => i !== idx),
@@ -932,13 +961,15 @@ export function KickoffDirectionScreen({
       // Sign the client's version off first — kickoff 409s without it, and
       // doing it here keeps it to one button. The AREAS gate is the last one;
       // the brief was approved earlier, which is what built these.
-      if (areasNeedsApproval) await approveShare.mutateAsync("areas")
+      // Skipping the client leaves their response for later — nothing to approve now.
+      if (areasNeedsApproval && !skippingClient) await approveShare.mutateAsync("areas")
 
       // The long call (~up to 3 min): every department's questions.
       await pmApi.submitKickoff({
         cycle_id: id,
         strategic_brief: result.brief,
         num_questions: numQuestions,
+        ...(skippingClient ? { continue_without_client: true } : {}),
       })
 
       // Non-blocking: kickoff already succeeded, so a deadline failure warns
@@ -979,6 +1010,12 @@ export function KickoffDirectionScreen({
   // every arrival at the areas screen — for messages that were sitting in the
   // database the whole time.
   const messagesLoaded = messages !== null
+  // New cycles: 3 messages per area, each picked within its area.
+  const grouped = isGrouped(list)
+  // 3 for new cycles; old one-message-per-area cycles keep their cap of 5.
+  const maxAreas = maxAreasFor(list, areas.length)
+  // New cycles: every used area needs its leading message before kickoff.
+  const areasMissingLead = grouped ? areasMissingPrimaryMessage(areas, list) : []
 
   const editMessages = (next: ConceptMessage[]) => {
     setMessages(next)
@@ -1023,6 +1060,41 @@ export function KickoffDirectionScreen({
     }
   }
 
+  /** New cycles: refine the 3 messages of one area, leaving the rest alone. */
+  const refineAreaMessages = async (instruction: string, areaIndex: number) => {
+    if (areasShared) return false
+    const own = messagesOfArea(list, areaIndex)
+    const numbers = own.map(({ position }) => position + 1)
+    if (numbers.length === 0) return false
+    // An area you added arrives with 3 EMPTY messages: ask for them to be
+    // written, not "modified", or nothing comes back.
+    const allEmpty = own.every(
+      ({ message }) => !message.title?.trim() && !message.description?.trim(),
+    )
+    const area = areas[areaIndex]
+    const scoped = allEmpty
+      ? `Concept messages ${numbers.join(", ")} are empty — write all three from scratch` +
+        (area?.slogan ? ` for the area of focus "${area.slogan}"` : "") +
+        (area?.summary ? ` (${area.summary})` : "") +
+        ": each a two-word title and three paragraphs, three genuinely different takes, " +
+        "in the same voice and at the same length as the other messages" +
+        (instruction.trim() ? `, and ${instruction}` : "") +
+        ". Leave every other message exactly as it is, in the same order."
+      : `Only modify concept messages ${numbers.join(", ")}: ${instruction}. ` +
+        "Keep them three different takes. Leave every other message exactly as it is, in the same order."
+    try {
+      const data = await pmApi.refineConceptMessages(id, {
+        concept_messages: list,
+        instruction: scoped,
+      })
+      setMessages(data.concept_messages ?? list)
+      return true
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't refine those messages.")
+      return false
+    }
+  }
+
   // One Refine button on the card drives both halves of it. The area names the
   // idea and the message tells it at length, so "make it punchier" applied to
   // only one of them leaves a slogan that no longer matches its message.
@@ -1039,9 +1111,11 @@ export function KickoffDirectionScreen({
     const area = (refinedAreas ?? areas)[index]
     // With no slot at all (fewer messages than areas) asking the refiner for
     // message N invites it to invent one out of order, so that case is left.
-    const messageRefined = list[index]
-      ? await refineMessage(instruction, index, area)
-      : false
+    const messageRefined = grouped
+      ? await refineAreaMessages(instruction, index)
+      : list[index]
+        ? await refineMessage(instruction, index, area)
+        : false
     // Either half landing is a result worth keeping on screen. Both failing
     // has already raised its own toast.
     return !!refinedAreas || messageRefined
@@ -1230,7 +1304,11 @@ export function KickoffDirectionScreen({
               areasShare?.responded_at ? ` · ${fmtDate(areasShare.responded_at)}` : ""
             }`}
             note={areasShare?.client_note}
-            body="Everything below is their version, including which area leads the report. Approve &amp; kickoff in the bar at the bottom signs it off, or send it back with a note."
+            body={
+              keptGoingWithoutClient
+                ? "Everything below is their version, including which area leads the report. The departments have already started — Approve in the bar at the bottom signs it off and lets the report be built."
+                : "Everything below is their version, including which area leads the report. Approve & kickoff in the bar at the bottom signs it off, or send it back with a note."
+            }
             compact={fitScreen}
             trailing={fitScreen ? <SaveIndicator state={saveState} /> : undefined}
           />
@@ -1246,7 +1324,9 @@ export function KickoffDirectionScreen({
             body={
               briefAwaiting
                 ? "It's locked until you approve their response — otherwise your edits and theirs would overwrite each other. Approving it is also what writes the areas of focus and concept messages from it."
-                : "They're locked until you approve their response — otherwise your edits and theirs would overwrite each other."
+                : keptGoingWithoutClient
+                  ? "The departments have already started, with every area of focus treated equally. The report can't be built until your client signs these off."
+                  : "They're locked until you approve their response — otherwise your edits and theirs would overwrite each other."
             }
             compact={fitScreen}
             trailing={fitScreen ? <SaveIndicator state={saveState} /> : undefined}
@@ -1259,7 +1339,6 @@ export function KickoffDirectionScreen({
             body={`Approved ${fmtDate(briefShare?.approved_at)}. The areas of focus below were written from it, so it can't be changed now.`}
           />
         ) : null}
-
 
         {/* ── Hard error (403 / 404 / network) ── */}
         {phase === "error" && (
@@ -1570,12 +1649,12 @@ export function KickoffDirectionScreen({
                     // How many areas there are is settled at the first
                     // share: they add to the set once, then both sides work
                     // on the same list. The server draws the same line.
-                    disabled={areasShared || areas.length >= MAX_AREAS_ON_PAGE}
+                    disabled={areasShared || areas.length >= maxAreas}
                     title={
                       areasShared
                         ? "This has already gone to the client — the number of areas is settled"
-                        : areas.length >= MAX_AREAS_ON_PAGE
-                          ? `At most ${MAX_AREAS_ON_PAGE} areas of focus on the page`
+                        : areas.length >= maxAreas
+                          ? `At most ${maxAreas} areas of focus on the page`
                           : undefined
                     }
                   >
@@ -1588,11 +1667,11 @@ export function KickoffDirectionScreen({
                   the rule the same way. Only while there's still a way to act
                   on it — once the areas are shared the count is frozen and
                   deleting is no longer allowed either. */}
-              {!areasShared && areas.length >= MAX_AREAS_ON_PAGE && (
+              {!areasShared && areas.length >= maxAreas && (
                 <p className="mt-3 flex items-start gap-1.5 text-xs font-medium text-indigo-700">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    {MAX_AREAS_ON_PAGE} is the maximum. To add your own, delete one
+                    {maxAreas} is the maximum. To add your own, delete one
                     first.
                   </span>
                 </p>
@@ -1628,8 +1707,18 @@ export function KickoffDirectionScreen({
                     key={i}
                     index={i}
                     area={area}
-                    // Position is the link: message i belongs to area i.
+                    // Position is the link: message i belongs to area i (old cycles).
                     message={list[i]}
+                    // New cycles: this area's 3 messages, each with its own pick.
+                    groupedMessages={grouped ? messagesOfArea(list, i) : undefined}
+                    onGroupedMessageChange={(position, next) =>
+                      editMessages(
+                        list.map((m, k) => (k === position ? { ...m, ...next } : m)),
+                      )
+                    }
+                    onGroupedRoleChange={(position, role) =>
+                      editMessages(setMessageRole(list, position, role))
+                    }
                     messageLoading={!messagesLoaded}
                     roleGroup="area-of-focus-primary"
                     readOnly={areasAwaiting}
@@ -1785,35 +1874,98 @@ export function KickoffDirectionScreen({
                   </Button>
                 </Link>
               )
-            ) : (
+            ) : keptGoingWithoutClient ? (
+              // Spark already kicked off before the client signed off. The only
+              // thing left here is to approve their response when it lands —
+              // never a second kickoff.
               <Button
                 disabled={
-                  phase !== "result" ||
-                  list.length === 0 ||
-                  !areaChoiceValid ||
-                  (sparkFlow && !(areasApproved || areasNeedsApproval))
+                  approveShare.isPending || (!areasNeedsApproval && !areasApproved)
                 }
-                onClick={openApprove}
+                onClick={() => {
+                  // Already signed off: this is just the way back to the plan.
+                  if (areasApproved) {
+                    router.push(`/pm/cycles/${id}/plan`)
+                    return
+                  }
+                  approveShare.mutate("areas", {
+                    // The plan screen was waiting on exactly this, so go back to it.
+                    onSuccess: () => {
+                      toast.success("Approved — the report can now be built.")
+                      router.push(`/pm/cycles/${id}/plan`)
+                    },
+                  })
+                }}
                 title={
-                  !messagesLoaded
-                    ? undefined
-                    : list.length === 0
-                      ? "Generate the concept messages first"
-                      : !areaChoiceValid
-                        ? `The client needs to mark ${MIN_SELECTED_AREAS}-${MAX_SELECTED_AREAS} areas, one leading`
-                        : !sparkFlow
-                          ? undefined
-                          : !areasShare
-                            ? "Share the areas of focus with the client first"
-                            : areasShare.status === "pending"
-                              ? "Waiting on the client's response"
-                              : undefined
+                  !areasNeedsApproval && !areasApproved
+                    ? "Waiting on the client's response"
+                    : undefined
                 }
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
-                <CheckCircle2 className="h-4 w-4" />
-                {areasNeedsApproval ? "Approve & kickoff" : "Approve & use"}
+                {approveShare.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                {areasApproved ? "Go to report builder" : "Approve"}
               </Button>
+            ) : (
+              <>
+                {canSkipClient && (
+                  <Checkbox
+                    id="skip-client-signoff"
+                    checked={skipClient}
+                    onCheckedChange={setSkipClient}
+                    disabled={phase !== "result"}
+                    label="Skip approval"
+                    className="max-w-sm"
+                  />
+                )}
+                {skippingClient ? (
+                  <Button
+                    disabled={phase !== "result" || list.length === 0}
+                    onClick={openApprove}
+                    title={list.length === 0 ? "Generate the concept messages first" : undefined}
+                    className="bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                    Kick off now
+                  </Button>
+                ) : (
+                <Button
+                  disabled={
+                    phase !== "result" ||
+                    list.length === 0 ||
+                    !areaChoiceValid ||
+                    areasMissingLead.length > 0 ||
+                    (sparkFlow && !(areasApproved || areasNeedsApproval))
+                  }
+                  onClick={openApprove}
+                  title={
+                    !messagesLoaded
+                      ? undefined
+                      : list.length === 0
+                        ? "Generate the concept messages first"
+                        : !areaChoiceValid
+                          ? `The client needs to mark ${MIN_SELECTED_AREAS}-${Math.min(MAX_SELECTED_AREAS, areas.length)} areas, one leading`
+                          : areasMissingLead.length > 0
+                            ? `Pick a primary concept message for: ${areasMissingLead.join(", ")}`
+                          : !sparkFlow
+                            ? undefined
+                            : !areasShare
+                              ? "Share the areas of focus with the client first"
+                              : areasShare.status === "pending"
+                                ? "Waiting on the client's response"
+                                : undefined
+                  }
+                  className="bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {areasNeedsApproval ? "Approve & kickoff" : "Approve & use"}
+                </Button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1899,6 +2051,7 @@ export function KickoffDirectionScreen({
         onConfirm={confirmApprove}
         cycleLabel={fiscalLabel}
         changedSinceResponse={changedSinceResponse}
+        withoutClient={skippingClient}
       />
 
       {/* One dialog for all three destructive paths — refine, manual edit, and

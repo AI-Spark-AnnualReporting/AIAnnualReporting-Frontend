@@ -35,6 +35,10 @@ import {
   useSetSourceMode,
 } from "@/hooks/useReportBuilder"
 import { usePMCycleDashboard } from "@/hooks/useSessions"
+import { useCycleShares } from "@/hooks/useShare"
+import { useAuth } from "@/contexts/AuthContext"
+import { kickedOffWithoutClient } from "@/lib/api/share"
+import { ClientSignoffGate } from "@/components/pm/ClientSignoffGate"
 import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import {
@@ -161,6 +165,15 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const findingsQuery = useDraftFindings(cycleId)
   const router = useRouter()
   const consented = !!findingsQuery.data?.locked_at
+
+  // spark_internal ONLY: Spark may start the departments before the client
+  // signs off the areas of focus. The report is written around that choice,
+  // so this screen waits for it. For every other role the shares are never
+  // even fetched (empty id disables the query) and nothing changes.
+  const { user } = useAuth()
+  const isSpark = user?.role === "spark_internal"
+  const sharesQuery = useCycleShares(isSpark ? cycleId : "")
+  const areasShare = sharesQuery.data?.areas
   useEffect(() => {
     if (!findingsQuery.isLoading && !consented) {
       router.replace(`/pm/cycles/${cycleId}/findings`)
@@ -171,6 +184,10 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     return <PageLoader />
   }
   if (!consented) return <PageLoader />
+  if (isSpark && sharesQuery.isLoading) return <PageLoader />
+  if (isSpark && areasShare && kickedOffWithoutClient(areasShare)) {
+    return <ClientSignoffGate cycleId={cycleId} share={areasShare} />
+  }
 
   const cycleName = pmData?.cycle?.cycle_name
   // Arabic cycles render section/theme titles right-to-left.
@@ -846,8 +863,11 @@ function StartBuildingAction({
   // Nothing left for this button to do: the plan is already frozen, no source
   // edits are waiting, and every eligible section has been drafted. All that is
   // left is to open the builder — so the button says so and goes straight there.
-  const nothingToDo =
-    alreadyLocked && !hasUnsaved && eligibleToGenerate.length === 0
+  // Once locked, nothing on the plan can be edited (the pickers are read-only
+  // and the server refuses every save), so any "unsaved" edit left over from
+  // before the lock is stale and must never be sent.
+  const saveBeforeLock = hasUnsaved && !alreadyLocked
+  const nothingToDo = alreadyLocked && eligibleToGenerate.length === 0
 
   const goToBuilder = () => {
     if (failed > 0) {
@@ -869,7 +889,7 @@ function StartBuildingAction({
 
     // 1. Write the sources the PM picked on step 1. Stop here if any failed —
     //    locking on top of a half-written plan would freeze the wrong thing.
-    if (hasUnsaved) {
+    if (saveBeforeLock) {
       setPhase("saving")
       const ok = await saveSources((done, totalToSave) =>
         setSaved({ done, total: totalToSave }),

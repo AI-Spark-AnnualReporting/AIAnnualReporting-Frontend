@@ -30,6 +30,7 @@ export function ApproveDeadlineDialog({
   onConfirm,
   cycleLabel,
   changedSinceResponse = false,
+  withoutClient = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -46,6 +47,8 @@ export function ApproveDeadlineDialog({
   /** Spark edited the brief, areas or messages after the client sent them
    *  back. Kickoff is the point of no return, so it is said again here. */
   changedSinceResponse?: boolean
+  /** spark_internal only: kicking off before the client signs off the areas. */
+  withoutClient?: boolean
 }) {
   // Distinguish "nothing chosen yet" from "chose a past date" for the helper text.
   const isPast = !!value && value < min
@@ -77,6 +80,19 @@ export function ApproveDeadlineDialog({
             <p className="mt-1.5 ps-6 text-xs text-amber-800">
               Kickoff writes every department&apos;s questions from this version, and
               the client&apos;s link still shows theirs.
+            </p>
+          </div>
+        )}
+
+        {withoutClient && (
+          <div className="mx-6 mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <p className="text-sm font-semibold text-indigo-900">
+              Starting before your client signs off
+            </p>
+            <p className="mt-1.5 text-xs text-indigo-800">
+              Questions follow the report outline first, with every area of focus
+              treated equally. The report itself can&apos;t be built until your
+              client signs off the areas of focus.
             </p>
           </div>
         )}

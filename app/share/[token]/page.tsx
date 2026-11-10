@@ -39,11 +39,20 @@ import {
   roleSelectionComplete,
   MIN_SELECTED_AREAS,
   MAX_SELECTED_AREAS,
-  MAX_AREAS_ON_PAGE,
+  maxAreasFor,
   MIN_AREAS_ON_PAGE,
 } from "@/lib/areasOfFocus"
 import type { AreaOfFocus } from "@/lib/areasOfFocus"
 import type { ConceptMessage, SurveyQuestion } from "@/lib/api/pm"
+import {
+  areasMissingPrimaryMessage,
+  blankAreaMessages,
+  hasBlankUsedMessage,
+  isGrouped,
+  messagesOfArea,
+  removeAreaMessages,
+  setMessageRole,
+} from "@/lib/conceptMessages"
 import {
   AlertTriangle, CheckCircle2, FileText, Info, Link2Off, Loader2, MessageSquareQuote,
   Plus, Send, Upload,
@@ -105,7 +114,11 @@ function bannerTitle(view: ClientShareView, status: BannerStatus): string {
 }
 
 /** The line under the headline. */
-function bannerSubtitle(view: ClientShareView, status: BannerStatus): string {
+function bannerSubtitle(
+  view: ClientShareView,
+  status: BannerStatus,
+  grouped = false,
+): string {
   if (status === "approved") {
     return "It has been approved. Nothing more is needed from you. Everything below is what you sent."
   }
@@ -122,6 +135,9 @@ function bannerSubtitle(view: ClientShareView, status: BannerStatus): string {
   }
   if (view.stage === "brief") {
     return "This is the direction for the whole report. Edit anything that isn't right — everything else is written from it."
+  }
+  if (grouped) {
+    return "Each area has three concept messages beneath it. Pick one area to lead the report and mark the others as used or not. In every area you use, pick one message to lead, and mark the others as used or not. Edit anything that isn't right."
   }
   return `Each area has its concept message beneath it. Mark ${MIN_SELECTED_AREAS}–${MAX_SELECTED_AREAS} of them as used, pick exactly one to lead, and edit anything that isn't right.`
 }
@@ -331,16 +347,25 @@ export default function ClientSharePage({
   const blankAreas = areas.some((a) => !a.slogan.trim())
   // Same for the message under it: a named area with nothing written beneath
   // reached Spark as an empty card. The server refuses it too.
-  const blankMessages = areas.some(
-    (_, i) => !concepts[i]?.title?.trim() || !concepts[i]?.description?.trim(),
-  )
+  // New cycles (3 messages per area): each message's role is picked within its
+  // area, and a "not used" message may stay blank.
+  const grouped = isGrouped(concepts)
+  // 3 for new cycles; old one-message-per-area cycles keep their cap of 5.
+  const maxAreas = maxAreasFor(concepts, areas.length)
+  const blankMessages = grouped
+    ? hasBlankUsedMessage(concepts)
+    : areas.some(
+        (_, i) => !concepts[i]?.title?.trim() || !concepts[i]?.description?.trim(),
+      )
+  // New cycles: every area they keep needs its leading message picked.
+  const areasMissingLead = grouped ? areasMissingPrimaryMessage(areas, concepts) : []
 
   const canSubmit = editable && !submitting && (
     view?.stage === "questionnaire"
       ? isComplete(questions, answers)
       : view?.stage === "brief"
         ? brief.trim().length > 0
-        : areasValid && !blankAreas && !blankMessages
+        : areasValid && !blankAreas && !blankMessages && areasMissingLead.length === 0
   )
 
   /** Their own area, with an empty concept message to write underneath it. */
@@ -349,14 +374,23 @@ export default function ClientSharePage({
       ...prev,
       { slogan: "", summary: "", sub_slogans: [], role: "none" },
     ])
-    setConcepts((prev) => [...prev, { title: "", description: "" }])
+    // New cycles get 3 blank messages to write (or leave out) under it.
+    setConcepts((prev) =>
+      isGrouped(prev)
+        ? [...prev, ...blankAreaMessages(areas.length)]
+        : [...prev, { title: "", description: "" }],
+    )
   }
 
   /** Only ever one they added — the two lists are linked by position, so both
    *  have to lose the same index. */
   const removeArea = (index: number) => {
     setAreas((prev) => prev.filter((_, k) => k !== index))
-    setConcepts((prev) => prev.filter((_, k) => k !== index))
+    setConcepts((prev) =>
+      isGrouped(prev)
+        ? removeAreaMessages(prev, index)
+        : prev.filter((_, k) => k !== index),
+    )
   }
 
   const submit = async () => {
@@ -455,7 +489,7 @@ export default function ClientSharePage({
         stage={view.stage}
         cycleName={view.cycle_name}
         title={bannerTitle(view, bannerState)}
-        subtitle={bannerSubtitle(view, bannerState)}
+        subtitle={bannerSubtitle(view, bannerState, grouped)}
         facts={editable ? bannerFacts(view, questions.length, areas.length, firstRound) : []}
         status={bannerState}
         submittedAt={view.submitted_at}
@@ -674,8 +708,18 @@ export default function ClientSharePage({
                     key={i}
                     index={i}
                     area={area}
-                    // Position is the link between the two lists.
+                    // Position is the link between the two lists (old cycles).
                     message={concepts[i]}
+                    // New cycles: this area's 3 messages, each with its own pick.
+                    groupedMessages={grouped ? messagesOfArea(concepts, i) : undefined}
+                    onGroupedMessageChange={(position, next) =>
+                      setConcepts((prev) =>
+                        prev.map((m, k) => (k === position ? { ...m, ...next } : m)),
+                      )
+                    }
+                    onGroupedRoleChange={(position, role) =>
+                      setConcepts((prev) => setMessageRole(prev, position, role))
+                    }
                     roleGroup="client-areas"
                     readOnly={!editable}
                     onAreaChange={(next) =>
@@ -687,7 +731,7 @@ export default function ClientSharePage({
                       )
                     }
                     // Any area, on the first round — the same rule Spark has.
-                    // With five on the page there is no room to add, so
+                    // With the maximum on the page there is no room to add, so
                     // deleting one is the only way to make room for their own.
                     // Never below two: the server refuses a smaller set.
                     onRemove={
@@ -708,23 +752,27 @@ export default function ClientSharePage({
                               : a,
                         ),
                       )
-                      setConcepts((prev) =>
-                        prev.map((m, k) => ({
-                          ...m,
-                          role: k === i && role === "primary" ? "primary" : "secondary",
-                        })),
-                      )
+                      // Old cycles only: the message's role follows its area.
+                      // New cycles pick message roles inside each area instead.
+                      if (!grouped) {
+                        setConcepts((prev) =>
+                          prev.map((m, k) => ({
+                            ...m,
+                            role: k === i && role === "primary" ? "primary" : "secondary",
+                          })),
+                        )
+                      }
                     }}
                   />
                 ))}
               </div>
               {/* Says how to make room rather than leaving a greyed-out button
                   with its reason hidden in a tooltip. */}
-              {canAdd && areas.length >= MAX_AREAS_ON_PAGE && (
+              {canAdd && areas.length >= maxAreas && (
                 <p className="mt-4 flex items-start gap-1.5 text-xs font-medium text-indigo-700">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    {MAX_AREAS_ON_PAGE} is the maximum. To add your own, delete one
+                    {maxAreas} is the maximum. To add your own, delete one
                     first.
                   </span>
                 </p>
@@ -734,10 +782,10 @@ export default function ClientSharePage({
                   type="button"
                   variant="outline"
                   onClick={addArea}
-                  disabled={areas.length >= MAX_AREAS_ON_PAGE}
+                  disabled={areas.length >= maxAreas}
                   title={
-                    areas.length >= MAX_AREAS_ON_PAGE
-                      ? `At most ${MAX_AREAS_ON_PAGE} areas of focus on the page`
+                    areas.length >= maxAreas
+                      ? `At most ${maxAreas} areas of focus on the page`
                       : "Add an area of your own and write its concept message"
                   }
                   className="mt-2"
@@ -752,12 +800,19 @@ export default function ClientSharePage({
               )}
               {editable && !blankAreas && blankMessages && (
                 <p className="mt-2 text-sm font-medium text-amber-700">
-                  Give every area a concept message (a title and its text) before sending.
+                  {grouped
+                    ? "Every concept message you use needs a title and its text — or mark it as not used."
+                    : "Give every area a concept message (a title and its text) before sending."}
+                </p>
+              )}
+              {editable && areasMissingLead.length > 0 && (
+                <p className="mt-2 text-sm font-medium text-amber-700">
+                  Pick a primary concept message for: {areasMissingLead.join(", ")}.
                 </p>
               )}
               {editable && !areasValid && (
                 <p className="mt-2 text-sm font-medium text-amber-700">
-                  Mark {MIN_SELECTED_AREAS}–{MAX_SELECTED_AREAS} areas as used, with one
+                  Mark {MIN_SELECTED_AREAS}–{Math.min(MAX_SELECTED_AREAS, areas.length)} areas as used, with one
                   set to lead, before sending.
                 </p>
               )}

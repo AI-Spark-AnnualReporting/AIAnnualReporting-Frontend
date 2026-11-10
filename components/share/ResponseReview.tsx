@@ -1,5 +1,6 @@
 "use client"
 
+import { isGrouped, messagesOfArea } from "@/lib/conceptMessages"
 import { Ban, Check, Circle, FileText, MessageSquareQuote, Star } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ProsePreview } from "@/components/ui/prose-preview"
@@ -164,6 +165,8 @@ export function AreasReview({
 }) {
   const used = areas.filter((a) => (a.role ?? "none") !== "none").length
   const leading = areas.filter((a) => a.role === "primary").length
+  // New cycles: 3 messages per area, each with its own role in that area.
+  const grouped = isGrouped(concepts)
 
   return (
     <div className="space-y-3">
@@ -172,9 +175,16 @@ export function AreasReview({
         <ul className="divide-y divide-border">
           {areas.map((area, i) => {
             const role = area.role ?? "none"
-            const message = concepts[i]
-            const title = message?.title?.trim()
-            const body = message?.description?.trim()
+            // Old cycles: message i belongs to area i. New: the area's three.
+            const oldMessage = concepts[i]
+            const oldHasText = Boolean(
+              oldMessage?.title?.trim() || oldMessage?.description?.trim(),
+            )
+            const areaMessages = grouped
+              ? messagesOfArea(concepts, i).map(({ message }) => message)
+              : oldHasText
+                ? [oldMessage]
+                : []
             return (
               <li key={i} className="flex items-start gap-3 px-4 py-3">
                 <span className="mt-0.5 shrink-0">
@@ -192,17 +202,31 @@ export function AreasReview({
                   </p>
                   {/* The whole message, rendered the way its card on the page
                       renders it (sanitised — the client may have rewritten it). */}
-                  {title || body ? (
-                    <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
-                      {title && <p className="text-sm font-semibold text-foreground">{title}</p>}
-                      {body && (
-                        <div className={cn("text-sm", title && "mt-1.5")}>
-                          <ProsePreview content={body} className="prose-indigo" />
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                  {areaMessages.length === 0 ? (
                     <p className="mt-0.5 text-xs italic text-muted-foreground/70">No concept message</p>
+                  ) : (
+                    areaMessages.map((message, k) => {
+                      const title = message.title?.trim()
+                      const body = message.description?.trim()
+                      const messageRole = (message.role ?? "none") as keyof typeof ROLE_LABEL
+                      return (
+                        <div key={k} className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
+                          {grouped && (
+                            <p className="mb-1 text-xs font-semibold text-muted-foreground">
+                              Message {k + 1} · {ROLE_LABEL[messageRole] ?? "Not used"}
+                            </p>
+                          )}
+                          {title && <p className="text-sm font-semibold text-foreground">{title}</p>}
+                          {body ? (
+                            <div className={cn("text-sm", title && "mt-1.5")}>
+                              <ProsePreview content={body} className="prose-indigo" />
+                            </div>
+                          ) : !title ? (
+                            <p className="text-xs italic text-muted-foreground/70">Left blank</p>
+                          ) : null}
+                        </div>
+                      )
+                    })
                   )}
                 </div>
                 <span
