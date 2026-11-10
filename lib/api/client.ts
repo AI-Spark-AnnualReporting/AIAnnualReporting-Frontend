@@ -7,6 +7,7 @@ import { centriyonLoginUrl } from "@/lib/centriyon"
 import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
 import { getActingCompany } from "@/lib/actingCompany"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
+import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -128,7 +129,11 @@ apiClient.interceptors.response.use(
       const url: string = error.config?.url ?? ""
       const isAuthEndpoint =
         url.includes("/auth/me") || url.includes("/auth/logout")
-      if (!isAuthEndpoint) {
+      // A request sent with an OLDER token than the one saved now (e.g. one in
+      // flight while a hand-off tab signed in) says nothing about the current
+      // session — clearing here would log out the sign-in that replaced it.
+      const sentToken = tokenFromAuthHeader(error.config?.headers?.Authorization)
+      if (!isAuthEndpoint && isStillStoredToken(sentToken)) {
         localStorage.removeItem("access_token")
         localStorage.removeItem("refresh_token")
         // Remember the page so login lands back here, not on the role home —

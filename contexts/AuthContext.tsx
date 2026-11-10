@@ -20,6 +20,7 @@ import {
 } from "@/lib/postLoginRedirect"
 import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
 import { clearBackUrl, setBackUrl } from "@/lib/backUrl"
+import { getStoredToken, isStillStoredToken } from "@/lib/storedToken"
 
 interface AuthContextValue {
   user: User | null
@@ -57,11 +58,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
 
   const refreshUser = useCallback(async () => {
+    // The token this check is about. If a newer sign-in saves another one while
+    // /auth/me is in flight (a hand-off tab racing a left-over token), this
+    // result is stale either way and must not touch the session — see
+    // lib/storedToken.
+    const checkedToken = getStoredToken()
     try {
       const userData = await authApi.me()
+      if (!isStillStoredToken(checkedToken)) return
       rememberSignedInUser(userData.user_id)
       setUser(userData)
     } catch {
+      if (!isStillStoredToken(checkedToken)) return
       setUser(null)
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
@@ -70,7 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
-    if (token) {
+    // On the hand-off page the token in the URL is about to replace the saved
+    // one, and loginWithToken checks it itself. Checking the saved (old) one
+    // here as well can only race it.
+    const handingOff =
+      window.location.pathname === "/auth/token" &&
+      new URLSearchParams(window.location.search).has("token")
+    if (token && !handingOff) {
       refreshUser().finally(() => setIsLoading(false))
     } else {
       setIsLoading(false)

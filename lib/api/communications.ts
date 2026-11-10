@@ -4,6 +4,7 @@ import { centriyonLoginUrl } from "@/lib/centriyon"
 import { getActingCompany } from "@/lib/actingCompany"
 import { agentRunPath } from "@/lib/reportReadiness"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
+import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -56,7 +57,13 @@ commClient.interceptors.response.use(
   },
   (error) => {
     checkAiCreditsHeader(error.response?.headers)
-    if (error.response?.status === 401 && typeof window !== "undefined") {
+    // Only when the request carried the token saved now — an older token's 401
+    // must not log out the sign-in that replaced it (see lib/storedToken).
+    if (
+      error.response?.status === 401 &&
+      typeof window !== "undefined" &&
+      isStillStoredToken(tokenFromAuthHeader(error.config?.headers?.Authorization))
+    ) {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       window.location.href = centriyonLoginUrl()
