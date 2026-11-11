@@ -3,6 +3,8 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { getActingCompany } from "@/lib/actingCompany"
 import { agentRunPath } from "@/lib/reportReadiness"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
+import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -49,9 +51,19 @@ commClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // Normalize errors to { error, message, status, details } (matching the main
 // client) so components can read `.status`. 401 → bounce to Centriyon login.
 commClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    checkAiCreditsHeader(response.headers)
+    return response
+  },
   (error) => {
-    if (error.response?.status === 401 && typeof window !== "undefined") {
+    checkAiCreditsHeader(error.response?.headers)
+    // Only when the request carried the token saved now — an older token's 401
+    // must not log out the sign-in that replaced it (see lib/storedToken).
+    if (
+      error.response?.status === 401 &&
+      typeof window !== "undefined" &&
+      isStillStoredToken(tokenFromAuthHeader(error.config?.headers?.Authorization))
+    ) {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       window.location.href = centriyonLoginUrl()

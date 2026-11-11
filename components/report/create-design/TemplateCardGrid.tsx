@@ -39,7 +39,6 @@ const CARD_NOTES: Record<string, string> = {
   landscape_schedule: "Tables first, after the title and a short introduction. Wide tables run the full width.",
   landscape_essay: "Long text in three columns, opened by a column with the title, the quotes and a picture.",
   landscape_tiles: "Each figure in its own tile, eight to a sheet, four on each half, the right half in the brand colour. The text and tables follow.",
-  landscape_tables: "Tables in two half-page columns under their titles: group rows in a brand bar, the current year in bold. Wide tables span both.",
   landscape_editorial: "Four columns of text under a large lead paragraph, subheadings after a small square, the first sheet tinted beyond the title column.",
   landscape_portrait: "A tall portrait with the featured quote and speaker on a brand plate at its foot; the letter beside a rail of three to five key figures.",
   landscape_photo_panel: "A big photo bleeding off the right, a solid brand panel over its left edge carrying text; body text, a lead-in and one figure beside it.",

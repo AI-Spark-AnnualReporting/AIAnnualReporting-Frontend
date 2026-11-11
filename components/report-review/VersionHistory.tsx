@@ -206,8 +206,8 @@ function VersionChanges({
         </div>
         {compare.data && (
           <div className="flex gap-4 pt-1 text-xs text-muted-foreground">
-            <span><span className="rounded bg-green-100 px-1.5 font-semibold text-green-900">green</span> added</span>
-            <span><span className="rounded bg-red-100 px-1.5 text-red-800 line-through">red</span> removed</span>
+            <span><span className="rounded bg-green-100 px-1.5 font-semibold text-green-900">green</span> added in Version {version.version_no}</span>
+            <span><span className="rounded bg-red-100 px-1.5 text-red-800 line-through">red</span> removed in Version {version.version_no}</span>
           </div>
         )}
         {/* Once, at the top, over the two columns of every section below
@@ -218,8 +218,8 @@ function VersionChanges({
             dir={arabic ? "rtl" : "ltr"}
             className="hidden grid-cols-2 rounded-md border bg-muted/40 pt-0 text-[11px] font-bold tracking-wide text-muted-foreground md:grid"
           >
-            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "text-right" : "border-r")}>VERSION {previousNo}</span>
-            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "border-r text-right" : "")}>VERSION {version.version_no}</span>
+            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "text-right" : "border-r")}>VERSION {previousNo} (BEFORE)</span>
+            <span dir="ltr" className={cn("px-3 py-1.5", arabic ? "border-r text-right" : "")}>VERSION {version.version_no} (AFTER)</span>
           </div>
         )}
       </DialogHeader>
@@ -294,13 +294,25 @@ function ChangesSkeleton() {
   )
 }
 
-/** Which version a column shows: the older one keeps removed words, the newer one added words. */
+/** Which version a column shows: the older one as it was, the newer one with its changes marked. */
 type Side = "old" | "new"
 
-/** A paragraph's words as one side shows them. */
+/**
+ * A paragraph's words as one side shows them.
+ *
+ * The older version shows its text plain: the removed words really are in
+ * it, and crossing them out there read as "never in this version" (user,
+ * 2026-10-29). The newer version shows every part, like Word's track
+ * changes: what was taken out (red, crossed out) next to what came in (green).
+ */
 function sideParts(parts: DiffPart[], side: Side): DiffPart[] {
-  const hidden = side === "old" ? "added" : "deleted"
-  return parts.filter((part) => part.kind !== hidden)
+  if (side === "new") return parts
+  const oldParts: DiffPart[] = []
+  for (const part of parts) {
+    if (part.kind === "added") continue
+    oldParts.push({ ...part, kind: "same" })
+  }
+  return oldParts
 }
 
 /** True when the parts have any words at all. */
@@ -310,8 +322,8 @@ function hasWords(parts: DiffPart[]): boolean {
 
 /**
  * One changed section, the two versions side by side: the older on the
- * left (removed words in red), the newer on the right (added words in
- * green), each changed paragraph on the same row. The Arabic reads right to
+ * left as it was, the newer on the right with removed words (red) and added
+ * words (green) marked, each changed paragraph on the same row. The Arabic reads right to
  * left, so there the older version is on the right.
  */
 function ChangedSection({
@@ -380,12 +392,12 @@ function SidePair({
   return (
     <>
       <div className={cn(cell, arabic ? "" : "md:border-r")}>
-        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo}</p>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo} (BEFORE)</p>
         <SideParagraph paragraph={paragraph} side="old" emptyText={`— not in Version ${fromNo}`} />
       </div>
       {/* Stacked (phone), it needs its own top line; side by side, only between rows. */}
       <div className={cn("min-w-0 border-t px-3 py-2.5", first && "md:border-t-0", arabic ? "md:border-r" : "")}>
-        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo}</p>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo} (AFTER)</p>
         <SideParagraph paragraph={paragraph} side="new" emptyText={`— removed in Version ${toNo}`} />
       </div>
     </>

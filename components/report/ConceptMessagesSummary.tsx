@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AreaConceptCard } from "@/components/report/AreaConceptCard"
 import type { AreaOfFocus, ConceptMessage } from "@/lib/api/pm"
+import { isGrouped, messagesOfArea } from "@/lib/conceptMessages"
 
 /** A real failure, as opposed to "nothing has been written yet". */
 export function ErrorPanel({ title, body }: { title: string; body: string }) {
@@ -25,6 +26,29 @@ export function ErrorPanel({ title, body }: { title: string; body: string }) {
 interface AreaPair {
   area: AreaOfFocus
   message?: ConceptMessage
+  /** New cycles: the area's USED messages (primary first), with positions. */
+  grouped?: { message: ConceptMessage; position: number }[]
+}
+
+/**
+ * New cycles (3 messages per area): the used areas, primary first, each with
+ * only the messages that go into the report — the area's primary message
+ * first, then its secondary ones. Same rule as app/utils/concept_groups.py.
+ */
+function usedGroupsPrimaryFirst(areas: AreaOfFocus[], messages: ConceptMessage[]): AreaPair[] {
+  const groups: AreaPair[] = []
+  areas.forEach((area, index) => {
+    if ((area.role ?? "none") === "none") return
+    const used = messagesOfArea(messages, index).filter(
+      ({ message }) => (message.role ?? "none") !== "none",
+    )
+    const lead = used.filter(({ message }) => message.role === "primary")
+    const rest = used.filter(({ message }) => message.role !== "primary")
+    groups.push({ area, grouped: [...lead, ...rest] })
+  })
+  const primary = groups.filter((g) => g.area.role === "primary")
+  const others = groups.filter((g) => g.area.role !== "primary")
+  return [...primary, ...others]
 }
 
 /**
@@ -116,7 +140,9 @@ export function ConceptMessagesSummary({
 }) {
   const { data, isLoading, error } = useConceptMessages(cycleId)
   const messages = data?.concept_messages ?? []
-  const pairs = usedPairsPrimaryFirst(pairAreasWithMessages(areas, messages))
+  const pairs = isGrouped(messages)
+    ? usedGroupsPrimaryFirst(areas, messages)
+    : usedPairsPrimaryFirst(pairAreasWithMessages(areas, messages))
 
   return (
     <section className="space-y-4">
@@ -170,6 +196,7 @@ export function ConceptMessagesSummary({
                 index={i}
                 area={p.area}
                 message={p.message}
+                groupedMessages={p.grouped}
                 roleGroup={`summary-${cycleId}`}
                 readOnly
                 onAreaChange={noop}

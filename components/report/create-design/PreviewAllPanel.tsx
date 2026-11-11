@@ -140,6 +140,9 @@ export function PreviewAllPanel({
   // 1 = the page filling the pane, so the opening view is 100% at any window
   // size and "Fit width" is a reset rather than a mode.
   const [zoom, setZoom] = useState(1)
+  // Portrait only: a spread of two landscape sheets is too small to read.
+  const [twoPages, setTwoPages] = useState(false)
+  const twoUp = twoPages && orientation === "portrait"
   const [pane, setPane] = useState({ w: 0, h: 0 })
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Sharper re-renders, deliberately OUT of the shared module cache: that is
@@ -155,9 +158,13 @@ export function PreviewAllPanel({
   // launch thrown away.
   const asked = useRef(new Set<string>())
 
-  const baseW = Math.max(240, Math.min(pane.w - GUTTER, maxFitWidth(orientation, format)))
+  // Two pages share the pane, so 100% still means "fill it".
+  const baseW = twoUp
+    ? Math.max(120, Math.min((pane.w - GUTTER) / 2, maxFitWidth(orientation, format)))
+    : Math.max(240, Math.min(pane.w - GUTTER, maxFitWidth(orientation, format)))
   const pageW = pane.w ? baseW * zoom : 0
   const pageH = pageW * ratio
+  const wantScale = scaleFor(pageW, orientation, format)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -260,6 +267,30 @@ export function PreviewAllPanel({
   }
   const chosen = pages.filter((p) => p.templateKey)
 
+  // Read the cache DURING render, the way PageRenderPanel does. The pre-warm
+  // has usually drawn every section page already, and without this they would
+  // all sit behind the cover and the contents page — the two slowest entries,
+  // and the first two in the queue — showing spinners for pictures already in
+  // memory. The sharp copy replaces the soft one in place when it lands: no
+  // spinner, no flash, no reflow. The page simply gets crisp.
+  const sheetsFor = (page: Page) =>
+    sharp[`${page.key}|s${wantScale}`] ??
+    urls[page.key] ??
+    (page.templateKey ? peek(page.key) : undefined)
+
+  // Two-page view pairs printed SHEETS, not units: one unit can print several.
+  // A unit with nothing drawn yet holds one slot, so pairs shift once when it
+  // lands. Like a book, the cover sits alone on the right.
+  type Slot = { page: Page; sheet?: string; index: number }
+  const slots: Slot[] = []
+  if (twoUp) {
+    for (const page of pages) {
+      const sheets = page.templateKey ? sheetsFor(page) : undefined
+      if (sheets) sheets.forEach((sheet, index) => slots.push({ page, sheet, index }))
+      else slots.push({ page, index: 0 })
+    }
+  }
+
   useEffect(() => {
     const ac = new AbortController()
     abort.current = ac
@@ -297,25 +328,27 @@ export function PreviewAllPanel({
   useEffect(() => {
     const root = scrollRef.current
     if (!root) return
-    const seen = new Set<string>()
+    // By element, not by key: in two-page view several sheets share a key,
+    // and one scrolling off must not hide a sibling still on screen.
+    const seen = new Map<Element, string>()
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
           const key = (e.target as HTMLElement).dataset.pageKey
           if (!key) continue
-          if (e.isIntersecting) seen.add(key)
-          else seen.delete(key)
+          if (e.isIntersecting) seen.set(e.target, key)
+          else seen.delete(e.target)
         }
-        setVisible([...seen])
+        setVisible([...new Set(seen.values())])
       },
       { root, rootMargin: "200px 0px 200px 0px", threshold: 0.01 },
     )
     figures.current.forEach((el) => io.observe(el))
     return () => io.disconnect()
-  }, [pages.length])
+    // Two-page slots come and go as sheets land and as the view toggles.
+  }, [pages.length, twoUp, slots.length])
 
   // ── sharpen what is on screen ─────────────────────────────────────────
-  const wantScale = scaleFor(pageW, orientation, format)
   useEffect(() => {
     if (wantScale <= BASE_SCALE || !visible.length) return
     const queue = pages.filter(
@@ -449,6 +482,65 @@ export function PreviewAllPanel({
     setAttempt((n) => n + 1)
   }
 
+  // What sits under a caption: the sheets, or the card that stands in for them.
+  const pageBody = (page: Page, sheets: string[] | undefined, first = 0) =>
+    !page.templateKey ? (
+      <div
+        className="flex items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm text-slate-400"
+        style={{ height: pageH || 260 }}
+      >
+        {page.missing}
+      </div>
+    ) : sheets ? (
+      <div className="space-y-3">
+        {sheets.map((sheet, i) => (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            key={i}
+            src={sheet}
+            alt={`${page.caption}, sheet ${first + i + 1}`}
+            // A sharp sheet is a multi-megabyte data URI that
+            // decodes to tens of MB. Async keeps that decode off
+            // the scroll path; nothing about what is shown moves.
+            decoding="async"
+            className="block w-full rounded-lg border border-slate-200 bg-white shadow-sm"
+          />
+        ))}
+      </div>
+    ) : failed[page.key] ? (
+      <div
+        className="flex flex-col items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 text-sm"
+        style={{ height: pageH || 260 }}
+      >
+        <p className="px-6 text-center text-[12px] text-amber-900">
+          {failed[page.key]}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px]"
+          onClick={() => retry(page.key)}
+        >
+          <RefreshCw className="mr-1.5 h-3 w-3" />
+          Try again
+        </Button>
+      </div>
+    ) : (
+      // Height reserved from the A4 ratio, so the run does not
+      // jump as pages land — the old fixed 360px did.
+      <div
+        className="flex items-center justify-center rounded-lg border border-slate-200 bg-white"
+        style={{ height: pageH || 360 }}
+      >
+        <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
+      </div>
+    )
+
+  const track = (id: string) => (el: HTMLElement | null) => {
+    if (el) figures.current.set(id, el)
+    else figures.current.delete(id)
+  }
+
   const here = pages.find((p) => visible.includes(p.key))
 
   return (
@@ -485,6 +577,8 @@ export function PreviewAllPanel({
             onZoom={(z) => zoomAround(z)}
             onFitWidth={fitWidth}
             onFitPage={fitPage}
+            twoPages={twoUp}
+            onTwoPages={orientation === "portrait" ? setTwoPages : undefined}
           />
           <div className="h-5 w-px bg-slate-200" />
           <Button variant="outline" size="sm" className="h-8" onClick={onExit}>
@@ -496,7 +590,7 @@ export function PreviewAllPanel({
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-slate-100 p-5">
         <div
           className="mx-auto space-y-6"
-          style={{ width: pageW || undefined }}
+          style={{ width: (twoUp ? 2 * pageW : pageW) || undefined }}
           onDoubleClick={() => zoomAround(zoom > 1.5 ? 1 : 2)}
         >
           {pages.length === 0 && (
@@ -504,84 +598,40 @@ export function PreviewAllPanel({
               Nothing to preview yet.
             </p>
           )}
-          {pages.map((page) => {
-            // Read the cache DURING render, the way PageRenderPanel does. The
-            // pre-warm has usually drawn every section page already, and
-            // without this they would all sit behind the cover and the
-            // contents page — the two slowest entries, and the first two in
-            // the queue — showing spinners for pictures already in memory.
-            const base =
-              urls[page.key] ?? (page.templateKey ? peek(page.key) : undefined)
-            // The sharp copy replaces the soft one in place when it lands: no
-            // spinner, no flash, no reflow. The page simply gets crisp.
-            const sheets = sharp[`${page.key}|s${wantScale}`] ?? base
-            return (
-              <figure
-                key={page.key}
-                data-page-key={page.key}
-                ref={(el) => {
-                  if (el) figures.current.set(page.key, el)
-                  else figures.current.delete(page.key)
-                }}
-                className="m-0"
-              >
-                <figcaption className="mb-1.5 truncate text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                  {page.caption}
-                </figcaption>
-                {!page.templateKey ? (
-                  <div
-                    className="flex items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm text-slate-400"
-                    style={{ height: pageH || 260 }}
-                  >
-                    {page.missing}
-                  </div>
-                ) : sheets ? (
-                  <div className="space-y-3">
-                    {sheets.map((sheet, i) => (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        key={i}
-                        src={sheet}
-                        alt={`${page.caption}, sheet ${i + 1}`}
-                        // A sharp sheet is a multi-megabyte data URI that
-                        // decodes to tens of MB. Async keeps that decode off
-                        // the scroll path; nothing about what is shown moves.
-                        decoding="async"
-                        className="block w-full rounded-lg border border-slate-200 bg-white shadow-sm"
-                      />
-                    ))}
-                  </div>
-                ) : failed[page.key] ? (
-                  <div
-                    className="flex flex-col items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 text-sm"
-                    style={{ height: pageH || 260 }}
-                  >
-                    <p className="px-6 text-center text-[12px] text-amber-900">
-                      {failed[page.key]}
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px]"
-                      onClick={() => retry(page.key)}
-                    >
-                      <RefreshCw className="mr-1.5 h-3 w-3" />
-                      Try again
-                    </Button>
-                  </div>
-                ) : (
-                  // Height reserved from the A4 ratio, so the run does not
-                  // jump as pages land — the old fixed 360px did.
-                  <div
-                    className="flex items-center justify-center rounded-lg border border-slate-200 bg-white"
-                    style={{ height: pageH || 360 }}
-                  >
-                    <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
-                  </div>
-                )}
-              </figure>
-            )
-          })}
+          {twoUp ? (
+            // One flat grid, not a row per pair: when a unit lands with several
+            // sheets the pairing shifts, and figures in fixed rows would remount
+            // and flash. Here they just flow to the next cell.
+            <div className="grid grid-cols-2 gap-y-6">
+              {slots.map((slot, i) => (
+                <figure
+                  key={`${slot.page.key}|${slot.index}`}
+                  data-page-key={slot.page.key}
+                  ref={track(`${slot.page.key}|${slot.index}`)}
+                  className={i === 0 ? "col-start-2 m-0" : "m-0"}
+                >
+                  <figcaption className="mb-1.5 truncate text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    {slot.page.caption}
+                  </figcaption>
+                  {pageBody(slot.page, slot.sheet ? [slot.sheet] : undefined, slot.index)}
+                </figure>
+              ))}
+            </div>
+          ) : (
+            pages.map((page) => (
+                <figure
+                  key={page.key}
+                  data-page-key={page.key}
+                  ref={track(page.key)}
+                  className="m-0"
+                >
+                  <figcaption className="mb-1.5 truncate text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    {page.caption}
+                  </figcaption>
+                  {pageBody(page, sheetsFor(page))}
+                </figure>
+              ))
+          )}
         </div>
       </div>
     </div>

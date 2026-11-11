@@ -1,4 +1,5 @@
 import axios from "axios"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { apiClient } from "@/lib/api/client"
 import type { AreaOfFocus } from "@/lib/areasOfFocus"
 import type { ConceptMessage, GenerateBriefAnswer, SurveyQuestion } from "@/lib/api/pm"
@@ -27,6 +28,18 @@ export const publicClient = axios.create({
   timeout: 30000,
 })
 
+// Out of AI credit: the backend says so on every response, failed ones included.
+publicClient.interceptors.response.use(
+  (response) => {
+    checkAiCreditsHeader(response.headers)
+    return response
+  },
+  (error) => {
+    checkAiCreditsHeader(error.response?.headers)
+    return Promise.reject(error)
+  },
+)
+
 export type ShareStage = "questionnaire" | "brief" | "areas"
 export type ShareStatus = "pending" | "responded" | "approved"
 export type ShareEmailStatus = "pending" | "sent" | "failed"
@@ -47,6 +60,8 @@ export interface KickoffHistoryEntry {
     | "edited"
     | "generated"
     | "refined"
+    /** Spark only: the departments were started before the client signed off. */
+    | "continued_without_client"
   actor_type: "spark" | "client"
   actor_id?: string | null
   /** A Spark user's name, or the client's email. */
@@ -105,10 +120,20 @@ export interface ShareRequest {
   document_name?: string | null
   document_id?: string | null
   created_at?: string | null
+  viewed_at?: string | null
   responded_at?: string | null
   approved_at?: string | null
   approved_by?: string | null
+  /** Areas gate, Spark only: set when Spark kicked off without waiting for the
+   *  client. The report plan stays blocked until this share is approved. */
+  continued_without_client_at?: string | null
+  continued_without_client_by?: string | null
 }
+
+/** True while an early kickoff is still waiting on the client's sign-off.
+ *  Mirrors share_service.kicked_off_without_client on the backend. */
+export const kickedOffWithoutClient = (share?: ShareRequest | null): boolean =>
+  !!share?.continued_without_client_at && share.status !== "approved"
 
 export interface CycleShares {
   cycle_id: string

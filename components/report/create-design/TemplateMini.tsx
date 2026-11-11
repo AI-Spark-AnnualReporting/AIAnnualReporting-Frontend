@@ -494,8 +494,8 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
       }}
     >
       {/* The fold is split at the middle of the sheet: half of it white, half
-          in the brand colour. Together the two insets give the same fold as
-          the data-tables card, about a tenth of the width. */}
+          in the brand colour. Together the two insets give a fold about a
+          tenth of the width, as on the page. */}
       <div
         style={{
           flex: 1,
@@ -527,132 +527,6 @@ function LandscapeTilesMini({ accent, presentation }: { accent: string; presenta
       >
         <div style={header} />
         {statTileGroup(TILE_INKS_ON_BRAND)}
-      </div>
-    </div>
-  )
-}
-
-/**
- * One head of a data table's header row, with the page's short accent line
- * on its start edge. The head text sits at the bottom of the row.
- */
-function tableHeadCell(width: string, ink: string) {
-  return (
-    <div
-      style={{
-        width,
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "flex-end",
-        borderLeft: `1px solid ${CORAL}`,
-        padding: "0 0 1px 2px",
-      }}
-    >
-      <div style={line("60%", ink, 2)} />
-    </div>
-  )
-}
-
-/**
- * One cell of a data table's body row. It starts where its head's text
- * starts, just after the short line, as the figures do on the page.
- */
-function tableBodyCell(width: string, ink: string) {
-  return (
-    <div style={{ width, flexShrink: 0, paddingLeft: 3 }}>
-      <div style={line("60%", ink, 2)} />
-    </div>
-  )
-}
-
-/**
- * One body row of a data table: the line label, the current year (bold on
- * the page, so darker here), then the year before it.
- */
-function tableBodyRow(shaded: boolean, index: number) {
-  return (
-    <div
-      key={index}
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: "flex",
-        alignItems: "center",
-        background: shaded ? "#F7F4F9" : "#fff",
-      }}
-    >
-      {tableBodyCell("52%", "#C3C7D4")}
-      {tableBodyCell("24%", "#6B7085")}
-      {tableBodyCell("24%", "#AEB3C2")}
-    </div>
-  )
-}
-
-/**
- * One data table under its title (the lead-in, in the brand colour): the
- * white header row, a group row as a brand bar when asked, then the rows,
- * every other one tinted starting with the first.
- */
-function dataTable(accent: string, rows: number, withGroupBar: boolean) {
-  return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div style={line("58%", accent, 2.5)} />
-      <div style={{ height: 8, marginTop: 3, flexShrink: 0, display: "flex" }}>
-        {tableHeadCell("52%", "#6B7085")}
-        {tableHeadCell("24%", "#6B7085")}
-        {tableHeadCell("24%", "#AEB3C2")}
-      </div>
-      {withGroupBar && (
-        <div
-          style={{
-            height: 6,
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            paddingLeft: 3,
-            background: accent,
-          }}
-        >
-          <div style={line("20%", "rgba(255,255,255,0.85)", 2)} />
-        </div>
-      )}
-      {Array.from({ length: rows }, (_, i) => tableBodyRow(i % 2 === 0, i))}
-    </div>
-  )
-}
-
-/**
- * The data-tables landscape page, drawn sideways like two facing pages with
- * the fold between them: on the left the subheading after its small square,
- * the opening text and a long table; on the right two more tables. Each table
- * sits under its title, with a short line at the start of each column head,
- * group rows in a brand bar and every other row tinted.
- */
-function LandscapeTablesMini({ accent, presentation }: { accent: string; presentation: boolean }) {
-  return (
-    <div
-      style={{
-        ...shell,
-        aspectRatio: landscapeRatio(presentation),
-        flexDirection: "row",
-        padding: 9,
-        gap: 0,
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
-          <div style={{ width: 4, height: 4, background: CORAL, flexShrink: 0 }} />
-          <div style={line("56%", accent, 3.5)} />
-        </div>
-        <div style={line("100%")} />
-        <div style={{ ...line("72%"), marginBottom: 5 }} />
-        {dataTable(accent, 16, true)}
-      </div>
-      {/* The fold: nothing is drawn in it on the page either. */}
-      <div style={{ flex: "0 0 11%" }} />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-        {dataTable(accent, 8, false)}
-        {dataTable(accent, 8, true)}
       </div>
     </div>
   )
@@ -822,29 +696,6 @@ function StatTilesMini({ accent }: { accent: string }) {
         }}
       >
         {statTileGroup(TILE_INKS_ON_BRAND)}
-      </div>
-    </div>
-  )
-}
-
-/**
- * The data-tables portrait page: the subheading after its small square, the
- * opening text, then the tables one under another across the full width, each
- * under its title with the same group bars, tinted rows and bold current year
- * as the landscape page.
- */
-function DataTablesMini({ accent }: { accent: string }) {
-  return (
-    <div style={{ ...shell, gap: 3 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
-        <div style={{ width: 4, height: 4, background: CORAL, flexShrink: 0 }} />
-        <div style={line("56%", accent, 3.5)} />
-      </div>
-      <div style={line("100%")} />
-      <div style={{ ...line("72%"), marginBottom: 4 }} />
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 7 }}>
-        {dataTable(accent, 10, true)}
-        {dataTable(accent, 8, false)}
       </div>
     </div>
   )
@@ -1663,9 +1514,6 @@ function TemplateMiniInner({
   if (templateKey === "landscape_tiles") {
     return <LandscapeTilesMini accent={accent} presentation={presentation} />
   }
-  if (templateKey === "landscape_tables") {
-    return <LandscapeTablesMini accent={accent} presentation={presentation} />
-  }
   if (templateKey === "landscape_editorial") {
     return <LandscapeEditorialMini accent={accent} presentation={presentation} />
   }
@@ -1700,9 +1548,6 @@ function TemplateMiniInner({
 
   if (templateKey === "stat_tiles") {
     return <StatTilesMini accent={accent} />
-  }
-  if (templateKey === "data_tables") {
-    return <DataTablesMini accent={accent} />
   }
   if (templateKey === "borderless_table") {
     return <BorderlessTableMini accent={accent} />
@@ -1966,34 +1811,6 @@ function TemplateMiniInner({
     )
   }
 
-  if (templateKey === "financial_table") {
-    return (
-      <div style={shell}>
-        <div style={line("14%", accent, 3)} />
-        <div style={line("68%", "#9AA0B4", 5)} />
-        <div style={{ ...line("100%", "#E4E6F1", 1), marginTop: 1 }} />
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, marginTop: 3 }}>
-          <div style={{ height: 6, background: accent, flexShrink: 0 }} />
-          {Array.from({ length: 6 }, (_, i) => (
-            <div
-              key={i}
-              style={{
-                height: 6,
-                background: i % 2 ? "#F7F4F9" : "#fff",
-                borderBottom: "0.5px solid #EDEFF6",
-                display: "flex",
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ width: "55%", borderRight: "1px solid #fff" }} />
-              <div style={{ width: "25%", borderRight: "1px solid #fff" }} />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   const withStats = templateKey === "narrative_with_stats"
   return (
     <div style={shell}>
@@ -2041,7 +1858,6 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   narrative_text_heavy: "Prose",
   narrative_with_stats: "Prose + figures",
   kpi_stat_grid: "Figure grid",
-  financial_table: "Table",
   statement_letter: "Letter",
   executive_statement: "Executive statement",
   editorial_alternating: "Editorial — alternating",
@@ -2049,7 +1865,6 @@ export const TEMPLATE_NAMES: Record<string, string> = {
   editorial_columns: "Editorial — columns",
   statement_stat_rail: "Statement — figure rail",
   stat_tiles: "Stat tiles",
-  data_tables: "Data tables",
   photo_panel: "Photo + panel",
   people_grid: "People",
   borderless_table: "Borderless table",

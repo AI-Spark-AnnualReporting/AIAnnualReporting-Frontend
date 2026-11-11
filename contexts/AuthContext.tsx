@@ -8,6 +8,7 @@ import React, {
   useCallback,
 } from "react"
 import { useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import { User, UserRole } from "@/types"
 import { authApi } from "@/lib/api/auth"
 import { centriyonLoginUrl } from "@/lib/centriyon"
@@ -15,9 +16,11 @@ import {
   clearPostLoginRedirect,
   consumePostLoginRedirect,
   isSafeRedirectPath,
+  rememberSignedInUser,
 } from "@/lib/postLoginRedirect"
 import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
 import { clearBackUrl, setBackUrl } from "@/lib/backUrl"
+import { getStoredToken, isStillStoredToken } from "@/lib/storedToken"
 
 interface AuthContextValue {
   user: User | null
@@ -52,11 +55,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
+  const queryClient = useQueryClient()
+
   const refreshUser = useCallback(async () => {
+    // The token this check is about. If a newer sign-in saves another one while
+    // /auth/me is in flight (a hand-off tab racing a left-over token), this
+    // result is stale either way and must not touch the session — see
+    // lib/storedToken.
+    const checkedToken = getStoredToken()
     try {
       const userData = await authApi.me()
+      if (!isStillStoredToken(checkedToken)) return
+      rememberSignedInUser(userData.user_id)
       setUser(userData)
     } catch {
+      if (!isStillStoredToken(checkedToken)) return
       setUser(null)
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
@@ -65,7 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
-    if (token) {
+    // On the hand-off page the token in the URL is about to replace the saved
+    // one, and loginWithToken checks it itself. Checking the saved (old) one
+    // here as well can only race it.
+    const handingOff =
+      window.location.pathname === "/auth/token" &&
+      new URLSearchParams(window.location.search).has("token")
+    if (token && !handingOff) {
       refreshUser().finally(() => setIsLoading(false))
     } else {
       setIsLoading(false)
@@ -98,11 +117,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Centriyon-origin URL is kept — see lib/backUrl.
       setBackUrl(opts?.back)
       const userData = await authApi.me()
+      // A new sign-in may be a different person (e.g. Spark, then a client
+      // PM in the same browser). Drop everything cached for the previous one,
+      // or their open pages refetch with this login and fail.
+      queryClient.clear()
+      rememberSignedInUser(userData.user_id)
       setUser(userData)
       // An explicit destination wins: it is the whole point of the handoff.
       // Otherwise resume a session that expired mid-work, then fall back to the
       // role home. RouteGuard re-routes if the role can't see the page.
-      const back = consumePostLoginRedirect()
+      const back = consumePostLoginRedirect(userData.user_id)
       const target = isSafeRedirectPath(opts?.next)
         ? opts.next
         : back ?? ROLE_ROUTES[userData.role] ?? "/login"
@@ -110,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // press away, and for a super-admin's token that is worth avoiding.
       router.replace(target)
     },
-    [router]
+    [router, queryClient]
   )
 
   const logout = useCallback(async () => {

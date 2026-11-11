@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 export function ClientDriftNotice({
   changed,
   canSendBack = true,
+  compact = false,
   className,
 }: {
   /** Whether anything has moved since they sent it. */
@@ -28,9 +29,33 @@ export function ClientDriftNotice({
   /** False once it is signed off — sending it back is no longer an option, so
    *  offering it in the copy would be a dead end. */
   canSendBack?: boolean
+  /** One slim line, for a screen whose height has to go to the editing below
+   *  it (Spark's areas of focus step). The two-line box there left the areas
+   *  list about one line tall. */
+  compact?: boolean
   className?: string
 }) {
   if (!changed) return null
+
+  if (compact) {
+    return (
+      <div
+        className={cn(
+          "flex items-start gap-1.5 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900",
+          className,
+        )}
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p>
+          <span className="font-semibold">You&apos;ve changed this since they sent it.</span>{" "}
+          <span className="text-amber-800">
+            Their link still shows the earlier wording.
+            {canSendBack ? " Send it back if they should see this." : ""}
+          </span>
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div

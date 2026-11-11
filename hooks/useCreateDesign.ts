@@ -15,7 +15,7 @@ import {
   createDesignApi, type CustomPaper, type CycleDesign, type DesignEnvelope,
 } from "@/lib/api/createDesign"
 import { QUERY_KEYS } from "@/lib/constants"
-import type { Orientation } from "@/lib/orientation"
+import { keyUnlessRetired, type Orientation } from "@/lib/orientation"
 import { readError, type MutationError } from "@/hooks/useReportBuilder"
 
 export function useCycleDesign(cycleId: string) {
@@ -50,7 +50,9 @@ function patchSection(
     for (const s of sections) {
       for (const u of s.design?.units ?? []) {
         unitsTotal += 1
-        if (u.template_key) unitsChosen += 1
+        // A retired key prints the plain layout, so it is not a design
+        // (the backend skips it the same way).
+        if (keyUnlessRetired(u.template_key)) unitsChosen += 1
       }
     }
     return { ...old, sections, units_total: unitsTotal, units_chosen: unitsChosen }

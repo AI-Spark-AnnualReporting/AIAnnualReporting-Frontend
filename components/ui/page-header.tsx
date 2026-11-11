@@ -15,7 +15,9 @@ export function PageHeader({ title, description, action, className }: PageHeader
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
         {description && (
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          // A div, not a p: descriptions can hold block content (e.g. a
+          // loading skeleton), which is invalid inside <p> and breaks hydration.
+          <div className="mt-1 text-sm text-muted-foreground">{description}</div>
         )}
       </div>
       {action && <div className="flex shrink-0 items-center gap-3">{action}</div>}

@@ -25,9 +25,11 @@ import {
   PAGE_FORMAT_LABELS,
   PORTRAIT_OPENER_KEYS,
   PORTRAIT_OPENER_NAMES,
+  RETIRED_TEMPLATES,
   applyToAllLabel,
   countPicked,
   isLandscapeTemplateKey,
+  keyUnlessRetired,
   keyForFormat,
   landscapeCoverKey,
   landscapeOpenerChoice,
@@ -53,7 +55,6 @@ const PORTRAIT_PAGE_KEYS = [
   "narrative_text_heavy",
   "narrative_with_stats",
   "kpi_stat_grid",
-  "financial_table",
   "statement_letter",
   "executive_statement",
   "editorial_alternating",
@@ -61,7 +62,6 @@ const PORTRAIT_PAGE_KEYS = [
   "editorial_columns",
   "statement_stat_rail",
   "stat_tiles",
-  "data_tables",
   "photo_panel",
   "people_grid",
   "borderless_table",
@@ -69,8 +69,8 @@ const PORTRAIT_PAGE_KEYS = [
   "striped_table",
   "zebra_table",
 ]
-// Eighteen portrait section cards, the same count /reports/page-options returns.
-assert.equal(PORTRAIT_PAGE_KEYS.length, 18)
+// Sixteen portrait section cards, the same count /reports/page-options returns.
+assert.equal(PORTRAIT_PAGE_KEYS.length, 16)
 const PORTRAIT_COVER_KEYS = ["statement", "band", "panel", "monolith"]
 const PORTRAIT_TOC_KEYS = ["classic", "columns", "spread", "index", "brand_band"]
 const PORTRAIT_DIVIDER_KEYS = ["rule", "banded", "full", "figure", "numeral", "split"]
@@ -91,8 +91,8 @@ assert.equal(pickedKey(both, "portrait"), "kpi_stat_grid")
 assert.equal(pickedKey(both, "landscape"), LANDSCAPE_TEMPLATE_KEY)
 
 // A page extracted before landscape existed has no landscape field at all.
-const portraitOnly = { template_key: "financial_table" }
-assert.equal(pickedKey(portraitOnly, "portrait"), "financial_table")
+const portraitOnly = { template_key: "stat_tiles" }
+assert.equal(pickedKey(portraitOnly, "portrait"), "stat_tiles")
 assert.equal(pickedKey(portraitOnly, "landscape"), null)
 
 // A landscape pick never leaks into portrait.
@@ -100,6 +100,14 @@ const landscapeOnly = { template_key: null, landscape_template_key: LANDSCAPE_TE
 assert.equal(pickedKey(landscapeOnly, "portrait"), null)
 assert.equal(pickedKey(landscapeOnly, "landscape"), LANDSCAPE_TEMPLATE_KEY)
 assert.equal(pickedKey({ template_key: null, landscape_template_key: null }, "landscape"), null)
+
+// A retired pick (old "Data tables" pages still stored on live rows) reads as
+// no pick, so the rail, Preview All and the counters all show the plain layout.
+const retired = { template_key: "data_tables", landscape_template_key: "landscape_tables" }
+assert.equal(pickedKey(retired, "portrait"), null)
+assert.equal(pickedKey(retired, "landscape"), null)
+assert.deepEqual(countPicked([{ design: { units: [retired, both] } }], "portrait"), { picked: 1, total: 2 })
+assert.deepEqual(countPicked([{ design: { units: [retired, both] } }], "landscape"), { picked: 1, total: 2 })
 
 // countPicked: every page of every section with a design; none without.
 const sections = [
@@ -111,6 +119,20 @@ const sections = [
 assert.deepEqual(countPicked(sections, "portrait"), { picked: 2, total: 4 })
 assert.deepEqual(countPicked(sections, "landscape"), { picked: 2, total: 4 })
 assert.deepEqual(countPicked([], "portrait"), { picked: 0, total: 0 })
+// A retired key counts as no pick in either orientation.
+assert.deepEqual(
+  countPicked([{ design: { units: [
+    { template_key: "data_tables", landscape_template_key: "landscape_tables" },
+    { template_key: "grid_table", landscape_template_key: "landscape_rail" },
+  ] } }], "portrait"),
+  { picked: 1, total: 2 },
+)
+assert.deepEqual(
+  countPicked([{ design: { units: [
+    { template_key: "data_tables", landscape_template_key: "landscape_tables" },
+  ] } }], "landscape"),
+  { picked: 0, total: 1 },
+)
 assert.deepEqual(
   countPicked([{ design: { units: [portraitOnly, portraitOnly] } }], "landscape"),
   { picked: 0, total: 2 },
@@ -122,16 +144,16 @@ assert.deepEqual(pageSize("landscape"), { width: 841.89, height: 595.28 })
 assert.ok(pageSize("portrait").height > pageSize("portrait").width)
 assert.ok(pageSize("landscape").width > pageSize("landscape").height)
 
-// The seventeen landscape section templates, the default first. Copied from the
+// The sixteen landscape section templates, the default first. Copied from the
 // engine's page_templates.LANDSCAPE_KEYS.
 assert.deepEqual([...LANDSCAPE_TEMPLATE_KEYS], [
   "landscape_columns", "landscape_rail", "landscape_hero",
   "landscape_picture", "landscape_statement", "landscape_schedule", "landscape_essay",
-  "landscape_tiles", "landscape_tables", "landscape_editorial", "landscape_portrait",
+  "landscape_tiles", "landscape_editorial", "landscape_portrait",
   "landscape_photo_panel", "landscape_people", "landscape_borderless_table",
   "landscape_grid_table", "landscape_striped_table", "landscape_zebra_table",
 ])
-assert.equal(LANDSCAPE_TEMPLATE_KEYS.length, 17)
+assert.equal(LANDSCAPE_TEMPLATE_KEYS.length, 16)
 assert.equal(LANDSCAPE_TEMPLATE_KEYS[0], LANDSCAPE_TEMPLATE_KEY)
 
 // The landscape covers and contents pages, the default first. Copied from the
@@ -177,7 +199,7 @@ assert.equal(portraitOpenerChoice(landscapeOpenerOnly), null)
 
 // landscapeOptions: one card per landscape template, nothing recommended.
 const options = landscapeOptions()
-assert.equal(options.length, 17)
+assert.equal(options.length, 16)
 assert.deepEqual(options.map((option) => option.key), [...LANDSCAPE_TEMPLATE_KEYS])
 for (const option of options) {
   assert.deepEqual(option, {
@@ -205,7 +227,8 @@ const portraitCards = [
     counts: { table: 1 }, dropped: { pull_quotes: 2 } },
   { key: "zebra_table", recommended: false, reason: null,
     counts: { table: 4 }, dropped: { narrative_blocks: 2 } },
-  { key: "landscape_tables", recommended: false, reason: null,
+  // A portrait card with no landscape twin: nothing may copy its counts.
+  { key: "kpi_stat_grid", recommended: false, reason: null,
     counts: { table: 2 }, dropped: {} },
 ]
 const borrowed = landscapeOptions(portraitCards)
@@ -234,7 +257,23 @@ for (const option of borrowed) {
   assert.deepEqual(option.dropped, {}, option.key)
 }
 
-// isLandscapeTemplateKey: the seventeen, and nothing else.
+// RETIRED_TEMPLATES / keyUnlessRetired: both Data tables pages are retired, so
+// an old pick of either reads as no pick (the plain layout), and no retired key
+// is still offered anywhere.
+assert.ok(RETIRED_TEMPLATES.has("data_tables"))
+assert.ok(RETIRED_TEMPLATES.has("landscape_tables"))
+assert.ok(RETIRED_TEMPLATES.has("financial_table"))
+assert.equal(keyUnlessRetired("data_tables"), null)
+assert.equal(keyUnlessRetired("landscape_tables"), null)
+assert.equal(keyUnlessRetired("grid_table"), "grid_table")
+assert.equal(keyUnlessRetired("landscape_rail"), "landscape_rail")
+assert.equal(keyUnlessRetired(null), null)
+assert.equal(keyUnlessRetired(undefined), null)
+assert.equal(keyUnlessRetired(""), null)
+for (const key of LANDSCAPE_TEMPLATE_KEYS) assert.ok(!RETIRED_TEMPLATES.has(key), key)
+for (const key of PORTRAIT_PAGE_KEYS) assert.ok(!RETIRED_TEMPLATES.has(key), key)
+
+// isLandscapeTemplateKey: the sixteen, and nothing else.
 for (const key of LANDSCAPE_TEMPLATE_KEYS) assert.ok(isLandscapeTemplateKey(key))
 for (const key of PORTRAIT_PAGE_KEYS) assert.ok(!isLandscapeTemplateKey(key))
 assert.ok(!isLandscapeTemplateKey(null))
@@ -263,7 +302,7 @@ for (const key of ["landscape_borderless_table", "landscape_grid_table", "landsc
   assert.match(landscapeAppliedText(3, key, "Zebra table"), /3 sections with tables$/)
 }
 assert.equal(applyToAllLabel("landscape_rail", "Figure rail"), "Use Figure rail for all sections")
-assert.equal(applyToAllLabel("landscape_tables", "Data tables"), "Use Data tables for all sections")
+assert.equal(applyToAllLabel("landscape_tiles", "Stat tiles"), "Use Stat tiles for all sections")
 assert.equal(landscapeAppliedText(0, "landscape_rail", "Figure rail"), "Every section already has a landscape template")
 assert.equal(landscapeAppliedText(1, "landscape_rail", "Figure rail"), "Figure rail applied to 1 section")
 assert.equal(landscapeAppliedText(4, "landscape_rail", "Figure rail"), "Figure rail applied to 4 sections")
@@ -336,7 +375,7 @@ assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_statement, "Landscape — statem
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_schedule, "Landscape — schedule")
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_essay, "Landscape — essay")
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_tiles, "Landscape — stat tiles")
-assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_tables, "Landscape — data tables")
+assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_tables, undefined, "Data tables is retired")
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_editorial, "Landscape — editorial columns")
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_portrait, "Landscape — portrait + stats")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_picture, "Picture spread")
@@ -344,7 +383,7 @@ assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_statement, "Statement")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_schedule, "Schedule")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_essay, "Essay")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_tiles, "Stat tiles")
-assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_tables, "Data tables")
+assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_tables, undefined, "Data tables is retired")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_editorial, "Editorial columns")
 assert.equal(LANDSCAPE_TEMPLATE_SHORT_NAMES.landscape_portrait, "Portrait + stats")
 assert.equal(LANDSCAPE_TEMPLATE_NAMES.landscape_photo_panel, "Landscape — photo + panel")

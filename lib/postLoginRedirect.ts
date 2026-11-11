@@ -8,11 +8,27 @@
  * we come back on `/auth/token?token=…` with no query params of our own.
  */
 const KEY = "sar_post_login_redirect"
+// Who was signed in when the path was stored. A page from one account must
+// never be resumed for another (e.g. a Spark cycle for a client-company PM,
+// which then 404s on every request the page makes).
+const USER_KEY = "sar_signed_in_user"
+
+/** Remember who is signed in, so a stored path can be tied to them. */
+export function rememberSignedInUser(userId: string) {
+  try {
+    localStorage.setItem(USER_KEY, userId)
+  } catch {
+    // Private mode / quota — the redirect just won't be resumed.
+  }
+}
 const MAX_AGE_MS = 60 * 60 * 1000 // 1h — a day-old path is no longer "where I was"
 
 export function storePostLoginRedirect(path: string) {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ path, ts: Date.now() }))
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ path, ts: Date.now(), user: localStorage.getItem(USER_KEY) }),
+    )
   } catch {
     // Private mode / quota — losing the return path is not worth failing over.
   }
@@ -42,13 +58,19 @@ export function isSafeRedirectPath(path: unknown): path is string {
   return true
 }
 
-export function consumePostLoginRedirect(): string | null {
+export function consumePostLoginRedirect(userId: string): string | null {
   const raw = localStorage.getItem(KEY)
   clearPostLoginRedirect()
   if (!raw) return null
   try {
-    const { path, ts } = JSON.parse(raw) as { path?: unknown; ts?: unknown }
+    const { path, ts, user } = JSON.parse(raw) as {
+      path?: unknown
+      ts?: unknown
+      user?: unknown
+    }
     if (typeof ts !== "number") return null
+    // Only resume for the same person; anyone else starts on their home page.
+    if (user !== userId) return null
     if (Date.now() - ts > MAX_AGE_MS) return null
     if (!isSafeRedirectPath(path)) return null
     return path

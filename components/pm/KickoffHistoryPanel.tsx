@@ -37,6 +37,11 @@ const ACTION: Record<KickoffHistoryEntry["action"], { icon: LucideIcon; verb: st
   edited: { icon: Pencil, verb: "edited it", tone: "bg-violet-100 text-violet-700" },
   generated: { icon: Sparkles, verb: "AI wrote it", tone: "bg-fuchsia-100 text-fuchsia-700" },
   refined: { icon: Wand2, verb: "Refined with AI", tone: "bg-fuchsia-100 text-fuchsia-700" },
+  continued_without_client: {
+    icon: Send,
+    verb: "started the departments before the client signed off",
+    tone: "bg-amber-100 text-amber-700",
+  },
 }
 
 /** AI runs read as the AI's work, with the Spark user who started it named. */
@@ -206,6 +211,10 @@ function AreasChange({ before, after }: { before: Loose; after: Loose }) {
   const newMessages = list(after?.concept_messages)
   const oldByName = new Map(oldAreas.map((a) => [areaKey(a), a]))
   const newNames = new Set(newAreas.map(areaKey))
+  // New cycles: 3 messages per area, found by area_index, each with its own role.
+  const grouped = newMessages.some((m) => typeof m.area_index === "number")
+  const messagesAt = (messages: Record<string, unknown>[], areaIndex: number) =>
+    messages.filter((m) => m.area_index === areaIndex)
 
   const rows = []
   let unchanged = 0
@@ -234,11 +243,28 @@ function AreasChange({ before, after }: { before: Loose; after: Loose }) {
     }
 
     const oldMessage = messageFor(old, oldMessages)
-    const roleChanged = roleOf(old) !== roleOf(area)
-    const wordingChanged =
-      text(old.summary) !== text(area.summary) ||
-      text(oldMessage?.title) !== text(message?.title) ||
-      text(oldMessage?.description) !== text(message?.description)
+    // New cycles: compare the area's 3 messages slot by slot, picks included.
+    const oldGroup = grouped ? messagesAt(oldMessages, oldAreas.indexOf(old)) : []
+    const newGroup = grouped ? messagesAt(newMessages, newAreas.indexOf(area)) : []
+    const slots = Math.max(oldGroup.length, newGroup.length)
+    let groupWordingChanged = false
+    const pickChanges: string[] = []
+    for (let k = 0; k < slots; k++) {
+      const a = oldGroup[k]
+      const b = newGroup[k]
+      if (text(a?.title) !== text(b?.title) || text(a?.description) !== text(b?.description)) {
+        groupWordingChanged = true
+      }
+      const ra = roleOf(a)
+      const rb = roleOf(b)
+      if (ra !== rb) pickChanges.push(`message ${k + 1}: ${ra} → ${rb}`)
+    }
+    const roleChanged = roleOf(old) !== roleOf(area) || pickChanges.length > 0
+    const wordingChanged = grouped
+      ? text(old.summary) !== text(area.summary) || groupWordingChanged
+      : text(old.summary) !== text(area.summary) ||
+        text(oldMessage?.title) !== text(message?.title) ||
+        text(oldMessage?.description) !== text(message?.description)
     if (!roleChanged && !wordingChanged) {
       unchanged += 1
       continue
@@ -249,7 +275,14 @@ function AreasChange({ before, after }: { before: Loose; after: Loose }) {
         <span className="font-semibold">{name}</span>{" "}
         {roleChanged ? (
           <span className="text-muted-foreground">
-            {roleOf(old)} → <span className="font-semibold text-foreground">{roleOf(area)}</span>
+            {roleOf(old) !== roleOf(area) && (
+              <>
+                {roleOf(old)} → <span className="font-semibold text-foreground">{roleOf(area)}</span>
+              </>
+            )}
+            {pickChanges.length > 0 && (
+              <span className="ms-1">({pickChanges.join(", ")})</span>
+            )}
           </span>
         ) : (
           <span className="text-muted-foreground">wording changed</span>
@@ -257,12 +290,31 @@ function AreasChange({ before, after }: { before: Loose; after: Loose }) {
         {wordingChanged && (
           <MoreText label="Show wording changes">
             <TextChange label="Summary" before={text(old.summary)} after={text(area.summary)} />
-            <TextChange label="Message title" before={text(oldMessage?.title)} after={text(message?.title)} />
-            <TextChange
-              label="Concept message"
-              before={text(oldMessage?.description)}
-              after={text(message?.description)}
-            />
+            {grouped ? (
+              Array.from({ length: slots }, (_, k) => (
+                <div key={k} className="space-y-1">
+                  <TextChange
+                    label={`Message ${k + 1} title`}
+                    before={text(oldGroup[k]?.title)}
+                    after={text(newGroup[k]?.title)}
+                  />
+                  <TextChange
+                    label={`Message ${k + 1}`}
+                    before={text(oldGroup[k]?.description)}
+                    after={text(newGroup[k]?.description)}
+                  />
+                </div>
+              ))
+            ) : (
+              <>
+                <TextChange label="Message title" before={text(oldMessage?.title)} after={text(message?.title)} />
+                <TextChange
+                  label="Concept message"
+                  before={text(oldMessage?.description)}
+                  after={text(message?.description)}
+                />
+              </>
+            )}
           </MoreText>
         )}
       </li>,

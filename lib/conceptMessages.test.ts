@@ -36,3 +36,44 @@ assert.equal(primaryIndexOf([]), -1, "empty list")
 assert.equal(primaryIndexOf(msgs("primary", "primary")), 0, "first of two primaries")
 
 console.log("primaryIndexOf: all checks passed")
+
+// ── 3 areas x 3 concept messages ──
+import {
+  areasMissingPrimaryMessage,
+  blankAreaMessages,
+  hasBlankUsedMessage,
+  isGrouped,
+  messagesOfArea,
+  removeAreaMessages,
+  setMessageRole,
+} from "./conceptMessages"
+
+const g = (area_index: number, role: "primary" | "secondary" | "none", title = "T") =>
+  ({ title, description: "copy", area_index, role })
+
+const nine = [0, 1, 2].flatMap((a) => [g(a, "none"), g(a, "none"), g(a, "none")])
+assert.ok(isGrouped(nine), "area_index marks the new shape")
+assert.ok(!isGrouped(msgs("primary")), "old messages are not grouped")
+assert.deepEqual(messagesOfArea(nine, 1).map((x) => x.position), [3, 4, 5], "area 2 = positions 3-5")
+
+const picked = setMessageRole(setMessageRole(nine, 3, "primary"), 4, "primary")
+assert.equal(picked[3].role, "secondary", "a new primary demotes the old one in the same area")
+assert.equal(picked[4].role, "primary")
+assert.equal(setMessageRole(picked, 0, "primary")[4].role, "primary", "other areas untouched")
+
+const removed = removeAreaMessages(nine, 0)
+assert.equal(removed.length, 6)
+assert.deepEqual([...new Set(removed.map((m) => m.area_index))], [0, 1], "indexes close the gap")
+
+assert.equal(blankAreaMessages(2).length, 3)
+assert.ok(!hasBlankUsedMessage(blankAreaMessages(2)), "blank but unused is fine")
+assert.ok(hasBlankUsedMessage([{ title: "", description: "", area_index: 0, role: "secondary" }]))
+
+const areas = [
+  { slogan: "Lead", role: "primary" },
+  { slogan: "Used", role: "secondary" },
+  { slogan: "Dropped", role: "none" },
+]
+assert.deepEqual(areasMissingPrimaryMessage(areas, setMessageRole(nine, 0, "primary")), ["Used"])
+
+console.log("conceptMessages: grouped checks passed")

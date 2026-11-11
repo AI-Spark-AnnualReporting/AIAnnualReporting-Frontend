@@ -14,7 +14,6 @@ import {
   useCheckDrafts,
   useDepartmentClaims,
   useDraftFindings,
-  usePlan,
 } from "@/hooks/useReportBuilder"
 import { DraftCheckLoader } from "@/components/report/DraftCheckLoader"
 import { PageHeader } from "@/components/ui/page-header"
@@ -53,6 +52,7 @@ import {
 import Link from "next/link"
 import { formatDate, deptLeadLabel } from "@/lib/utils"
 import { cn } from "@/lib/utils"
+import { pickReportBuilderDestination } from "@/lib/reportBuilderDestination"
 import { toast } from "sonner"
 
 // Shape of the PM cycle dashboard API response
@@ -92,14 +92,11 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const createEscalation = useCreateEscalation()
   const { data: escalationsData } = useEscalations(id)
   const bulkReminder = useBulkReminder()
-  const { data: readiness } = useBuildReadiness(id)
+  const readinessQuery = useBuildReadiness(id)
+  const readiness = readinessQuery.data
   // Departments whose facts look short: warned on the Department Claims button.
   const { data: claimsData } = useDepartmentClaims(id, (readiness?.departments_approved ?? 0) > 0)
   const shortFacts = departmentsWithShortFacts(claimsData)
-  // Only to decide where "Open Report Builder" goes. Once the plan is locked
-  // the plan screen has nothing left to do, so the builder is the resume point.
-  const { data: plan } = usePlan(id)
-  const planLocked = !!plan?.sections_locked
   // Pre-build draft checks. Read-only here — running the check is an explicit
   // click inside the panel, so opening this page never costs a model call.
   const draftFindingsQuery = useDraftFindings(id)
@@ -919,8 +916,42 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
           {(() => {
-            const total = readiness?.departments_total ?? 0
-            const approved = readiness?.departments_approved ?? 0
+            // Where the button goes is decided by the server's facts. Not known
+            // yet, or the read failed: say so instead of guessing a screen
+            // (guessing is how a quick click used to open the plan screen).
+            if (readinessQuery.isPending) {
+              return (
+                <Button disabled>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Checking…
+                </Button>
+              )
+            }
+            if (!readiness) {
+              return (
+                <Button variant="outline" onClick={() => readinessQuery.refetch()}>
+                  Couldn&apos;t check this cycle. Retry
+                </Button>
+              )
+            }
+            const destination = pickReportBuilderDestination(id, readiness)
+
+            // A report is assembled: the final screen, whatever else is true.
+            // No analysis (it would run on a finished report) and no department
+            // gate (a department reopened later must not hide the report).
+            if (destination.screen === "report") {
+              return (
+                <Link href={destination.href}>
+                  <Button>
+                    {destination.label}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+              )
+            }
+
+            const total = readiness.departments_total ?? 0
+            const approved = readiness.departments_approved ?? 0
 
             // Gated on EVERY department being approved, NOT on can_build. The
             // check sits at the builder gate (agreed when it was planned): run
@@ -961,19 +992,15 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               const findingsLocked = !!draftFindings?.locked_at
               const noAnalysisPossible = alreadyAnalyzed || findingsLocked
 
-              // Everything handled: the findings are no longer in the way, so
-              // go straight to the builder. The header keeps a link back to
-              // them for the record of what was corrected.
-              if (noAnalysisPossible && stillOpen === 0 && readiness?.can_build) {
-                // Once the plan is locked the plan screen is read-only, so
-                // landing on it is an extra click — resume in the builder.
-                const href = planLocked
-                  ? `/pm/cycles/${id}/build`
-                  : `/pm/cycles/${id}/plan`
+              // The PM has consented on the findings page: the findings are no
+              // longer in the way, so go straight in — the builder once the
+              // plan is locked, the plan screen before. The header keeps a link
+              // back to the findings for the record of what was corrected.
+              if (!destination.needsFindingsStep && stillOpen === 0 && readiness.can_build) {
                 return (
-                  <Link href={href}>
+                  <Link href={destination.href}>
                     <Button>
-                      {planLocked ? "Continue Report Builder" : "Open Report Builder"}
+                      {destination.label}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>

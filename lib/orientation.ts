@@ -53,7 +53,6 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_schedule",
   "landscape_essay",
   "landscape_tiles",
-  "landscape_tables",
   "landscape_editorial",
   "landscape_portrait",
   "landscape_photo_panel",
@@ -63,6 +62,29 @@ export const LANDSCAPE_TEMPLATE_KEYS = [
   "landscape_striped_table",
   "landscape_zebra_table",
 ] as const
+
+/**
+ * Templates no longer offered anywhere (the engine's RETIRED_KEYS). Both
+ * "Data tables" pages are here: a section with a real table now gets no
+ * template and prints in the plain layout, so their old cards must hide.
+ */
+export const RETIRED_TEMPLATES: ReadonlySet<string> = new Set([
+  "financial_table",
+  "data_tables",
+  "landscape_tables",
+])
+
+/**
+ * A saved template key, or null when there is none or it is retired.
+ *
+ * A retired key would ask the engine for a page it no longer has, so it is
+ * treated like no pick: the section shows (and prints in) the plain layout.
+ */
+export function keyUnlessRetired(key: string | null | undefined): string | null {
+  if (!key) return null
+  if (RETIRED_TEMPLATES.has(key)) return null
+  return key
+}
 
 /** The default landscape section-page template — the first in the list. */
 export const LANDSCAPE_TEMPLATE_KEY = "landscape_columns"
@@ -100,7 +122,6 @@ export const LANDSCAPE_TEMPLATE_NAMES: Record<string, string> = {
   landscape_schedule: "Landscape — schedule",
   landscape_essay: "Landscape — essay",
   landscape_tiles: "Landscape — stat tiles",
-  landscape_tables: "Landscape — data tables",
   landscape_editorial: "Landscape — editorial columns",
   landscape_portrait: "Landscape — portrait + stats",
   landscape_photo_panel: "Landscape — photo + panel",
@@ -124,7 +145,6 @@ export const LANDSCAPE_TEMPLATE_SHORT_NAMES: Record<string, string> = {
   landscape_schedule: "Schedule",
   landscape_essay: "Essay",
   landscape_tiles: "Stat tiles",
-  landscape_tables: "Data tables",
   landscape_editorial: "Editorial columns",
   landscape_portrait: "Portrait + stats",
   landscape_photo_panel: "Photo + panel",
@@ -277,11 +297,16 @@ export function orientationOf(
 /**
  * The template a person picked for this page in one orientation.
  *
+ * A retired pick (e.g. an old "Data tables" page) reads as no pick: the
+ * engine no longer has that page, so every caller — rail, Preview All, the
+ * card grid, the counters — must show and count it as the plain layout.
+ *
  * @returns the portrait or landscape pick, or null when nothing is picked
+ *   or the pick is retired
  */
 export function pickedKey(unit: UnitPicks, orientation: Orientation): string | null {
-  if (orientation === "landscape") return unit.landscape_template_key ?? null
-  return unit.template_key ?? null
+  if (orientation === "landscape") return keyUnlessRetired(unit.landscape_template_key)
+  return keyUnlessRetired(unit.template_key)
 }
 
 /**
@@ -302,7 +327,8 @@ export function countPicked(
   for (const section of sections) {
     for (const unit of section.design?.units ?? []) {
       total += 1
-      if (pickedKey(unit, orientation)) picked += 1
+      // A retired key prints the plain layout, so it does not count as picked.
+      if (keyUnlessRetired(pickedKey(unit, orientation))) picked += 1
     }
   }
   return { picked, total }

@@ -25,6 +25,7 @@
 import { getActingCompany } from "@/lib/actingCompany"
 import { noteEpoch } from "@/lib/createDesignCache"
 import { parseSseFrames } from "@/lib/sseFrames"
+import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { apiClient } from "./client"
 
 /** A stage of the extraction, announced as it starts. */
@@ -153,6 +154,7 @@ export async function streamSectionBlocks(
       signal,
       cache: "no-store",
     })
+    checkAiCreditsHeader(res.headers)
 
     if (!res.ok) {
       // The pre-stream channel: the guard refused before any byte was written,

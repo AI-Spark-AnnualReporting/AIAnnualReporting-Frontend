@@ -704,7 +704,8 @@ export interface RefineAreasOfFocusResponse {
 //
 // Generation failures come back as 200 with an EMPTY list, not an error status,
 // so callers must check `concept_messages.length` rather than trusting the code.
-export type ConceptRole = "primary" | "secondary"
+/** "none" exists only on new 3-messages-per-area cycles (not used in the report). */
+export type ConceptRole = "primary" | "secondary" | "none"
 
 export interface ConceptMessage {
   /** A two-word phrase the agent reads off the copy it just wrote — NOT the
@@ -729,6 +730,12 @@ export interface ConceptMessage {
    * it on writes (spread the message) or the link back to the area is lost.
    */
   area_slogan?: string
+  /**
+   * New cycles only (3 areas x 3 messages): which area, 0-based, this message
+   * belongs to, and `role` is then chosen WITHIN that area. Absent on old
+   * one-message-per-area cycles, which keep the position link.
+   */
+  area_index?: number | null
 }
 
 export interface ConceptMessagesResponse {
@@ -793,6 +800,9 @@ export interface KickoffBriefPayload {
   additional_context?: string
   // Optional — backend default is 12, accepted range 5-20
   num_questions?: number
+  /** spark_internal ONLY: kick off while the areas of focus are still with the
+   *  client. The backend 403s any other role that sends it. */
+  continue_without_client?: boolean
 }
 
 // PM-access cycle + session list shapes (real backend endpoints)
@@ -1407,8 +1417,14 @@ export const pmApi = {
 
   // Ignore validation findings (ignored=true), or undo that (false). Several
   // keys go in one save.
+  // 120 s, not the default 30: a save takes a few seconds, but a backend busy
+  // with an assemble or a validation can make it wait well past 30 s.
   ignoreFindings: async (cycleId: string, keys: string[], ignored: boolean): Promise<void> => {
-    await apiClient.put(`/pm/cycles/${cycleId}/validation/ignore`, { keys, ignored })
+    await apiClient.put(
+      `/pm/cycles/${cycleId}/validation/ignore`,
+      { keys, ignored },
+      { timeout: 120000 },
+    )
   },
 
   // Undo the latest `steps` changes to a section since the validation. Returns
