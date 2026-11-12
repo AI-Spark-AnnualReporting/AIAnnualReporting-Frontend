@@ -368,6 +368,34 @@ function AreasResult({ areas }: { areas: Record<string, unknown>[] }) {
 }
 
 /** Questions added, removed, reworded or (un)rejected, and answers changed. */
+/** A question's choices as plain strings (none when it is free-text). */
+function choicesOf(question: Record<string, unknown>): string[] {
+  const options = question.options
+  if (!Array.isArray(options)) return []
+  return options.map((o) => text(o))
+}
+
+/** The choices taken away (red) and added (green); a rename shows as both.
+ *  Nothing when the choices are the same. */
+function ChoicesChange({ before, after }: { before: string[]; after: string[] }) {
+  const removed = before.filter((o) => !after.includes(o))
+  const added = after.filter((o) => !before.includes(o))
+  if (removed.length === 0 && added.length === 0) return null
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Choices changed</p>
+      <p className="flex flex-wrap gap-1.5 text-sm">
+        {removed.map((o) => (
+          <del key={`rm-${o}`} className="rounded bg-red-100 px-1.5 text-red-800">{o}</del>
+        ))}
+        {added.map((o) => (
+          <ins key={`add-${o}`} className="rounded bg-green-100 px-1.5 text-green-900 no-underline">{o}</ins>
+        ))}
+      </p>
+    </div>
+  )
+}
+
 function QuestionnaireChange({ before, after }: { before: Loose; after: Loose }) {
   const oldQuestions = list(before?.questions)
   const newQuestions = list(after?.questions)
@@ -412,6 +440,16 @@ function QuestionnaireChange({ before, after }: { before: Loose; after: Loose })
     } else {
       if (text(old.text) !== text(q.text)) {
         rows.push(<TextChange key={`text-${id}`} label="Question reworded" before={text(old.text)} after={text(q.text)} />)
+      }
+      const oldChoices = choicesOf(old)
+      const newChoices = choicesOf(q)
+      if (oldChoices.join("\n") !== newChoices.join("\n")) {
+        rows.push(
+          <div key={`opt-${id}`} className="space-y-1">
+            <p className="text-sm font-medium text-foreground">{text(q.text)}</p>
+            <ChoicesChange before={oldChoices} after={newChoices} />
+          </div>,
+        )
       }
       if (Boolean(old.rejected_by) !== Boolean(q.rejected_by)) {
         rows.push(

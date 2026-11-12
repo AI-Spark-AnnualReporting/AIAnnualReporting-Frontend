@@ -26,6 +26,7 @@ import {
 import {
   QuestionnaireForm,
   QuestionnaireValue,
+  answerAfterOptionsChange,
   buildAnswersPayload,
   emptyQuestionnaireValue,
   answeredCount,
@@ -206,6 +207,12 @@ export default function ClientSharePage({
   // server adopts them onto the cycle then, and renumbers the ids.
   const [extraQuestions, setExtraQuestions] = useState<SurveyQuestion[]>([])
   const [newQuestion, setNewQuestion] = useState("")
+  // Their rewording of OUR questions, by question id. Local until they send —
+  // the server then writes it onto the cycle. Kept apart from the link's list
+  // so "Undo my change" can put the original back.
+  const [questionEdits, setQuestionEdits] = useState<
+    Record<string, { text: string; options: string[] | null }>
+  >({})
   // Their note back on the bundle. The questionnaire doesn't need one — its
   // last question already asks "anything else?".
   const [note, setNote] = useState("")
@@ -287,10 +294,63 @@ export default function ClientSharePage({
 
   // Theirs go last, after the catch-all: a question they wrote is the newest
   // thing on the page and reads as an addition rather than part of our set.
-  const questions = useMemo(
-    () => [...(view?.payload.questions ?? []), ...extraQuestions],
-    [view, extraQuestions],
-  )
+  const questions = useMemo(() => {
+    const shown: SurveyQuestion[] = []
+    for (const q of view?.payload.questions ?? []) {
+      const edit = questionEdits[q.id]
+      shown.push(edit ? { ...q, text: edit.text, options: edit.options } : q)
+    }
+    return [...shown, ...extraQuestions]
+  }, [view, extraQuestions, questionEdits])
+
+  /** The question as the link showed it, before any change of theirs. */
+  const originalQuestion = (questionId: string): SurveyQuestion | undefined =>
+    (view?.payload.questions ?? []).find((q) => q.id === questionId)
+
+  /** Their edit of any question. Their own new questions are changed in
+   *  place; ours are kept as an edit so it can be undone. */
+  const editQuestion = (questionId: string, text: string, options: string[] | null) => {
+    if (extraQuestions.some((q) => q.id === questionId)) {
+      setExtraQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, text, options } : q)),
+      )
+      return
+    }
+    const original = originalQuestion(questionId)
+    const unchanged =
+      original &&
+      original.text === text &&
+      JSON.stringify(original.options ?? null) === JSON.stringify(options)
+    setQuestionEdits((prev) => {
+      const next = { ...prev }
+      if (unchanged) delete next[questionId]
+      else next[questionId] = { text, options }
+      return next
+    })
+  }
+
+  /** Put our wording back, and keep their answer valid for our choices. */
+  const undoQuestionEdit = (questionId: string) => {
+    const original = originalQuestion(questionId)
+    const index = questions.findIndex((q) => q.id === questionId)
+    setQuestionEdits((prev) => {
+      const next = { ...prev }
+      delete next[questionId]
+      return next
+    })
+    if (!original || index < 0) return
+    setAnswers((prev) => {
+      const current = prev.answers[index]
+      if (!current) return prev
+      return {
+        ...prev,
+        answers: {
+          ...prev.answers,
+          [index]: answerAfterOptionsChange(current, original.options ?? null),
+        },
+      }
+    })
+  }
 
   const addQuestion = () => {
     const text = newQuestion.trim()
@@ -302,12 +362,6 @@ export default function ClientSharePage({
       { id: `own-${Date.now()}`, text, source: "manual", options: null },
     ])
     setNewQuestion("")
-  }
-
-  const editExtraQuestion = (questionId: string, text: string) => {
-    setExtraQuestions((prev) =>
-      prev.map((q) => (q.id === questionId ? { ...q, text } : q)),
-    )
   }
 
   const removeExtraQuestion = (questionId: string) => {
@@ -403,7 +457,16 @@ export default function ClientSharePage({
         view.stage === "questionnaire"
           ? {
               answers: buildAnswersPayload(questions, answers),
-              added_questions: extraQuestions.map((q) => ({ id: q.id, text: q.text })),
+              added_questions: extraQuestions.map((q) => ({
+                id: q.id,
+                text: q.text,
+                options: q.options,
+              })),
+              edited_questions: Object.entries(questionEdits).map(([qid, edit]) => ({
+                id: qid,
+                text: edit.text,
+                options: edit.options,
+              })),
               // Recorded on the question as "rejected by the client", so Spark
               // can tell a deliberate skip from a missed one.
               rejected_question_ids: questions
@@ -428,6 +491,8 @@ export default function ClientSharePage({
       // The server now lists their questions on the link itself (renumbered),
       // so the browser-only copies would show twice.
       setExtraQuestions([])
+      // Same for their rewording: the link's list now carries it.
+      setQuestionEdits({})
       setJustSent(true)
     } catch (err) {
       toast.error(
@@ -526,11 +591,15 @@ export default function ClientSharePage({
               value={answers}
               onChange={setAnswers}
               readOnly={!editable}
-              // Only their own. Spark's questions are theirs to answer, not
-              // to reword or remove.
+              // Delete: only their own. Spark's questions they can reject,
+              // not remove.
               editableQuestionIds={extraQuestions.map((q) => q.id)}
               onRemoveQuestion={canAdd ? removeExtraQuestion : undefined}
-              onEditQuestion={canAdd ? editExtraQuestion : undefined}
+              // Edit: any question, every round, while the link is open.
+              onEditQuestion={editable ? editQuestion : undefined}
+              undoableQuestionIds={Object.keys(questionEdits)}
+              onUndoEdit={undoQuestionEdit}
+              showEditedBy={false}
             />
 
             {/* Anything we didn't think to ask. They write the question and
