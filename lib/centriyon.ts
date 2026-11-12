@@ -13,25 +13,23 @@ export function centriyonLoginUrl(): string {
 }
 
 /**
- * Absolute Centriyon URL that carries the current session's JWT, so the user
- * arrives signed in instead of at a login form — the mirror of the passthrough
- * Centriyon uses to send users here, landing on its `/auth/token` page the way
- * SAR's own `app/auth/token` receives one.
+ * Absolute Centriyon URL for `path` (omit it for the dashboard).
  *
- * `path` is where they should end up once the token is stored; omit it for the
- * dashboard. Without a token the deep link is still returned — a user with a
- * live Centriyon session lands straight on it, and one without gets Centriyon's
- * login. Returns null only when there is no base URL to build on.
+ * It no longer carries a token. Since refresh tokens, Centriyon keeps its own
+ * session in its own storage on this browser (the user came here from it), so
+ * a plain link lands them signed in; one without a session gets Centriyon's
+ * login, which sends them on to `path` afterwards. Putting a token in the link
+ * only left it in browser history. `_token` stays so callers need no change.
+ * Returns null only when there is no base URL to build on.
+ * Plan: Centriton/.claude/plans/refresh-token.md
  */
 export function centriyonUrl(
-  token: string | null | undefined,
+  _token: string | null | undefined,
   path = "/",
 ): string | null {
   const base = centriyonBaseUrl()
   if (!base) return null
-  if (!token) return `${base}${path === "/" ? "" : path}`
-  const next = path === "/" ? "" : `&next=${encodeURIComponent(path)}`
-  return `${base}/auth/token?token=${encodeURIComponent(token)}${next}`
+  return `${base}${path === "/" ? "" : path}`
 }
 
 /** The dashboard, carrying the session. Null without a base URL or a token. */

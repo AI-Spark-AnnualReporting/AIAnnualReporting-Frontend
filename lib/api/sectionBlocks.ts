@@ -27,6 +27,7 @@ import { noteEpoch } from "@/lib/createDesignCache"
 import { parseSseFrames } from "@/lib/sseFrames"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { apiClient } from "./client"
+import { fetchWithRefresh } from "./session"
 
 /** A stage of the extraction, announced as it starts. */
 export interface CreateDesignStep {
@@ -148,7 +149,9 @@ export async function streamSectionBlocks(
   }
 
   try {
-    const res = await fetch(url, {
+    // A 401 before the stream starts (access token ran out) renews the session
+    // and asks again once; a stream already running is never retried.
+    const res = await fetchWithRefresh(url, {
       method: "GET",
       headers,
       signal,

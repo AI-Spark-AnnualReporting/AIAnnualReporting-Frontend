@@ -8,6 +8,7 @@ import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
 import { getActingCompany } from "@/lib/actingCompany"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
+import { clearSession, retryOnceAfterRefresh } from "@/lib/api/session"
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -108,8 +109,11 @@ apiClient.interceptors.request.use(
 )
 
 // Response interceptor:
-//   401 → token is invalid/expired. There is no SAR refresh flow any more —
-//   bounce the user back to Centriyon login so they can re-authenticate.
+//   401 → the access token (15 minutes) ran out. Renew it with the refresh
+//   token and resend the request once (lib/api/session). Only when Centriyon
+//   refuses the refresh token is the session over: bounce the user back to
+//   Centriyon login. If Centriyon can't be reached, keep the session and just
+//   fail this request.
 //
 //   We deliberately do NOT redirect when the failing call is `/auth/me` or
 //   `/auth/logout`. `me` runs on mount with whatever happens to be in
@@ -126,6 +130,9 @@ apiClient.interceptors.response.use(
     // Out of AI credit: the backend says so on every response, failed ones included.
     checkAiCreditsHeader(error.response?.headers)
     if (error.response?.status === 401 && typeof window !== "undefined") {
+      const retried = await retryOnceAfterRefresh(error, apiClient)
+      if (retried && typeof retried !== "string") return retried
+
       const url: string = error.config?.url ?? ""
       const isAuthEndpoint =
         url.includes("/auth/me") || url.includes("/auth/logout")
@@ -133,9 +140,9 @@ apiClient.interceptors.response.use(
       // flight while a hand-off tab signed in) says nothing about the current
       // session — clearing here would log out the sign-in that replaced it.
       const sentToken = tokenFromAuthHeader(error.config?.headers?.Authorization)
-      if (!isAuthEndpoint && isStillStoredToken(sentToken)) {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("refresh_token")
+      const sessionIsOver = retried !== "unavailable"
+      if (sessionIsOver && !isAuthEndpoint && isStillStoredToken(sentToken)) {
+        clearSession()
         // Remember the page so login lands back here, not on the role home —
         // an expiry mid-kickoff otherwise loses the PM's place entirely.
         storePostLoginRedirect(window.location.pathname + window.location.search)

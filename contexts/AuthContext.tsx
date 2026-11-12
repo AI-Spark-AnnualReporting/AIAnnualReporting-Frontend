@@ -21,19 +21,22 @@ import {
 import { clearActingCompany, setActingCompany } from "@/lib/actingCompany"
 import { clearBackUrl, setBackUrl } from "@/lib/backUrl"
 import { getStoredToken, isStillStoredToken } from "@/lib/storedToken"
+import { clearSession, revokeRefreshToken, startSessionFromHandoff } from "@/lib/api/session"
+
+interface HandoffOptions {
+  next?: string | null
+  company?: string | null
+  back?: string | null
+}
 
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  loginWithToken: (
-    token: string,
-    opts?: {
-      next?: string | null
-      company?: string | null
-      back?: string | null
-    }
-  ) => Promise<void>
+  /** Old hand-off: a bare access token in `?token=` (older Centriyon builds). */
+  loginWithToken: (token: string, opts?: HandoffOptions) => Promise<void>
+  /** New hand-off: this app's own refresh token, from after `#` in the link. */
+  loginWithRefreshToken: (refreshToken: string, opts?: HandoffOptions) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
@@ -57,7 +60,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const queryClient = useQueryClient()
 
-  const refreshUser = useCallback(async () => {
+  // One /auth/me check of the saved session. "failed" = the check couldn't be
+  // made (network, timeout, 5xx) — that says nothing about the session itself.
+  const checkSavedSession = useCallback(async (): Promise<"done" | "failed"> => {
     // The token this check is about. If a newer sign-in saves another one while
     // /auth/me is in flight (a hand-off tab racing a left-over token), this
     // result is stale either way and must not touch the session — see
@@ -65,46 +70,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const checkedToken = getStoredToken()
     try {
       const userData = await authApi.me()
-      if (!isStillStoredToken(checkedToken)) return
+      if (!isStillStoredToken(checkedToken)) return "done"
       rememberSignedInUser(userData.user_id)
       setUser(userData)
-    } catch {
-      if (!isStillStoredToken(checkedToken)) return
+      return "done"
+    } catch (err) {
+      if (!isStillStoredToken(checkedToken)) return "done"
+      // Only a 401 means the session is over — by now the api client has
+      // already tried to renew it. A network error, a timeout or a 5xx (the
+      // backend answers 503 when its database hiccups) must not sign anyone out.
+      const status = (err as { status?: number } | undefined)?.status
+      if (status !== 401) return "failed"
       setUser(null)
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
+      clearSession()
+      return "done"
     }
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    await checkSavedSession()
+  }, [checkSavedSession])
+
+  // On start-up, a check that couldn't be made is tried again (after 2, 4 and
+  // 6 seconds) instead of signing the user out over a blip. Only if the server
+  // stays unreachable does the session go, as it always did.
+  const loadSavedSession = useCallback(async () => {
+    for (const waitMs of [0, 2000, 4000, 6000]) {
+      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs))
+      if ((await checkSavedSession()) === "done") return
+    }
+    setUser(null)
+    clearSession()
+  }, [checkSavedSession])
+
   useEffect(() => {
     const token = localStorage.getItem("access_token")
-    // On the hand-off page the token in the URL is about to replace the saved
-    // one, and loginWithToken checks it itself. Checking the saved (old) one
-    // here as well can only race it.
-    const handingOff =
-      window.location.pathname === "/auth/token" &&
-      new URLSearchParams(window.location.search).has("token")
+    // On the hand-off page the session in the URL is about to replace the
+    // saved one, and the login there checks it itself. Checking the saved
+    // (old) one here as well can only race it. Decided by the path alone: that
+    // page's effect runs BEFORE this one and has already removed the `#…`
+    // from the address bar, so looking for the token here would miss it.
+    const handingOff = window.location.pathname === "/auth/token"
     if (token && !handingOff) {
-      refreshUser().finally(() => setIsLoading(false))
+      loadSavedSession().finally(() => setIsLoading(false))
     } else {
       setIsLoading(false)
     }
-  }, [refreshUser])
+  }, [loadSavedSession])
 
-  // Centriyon SSO: the JWT is minted by Centriyon and handed to SAR via
-  // `?token=` on the root URL. We persist it, hydrate the user, and route to
-  // their role home. There's no SAR-issued refresh token any more.
-  const loginWithToken = useCallback(
-    async (
-      token: string,
-      opts?: {
-        next?: string | null
-        company?: string | null
-        back?: string | null
-      }
-    ) => {
-      localStorage.setItem("access_token", token)
-      localStorage.removeItem("refresh_token")
+  // After the session is saved (either hand-off): hydrate the user and route.
+  const finishSignIn = useCallback(
+    async (opts?: HandoffOptions) => {
       // Spark accounts carry no company of their own; the backend resolves the
       // one they are acting on from X-Company-Id, which the api client attaches
       // from here. Set it BEFORE /auth/me — that call is company-scoped too.
@@ -137,14 +153,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [router, queryClient]
   )
 
+  // Old Centriyon SSO: a bare access token handed over in `?token=`. It can't
+  // renew itself, so the session ends when it expires. Kept for Centriyon
+  // builds older than refresh tokens; remove one release after.
+  const loginWithToken = useCallback(
+    async (token: string, opts?: HandoffOptions) => {
+      clearSession()
+      localStorage.setItem("access_token", token)
+      await finishSignIn(opts)
+    },
+    [finishSignIn]
+  )
+
+  // Centriyon SSO: Centriyon starts a separate session for this app and puts
+  // its refresh token after `#` in the link. Swapping it at once gives this
+  // tab its own access + refresh token, and kills the copy left in history.
+  // A link that can't be swapped (stale, already used) leaves any session
+  // already saved here alone — only a successful swap replaces it.
+  const loginWithRefreshToken = useCallback(
+    async (refreshToken: string, opts?: HandoffOptions) => {
+      const started = await startSessionFromHandoff(refreshToken)
+      if (!started) throw new Error("This sign-in link has expired or was already used.")
+      await finishSignIn(opts)
+    },
+    [finishSignIn]
+  )
+
   const logout = useCallback(async () => {
+    // Ends this session at Centriyon, so the refresh token stops working.
+    // First, and fire-and-forget: it must not wait on the SAR call below.
+    revokeRefreshToken()
     try {
       await authApi.logout()
     } catch {
       // ignore — local cleanup + Centriyon bounce still happens
     } finally {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
+      clearSession()
       // Signing out is deliberate — don't resume the last page on next login.
       clearPostLoginRedirect()
       // Otherwise the next person on this browser inherits a Spark session's
@@ -163,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         loginWithToken,
+        loginWithRefreshToken,
         logout,
         refreshUser,
       }}

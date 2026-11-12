@@ -43,10 +43,10 @@ Open [http://localhost:3000](http://localhost:3000).
 | Styling | TailwindCSS v4 + shadcn/ui (Radix) |
 | Server state | TanStack Query |
 | Forms | React Hook Form + Zod |
-| HTTP | Axios (Centriyon JWT; 401 → Centriyon login redirect) |
+| HTTP | Axios (Centriyon JWT; 401 → refresh at Centriyon + retry once; refused → Centriyon login) |
 | Icons | Lucide React |
 | Toasts | Sonner |
-| Auth | Centriyon SSO — receives JWT via `?token=` on root; no refresh token |
+| Auth | Centriyon SSO — own session via `#refresh_token=` on `/auth/token`, renewed at Centriyon (`lib/api/session.ts`) |
 | DnD | `@dnd-kit/core` + `@dnd-kit/sortable` (plan reorder) |
 | Markdown | `react-markdown` |
 | Drag-and-drop upload | `react-dropzone` |
