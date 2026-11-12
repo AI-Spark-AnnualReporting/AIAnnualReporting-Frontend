@@ -576,6 +576,9 @@ export interface SurveyQuestion {
    *  list so the rejection can be traced. */
   rejected_by?: "spark" | "pm" | "client" | null
   rejected_at?: string | null
+  /** Who last changed the wording or choices — absent if never edited. */
+  edited_by?: "spark" | "pm" | "client" | null
+  edited_at?: string | null
 }
 
 export interface SurveyQuestionsResponse {
@@ -947,6 +950,23 @@ export const pmApi = {
     const { data } = await apiClient.put<SurveyQuestionsResponse>(
       `/pm/cycles/${cycleId}/questions/${encodeURIComponent(questionId)}/rejection`,
       { rejected },
+    )
+    return data
+  },
+
+  // PUT /pm/cycles/{id}/questions/{qid} — change one question's wording and
+  // choices. Any question, the AI's and the template's too. Allowed between
+  // rounds; 409 while the client holds the link, once the brief exists, or if
+  // the question is rejected. Empty or null options make it free-text.
+  editQuestion: async (
+    cycleId: string,
+    questionId: string,
+    text: string,
+    options: string[] | null,
+  ): Promise<SurveyQuestionsResponse> => {
+    const { data } = await apiClient.put<SurveyQuestionsResponse>(
+      `/pm/cycles/${cycleId}/questions/${encodeURIComponent(questionId)}`,
+      { text, options },
     )
     return data
   },

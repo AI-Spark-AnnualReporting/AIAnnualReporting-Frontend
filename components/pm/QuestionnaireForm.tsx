@@ -1,10 +1,14 @@
 "use client"
 
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { SurveyQuestion } from "@/lib/api/pm"
 import {
   Answer,
   QuestionnaireValue,
+  answerAfterOptionsChange,
+  cleanChoices,
   emptyAnswer,
   isAnswered,
 } from "@/lib/questionnaireAnswers"
@@ -12,6 +16,8 @@ import {
 // The pure answer logic lives in lib/questionnaireAnswers so its round-trip can
 // be tested without a DOM. Re-exported here so callers have one import.
 export {
+  answerAfterOptionsChange,
+  cleanChoices,
   emptyAnswer,
   emptyQuestionnaireValue,
   isAnswered,
@@ -24,7 +30,7 @@ export {
 } from "@/lib/questionnaireAnswers"
 export type { Answer, QuestionnaireValue } from "@/lib/questionnaireAnswers"
 import { cn } from "@/lib/utils"
-import { Ban, Check, Loader2, RotateCcw, Trash2, X } from "lucide-react"
+import { Ban, Check, Loader2, Pencil, RotateCcw, Trash2, X } from "lucide-react"
 
 /* ────────────────────────────────────────────────────────────────────────────
    The strategic questionnaire, rendered once and used twice: by the PM on
@@ -70,6 +76,15 @@ function formatRejectedAt(iso: string): string {
   })
 }
 
+/** One question being edited: its position, and the draft wording/choices.
+ *  Nothing is saved until Save, so Cancel simply drops the draft. */
+interface QuestionDraft {
+  index: number
+  text: string
+  options: string[]
+  newOption: string
+}
+
 export function QuestionnaireForm({
   questions,
   value,
@@ -80,12 +95,15 @@ export function QuestionnaireForm({
   onEditQuestion,
   onToggleRejected,
   deletingQuestionId,
+  undoableQuestionIds,
+  onUndoEdit,
+  showEditedBy = true,
 }: {
   questions: SurveyQuestion[]
   value: QuestionnaireValue
   onChange: (next: QuestionnaireValue) => void
   readOnly?: boolean
-  /** Which questions THIS reader may edit or delete, by id.
+  /** Which questions THIS reader may DELETE, by id.
    *
    *  Not derived from `source` any more. Both Spark and the client write their
    *  own questions and both are stored as "manual", so keying off that let the
@@ -94,10 +112,21 @@ export function QuestionnaireForm({
    *  knows which of these questions are the reader's own. */
   editableQuestionIds?: string[]
   onRemoveQuestion?: (questionId: string) => void
-  /** Same rule as onRemoveQuestion: only Spark's own questions, only while the
-   *  list is still Spark's to change. Committed on blur, not per keystroke —
-   *  each commit is a save. */
-  onEditQuestion?: (questionId: string, text: string) => void
+  /** Change one question's wording and choices. ANY question may be edited
+   *  (not only the reader's own), while the form isn't read-only and the
+   *  question isn't rejected. Called once, on Save. Omit to hide Edit. */
+  onEditQuestion?: (
+    questionId: string,
+    text: string,
+    options: string[] | null,
+  ) => void | Promise<void>
+  /** Questions the reader changed this round and can still take back (the
+   *  client's page, before they send). Shows "Undo my change". */
+  undoableQuestionIds?: string[]
+  onUndoEdit?: (questionId: string) => void
+  /** Show "Edited by …" under a question. Off on the client's page — who at
+   *  Spark changed a question is not theirs to read. */
+  showEditedBy?: boolean
   /** Persist a rejection as it happens. The form still flips it on screen at
    *  once; this records it, so it survives a refresh and says who made it.
    *  Omitted on the client's page, which sends its rejections with the reply. */
@@ -108,6 +137,50 @@ export function QuestionnaireForm({
 }) {
   const { answers, rejected } = value
   const mine = new Set(editableQuestionIds ?? [])
+  const undoable = new Set(undoableQuestionIds ?? [])
+  // One question edited at a time.
+  const [draft, setDraft] = useState<QuestionDraft | null>(null)
+  const [savingDraft, setSavingDraft] = useState(false)
+
+  const startEdit = (index: number) => {
+    const q = questions[index]
+    if (!q) return
+    setDraft({ index, text: q.text, options: [...(q.options ?? [])], newOption: "" })
+  }
+
+  /** Add the "+ Add choice" box's text as a choice, then clear the box. */
+  const addDraftOption = () => {
+    if (!draft) return
+    const text = draft.newOption.trim()
+    if (!text) return
+    setDraft({ ...draft, options: [...draft.options, text], newOption: "" })
+  }
+
+  /** Save the draft: keep the answer valid for the new choices, then hand the
+   *  change to the page (which saves it, or keeps it until the client sends). */
+  const saveDraft = async () => {
+    if (!draft || !onEditQuestion) return
+    const q = questions[draft.index]
+    const text = draft.text.trim()
+    if (!q || !text) return
+    const pending = draft.newOption.trim()
+    const options = cleanChoices(pending ? [...draft.options, pending] : draft.options)
+
+    const current = answers[draft.index]
+    if (current) {
+      onChange({
+        ...value,
+        answers: { ...answers, [draft.index]: answerAfterOptionsChange(current, options) },
+      })
+    }
+    setSavingDraft(true)
+    try {
+      await onEditQuestion(q.id, text, options)
+      setDraft(null)
+    } finally {
+      setSavingDraft(false)
+    }
+  }
   const patch = (answersNext: Record<number, Answer>) =>
     onChange({ ...value, answers: answersNext })
 
@@ -192,6 +265,8 @@ export function QuestionnaireForm({
         const answered = !isRejected && isAnswered(a)
         const presets = q.options ?? []
         const longForm = isLongForm(q)
+        const isEditing = draft?.index === i
+        const canEdit = !!onEditQuestion && !readOnly && !isRejected
 
         return (
           <div
@@ -218,27 +293,24 @@ export function QuestionnaireForm({
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
-                {onEditQuestion && mine.has(q.id) && !readOnly && !isRejected ? (
-                  // Uncontrolled on purpose: a controlled input would save on
-                  // every keystroke. defaultValue + commit-on-blur is one save
-                  // per edit.
+                {isEditing && draft ? (
+                  // Saved on Save, not on blur: wording and choices go
+                  // together, and Cancel has to be able to drop both.
                   <input
-                    key={`${q.id}:${q.text}`}
                     type="text"
-                    defaultValue={q.text}
+                    value={draft.text}
+                    autoFocus
                     aria-label={`Edit question ${i + 1}`}
-                    onBlur={(e) => {
-                      const next = e.target.value.trim()
-                      if (next && next !== q.text) onEditQuestion(q.id, next)
-                      else e.target.value = q.text
-                    }}
+                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault()
-                        e.currentTarget.blur()
+                        saveDraft()
+                      } else if (e.key === "Escape") {
+                        setDraft(null)
                       }
                     }}
-                    className="w-full rounded-md border border-transparent bg-transparent px-1.5 py-0.5 font-semibold leading-snug text-foreground outline-none transition-colors hover:border-border focus:border-indigo-400 focus:bg-background"
+                    className="w-full rounded-md border border-indigo-400 bg-background px-1.5 py-0.5 font-semibold leading-snug text-foreground outline-none transition-colors"
                   />
                 ) : (
                   <p
@@ -261,6 +333,27 @@ export function QuestionnaireForm({
                       : "Skipped — this question won't be used in the brief."}
                   </p>
                 )}
+                {!isRejected && !isEditing && undoable.has(q.id) && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    You changed this question.{" "}
+                    {onUndoEdit && !readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => onUndoEdit(q.id)}
+                        className="font-semibold text-indigo-700 hover:underline"
+                      >
+                        Undo my change
+                      </button>
+                    )}
+                  </p>
+                )}
+                {!isRejected && !isEditing && !undoable.has(q.id) && showEditedBy && q.edited_by && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {`Edited by ${REJECTED_BY_LABEL[q.edited_by] ?? q.edited_by}${
+                      q.edited_at ? ` on ${formatRejectedAt(q.edited_at)}` : ""
+                    }`}
+                  </p>
+                )}
 
               </div>
               {answered && (
@@ -268,7 +361,18 @@ export function QuestionnaireForm({
                   <Check className="h-3 w-3" /> Answered
                 </span>
               )}
-              {!readOnly && onRemoveQuestion && mine.has(q.id) && (
+              {canEdit && !isEditing && (
+                <button
+                  type="button"
+                  onClick={() => startEdit(i)}
+                  disabled={!!draft}
+                  title="Change this question's wording or choices"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
+                >
+                  <Pencil className="h-3 w-3" /> Edit
+                </button>
+              )}
+              {!readOnly && onRemoveQuestion && mine.has(q.id) && !isEditing && (
                 <button
                   type="button"
                   onClick={() => onRemoveQuestion(q.id)}
@@ -287,7 +391,7 @@ export function QuestionnaireForm({
                   )}
                 </button>
               )}
-              {!readOnly && (
+              {!readOnly && !isEditing && (
                 <button
                   type="button"
                   onClick={() => toggleRejected(i)}
@@ -309,7 +413,85 @@ export function QuestionnaireForm({
 
             {/* Chip-select (with inline "Other…" box) or plain free-text.
                 Hidden entirely once rejected — nothing left to answer. */}
-            {isRejected ? null : hasOptions(q) ? (
+            {isEditing && draft ? (
+              <div className="mt-4 space-y-3 pl-9">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Choices — leave none for a written answer
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {/* Keyed by position: keying by value would remount the
+                      input on every keystroke and drop focus. */}
+                  {draft.options.map((opt, optIdx) => (
+                    <span
+                      key={optIdx}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground"
+                    >
+                      <input
+                        type="text"
+                        value={opt}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            options: draft.options.map((o, k) => (k === optIdx ? e.target.value : o)),
+                          })
+                        }
+                        size={Math.max(opt.length, 3)}
+                        aria-label={`Edit choice "${opt}"`}
+                        className="max-w-full border-0 bg-transparent p-0 text-sm font-medium text-foreground outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            options: draft.options.filter((_, k) => k !== optIdx),
+                          })
+                        }
+                        title={`Remove "${opt}"`}
+                        className="text-muted-foreground transition-colors hover:text-destructive"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={draft.newOption}
+                    onChange={(e) => setDraft({ ...draft, newOption: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addDraftOption()
+                      }
+                    }}
+                    onBlur={addDraftOption}
+                    placeholder="+ Add choice"
+                    aria-label="Add a choice"
+                    className="min-w-[7rem] max-w-full rounded-full border border-dashed border-muted-foreground/40 bg-background px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDraft(null)}
+                    disabled={savingDraft}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={saveDraft}
+                    disabled={savingDraft || !draft.text.trim()}
+                  >
+                    {savingDraft && <Loader2 className="animate-spin" />}
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : isRejected ? null : hasOptions(q) ? (
               <div
                 className={cn(
                   "mt-4 flex gap-2 pl-9",

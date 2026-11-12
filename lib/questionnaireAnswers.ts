@@ -167,3 +167,43 @@ export function valueFromAnswers(
   })
   return { answers: out, rejected }
 }
+
+/** Keep an answer valid after its question's choices were edited.
+ *
+ *  A picked choice that was renamed or removed no longer matches any chip, so
+ *  it would vanish from the screen while still being sent. It becomes the
+ *  answerer's own pill instead — nothing they picked is lost or hidden.
+ *
+ *  When the question becomes free-text (no choices left), everything picked
+ *  or typed is joined into the one text box, the way it would be sent. */
+export function answerAfterOptionsChange(a: Answer, options: string[] | null): Answer {
+  const parts = [...a.selected, ...a.custom]
+
+  if (!options || options.length === 0) {
+    const draft = a.text.trim()
+    if (draft) parts.push(draft)
+    return { selected: [], custom: [], text: parts.join(", ") }
+  }
+
+  const selected: string[] = []
+  const custom: string[] = []
+  for (const value of a.selected) {
+    if (options.includes(value)) selected.push(value)
+    else custom.push(value)
+  }
+  for (const value of a.custom) {
+    if (!custom.includes(value)) custom.push(value)
+  }
+  return { selected, custom, text: a.text }
+}
+
+/** Trim each choice and drop blanks and repeats. Null when none are left,
+ *  which makes the question free-text. Same rule as the server's. */
+export function cleanChoices(options: string[]): string[] | null {
+  const cleaned: string[] = []
+  for (const option of options) {
+    const text = option.trim()
+    if (text && !cleaned.includes(text)) cleaned.push(text)
+  }
+  return cleaned.length > 0 ? cleaned : null
+}

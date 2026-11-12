@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict"
 import {
+  answerAfterOptionsChange,
   buildAnswersPayload,
   splitAnswer,
   valueFromAnswers,
@@ -156,6 +157,30 @@ const AUDIENCE = [
   // And a skipped question must not be re-sent on the way back out.
   const wire = buildAnswersPayload(questions as never, v)
   assert.deepEqual(wire, [{ question_id: "t1", answer: "Industry analysts" }])
+}
+
+// ── choices edited after someone picked one ────────────────────────────────
+
+{
+  // A renamed choice that was picked must not vanish: it becomes their own pill.
+  const a = { selected: ["Bold", "Trusted"], custom: [], text: "" }
+  assert.deepEqual(answerAfterOptionsChange(a, ["Bold", "Reliable"]), {
+    selected: ["Bold"],
+    custom: ["Trusted"],
+    text: "",
+  })
+
+  // Turning it into a free-text question keeps everything, joined.
+  const b = { selected: ["Bold"], custom: ["Our own"], text: "draft" }
+  assert.deepEqual(answerAfterOptionsChange(b, null), {
+    selected: [],
+    custom: [],
+    text: "Bold, Our own, draft",
+  })
+
+  // Nothing changes when the picks are still choices.
+  const c = { selected: ["Bold"], custom: [], text: "" }
+  assert.deepEqual(answerAfterOptionsChange(c, ["Bold", "New"]), c)
 }
 
 console.log("questionnaireAnswers: all checks passed")

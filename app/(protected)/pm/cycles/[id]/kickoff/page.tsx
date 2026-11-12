@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import {
   QuestionnaireForm,
   QuestionnaireValue,
+  cleanChoices,
   buildAnswersPayload as buildPayload,
   emptyQuestionnaireValue,
   answeredCount as countAnswered,
@@ -35,7 +36,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Clock, Download, FileText, Loader2,
-  Plus, ShieldAlert, Sparkles, Undo2,
+  Plus, ShieldAlert, Sparkles, Undo2, X,
 } from "lucide-react"
 import { documentsApi } from "@/lib/api/documents"
 
@@ -180,7 +181,19 @@ export default function KickoffQuestionnairePage({
   // leaves answers pointing at questions that changed. The server refuses it
   // too. Deliberately NOT tied to answersLocked — that reopens between rounds.
   const [newQuestion, setNewQuestion] = useState("")
+  // Choices for the new question, and the "+ Add choice" box's text. None
+  // means the client answers it in their own words.
+  const [newChoices, setNewChoices] = useState<string[]>([])
+  const [newChoiceDraft, setNewChoiceDraft] = useState("")
   const [savingQuestions, setSavingQuestions] = useState(false)
+
+  /** Turn the "+ Add choice" box's text into a choice, then clear the box. */
+  const addNewChoice = () => {
+    const text = newChoiceDraft.trim()
+    if (!text) return
+    setNewChoices((prev) => [...prev, text])
+    setNewChoiceDraft("")
+  }
   const canEditQuestions = !share && !briefExists
 
   const saveQuestions = async (next: SurveyQuestion[]) => {
@@ -203,10 +216,15 @@ export default function KickoffQuestionnairePage({
     const taken = new Set(questions.map((q) => q.id))
     let n = 1
     while (taken.has(`m${n}`)) n += 1
+    // A choice still sitting in the box counts, so it isn't lost on Add.
+    const pending = newChoiceDraft.trim()
+    const options = cleanChoices(pending ? [...newChoices, pending] : newChoices)
     setNewQuestion("")
+    setNewChoices([])
+    setNewChoiceDraft("")
     await saveQuestions([
       ...questions,
-      { id: `m${n}`, text, source: "manual", options: null },
+      { id: `m${n}`, text, source: "manual", options },
     ])
   }
 
@@ -227,11 +245,20 @@ export default function KickoffQuestionnairePage({
     }
   }
 
-  const editQuestion = async (questionId: string, text: string) => {
-    if (savingQuestions) return
-    await saveQuestions(
-      questions.map((q) => (q.id === questionId ? { ...q, text } : q)),
-    )
+  /** Change one question's wording and choices — any question, not only
+   *  Spark's own. Allowed between rounds too (unlike adding or deleting):
+   *  answers are stored by question id, so rewording never moves one. */
+  const editQuestion = async (
+    questionId: string,
+    text: string,
+    options: string[] | null,
+  ) => {
+    try {
+      await pmApi.editQuestion(id, questionId, text, options)
+      await qc.refetchQueries({ queryKey: ["pm", "survey-questions", id] })
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't save the question.")
+    }
   }
 
   // Memoised because it feeds the seeding check below. `?? []` builds a fresh
@@ -499,14 +526,17 @@ export default function KickoffQuestionnairePage({
               value={qValue}
               onChange={setQValue}
               readOnly={answersLocked}
-              // Spark's own questions only. The client's adopted ones are
-              // stored as "manual" too, so ownership is stated rather than
-              // inferred from the source.
+              // Delete: Spark's own questions only. The client's adopted ones
+              // are stored as "manual" too, so ownership is stated rather
+              // than inferred from the source.
               editableQuestionIds={questions
                 .filter((q) => q.source === "manual")
                 .map((q) => q.id)}
               onRemoveQuestion={canEditQuestions ? removeQuestion : undefined}
-              onEditQuestion={canEditQuestions ? editQuestion : undefined}
+              // Edit: every question, whenever the form is open — before the
+              // first send and between rounds. The form is read-only while
+              // the client holds the link and once the brief exists.
+              onEditQuestion={editQuestion}
               onToggleRejected={saveRejection}
               deletingQuestionId={deletingQuestionId}
             />
@@ -518,9 +548,10 @@ export default function KickoffQuestionnairePage({
             {!canEditQuestions && share && (
               <p className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
                 The question set is settled — it has gone to the client and an
-                answer is stored against each question, so the list can&apos;t
-                change now. Re-share if something important is missing; that
-                sends a fresh link.
+                answer is stored against each question, so questions can&apos;t
+                be added or deleted now. You can still edit a question&apos;s
+                wording and choices. Re-share if something important is
+                missing; that sends a fresh link.
               </p>
             )}
 
@@ -533,8 +564,8 @@ export default function KickoffQuestionnairePage({
                   Add your own question
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Goes to the client with the rest. They&apos;ll answer it in their own
-                  words — no options to pick from.
+                  Goes to the client with the rest. Add choices for them to pick
+                  from, or leave none and they&apos;ll answer in their own words.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <input
@@ -563,6 +594,41 @@ export default function KickoffQuestionnairePage({
                     )}
                     Add question
                   </Button>
+                </div>
+                {/* Choices — same pills and "+ Add choice" box as editing a
+                    question, so adding and editing look alike. */}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {newChoices.map((choice, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground"
+                    >
+                      {choice}
+                      <button
+                        type="button"
+                        onClick={() => setNewChoices((prev) => prev.filter((_, k) => k !== idx))}
+                        title={`Remove "${choice}"`}
+                        className="text-muted-foreground transition-colors hover:text-destructive"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={newChoiceDraft}
+                    onChange={(e) => setNewChoiceDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addNewChoice()
+                      }
+                    }}
+                    onBlur={addNewChoice}
+                    placeholder="+ Add choice (optional)"
+                    aria-label="Add a choice to the new question"
+                    className="min-w-[12rem] max-w-full rounded-full border border-dashed border-muted-foreground/40 bg-background px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400"
+                  />
                 </div>
               </div>
             )}
