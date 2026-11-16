@@ -6,10 +6,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { SurveyQuestion } from "@/lib/api/pm"
 import {
   Answer,
+  QuestionDraft,
+  QuestionDrafts,
   QuestionnaireValue,
   answerAfterOptionsChange,
-  cleanChoices,
   emptyAnswer,
+  finishDraft,
   isAnswered,
 } from "@/lib/questionnaireAnswers"
 
@@ -27,8 +29,14 @@ export {
   buildAnswersPayload,
   splitAnswer,
   valueFromAnswers,
+  finishDraft,
 } from "@/lib/questionnaireAnswers"
-export type { Answer, QuestionnaireValue } from "@/lib/questionnaireAnswers"
+export type {
+  Answer,
+  QuestionDraft,
+  QuestionDrafts,
+  QuestionnaireValue,
+} from "@/lib/questionnaireAnswers"
 import { cn } from "@/lib/utils"
 import { Ban, Check, Loader2, Pencil, RotateCcw, Trash2, X } from "lucide-react"
 
@@ -76,20 +84,12 @@ function formatRejectedAt(iso: string): string {
   })
 }
 
-/** One question being edited: its position, and the draft wording/choices.
- *  Nothing is saved until Save, so Cancel simply drops the draft. */
-interface QuestionDraft {
-  index: number
-  text: string
-  options: string[]
-  newOption: string
-}
-
 export function QuestionnaireForm({
   questions,
   value,
   onChange,
   readOnly = false,
+  answersReadOnly = false,
   editableQuestionIds,
   onRemoveQuestion,
   onEditQuestion,
@@ -98,11 +98,18 @@ export function QuestionnaireForm({
   undoableQuestionIds,
   onUndoEdit,
   showEditedBy = true,
+  drafts: draftsFromPage,
+  onDraftsChange,
+  unsavedRejectionIds,
 }: {
   questions: SurveyQuestion[]
   value: QuestionnaireValue
   onChange: (next: QuestionnaireValue) => void
   readOnly?: boolean
+  /** Lock only the answers (choices, "Other…", text box) while Edit, Reject
+   *  and Delete keep working. Spark before sharing: the client answers, and
+   *  anything Spark picked here would be neither saved nor sent. */
+  answersReadOnly?: boolean
   /** Which questions THIS reader may DELETE, by id.
    *
    *  Not derived from `source` any more. Both Spark and the client write their
@@ -120,6 +127,14 @@ export function QuestionnaireForm({
     text: string,
     options: string[] | null,
   ) => void | Promise<void>
+  /** One-Save mode (Spark's kickoff page): the page holds every open edit and
+   *  saves them together from its own bar, so cards show Cancel only and any
+   *  number can be open. Omit both to get one card at a time, each with its
+   *  own Save calling `onEditQuestion`. */
+  drafts?: QuestionDrafts
+  onDraftsChange?: (next: QuestionDrafts) => void
+  /** Rejections the page holds until its Save (Spark): their card says so. */
+  unsavedRejectionIds?: string[]
   /** Questions the reader changed this round and can still take back (the
    *  client's page, before they send). Shows "Undo my change". */
   undoableQuestionIds?: string[]
@@ -136,47 +151,69 @@ export function QuestionnaireForm({
   deletingQuestionId?: string | null
 }) {
   const { answers, rejected } = value
+  const lockAnswers = readOnly || answersReadOnly
   const mine = new Set(editableQuestionIds ?? [])
   const undoable = new Set(undoableQuestionIds ?? [])
-  // One question edited at a time.
-  const [draft, setDraft] = useState<QuestionDraft | null>(null)
+  // Open edits, by question id. In one-Save mode the page owns them (it saves
+  // them all from its bar); otherwise the form keeps its own, one at a time.
+  const [ownDrafts, setOwnDrafts] = useState<QuestionDrafts>({})
+  const oneSave = !!onDraftsChange
+  const drafts = oneSave ? (draftsFromPage ?? {}) : ownDrafts
+  const setDrafts = oneSave ? onDraftsChange : setOwnDrafts
+  const anyDraftOpen = Object.keys(drafts).length > 0
   const [savingDraft, setSavingDraft] = useState(false)
 
-  const startEdit = (index: number) => {
-    const q = questions[index]
-    if (!q) return
-    setDraft({ index, text: q.text, options: [...(q.options ?? [])], newOption: "" })
+  const startEdit = (q: SurveyQuestion) => {
+    setDrafts({
+      ...drafts,
+      [q.id]: { text: q.text, options: [...(q.options ?? [])], newOption: "" },
+    })
+  }
+
+  /** Change part of one open draft. */
+  const updateDraft = (questionId: string, change: Partial<QuestionDraft>) => {
+    const current = drafts[questionId]
+    if (!current) return
+    setDrafts({ ...drafts, [questionId]: { ...current, ...change } })
+  }
+
+  /** Close one card's edit without saving it. */
+  const cancelDraft = (questionId: string) => {
+    const next = { ...drafts }
+    delete next[questionId]
+    setDrafts(next)
   }
 
   /** Add the "+ Add choice" box's text as a choice, then clear the box. */
-  const addDraftOption = () => {
-    if (!draft) return
-    const text = draft.newOption.trim()
+  const addDraftOption = (questionId: string) => {
+    const current = drafts[questionId]
+    if (!current) return
+    const text = current.newOption.trim()
     if (!text) return
-    setDraft({ ...draft, options: [...draft.options, text], newOption: "" })
+    updateDraft(questionId, { options: [...current.options, text], newOption: "" })
   }
 
-  /** Save the draft: keep the answer valid for the new choices, then hand the
-   *  change to the page (which saves it, or keeps it until the client sends). */
-  const saveDraft = async () => {
-    if (!draft || !onEditQuestion) return
-    const q = questions[draft.index]
-    const text = draft.text.trim()
-    if (!q || !text) return
-    const pending = draft.newOption.trim()
-    const options = cleanChoices(pending ? [...draft.options, pending] : draft.options)
+  /** Save one card (not used in one-Save mode): keep the answer valid for the
+   *  new choices, then hand the change to the page (which saves it, or keeps
+   *  it until the client sends). */
+  const saveDraft = async (index: number) => {
+    const q = questions[index]
+    const current = q ? drafts[q.id] : undefined
+    if (!q || !current || !onEditQuestion) return
+    const { text, options } = finishDraft(current)
+    if (!text) return
 
-    const current = answers[draft.index]
-    if (current) {
+    const answer = answers[index]
+    if (answer) {
       onChange({
         ...value,
-        answers: { ...answers, [draft.index]: answerAfterOptionsChange(current, options) },
+        answers: { ...answers, [index]: answerAfterOptionsChange(answer, options) },
       })
     }
     setSavingDraft(true)
     try {
       await onEditQuestion(q.id, text, options)
-      setDraft(null)
+      setOwnDrafts({})
     } finally {
       setSavingDraft(false)
     }
@@ -262,11 +299,12 @@ export function QuestionnaireForm({
       {questions.map((q, i) => {
         const a = answers[i] ?? emptyAnswer
         const isRejected = !!rejected[i]
-        const answered = !isRejected && isAnswered(a)
+        const answered = !isRejected && !answersReadOnly && isAnswered(a)
         const presets = q.options ?? []
         const longForm = isLongForm(q)
-        const isEditing = draft?.index === i
-        const canEdit = !!onEditQuestion && !readOnly && !isRejected
+        const draft = drafts[q.id]
+        const isEditing = !!draft
+        const canEdit = (oneSave || !!onEditQuestion) && !readOnly && !isRejected
 
         return (
           <div
@@ -301,13 +339,14 @@ export function QuestionnaireForm({
                     value={draft.text}
                     autoFocus
                     aria-label={`Edit question ${i + 1}`}
-                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+                    onChange={(e) => updateDraft(q.id, { text: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault()
-                        saveDraft()
+                        // One-Save mode saves from the page's bar, not here.
+                        if (!oneSave) saveDraft(i)
                       } else if (e.key === "Escape") {
-                        setDraft(null)
+                        cancelDraft(q.id)
                       }
                     }}
                     className="w-full rounded-md border border-indigo-400 bg-background px-1.5 py-0.5 font-semibold leading-snug text-foreground outline-none transition-colors"
@@ -326,7 +365,9 @@ export function QuestionnaireForm({
                   <p className="mt-1 text-xs text-muted-foreground">
                     {/* Who decided, once it's saved. Until then — the moment
                         between the click and the save — the plain line. */}
-                    {q.rejected_by
+                    {unsavedRejectionIds?.includes(q.id)
+                      ? "Skipped — saved when you click Save changes."
+                      : q.rejected_by
                       ? `Rejected by ${REJECTED_BY_LABEL[q.rejected_by] ?? q.rejected_by}${
                           q.rejected_at ? ` on ${formatRejectedAt(q.rejected_at)}` : ""
                         } — this question won't be used in the brief.`
@@ -364,8 +405,9 @@ export function QuestionnaireForm({
               {canEdit && !isEditing && (
                 <button
                   type="button"
-                  onClick={() => startEdit(i)}
-                  disabled={!!draft}
+                  onClick={() => startEdit(q)}
+                  // One card at a time unless the page saves them together.
+                  disabled={!oneSave && anyDraftOpen}
                   title="Change this question's wording or choices"
                   className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
                 >
@@ -430,8 +472,7 @@ export function QuestionnaireForm({
                         type="text"
                         value={opt}
                         onChange={(e) =>
-                          setDraft({
-                            ...draft,
+                          updateDraft(q.id, {
                             options: draft.options.map((o, k) => (k === optIdx ? e.target.value : o)),
                           })
                         }
@@ -442,8 +483,7 @@ export function QuestionnaireForm({
                       <button
                         type="button"
                         onClick={() =>
-                          setDraft({
-                            ...draft,
+                          updateDraft(q.id, {
                             options: draft.options.filter((_, k) => k !== optIdx),
                           })
                         }
@@ -457,14 +497,14 @@ export function QuestionnaireForm({
                   <input
                     type="text"
                     value={draft.newOption}
-                    onChange={(e) => setDraft({ ...draft, newOption: e.target.value })}
+                    onChange={(e) => updateDraft(q.id, { newOption: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault()
-                        addDraftOption()
+                        addDraftOption(q.id)
                       }
                     }}
-                    onBlur={addDraftOption}
+                    onBlur={() => addDraftOption(q.id)}
                     placeholder="+ Add choice"
                     aria-label="Add a choice"
                     className="min-w-[7rem] max-w-full rounded-full border border-dashed border-muted-foreground/40 bg-background px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400"
@@ -475,20 +515,22 @@ export function QuestionnaireForm({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => setDraft(null)}
+                    onClick={() => cancelDraft(q.id)}
                     disabled={savingDraft}
                   >
                     Cancel
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={saveDraft}
-                    disabled={savingDraft || !draft.text.trim()}
-                  >
-                    {savingDraft && <Loader2 className="animate-spin" />}
-                    Save
-                  </Button>
+                  {!oneSave && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => saveDraft(i)}
+                      disabled={savingDraft || !draft.text.trim()}
+                    >
+                      {savingDraft && <Loader2 className="animate-spin" />}
+                      Save
+                    </Button>
+                  )}
                 </div>
               </div>
             ) : isRejected ? null : hasOptions(q) ? (
@@ -505,7 +547,7 @@ export function QuestionnaireForm({
                       key={optIdx}
                       type="button"
                       aria-pressed={selected}
-                      disabled={readOnly}
+                      disabled={lockAnswers}
                       onClick={() => toggleChip(i, opt)}
                       className={cn(
                         "border text-sm font-medium transition-colors",
@@ -515,7 +557,7 @@ export function QuestionnaireForm({
                         selected
                           ? "border-indigo-400 bg-indigo-50 text-indigo-700"
                           : "border-border bg-background text-foreground hover:border-indigo-300 hover:bg-accent",
-                        readOnly && "cursor-default opacity-90 hover:border-border hover:bg-background",
+                        lockAnswers && "cursor-default opacity-90 hover:border-border hover:bg-background",
                       )}
                     >
                       {longForm && (
@@ -548,9 +590,9 @@ export function QuestionnaireForm({
                     <input
                       type="text"
                       value={v}
-                      readOnly={readOnly}
+                      readOnly={lockAnswers}
                       onChange={(e) => editCustom(i, customIdx, e.target.value)}
-                      onBlur={() => !readOnly && commitCustomEdit(i, customIdx)}
+                      onBlur={() => !lockAnswers && commitCustomEdit(i, customIdx)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault()
@@ -561,7 +603,7 @@ export function QuestionnaireForm({
                       aria-label={`Edit answer "${v}"`}
                       className="border-0 bg-transparent p-0 text-sm font-medium text-indigo-700 outline-none"
                     />
-                    {!readOnly && (
+                    {!lockAnswers && (
                       <button
                         type="button"
                         onClick={() => removeCustom(i, customIdx)}
@@ -576,7 +618,7 @@ export function QuestionnaireForm({
 
                 {/* Read-only hides the "Other…" box below, so a draft still
                     sitting in `text` would disappear with it. Show it. */}
-                {readOnly && a.text.trim() && (
+                {lockAnswers && a.text.trim() && (
                   <span className="inline-flex items-center rounded-full border border-indigo-400 bg-indigo-50 px-3.5 py-2 text-sm font-medium text-indigo-700">
                     {a.text.trim()}
                   </span>
@@ -584,7 +626,7 @@ export function QuestionnaireForm({
 
                 {/* Independent of chip selection — Enter (or blur) turns the
                     draft into a pill so the next one can be typed. */}
-                {!readOnly && (
+                {!lockAnswers && (
                   <input
                     type="text"
                     value={a.text}
@@ -608,13 +650,23 @@ export function QuestionnaireForm({
                   />
                 )}
               </div>
+            ) : lockAnswers ? (
+              // Locked: plain text, not a read-only box — a box with a cursor
+              // and resize handle looks editable and feels broken. No answer
+              // means nothing to show.
+              a.text.trim() ? (
+                <div className="mt-4 pl-9">
+                  <p className="whitespace-pre-wrap rounded-lg bg-muted/40 px-3 py-2 text-sm text-foreground">
+                    {a.text}
+                  </p>
+                </div>
+              ) : null
             ) : (
               <div className="mt-4 pl-9">
                 <Textarea
                   value={a.text}
-                  readOnly={readOnly}
                   onChange={(e) => setText(i, e.target.value)}
-                  placeholder={readOnly ? "" : "Type your answer…"}
+                  placeholder="Type your answer…"
                   rows={2}
                   className="text-sm"
                 />

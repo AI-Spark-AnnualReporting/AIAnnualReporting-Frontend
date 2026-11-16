@@ -954,19 +954,22 @@ export const pmApi = {
     return data
   },
 
-  // PUT /pm/cycles/{id}/questions/{qid} — change one question's wording and
-  // choices. Any question, the AI's and the template's too. Allowed between
+  // PUT /pm/cycles/{id}/questions — change one or more questions' wording and
+  // choices in one write (Spark sends all open edits; other roles one per
+  // Save). Any question, the AI's and the template's too. Allowed between
   // rounds; 409 while the client holds the link, once the brief exists, or if
-  // the question is rejected. Empty or null options make it free-text.
-  editQuestion: async (
+  // a question is rejected — then none are saved. Empty or null options make
+  // it free-text.
+  // Spark's one Save also carries rejections (reject / bring back); both are
+  // applied together, and if anything is refused nothing is saved.
+  editQuestions: async (
     cycleId: string,
-    questionId: string,
-    text: string,
-    options: string[] | null,
+    edits: { id: string; text: string; options: string[] | null }[],
+    rejections: { id: string; rejected: boolean }[] = [],
   ): Promise<SurveyQuestionsResponse> => {
     const { data } = await apiClient.put<SurveyQuestionsResponse>(
-      `/pm/cycles/${cycleId}/questions/${encodeURIComponent(questionId)}`,
-      { text, options },
+      `/pm/cycles/${cycleId}/questions`,
+      { edits, rejections },
     )
     return data
   },

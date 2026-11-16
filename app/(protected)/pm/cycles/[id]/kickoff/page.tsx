@@ -17,7 +17,10 @@ import { useAuth } from "@/contexts/AuthContext"
 import {
   QuestionnaireForm,
   QuestionnaireValue,
+  QuestionDrafts,
+  answerAfterOptionsChange,
   cleanChoices,
+  finishDraft,
   buildAnswersPayload as buildPayload,
   emptyQuestionnaireValue,
   answeredCount as countAnswered,
@@ -36,7 +39,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Clock, Download, FileText, Loader2,
-  Plus, ShieldAlert, Sparkles, Undo2, X,
+  Plus, Save, ShieldAlert, Sparkles, Undo2, X,
 } from "lucide-react"
 import { documentsApi } from "@/lib/api/documents"
 
@@ -175,6 +178,11 @@ export default function KickoffQuestionnairePage({
   //     retype an answer that can't reach anything is worse than locking it.
   const answersLocked = awaitingClient || briefExists
 
+  // Spark before the first share prepares the questions (edit, reject, add,
+  // delete) but doesn't answer them: the client does. Picks made here would be
+  // neither saved nor sent, so the answers stay locked and nothing counts.
+  const preparingForClient = sparkFlow && !share
+
   // Spark's own questions. Added before the questionnaire goes out and not
   // after: from the first share the list is what the client is answering, and
   // an answer is stored against a question id, so a set that keeps moving
@@ -247,17 +255,94 @@ export default function KickoffQuestionnairePage({
 
   /** Change one question's wording and choices — any question, not only
    *  Spark's own. Allowed between rounds too (unlike adding or deleting):
-   *  answers are stored by question id, so rewording never moves one. */
+   *  answers are stored by question id, so rewording never moves one.
+   *  Used by every role except Spark: one card, one Save. */
   const editQuestion = async (
     questionId: string,
     text: string,
     options: string[] | null,
   ) => {
     try {
-      await pmApi.editQuestion(id, questionId, text, options)
+      await pmApi.editQuestions(id, [{ id: questionId, text, options }])
       await qc.refetchQueries({ queryKey: ["pm", "survey-questions", id] })
     } catch (err) {
       toast.error((err as { message?: string })?.message || "Couldn't save the question.")
+    }
+  }
+
+  // Spark only: every open question edit, and every Reject / Undo, saved
+  // together from the footer bar in one request (one History entry), instead
+  // of a save per card or per click. Holding rejections until Save also means
+  // a quick Reject → Undo can't race two saves against each other.
+  const [drafts, setDrafts] = useState<QuestionDrafts>({})
+  // Rejections not saved yet, by question id: true = reject, false = bring back.
+  const [pendingRejections, setPendingRejections] = useState<Record<string, boolean>>({})
+  const [savingEdits, setSavingEdits] = useState(false)
+  const unsavedEdits = Object.keys(drafts).length + Object.keys(pendingRejections).length
+
+  /** Spark's Reject / Undo: the form has already flipped the card on screen.
+   *  Remember it until Save — or forget it if it's back to what's saved. */
+  const holdRejection = (questionId: string, rejected: boolean) => {
+    const saved = !!questions.find((q) => q.id === questionId)?.rejected_by
+    setPendingRejections((prev) => {
+      const next = { ...prev }
+      if (rejected === saved) delete next[questionId]
+      else next[questionId] = rejected
+      return next
+    })
+  }
+
+  /** Discard: close every open edit and put every held rejection back. */
+  const discardAll = () => {
+    setQValue((prev) => {
+      const rejected = { ...prev.rejected }
+      for (const [questionId, value] of Object.entries(pendingRejections)) {
+        const index = questions.findIndex((q) => q.id === questionId)
+        if (index >= 0) rejected[index] = !value
+      }
+      return { ...prev, rejected }
+    })
+    setDrafts({})
+    setPendingRejections({})
+  }
+
+  /** Save every open edit and held rejection in one request. Picked answers
+   *  are moved onto the new choices so nothing they chose vanishes. On
+   *  failure nothing is saved (the server refuses the whole batch), so the
+   *  changes stay on screen. */
+  const saveAllEdits = async () => {
+    const edits = Object.entries(drafts).map(([questionId, draft]) => ({
+      id: questionId,
+      ...finishDraft(draft),
+    }))
+    if (edits.some((e) => !e.text)) {
+      toast.error("A question can't be empty.")
+      return
+    }
+    const rejections = Object.entries(pendingRejections).map(([questionId, rejected]) => ({
+      id: questionId,
+      rejected,
+    }))
+    setSavingEdits(true)
+    try {
+      await pmApi.editQuestions(id, edits, rejections)
+      setQValue((prev) => {
+        const answers = { ...prev.answers }
+        for (const edit of edits) {
+          const index = questions.findIndex((q) => q.id === edit.id)
+          if (index >= 0 && answers[index]) {
+            answers[index] = answerAfterOptionsChange(answers[index], edit.options)
+          }
+        }
+        return { ...prev, answers }
+      })
+      await qc.refetchQueries({ queryKey: ["pm", "survey-questions", id] })
+      setDrafts({})
+      setPendingRejections({})
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || "Couldn't save your changes.")
+    } finally {
+      setSavingEdits(false)
     }
   }
 
@@ -307,14 +392,20 @@ export default function KickoffQuestionnairePage({
   // Rejections are saved on the questions now, so a refresh brings them back.
   // Re-applied whenever the saved flags change (after each save's refetch).
   // Only ever ADDS: an Undo clears the local mark first and the flag after,
-  // and this must not put back what the PM just took away.
+  // and this must not put back what the PM just took away. Spark's held
+  // (unsaved) rejections win over the saved flags, so a reload in between —
+  // e.g. after adding a question — doesn't undo what Spark just clicked.
   const [flagsSeeded, setFlagsSeeded] = useState<string | null>(null)
   const flagKey = questions.map((q) => `${q.id}:${q.rejected_by ?? ""}`).join("|")
   if (questions.length && flagKey !== flagsSeeded) {
     setFlagsSeeded(flagKey)
+    const held: Record<number, boolean> = {}
+    questions.forEach((q, i) => {
+      if (q.id in pendingRejections) held[i] = pendingRejections[q.id]
+    })
     setQValue((prev) => ({
       ...prev,
-      rejected: { ...prev.rejected, ...flaggedRejections(questions) },
+      rejected: { ...prev.rejected, ...flaggedRejections(questions), ...held },
     }))
   }
 
@@ -354,7 +445,10 @@ export default function KickoffQuestionnairePage({
   // 10-of-12 submission reads as complete rather than permanently short.
   // Without the sign-off in play this is the rule the wizard always had:
   // answer everything, then continue.
-  const canGenerate = allAnswered && (!sparkFlow || clientApproved || needsApproval)
+  // Unsaved question edits also block it: the brief would be drafted from
+  // the old wording.
+  const canGenerate =
+    allAnswered && unsavedEdits === 0 && (!sparkFlow || clientApproved || needsApproval)
 
   const [approveOpen, setApproveOpen] = useState(false)
 
@@ -414,7 +508,14 @@ export default function KickoffQuestionnairePage({
           {sparkFlow && !questionsError && total > 0 && (
             <div className="flex shrink-0 items-center gap-2">
               <KickoffHistoryButton cycleId={id} stage="questionnaire" />
-              <ShareWithClientButton cycleId={id} stage="questionnaire" share={share} />
+              {/* Rule: nothing is shared until it's saved. The client's link
+                  is built from the saved questions only. */}
+              <ShareWithClientButton
+                cycleId={id}
+                stage="questionnaire"
+                share={share}
+                blockedReason={unsavedEdits > 0 ? "Save your question changes first" : undefined}
+              />
             </div>
           )}
         </div>
@@ -503,9 +604,12 @@ export default function KickoffQuestionnairePage({
                     ? "The brief has already been drafted from these. To change them, use Regenerate on the next step."
                     : needsApproval
                       ? "Sent back by the client. Edit them if anything needs correcting — these are what the brief is drafted from."
-                      : "Pick the closest option for each — or write your own. Your answers shape the AI-drafted brief."}
+                      : preparingForClient
+                        ? "Check the questions before sending them. Edit, reject or add questions here; the client picks the answers."
+                        : "Pick the closest option for each — or write your own. Your answers shape the AI-drafted brief."}
                 </p>
               </div>
+              {!preparingForClient && (
               <div className="shrink-0 text-right">
                 <p className="text-sm font-medium text-muted-foreground">
                   <span className="text-foreground">{answeredCount}</span> of {required} answered
@@ -517,6 +621,7 @@ export default function KickoffQuestionnairePage({
                   />
                 </div>
               </div>
+              )}
             </div>
 
             {/* Question cards — shared with the client's own page, so the
@@ -526,6 +631,7 @@ export default function KickoffQuestionnairePage({
               value={qValue}
               onChange={setQValue}
               readOnly={answersLocked}
+              answersReadOnly={preparingForClient}
               // Delete: Spark's own questions only. The client's adopted ones
               // are stored as "manual" too, so ownership is stated rather
               // than inferred from the source.
@@ -536,8 +642,15 @@ export default function KickoffQuestionnairePage({
               // Edit: every question, whenever the form is open — before the
               // first send and between rounds. The form is read-only while
               // the client holds the link and once the brief exists.
-              onEditQuestion={editQuestion}
-              onToggleRejected={saveRejection}
+              // Spark saves all open edits at once from the footer; everyone
+              // else saves each card on its own.
+              {...(sparkFlow
+                ? { drafts, onDraftsChange: setDrafts }
+                : { onEditQuestion: editQuestion })}
+              // Spark's Reject / Undo wait for Save changes; everyone
+              // else's save straight away.
+              onToggleRejected={sparkFlow ? holdRejection : saveRejection}
+              unsavedRejectionIds={Object.keys(pendingRejections)}
               deletingQuestionId={deletingQuestionId}
             />
 
@@ -687,7 +800,34 @@ export default function KickoffQuestionnairePage({
             </Button>
           </Link>
           <div className="flex items-center gap-4">
-            {total > 0 && (
+            {/* Spark's one Save for every open question edit. */}
+            {unsavedEdits > 0 && (
+              <div className="flex items-center gap-2 border-r pr-4">
+                <span className="text-sm font-medium text-amber-700 tabular-nums">
+                  {unsavedEdits} unsaved {unsavedEdits === 1 ? "change" : "changes"}
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={savingEdits}
+                  onClick={discardAll}
+                >
+                  Discard
+                </Button>
+                <Button
+                  disabled={savingEdits}
+                  onClick={saveAllEdits}
+                  className="bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  {savingEdits ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  Save changes
+                </Button>
+              </div>
+            )}
+            {total > 0 && !preparingForClient && (
               <span className="text-sm font-medium text-muted-foreground tabular-nums">
                 {answeredCount}/{required} answered
               </span>
@@ -696,7 +836,14 @@ export default function KickoffQuestionnairePage({
               <Button
                 variant="outline"
                 onClick={() => setSendBackOpen(true)}
-                title="Return these answers to the client with a note"
+                // Same rule as Share: nothing goes to the client until it's
+                // saved — the link they get back shows the saved questions.
+                disabled={unsavedEdits > 0}
+                title={
+                  unsavedEdits > 0
+                    ? "Save your question changes first"
+                    : "Return these answers to the client with a note"
+                }
               >
                 <Undo2 className="h-4 w-4" /> Send back
               </Button>
@@ -705,9 +852,11 @@ export default function KickoffQuestionnairePage({
               onClick={handleGenerate}
               disabled={!canGenerate}
               title={
-                // Without the sign-off in play there is only one reason this
-                // can be off, and it is not the client.
-                !sparkFlow
+                unsavedEdits > 0
+                  ? "Save your question changes first"
+                  : // Without the sign-off in play there is only one reason this
+                    // can be off, and it is not the client.
+                    !sparkFlow
                   ? (!allAnswered ? "Answer every question to continue" : undefined)
                   : share?.status === "pending"
                     ? "Waiting on the client's answers"
