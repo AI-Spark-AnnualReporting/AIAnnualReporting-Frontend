@@ -103,6 +103,10 @@ export interface DiffParagraph {
   table_title?: string | null
   /** The subheading this paragraph sits under; null before the first one. */
   subsection?: string | null
+  /** An unchanged paragraph shown next to a change, so the reader sees where it sits. */
+  context?: boolean
+  /** How many unchanged paragraphs were left out just before this one. */
+  skipped_before?: number
 }
 
 export interface DiffPart {
@@ -116,8 +120,10 @@ export interface SectionDiff {
   status: "changed" | "same" | "added" | "removed"
   added: number
   deleted: number
-  /** Only the changed paragraphs, each with its changed words marked. */
+  /** The changed paragraphs, each with its changed words marked, and the unchanged paragraph just before and after each change. */
   paragraphs: DiffParagraph[]
+  /** How many unchanged paragraphs were left out after the last one shown. */
+  skipped_after?: number
 }
 
 export interface CompareResult {
