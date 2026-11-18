@@ -48,3 +48,30 @@ export function checkAiCreditsHeader(headers: HeaderSource): void {
 export function resetAiCreditsToastForTests(): void {
   lastShownAt = null
 }
+
+// ── The company's own AI credits (Centriyon plans) ──────────────────────
+// Different from the toast above (Spark's OpenAI account is empty): here the
+// company has used its plan's AI credits. Centriyon refuses the AI action with
+// a 403 whose message says so, e.g.
+//   "Not enough AI credits (balance -95). Ask your admin to buy more."
+//   "Custom template needs at least 60 AI credits to start; you have 45. ..."
+//   "No active subscription, so AI features are off. Ask your admin."
+// Matched by wording because the 403 has no other marker; the wording lives in
+// Centriton/credit_usage.py (require_credits).
+export const NOT_ENOUGH_CREDITS_TITLE = "Not enough AI credits"
+const CREDITS_REFUSAL_WORDS = /AI credits|AI features are off/i
+
+/** True when a failed request is Centriyon refusing an AI action for credits. */
+export function isAiCreditsRefusal(status: number | undefined, message: string | null | undefined): boolean {
+  return status === 403 && !!message && CREDITS_REFUSAL_WORDS.test(message)
+}
+
+/**
+ * Show Centriyon's credits message as a toast, so it is seen even on screens
+ * that show their own generic error. One toast at a time (same id), so a
+ * page with several AI calls doesn't stack them.
+ */
+export function showAiCreditsRefusal(status: number | undefined, message: string | null | undefined): void {
+  if (!isAiCreditsRefusal(status, message)) return
+  toast.error(NOT_ENOUGH_CREDITS_TITLE, { id: "ai-credits-refused", description: message ?? "" })
+}

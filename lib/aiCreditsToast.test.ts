@@ -10,7 +10,9 @@ import assert from "node:assert/strict"
 import { toast } from "sonner"
 import {
   checkAiCreditsHeader,
+  isAiCreditsRefusal,
   resetAiCreditsToastForTests,
+  showAiCreditsRefusal,
 } from "./aiCreditsToast.ts"
 
 let shown = 0
@@ -41,5 +43,24 @@ checkAiCreditsHeader(new Headers({ "content-type": "application/json" }))
 checkAiCreditsHeader(undefined)
 checkAiCreditsHeader(null)
 assert.equal(shown, 2, "no flag, no toast")
+
+// The company's own AI credits: Centriyon's 403 messages are recognised...
+const notEnough = "Not enough AI credits (balance -95). Ask your admin to buy more."
+const minimum = "Custom template needs at least 60 AI credits to start; you have 45. Ask your admin to buy more."
+const noPlan = "No active subscription, so AI features are off. Ask your admin."
+assert.ok(isAiCreditsRefusal(403, notEnough), "balance at or below zero")
+assert.ok(isAiCreditsRefusal(403, minimum), "under the action's minimum")
+assert.ok(isAiCreditsRefusal(403, noPlan), "no subscription")
+// ...and nothing else is
+assert.ok(!isAiCreditsRefusal(403, "Only project managers can do this"), "other 403s")
+assert.ok(!isAiCreditsRefusal(500, notEnough), "not a 403")
+assert.ok(!isAiCreditsRefusal(403, undefined), "no message")
+
+// showing it: a toast with Centriyon's own words
+const before = shown
+showAiCreditsRefusal(403, notEnough)
+assert.equal(shown, before + 1, "credits refusal shows a toast")
+showAiCreditsRefusal(404, "Cycle not found")
+assert.equal(shown, before + 1, "other errors show no credits toast")
 
 console.log("aiCreditsToast: all checks passed")

@@ -6,7 +6,7 @@ import axios, {
 import { centriyonLoginUrl } from "@/lib/centriyon"
 import { storePostLoginRedirect } from "@/lib/postLoginRedirect"
 import { getActingCompany } from "@/lib/actingCompany"
-import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
+import { checkAiCreditsHeader, showAiCreditsRefusal } from "@/lib/aiCreditsToast"
 import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
 import { clearSession, retryOnceAfterRefresh } from "@/lib/api/session"
 
@@ -175,6 +175,10 @@ apiClient.interceptors.response.use(
       detailMessage ||
       responseData?.error ||
       null
+
+    // The company has used up its AI credits: say so even where the screen
+    // shows its own generic error.
+    showAiCreditsRefusal(error.response?.status, backendMessage)
 
     // Log full error details for debugging
     // Includes error.code + error.message so network failures (no response object)

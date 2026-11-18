@@ -25,7 +25,7 @@
 import { getActingCompany } from "@/lib/actingCompany"
 import { noteEpoch } from "@/lib/createDesignCache"
 import { parseSseFrames } from "@/lib/sseFrames"
-import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
+import { checkAiCreditsHeader, showAiCreditsRefusal } from "@/lib/aiCreditsToast"
 import { apiClient } from "./client"
 import { fetchWithRefresh } from "./session"
 
@@ -163,6 +163,7 @@ export async function streamSectionBlocks(
       // The pre-stream channel: the guard refused before any byte was written,
       // so this is a normal JSON error body.
       const body = await res.json().catch(() => null)
+      showAiCreditsRefusal(res.status, body?.detail ?? body?.message)
       handlers.onError({
         status: res.status,
         code: body?.error ?? "HTTP_ERROR",
