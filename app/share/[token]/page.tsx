@@ -96,6 +96,25 @@ function valueFromReply(
   return { ...value, rejected }
 }
 
+/** A copy of a position-keyed map with the entry at `removed` dropped and
+ *  every later entry moved down one place. */
+function shiftAfterRemoval<T>(byPosition: Record<number, T>, removed: number): Record<number, T> {
+  const shifted: Record<number, T> = {}
+  Object.entries(byPosition).forEach(([key, value]) => {
+    const position = Number(key)
+    if (position < removed) shifted[position] = value
+    else if (position > removed) shifted[position - 1] = value
+  })
+  return shifted
+}
+
+/** True for a link that shows a list of questions to answer: the kickoff
+ *  questionnaire, or one department's questions sent by its HOD. Both use the
+ *  same form; only the wording around it differs. */
+function isQuestionList(view: ClientShareView): boolean {
+  return view.stage === "questionnaire" || view.stage === "department_questions"
+}
+
 /** Where the client stands on this link, for the banner. */
 function bannerStatus(view: ClientShareView): BannerStatus {
   if (view.status === "approved") return "approved"
@@ -110,6 +129,9 @@ function bannerTitle(view: ClientShareView, status: BannerStatus): string {
     return "Thank you — your response is with the Centriyon team"
   }
   if (status === "sent_back") return "A few changes, please"
+  if (view.stage === "department_questions") {
+    return `${view.department_name || "Department"} questions`
+  }
   if (view.stage === "questionnaire") return "A few questions about the year ahead"
   if (view.stage === "brief") return "Review the strategic brief"
   return "Review the areas of focus"
@@ -128,9 +150,12 @@ function bannerSubtitle(
     return "Nothing more is needed from you right now. Everything below is what you sent."
   }
   if (status === "sent_back") {
-    return view.stage === "questionnaire"
+    return isQuestionList(view)
       ? "Your previous answers are below. Edit what needs changing and send them again."
       : "What you sent is below. Edit what needs changing and send it again."
+  }
+  if (view.stage === "department_questions") {
+    return `Your answers shape the ${view.department_name || "department"} section of this annual report. Answer each in your own words, reject any that don't apply, or reword one that isn't quite right.`
   }
   if (view.stage === "questionnaire") {
     return "Your answers shape the strategic brief for this annual report. Pick the closest option for each, or write your own."
@@ -157,13 +182,14 @@ function bannerFacts(
   areaCount: number,
   firstRound: boolean,
 ): string[] {
-  if (view.stage === "questionnaire") {
+  if (isQuestionList(view)) {
     const facts = [
       `${questionCount} questions`,
       `About ${questionnaireMinutes(questionCount)} minutes`,
     ]
     if (firstRound) facts.push("You can add your own questions")
-    facts.push("You can attach your own brief")
+    // The kickoff questionnaire only: a department's link has no attachment.
+    if (view.stage === "questionnaire") facts.push("You can attach your own brief")
     return facts
   }
   if (view.stage === "brief") return ["About 5 minutes", "You can add a note"]
@@ -259,7 +285,7 @@ export default function ClientSharePage({
       .then((v) => {
         if (cancelled) return
         setView(v)
-        if (v.stage === "questionnaire") {
+        if (isQuestionList(v)) {
           // Fill from whatever they last sent. Two cases, same behaviour: a
           // submitted link shows back what they sent rather than an empty form
           // implying it never arrived, and work sent back for changes opens
@@ -307,6 +333,17 @@ export default function ClientSharePage({
     }
     return [...shown, ...extraQuestions]
   }, [view, extraQuestions, questionEdits])
+
+  /** The client's own questions: the ones added in this browser, plus (on a
+   *  department link sent back for changes) the ones they added last round,
+   *  which the server marks added_by "client". */
+  const ownQuestionIds = useMemo(() => {
+    const ids = extraQuestions.map((q) => q.id)
+    for (const q of view?.payload.questions ?? []) {
+      if ((q as SurveyQuestion & { added_by?: string }).added_by === "client") ids.push(q.id)
+    }
+    return ids
+  }, [view, extraQuestions])
 
   /** The question as the link showed it, before any change of theirs. */
   const originalQuestion = (questionId: string): SurveyQuestion | undefined =>
@@ -385,18 +422,15 @@ export default function ClientSharePage({
   const removeExtraQuestion = (questionId: string) => {
     const index = questions.findIndex((q) => q.id === questionId)
     setExtraQuestions((prev) => prev.filter((q) => q.id !== questionId))
-    // Answers are keyed by POSITION, so dropping a question has to drop its
-    // answer and shuffle everything after it down — otherwise every later
-    // answer lands on the wrong question.
-    setAnswers((prev) => {
-      const nextAnswers: typeof prev.answers = {}
-      Object.entries(prev.answers).forEach(([k, v]) => {
-        const i = Number(k)
-        if (i < index) nextAnswers[i] = v
-        else if (i > index) nextAnswers[i - 1] = v
-      })
-      return { ...prev, answers: nextAnswers, rejected: {} }
-    })
+    // Answers and rejections are keyed by POSITION, so dropping a question
+    // has to drop its entry and shuffle everything after it down — otherwise
+    // every later answer lands on the wrong question. Rejections move the same
+    // way: they used to be wiped here, which silently un-rejected every
+    // question the client had rejected.
+    setAnswers((prev) => ({
+      answers: shiftAfterRemoval(prev.answers, index),
+      rejected: shiftAfterRemoval(prev.rejected, index),
+    }))
   }
   const editable = view?.status === "pending"
   // Adding is a first-round act. A link that came back for changes is a second
@@ -433,7 +467,7 @@ export default function ClientSharePage({
   const areasMissingLead = grouped ? areasMissingPrimaryMessage(areas, concepts) : []
 
   const canSubmit = editable && !submitting && (
-    view?.stage === "questionnaire"
+    view && isQuestionList(view)
       ? isComplete(questions, answers)
       : view?.stage === "brief"
         ? brief.trim().length > 0
@@ -472,7 +506,7 @@ export default function ClientSharePage({
       // Each gate sends only its own half. The brief gate has no areas yet —
       // they are written from whatever this call stores, once Spark approves.
       const response: ShareResponsePayload =
-        view.stage === "questionnaire"
+        isQuestionList(view)
           ? {
               answers: buildAnswersPayload(questions, answers),
               added_questions: extraQuestions.map((q) => ({
@@ -499,7 +533,7 @@ export default function ClientSharePage({
               }
       const next = await clientShareApi.submit(token, {
         response,
-        client_note: view.stage !== "questionnaire" ? note.trim() || undefined : undefined,
+        client_note: !isQuestionList(view) ? note.trim() || undefined : undefined,
       })
       // Closed only once it has landed, so the dialog's own spinner covers
       // the request. Closing first left the client watching an unchanged page
@@ -569,14 +603,15 @@ export default function ClientSharePage({
     <>
     <div className="min-h-screen bg-muted/30">
       <ClientShareBanner
-        stage={view.stage}
+        // A department's link is not one of the kickoff steps, so no trail.
+        stage={view.stage === "department_questions" ? undefined : view.stage}
         cycleName={view.cycle_name}
         title={bannerTitle(view, bannerState)}
         subtitle={bannerSubtitle(view, bannerState, grouped)}
         facts={editable ? bannerFacts(view, questions.length, areas.length, firstRound) : []}
         status={bannerState}
         submittedAt={view.submitted_at}
-        progress={view.stage === "questionnaire" && editable ? { answered, required } : null}
+        progress={isQuestionList(view) && editable ? { answered, required } : null}
         contactName={view.contact_name}
         contactEmail={view.contact_email}
       />
@@ -601,8 +636,8 @@ export default function ClientSharePage({
           </div>
         )}
 
-        {/* ── Questionnaire ── */}
-        {view.stage === "questionnaire" && (
+        {/* ── Questionnaire (kickoff, or a department's questions) ── */}
+        {isQuestionList(view) && (
           <>
             <QuestionnaireForm
               questions={questions}
@@ -618,6 +653,7 @@ export default function ClientSharePage({
               undoableQuestionIds={Object.keys(questionEdits)}
               onUndoEdit={undoQuestionEdit}
               showEditedBy={false}
+              usedIn={view.stage === "department_questions" ? "the report" : "the brief"}
             />
 
             {/* Anything we didn't think to ask. They write the question and
@@ -698,7 +734,7 @@ export default function ClientSharePage({
                 file guides the AI draft, so it has to be on the cycle before
                 the answers are sent. Once sent it stays on the page, read-only,
                 so a returning client can see their file arrived. */}
-            {(editable || docName) && (
+            {view.stage === "questionnaire" && (editable || docName) && (
               <div
                 className={cn(
                   "mt-4 rounded-2xl border border-dashed p-4",
@@ -945,7 +981,7 @@ export default function ClientSharePage({
         {/* Their note on the brief or the areas. Editing the copy says what
             they'd write; this is for "section 2 feels long" without rewriting
             it. The questionnaire has none: its last question is the catch-all. */}
-        {editable && view.stage !== "questionnaire" && (
+        {editable && !isQuestionList(view) && (
           <div className="mt-8 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <label className="text-sm font-semibold text-foreground">
               Anything you&apos;d like to add?{" "}
@@ -963,7 +999,7 @@ export default function ClientSharePage({
 
         {/* Their note, once sent. The box above only exists while they can
             edit, so without this the note vanished from their own view. */}
-        {!editable && view.stage !== "questionnaire" && view.client_note && (
+        {!editable && !isQuestionList(view) && view.client_note && (
           <div className="mt-8 flex items-start gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <MessageSquareQuote className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
@@ -991,8 +1027,10 @@ export default function ClientSharePage({
                 onClick={() => setConfirmSend(true)}
                 disabled={!canSubmit}
                 title={
-                  view.stage === "questionnaire" && !isComplete(questions, answers)
-                    ? "Answer every question to send"
+                  isQuestionList(view) && !isComplete(questions, answers)
+                    ? required === 0
+                      ? "You've rejected every question — answer at least one to send"
+                      : "Answer every question to send"
                     : undefined
                 }
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
@@ -1018,7 +1056,7 @@ export default function ClientSharePage({
     <Dialog open={confirmSend} onOpenChange={(o) => !submitting && setConfirmSend(o)}>
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-4xl">
         <DialogTitle className="text-lg">
-          {view.stage === "questionnaire"
+          {isQuestionList(view)
             ? "Review your answers"
             : view.stage === "brief"
               ? "Review your strategic brief"
@@ -1030,11 +1068,11 @@ export default function ClientSharePage({
             : "This is exactly what the Centriyon team will receive."}
         </DialogDescription>
 
-        {view.stage === "questionnaire" && (
+        {isQuestionList(view) && (
           <QuestionnaireReview
             questions={questions}
             value={answers}
-            ownQuestionIds={extraQuestions.map((q) => q.id)}
+            ownQuestionIds={ownQuestionIds}
             documentName={docName}
           />
         )}
