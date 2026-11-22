@@ -206,6 +206,8 @@ export interface PlanResponse {
   sections_locked: boolean
   sections_locked_at: string | null
   sections_locked_by: string | null
+  /** Departments added to the cycle after this plan was made. */
+  departments_added_after_plan?: string[]
 }
 
 /**

@@ -255,9 +255,13 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   const questionsDeadlineSaved = pmDash?.cycle?.questions_deadline ?? null
   const todayIso = new Date().toISOString().slice(0, 10)
 
+  // "assigned" = a department added after kickoff, still waiting for the PM
+  // to generate its questions. It can't be late on work it doesn't have yet,
+  // and "Remind All" would chase a department with nobody to remind.
   const isOverdue = (row: SessionSummary) =>
     !!submissionDeadline &&
     new Date() > new Date(submissionDeadline) &&
+    row.status !== "assigned" &&
     row.status !== "submitted" &&
     row.status !== "approved"
   const overdueRows = departments.filter(isOverdue)
