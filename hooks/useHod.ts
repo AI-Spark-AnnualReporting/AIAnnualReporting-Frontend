@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { hodApi, HODSession, HODQuestion, ReviewStatus } from "@/lib/api/hod"
+import type { DepartmentShareState } from "@/lib/api/hod"
 import { QUERY_KEYS } from "@/lib/constants"
 import { toast } from "sonner"
 
@@ -175,4 +176,109 @@ export function useReviewAnswers(sessionId: string) {
     },
     onError: (err: { message?: string }) => toast.error(err?.message || "Failed to submit review"),
   })
+}
+
+// ── The department's questions with the client (Spark-led sessions) ────────
+
+/** Where the client step is up to. Polled every 60 s, like the kickoff shares,
+ *  so a client's reply shows up without a refresh. */
+export function useDeptClientShare(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: QUERY_KEYS.HOD_CLIENT_SHARE(sessionId),
+    queryFn: () => hodApi.clientShare(sessionId),
+    // Only Spark staff have this step, so nobody else makes (or polls) the call.
+    enabled: enabled && !!sessionId,
+    refetchInterval: 60_000,
+  })
+}
+
+export function useDeptClientHistory(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: QUERY_KEYS.HOD_CLIENT_HISTORY(sessionId),
+    queryFn: () => hodApi.clientShareHistory(sessionId),
+    enabled: enabled && !!sessionId,
+    // Fetched fresh every time the panel opens: the HOD's own question edits
+    // add lines too, and the app's 60 s cache would show an old (even empty)
+    // list right after them.
+    staleTime: 0,
+  })
+}
+
+/** One mutation on the client step. The server returns the new state, which
+ *  goes straight into the cache. The session is refetched too: the client's
+ *  changes are written onto its questions. */
+function useClientShareAction<V>(
+  sessionId: string,
+  fn: (vars: V) => Promise<DepartmentShareState>,
+  successMsg: string,
+  errorMsg: string,
+  afterSuccess?: (state: DepartmentShareState) => void,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (state) => {
+      qc.setQueryData(QUERY_KEYS.HOD_CLIENT_SHARE(sessionId), state)
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.HOD_SESSION(sessionId) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.HOD_CLIENT_HISTORY(sessionId) })
+      if (afterSuccess) afterSuccess(state)
+      else toast.success(successMsg)
+    },
+    onError: (err: { message?: string }) => toast.error(readableError(err?.message, errorMsg)),
+  })
+}
+
+/** The server's message, except the raw validation text for a bad email
+ *  ("body.client_email: value is not a valid email address…"). */
+function readableError(message: string | undefined, fallback: string): string {
+  if (!message) return fallback
+  if (message.includes("client_email")) return "That email address isn't valid."
+  return message
+}
+
+export function useShareWithClient(sessionId: string) {
+  return useClientShareAction<string>(
+    sessionId,
+    // Queued behind any approve/reject still saving, like Assign: the server
+    // sends the questions as stored, and once sent they're locked for good.
+    (email) => serializeWrite(sessionId, () => hodApi.shareWithClient(sessionId, email)),
+    "Sent to the client",
+    "Couldn't send to the client",
+  )
+}
+
+export function useApproveClientShare(sessionId: string) {
+  return useClientShareAction<void>(
+    sessionId,
+    () => hodApi.approveClientShare(sessionId),
+    "Client's answers approved",
+    "Couldn't approve",
+  )
+}
+
+export function useSendBackClientShare(sessionId: string) {
+  return useClientShareAction<string>(
+    sessionId,
+    (comment) => hodApi.sendBackClientShare(sessionId, comment),
+    "Sent back to the client",
+    "Couldn't send it back",
+  )
+}
+
+export function useRemindClient(sessionId: string) {
+  return useClientShareAction<void>(
+    sessionId,
+    () => hodApi.remindClient(sessionId),
+    "Reminder sent",
+    "Couldn't send the reminder",
+    // The reminder is counted even when the mailer fails, so say so rather
+    // than "Reminder sent".
+    (state) => {
+      if (state.share?.email_status === "failed") {
+        toast.warning("Reminder saved, but it couldn't be emailed — copy the link and send it yourself.")
+      } else {
+        toast.success("Reminder sent")
+      }
+    },
+  )
 }

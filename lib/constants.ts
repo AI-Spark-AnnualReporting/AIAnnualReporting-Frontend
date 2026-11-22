@@ -151,4 +151,6 @@ export const QUERY_KEYS = {
   HOD_SESSIONS: (status?: string) => ["hod", "sessions", status ?? "all"],
   HOD_SESSION: (id: string) => ["hod", "session", id],
   HOD_ASSIGNABLE: (id: string) => ["hod", "session", id, "assignable"],
+  HOD_CLIENT_SHARE: (id: string) => ["hod", "session", id, "client-share"],
+  HOD_CLIENT_HISTORY: (id: string) => ["hod", "session", id, "client-share", "history"],
 } as const

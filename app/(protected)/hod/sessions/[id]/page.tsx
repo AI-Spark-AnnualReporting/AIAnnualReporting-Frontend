@@ -11,8 +11,15 @@ import {
   useApproveAll,
   useHODAssignableUsers,
   useAssignSession,
+  useDeptClientShare,
   HOD_WRITE_KEY,
 } from "@/hooks/useHod"
+import {
+  ClientAnswers,
+  DepartmentShareBanner,
+  DepartmentShareButton,
+} from "@/components/hod/DepartmentClientShare"
+import { DepartmentHistoryButton } from "@/components/pm/KickoffHistoryPanel"
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
@@ -37,6 +44,15 @@ export default function HODCuratePage() {
   const addQ = useAddQuestion(id)
   const removeQ = useRemoveQuestion(id)
   const approveAll = useApproveAll(id)
+  // Spark-led sessions go to the client before they can be assigned.
+  // Only Spark staff have this step; nobody else makes the call.
+  const isSpark = me?.role === "spark_internal"
+  const {
+    data: clientState,
+    isLoading: clientLoading,
+    isError: clientError,
+    refetch: refetchClient,
+  } = useDeptClientShare(id, isSpark)
 
   // When every queued curation write has settled, do ONE reconciling refetch —
   // fixes the temp ids from optimistic adds and self-corrects any failed send.
@@ -73,7 +89,21 @@ export default function HODCuratePage() {
     return { pending, approved, rejected, total, reviewed, progress: total ? Math.round((reviewed / total) * 100) : 0 }
   }, [questions])
 
-  const canAssign = counts.total > 0 && counts.pending === 0 && counts.approved > 0
+  const reviewDone = counts.total > 0 && counts.pending === 0 && counts.approved > 0
+  const clientShare = clientState?.share ?? null
+  // The client step applies when this user must take it (Spark), or when it
+  // was already taken (so nobody assigns around an open share).
+  const clientStep = !!clientState?.required || !!clientShare
+  const clientApproved = clientShare?.status === "approved"
+  // For Spark, the client step isn't known until its state loads (or if that
+  // failed). Until then nothing is offered: no edits, no Assign, no Send.
+  const clientUnknown = isSpark && (clientLoading || clientError)
+  // Once sent, only the client changes the questions; after approval nobody does.
+  const locked = !!clientShare || clientUnknown
+  const canAssign = reviewDone && !clientUnknown && (!clientStep || clientApproved)
+  const showShareButton = clientStep && !clientApproved
+  // The client rejected every question: nothing left to approve.
+  const nothingToApprove = clientShare?.status === "responded" && counts.approved === 0
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div>
@@ -124,6 +154,9 @@ export default function HODCuratePage() {
         questions={questions}
         title={`${deptName} · ${cycleName}`}
         mine={!!me && session.user_id === me.user_id}
+        historyButton={
+          isSpark ? <DepartmentHistoryButton sessionId={id} title={`${deptName} questions`} /> : null
+        }
         onBack={() => router.push("/hod")}
         onAnswer={() => router.push("/department")}
         onReview={() => router.push(`/hod/sessions/${id}/review`)}
@@ -142,26 +175,45 @@ export default function HODCuratePage() {
           <h1 className="truncate text-lg font-extrabold text-[#1A1D2E]">{deptName} · {cycleName}</h1>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Reviewing questions
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />{" "}
+          {!clientShare
+            ? "Reviewing questions"
+            : clientShare.status === "pending"
+              ? "With the client"
+              : clientShare.status === "responded"
+                ? "Client responded"
+                : "Client answered"}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500">{counts.reviewed}/{counts.total} reviewed</span>
-          <button
-            onClick={() => approveAll.mutate()}
-            disabled={counts.pending === 0}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#1A1D2E] hover:bg-slate-50 disabled:opacity-40"
-          >
-            <Check className="h-3.5 w-3.5" /> Approve all pending
-          </button>
-          <button
-            onClick={() => setAssignOpen(true)}
-            disabled={!canAssign}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#4040c8] px-3 py-2 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
-          >
-            Assign &amp; send →
-          </button>
+          {/* From the start for Spark HODs: their edits before sending are
+              recorded too, not only what happens with the client. */}
+          {(clientShare || clientState?.required) && (
+            <DepartmentHistoryButton sessionId={id} title={`${deptName} questions`} />
+          )}
+          {!locked && (
+            <button
+              onClick={() => approveAll.mutate()}
+              disabled={counts.pending === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#1A1D2E] hover:bg-slate-50 disabled:opacity-40"
+            >
+              <Check className="h-3.5 w-3.5" /> Approve all pending
+            </button>
+          )}
+          {!showShareButton && !clientUnknown && (
+            <button
+              onClick={() => setAssignOpen(true)}
+              disabled={!canAssign}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#4040c8] px-3 py-2 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
+            >
+              Assign &amp; send →
+            </button>
+          )}
         </div>
       </div>
+
+      {clientShare && <DepartmentShareBanner share={clientShare} />}
+      {clientShare && clientShare.status !== "pending" && <ClientAnswers share={clientShare} />}
 
       {/* Counters */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -184,7 +236,8 @@ export default function HODCuratePage() {
         {questions.map((q) => {
           const status = reviewOf(q)
           const { topic, question } = splitQuestion(q.question)
-          const editing = editingId === q.question_id
+          // An edit box left open when the questions were sent closes itself.
+          const editing = editingId === q.question_id && !locked
           const border = status === "approved" ? "border-l-emerald-400" : status === "rejected" ? "border-l-rose-400" : "border-l-amber-400"
           return (
             <div key={q.question_id} dir={dirOf(question)} className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-4 ${border}`}>
@@ -228,7 +281,13 @@ export default function HODCuratePage() {
                     </p>
                   )}
 
-                  {!editing && (
+                  {(q.added_by === "client" || q.edited_by === "client") && (
+                    <p className="mt-1.5 text-[11px] font-semibold text-indigo-600">
+                      {q.added_by === "client" ? "Added by the client" : "Reworded by the client"}
+                    </p>
+                  )}
+
+                  {!editing && !locked && (
                     <div className="mt-3 flex items-center gap-2">
                       {status === "pending" && (
                         <>
@@ -265,7 +324,7 @@ export default function HODCuratePage() {
         })}
 
         {/* Add a question */}
-        {adding ? (
+        {locked ? null : adding ? (
           <div className="rounded-2xl border border-[#4040c8] bg-white p-4">
             <input
               value={newTopic}
@@ -303,19 +362,57 @@ export default function HODCuratePage() {
       <div className="fixed bottom-6 left-1/2 z-20 w-[min(48rem,calc(100%-3rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
         <div className="flex items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-xs font-semibold">
-            {counts.pending > 0 ? (
+            {showShareButton && clientShare ? (
+              <><Clock className="h-4 w-4 text-amber-500" /><span className="text-slate-600">
+                {clientShare.status === "pending"
+                  ? "Waiting on the client. You can assign once you've approved their answers."
+                  : "The client has responded. Approve their answers or send them back."}
+              </span></>
+            ) : counts.pending > 0 ? (
               <><Clock className="h-4 w-4 text-amber-500" /><span className="text-slate-600">{counts.pending} question{counts.pending === 1 ? "" : "s"} still pending your review</span></>
             ) : (
               <><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="text-slate-600">All reviewed — {counts.approved} will be sent, {counts.rejected} rejected</span></>
             )}
           </p>
-          <button
-            onClick={() => setAssignOpen(true)}
-            disabled={!canAssign}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
-          >
-            <Send className="h-3.5 w-3.5" /> Assign &amp; send questions
-          </button>
+          {/* The one place the client-step button lives: the sticky bar is
+              always on screen, and two copies would mean two dialogs. */}
+          {clientUnknown ? (
+            // Spark, client-step state not loaded yet (or it failed).
+            <button
+              onClick={() => refetchClient()}
+              disabled={!clientError}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {clientError ? (
+                <><RotateCcw className="h-3.5 w-3.5" /> Couldn&apos;t check the client step — retry</>
+              ) : (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking…</>
+              )}
+            </button>
+          ) : showShareButton ? (
+            <DepartmentShareButton
+              sessionId={id}
+              departmentName={deptName}
+              share={clientShare}
+              suggestedEmail={clientState?.suggested_email}
+              nothingToApprove={nothingToApprove}
+              blockedReason={
+                !clientShare && !reviewDone
+                  ? counts.pending > 0
+                    ? "Approve or reject every question first"
+                    : "Approve at least one question to send"
+                  : undefined
+              }
+            />
+          ) : (
+            <button
+              onClick={() => setAssignOpen(true)}
+              disabled={!canAssign}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#4040c8] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#3535b5] disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" /> Assign &amp; send questions
+            </button>
+          )}
         </div>
       </div>
 
@@ -335,10 +432,12 @@ export default function HODCuratePage() {
 
 /** The page after the questions were sent: read-only, saying to whom and
  *  when, with the way on. */
-function SentView({ session, questions, title, mine, onBack, onAnswer, onReview }: {
+function SentView({ session, questions, title, mine, historyButton, onBack, onAnswer, onReview }: {
   session: HODSession
   questions: HODQuestion[]
   title: string
+  /** Spark-led sessions: the History stays readable after Assign & send. */
+  historyButton?: React.ReactNode
   /** Sent to the person viewing: they answer them next. */
   mine: boolean
   onBack: () => void
@@ -399,9 +498,12 @@ function SentView({ session, questions, title, mine, onBack, onAnswer, onReview 
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {bar.badge}
         </span>
-        <span className="ml-auto text-xs font-semibold text-slate-500">
-          {sent.length} sent · {rejected} rejected
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs font-semibold text-slate-500">
+            {sent.length} sent · {rejected} rejected
+          </span>
+          {historyButton}
+        </div>
       </div>
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
