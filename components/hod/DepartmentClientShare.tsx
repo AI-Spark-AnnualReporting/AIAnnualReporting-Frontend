@@ -12,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { QuestionnaireReview } from "@/components/share/ResponseReview"
 import { cn } from "@/lib/utils"
 import {
   useApproveClientShare,
@@ -21,8 +20,6 @@ import {
   useShareWithClient,
 } from "@/hooks/useHod"
 import type { DepartmentShare } from "@/lib/api/hod"
-import type { SurveyQuestion } from "@/lib/api/pm"
-import type { Answer, QuestionnaireValue } from "@/lib/questionnaireAnswers"
 import {
   AlertTriangle, BellRing, Check, CheckCircle2, Clock, Copy, Info, Loader2, Mail,
   MessageSquareQuote, Send, Undo2,
@@ -127,6 +124,7 @@ export function DepartmentShareButton({
   const close = () => {
     setOpen(false)
     setConfirm(null)
+    setSendBackOpen(false)
     setSubmitting(false)
   }
 
@@ -165,19 +163,51 @@ export function DepartmentShareButton({
       }),
     )
 
+  // Once the client has replied, the two choices sit on the page itself (each
+  // still opens the dialog: a note for Send back, a confirm for Approve).
+  const replied = share?.status === "responded"
+
   return (
     <>
-      <Button
-        type="button"
-        variant={!share || share.status === "responded" ? "default" : "outline"}
-        onClick={() => setOpen(true)}
-        disabled={!!blockedReason}
-        title={blockedReason}
-        className={cn("shrink-0", t.className)}
-      >
-        <TriggerIcon className="h-4 w-4" />
-        {t.label}
-      </Button>
+      {replied ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setSendBackOpen(true)
+              setOpen(true)
+            }}
+            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          >
+            <Undo2 className="h-4 w-4" /> Send back
+          </Button>
+          {!nothingToApprove && (
+            <Button
+              type="button"
+              onClick={() => {
+                setConfirm("approve")
+                setOpen(true)
+              }}
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              <Check className="h-4 w-4" /> Approve answers
+            </Button>
+          )}
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant={!share ? "default" : "outline"}
+          onClick={() => setOpen(true)}
+          disabled={!!blockedReason}
+          title={blockedReason}
+          className={cn("shrink-0", t.className)}
+        >
+          <TriggerIcon className="h-4 w-4" />
+          {t.label}
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
         <DialogContent className="sm:max-w-lg">
@@ -462,41 +492,4 @@ export function DepartmentShareBanner({ share }: { share: DepartmentShare }) {
       )}
     </div>
   )
-}
-
-/** The client's answers, read-only, in the same layout the client saw before
- *  sending. Shown once they have responded. */
-export function ClientAnswers({ share }: { share: DepartmentShare }) {
-  const questions = (share.payload.questions ?? []) as SurveyQuestion[]
-  const value = valueFromShare(questions, share)
-  const ownIds = questions.filter((q) => q.id.startsWith("c_")).map((q) => q.id)
-  return (
-    <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
-      <p className="mb-3 text-sm font-bold text-[#1A1D2E]">The client&apos;s answers</p>
-      <QuestionnaireReview
-        questions={questions}
-        value={value}
-        ownQuestionIds={ownIds}
-        documentName={null}
-        reader="team"
-      />
-    </div>
-  )
-}
-
-/** Build the review's value from the stored reply: answers by question id,
- *  rejections from the client's own list (a blank answer is not a rejection). */
-function valueFromShare(questions: SurveyQuestion[], share: DepartmentShare): QuestionnaireValue {
-  const answerById = new Map<string, string>()
-  for (const a of share.response.answers ?? []) answerById.set(a.question_id, a.answer)
-  const rejectedIds = new Set(share.response.rejected_question_ids ?? [])
-
-  const answers: Record<number, Answer> = {}
-  const rejected: Record<number, boolean> = {}
-  questions.forEach((q, i) => {
-    if (rejectedIds.has(q.id)) rejected[i] = true
-    const text = answerById.get(q.id)
-    if (text) answers[i] = { selected: [], custom: [], text }
-  })
-  return { answers, rejected }
 }

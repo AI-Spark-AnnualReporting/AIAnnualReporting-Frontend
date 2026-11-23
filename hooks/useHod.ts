@@ -98,6 +98,24 @@ export function useReviewQuestion(sessionId: string) {
   )
 }
 
+// The Lead adds a question after Assign & send, before approval. Not optimistic:
+// the server also clears the department's outline and draft and may send a
+// submitted department back, so the page reloads the real session instead.
+export function useAddQuestionAfterAssign(sessionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (text: string) => hodApi.addQuestion(sessionId, text),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.HOD_SESSION(sessionId) })
+      qc.invalidateQueries({ queryKey: ["hod", "sessions"] })
+      toast.success("Question added. The team member has been told.")
+    },
+    onError: (err: { response?: { data?: { detail?: string } }; message?: string }) => {
+      toast.error(err?.response?.data?.detail || err?.message || "Couldn't add the question.")
+    },
+  })
+}
+
 export function useAddQuestion(sessionId: string) {
   return useOptimisticCuration<string>(
     sessionId,

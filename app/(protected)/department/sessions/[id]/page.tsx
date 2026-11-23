@@ -728,7 +728,7 @@ export default function SessionWorkspacePage({
         </div>
 
         {/* Row 2 — progress + actions */}
-        <div className="flex items-center gap-3 border-t border-slate-100 px-6 py-2.5">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-6 py-2.5">
           <div className="flex items-center gap-2">
             <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100">
               <div
@@ -890,6 +890,12 @@ export default function SessionWorkspacePage({
                     <span className="text-sm font-semibold text-slate-400">
                       Q{currentIndex + 1} of {questions.length}
                     </span>
+                    {/* Added by the Lead after the questions were sent. */}
+                    {currentQ.added_after_assign && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                        New from your Lead
+                      </span>
+                    )}
                     {saved[currentQ.question_id] && (
                       <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
                         <CheckCircle2 className="h-4 w-4" /> Saved

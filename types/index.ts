@@ -402,6 +402,8 @@ export interface Question {
   question_id: string
   question: string
   order: number
+  /** Added by the Lead after Assign & send; shown as "New from your Lead". */
+  added_after_assign?: boolean | null
 }
 
 export interface Answer {
