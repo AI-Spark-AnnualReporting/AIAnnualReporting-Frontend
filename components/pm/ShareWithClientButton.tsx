@@ -128,10 +128,15 @@ export function ShareWithClientButton({
   share,
   current,
   suggestedEmail,
+  blockedReason,
 }: {
   cycleId: string
   stage: ShareStage
   share?: ShareRequest | null
+  /** When set, the button is greyed out with this as its tooltip — e.g. the
+   *  page has unsaved question changes, and the client's link is built from
+   *  the saved questions only. */
+  blockedReason?: string
   /** The address an earlier gate on this cycle was sent to. Filled into the
    *  box so Spark does not retype an address they already sent to — it is the
    *  same client, and it stays editable for the case where it isn't. */
@@ -207,6 +212,8 @@ export function ShareWithClientButton({
         type="button"
         variant={isSpark && (!share || share.status === "responded") ? "default" : "outline"}
         onClick={() => setOpen(true)}
+        disabled={!!blockedReason}
+        title={blockedReason}
         className={cn("shrink-0", t.className)}
       >
         <TriggerIcon className="h-4 w-4" />

@@ -2,12 +2,13 @@
 
 import { useState } from "react"
 import {
-  BellRing, CheckCircle2, History, Loader2, MessageSquareQuote, Paperclip, Pencil, Send, Sparkles, Undo2,
+  BellRing, CheckCircle2, History, MessageSquareQuote, Paperclip, Pencil, Send, Sparkles, Undo2,
   UserRound, Wand2,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeletons"
 import { useKickoffHistory } from "@/hooks/useShare"
 import type { KickoffHistoryEntry, ShareStage } from "@/lib/api/share"
 import { DiffPart, hasChanges, wordDiff } from "@/lib/textDiff"
@@ -548,6 +549,29 @@ function Entry({ entry, stage }: { entry: KickoffHistoryEntry; stage: ShareStage
   )
 }
 
+/** Shown while the history loads: three grey rows shaped like timeline
+ *  entries (round icon, who/when line, a few text lines). */
+function HistorySkeleton() {
+  return (
+    <ol aria-busy="true" aria-label="Loading history" className="space-y-6 pt-2">
+      {[0, 1, 2].map((row) => (
+        <li key={row} className="flex gap-3">
+          <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2 pt-1">
+            <div className="flex items-center justify-between gap-3">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 /** The History button, and the panel it opens, for one gate. */
 export function KickoffHistoryButton({ cycleId, stage }: { cycleId: string; stage: ShareStage }) {
   const [open, setOpen] = useState(false)
@@ -569,9 +593,7 @@ export function KickoffHistoryButton({ cycleId, stage }: { cycleId: string; stag
 
           <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
             {isLoading ? (
-              <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading history…
-              </div>
+              <HistorySkeleton />
             ) : isError ? (
               <p className="py-10 text-sm text-destructive">Couldn&apos;t load the history. Try again.</p>
             ) : !entries || entries.length === 0 ? (

@@ -28,6 +28,7 @@ import {
   QuestionnaireValue,
   answerAfterOptionsChange,
   buildAnswersPayload,
+  cleanChoices,
   emptyQuestionnaireValue,
   answeredCount,
   requiredCount,
@@ -56,7 +57,7 @@ import {
 } from "@/lib/conceptMessages"
 import {
   AlertTriangle, CheckCircle2, FileText, Info, Link2Off, Loader2, MessageSquareQuote,
-  Plus, Send, Upload,
+  Plus, Send, Upload, X,
 } from "lucide-react"
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -207,6 +208,10 @@ export default function ClientSharePage({
   // server adopts them onto the cycle then, and renumbers the ids.
   const [extraQuestions, setExtraQuestions] = useState<SurveyQuestion[]>([])
   const [newQuestion, setNewQuestion] = useState("")
+  // Choices for their new question, and the "+ Add choice" box's text. None
+  // means they answer it in their own words. Same as Spark's add box.
+  const [newChoices, setNewChoices] = useState<string[]>([])
+  const [newChoiceDraft, setNewChoiceDraft] = useState("")
   // Their rewording of OUR questions, by question id. Local until they send —
   // the server then writes it onto the cycle. Kept apart from the link's list
   // so "Undo my change" can put the original back.
@@ -352,16 +357,29 @@ export default function ClientSharePage({
     })
   }
 
+  /** Turn the "+ Add choice" box's text into a choice, then clear the box. */
+  const addNewChoice = () => {
+    const text = newChoiceDraft.trim()
+    if (!text) return
+    setNewChoices((prev) => [...prev, text])
+    setNewChoiceDraft("")
+  }
+
   const addQuestion = () => {
     const text = newQuestion.trim()
     if (!text) return
+    // A choice still sitting in the box counts, so it isn't lost on Add.
+    const pending = newChoiceDraft.trim()
+    const options = cleanChoices(pending ? [...newChoices, pending] : newChoices)
     // A local id only. The server assigns the real one and moves the answer
     // with it, so nothing here can collide with a question of Spark's.
     setExtraQuestions((prev) => [
       ...prev,
-      { id: `own-${Date.now()}`, text, source: "manual", options: null },
+      { id: `own-${Date.now()}`, text, source: "manual", options },
     ])
     setNewQuestion("")
+    setNewChoices([])
+    setNewChoiceDraft("")
   }
 
   const removeExtraQuestion = (questionId: string) => {
@@ -612,8 +630,8 @@ export default function ClientSharePage({
                   Something we didn&apos;t ask about?
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Add your own question and answer it — it goes to the Centriyon team with
-                  the rest.
+                  Add your own question — with choices to pick from, or none to answer in
+                  your own words. It goes to the Centriyon team with the rest.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <input
@@ -637,6 +655,41 @@ export default function ClientSharePage({
                   >
                     <Plus className="h-4 w-4" /> Add question
                   </Button>
+                </div>
+                {/* Choices — same pills and "+ Add choice" box as Spark's add
+                    box, so both sides add questions the same way. */}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {newChoices.map((choice, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground"
+                    >
+                      {choice}
+                      <button
+                        type="button"
+                        onClick={() => setNewChoices((prev) => prev.filter((_, k) => k !== idx))}
+                        title={`Remove "${choice}"`}
+                        className="text-muted-foreground transition-colors hover:text-destructive"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={newChoiceDraft}
+                    onChange={(e) => setNewChoiceDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addNewChoice()
+                      }
+                    }}
+                    onBlur={addNewChoice}
+                    placeholder="+ Add choice (optional)"
+                    aria-label="Add a choice to the new question"
+                    className="min-w-[12rem] max-w-full rounded-full border border-dashed border-muted-foreground/40 bg-background px-3.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400"
+                  />
                 </div>
               </div>
             )}

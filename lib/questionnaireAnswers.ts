@@ -207,3 +207,22 @@ export function cleanChoices(options: string[]): string[] | null {
   }
   return cleaned.length > 0 ? cleaned : null
 }
+
+/** One question being edited: the draft wording, choices, and whatever is
+ *  still typed in its "+ Add choice" box. Nothing is saved until Save. */
+export interface QuestionDraft {
+  text: string
+  options: string[]
+  newOption: string
+}
+
+/** Open drafts, by question id. */
+export type QuestionDrafts = Record<string, QuestionDraft>
+
+/** The draft as it would be saved: wording trimmed, choices cleaned, and a
+ *  choice still sitting in the "+ Add choice" box counted, so it isn't lost. */
+export function finishDraft(draft: QuestionDraft): { text: string; options: string[] | null } {
+  const pending = draft.newOption.trim()
+  const options = pending ? [...draft.options, pending] : draft.options
+  return { text: draft.text.trim(), options: cleanChoices(options) }
+}
