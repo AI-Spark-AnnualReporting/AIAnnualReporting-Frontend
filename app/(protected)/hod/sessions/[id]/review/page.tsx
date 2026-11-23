@@ -119,7 +119,7 @@ export default function HODReviewPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl pb-28">
+    <div className="mx-auto max-w-3xl pb-6">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <button onClick={() => router.push(isSubmitted ? "/hod/reviews" : "/hod")} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
@@ -286,16 +286,17 @@ export default function HODReviewPage() {
       {/* Still before approval: the Lead may add a question. That sends the
           answers back with the draft cleared (plan: hod-add-question-after-assign). */}
       {canAddQuestion && activeTab === "answers" && (
-        <div className={isSubmitted ? "mb-24" : "mb-6"}>
+        <div className="mb-6">
           <AddQuestionAfterAssign sessionId={session.session_id} deptName={dept} />
         </div>
       )}
 
       {/* Action bar */}
       {isSubmitted ? (
-        <div className="fixed bottom-6 left-1/2 z-20 w-[min(48rem,calc(100%-3rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold text-slate-600">
+        // Sticky, not fixed: it stays inside the page column, so it lines up with the content.
+        <div className="sticky bottom-6 z-20 mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="min-w-0 flex-1 basis-60 text-xs font-semibold text-slate-600">
               Approve to include this in the report, or send it back for changes.
             </p>
             <div className="flex items-center gap-2">
