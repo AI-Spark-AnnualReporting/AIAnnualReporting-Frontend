@@ -11,6 +11,7 @@ import { dirOf } from "@/lib/lang"
 import { ArrowLeft, Check, Send, X, Loader2, Info, CircleSlash, FileText, ListChecks, ListTree } from "lucide-react"
 import { ClaimLine } from "@/components/report/ClaimLine"
 import { cn } from "@/lib/utils"
+import { AddQuestionAfterAssign } from "@/components/hod/AddQuestionAfterAssign"
 
 const isNA = (a: string) => a.trim().toUpperCase().startsWith("N/A")
 
@@ -277,6 +278,14 @@ export default function HODReviewPage() {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Still before approval: the Lead may add a question. That sends the
+          answers back with the draft cleared (plan: hod-add-question-after-assign). */}
+      {isSubmitted && (
+        <div className="mb-24">
+          <AddQuestionAfterAssign sessionId={session.session_id} deptName={dept} />
         </div>
       )}
 

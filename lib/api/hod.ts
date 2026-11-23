@@ -21,6 +21,8 @@ export interface HODQuestion {
   added_by?: string | null
   /** "client" when the client reworded it on their link. */
   edited_by?: string | null
+  /** The Lead added it after Assign & send; shown as "New" to the person answering. */
+  added_after_assign?: boolean | null
 }
 
 export interface HODAnswer {

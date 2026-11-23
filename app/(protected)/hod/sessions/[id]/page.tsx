@@ -20,6 +20,7 @@ import {
   DepartmentShareButton,
 } from "@/components/hod/DepartmentClientShare"
 import { DepartmentHistoryButton } from "@/components/pm/KickoffHistoryPanel"
+import { AddQuestionAfterAssign } from "@/components/hod/AddQuestionAfterAssign"
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
@@ -480,8 +481,8 @@ function SentView({ session, questions, title, mine, historyButton, onBack, onAn
               stage === "reopened"
                 ? "They're being updated."
                 : mine
-                  ? "They can't be changed any more. Answer them in your workspace."
-                  : "They can't be changed any more. They're being answered now.",
+                  ? "Answer them in your workspace. You can still add a question until you approve."
+                  : "They're being answered now. You can still add a question until you approve.",
             button: mine ? "Go to answering →" : "Back to dashboard",
             onClick: mine ? onAnswer : onBack,
           }
@@ -558,6 +559,13 @@ function SentView({ session, questions, title, mine, historyButton, onBack, onAn
           )
         })}
       </div>
+
+      {stage !== "approved" && (
+        <AddQuestionAfterAssign
+          sessionId={session.session_id}
+          deptName={session.departments?.department_name || "the department"}
+        />
+      )}
     </div>
   )
 }
