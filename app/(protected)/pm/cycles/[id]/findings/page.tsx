@@ -23,8 +23,13 @@ import {
   useCheckDrafts,
   useDraftFindings,
   useLockDraftFindings,
+  usePlan,
   FINDING_WRITE_KEY,
 } from "@/hooks/useReportBuilder";
+import {
+  DepartmentAddedBanner,
+  departmentsNotApproved,
+} from "@/components/pm/DepartmentAddedNotice";
 import { QUERY_KEYS } from "@/lib/constants";
 import { usePMCycleDashboard } from "@/hooks/useSessions";
 import { PageHeader } from "@/components/ui/page-header";
@@ -62,7 +67,18 @@ export default function CycleFindingsPage({
   const { data, isLoading } = useDraftFindings(id);
   const { data: readiness } = useBuildReadiness(id);
   const { data: dash } = usePMCycleDashboard(id);
+  const { data: plan } = usePlan(id);
   const check = useCheckDrafts(id);
+
+  // A plan exists only after every department was approved once, so a
+  // department that isn't approved now was added later by an admin. The
+  // dashboard polls, so this turns on while the PM is on the page.
+  const addedLater = plan?.plan_generated_at
+    ? departmentsNotApproved(
+        (dash as { departments?: { department_name: string; status?: string }[] } | undefined)
+          ?.departments,
+      )
+    : [];
   // Departments whose fact list looks short: the check trusts it, so their
   // "unsupported claim" findings may be wrong until the facts are re-read.
   const { data: claimsData } = useDepartmentClaims(id);
@@ -81,6 +97,20 @@ export default function CycleFindingsPage({
     }
     prevWriting.current = writing;
   }, [writing, qc, id]);
+
+  // Adding a department unlocks the findings and changes the approval count
+  // on the server; approving it changes the count again. Neither query polls,
+  // so reload both whenever the number of waiting departments changes, so the
+  // buttons match the notice. Skipped on the first render (just loaded).
+  const addedCount = addedLater.length;
+  const prevAddedCount = useRef<number | null>(null);
+  useEffect(() => {
+    const before = prevAddedCount.current;
+    prevAddedCount.current = addedCount;
+    if (before === null || before === addedCount) return;
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.DRAFT_FINDINGS(id) });
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.BUILD_READINESS(id) });
+  }, [addedCount, qc, id]);
 
   if (isLoading) return <PageLoader />;
 
@@ -193,6 +223,16 @@ export default function CycleFindingsPage({
           }
         />
       </div>
+
+      {addedLater.length > 0 && (
+        <DepartmentAddedBanner
+          cycleId={id}
+          names={addedLater}
+          approved={readiness?.departments_approved}
+          total={readiness?.departments_total}
+          hasFindings={findings.length > 0}
+        />
+      )}
 
       {locked ? (
         <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
