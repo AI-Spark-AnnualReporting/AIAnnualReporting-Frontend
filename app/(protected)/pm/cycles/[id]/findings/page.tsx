@@ -97,6 +97,10 @@ export default function CycleFindingsPage({
   // found its finding gone: "Finding with ID 'f7' not found").
   const saving = writing > 0;
   const mustHandleFirst = !!data?.checked_at && tally.open > 0;
+  // A department added after kickoff can send the PM back here before it is
+  // approved. Analyze checks approved drafts only, so it waits for everyone
+  // (the backend refuses too), like the cycle page's Analyze button.
+  const waitingForApproval = !!readiness && !readiness.all_approved;
   const neverChecked = !data?.checked_at;
   // Past the consent the page is a record, not a workspace.
   const locked = !!data?.locked_at;
@@ -145,11 +149,13 @@ export default function CycleFindingsPage({
                 <Button
                   variant="outline"
                   onClick={() => check.mutate()}
-                  disabled={check.isPending || saving || mustHandleFirst}
+                  disabled={check.isPending || saving || mustHandleFirst || waitingForApproval}
                   title={
-                    mustHandleFirst
-                      ? `Handle the ${tally.open} open finding${tally.open === 1 ? "" : "s"} before analyzing again.`
-                      : undefined
+                    waitingForApproval
+                      ? `Available once every department is approved (${readiness?.departments_approved} of ${readiness?.departments_total} so far)`
+                      : mustHandleFirst
+                        ? `Handle the ${tally.open} open finding${tally.open === 1 ? "" : "s"} before analyzing again.`
+                        : undefined
                   }
                 >
                   {check.isPending || saving ? (
@@ -179,6 +185,7 @@ export default function CycleFindingsPage({
                 // made the server refuse that save.
                 openCount={tally.open}
                 saving={saving}
+                neverChecked={neverChecked}
                 locked={locked}
                 findingCount={findings.length}
               />
@@ -411,6 +418,7 @@ function OpenBuilderButton({
   locked,
   findingCount,
   saving,
+  neverChecked,
   destination,
 }: {
   cycleId: string;
@@ -422,6 +430,8 @@ function OpenBuilderButton({
   findingCount: number;
   /** A finding click is still being saved: opening would lock it out. */
   saving: boolean;
+  /** Analyze has not run (or a department was added since): required first. */
+  neverChecked: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -449,10 +459,12 @@ function OpenBuilderButton({
     );
   }
 
-  if (!canBuild || openCount > 0 || saving) {
+  if (!canBuild || neverChecked || openCount > 0 || saving) {
     const reason = !canBuild
       ? "Available once sections are resolved and every department is approved"
-      : saving
+      : neverChecked
+        ? "Analyze the drafts first"
+        : saving
         ? "Saving your changes…"
         : `Handle all ${openCount} finding${openCount === 1 ? "" : "s"} first`;
     return (

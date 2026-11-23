@@ -22,7 +22,7 @@ This is the single source of truth for the frontend — paste it anywhere you ne
   - `status` ∈ `pending | drafting | locked` — where it is in the workflow
   - `ai_allowed` (boolean) — if `false`, the PM provides content manually (text or upload, based on `content_source`)
 - **Server state via TanStack Query.** Mutations always patch the affected list cache directly (the canonical pattern in `hooks/useReportBuilder.ts → patchSectionInList`), then invalidate the readiness query.
-- **Auth via Centriyon SSO.** Centriyon mints the JWT; SAR stores only `access_token` in `localStorage`. There is **no refresh token** — a 401 clears storage and redirects to Centriyon login. See §5.
+- **Auth via Centriyon SSO.** Centriyon mints the JWT and gives SAR its own refresh token on the hand-off link (`#refresh_token=`). A 401 renews the access token at Centriyon and retries once; only a refused refresh token redirects to Centriyon login. See §5.
 - **Two backend workarounds**: PM dashboard list + per-cycle dashboard are proxied through Next.js Route Handlers that impersonate department users and aggregate session data.
 
 ---
@@ -46,7 +46,7 @@ This is the single source of truth for the frontend — paste it anywhere you ne
 | Markdown render | `react-markdown` (prose preview of drafts + final report) | `^10.1` |
 | Date utils | `date-fns` (used by `lib/utils.ts` helpers) | `^4.1` |
 | Theme | `next-themes` (wired but UI runs light-only) | `^0.4` |
-| Auth | Centriyon SSO — Centriyon-issued JWT in `localStorage`, no refresh token | — |
+| Auth | Centriyon SSO — Centriyon-issued JWT + refresh token in `localStorage`, renewed at Centriyon (`lib/api/session.ts`) | — |
 
 `package.json` declares only `dev`, `build`, `start`, `lint` — no test or storybook runner.
 
@@ -68,7 +68,7 @@ spark-ar-studio/
 │   │   └── reset-password/page.tsx       "Manage in Centriyon" notice
 │   │
 │   ├── auth/
-│   │   └── token/page.tsx                Centriyon SSO landing — reads ?token=,
+│   │   └── token/page.tsx                Centriyon SSO landing — reads #refresh_token= (or old ?token=),
 │   │                                     calls loginWithToken, redirects to role home
 │   │
 │   ├── (protected)/                      RouteGuard-wrapped layout (Sidebar + TopNav)
@@ -236,32 +236,34 @@ Server-side hard redirect `/` → `/login`.
 
 ## 5. Authentication & RBAC — Centriyon SSO
 
-SAR delegates **all** authentication to **Centriyon**. SAR's backend no longer issues login, register, refresh, or password-management tokens — those endpoints return 410. SAR receives a Centriyon-issued JWT on the URL and uses it directly.
+SAR delegates **all** authentication to **Centriyon**. SAR's backend no longer issues login, register, refresh, or password-management tokens — those endpoints return 410. Centriyon gives SAR its **own session** (refresh token) on the hand-off link, and SAR renews its access token by calling **Centriyon's** `/auth/refresh`. Plan: `Centriton/.claude/plans/refresh-token.md`.
 
 ### Sign-in flow
 
 ```
-Centriyon login UI
-   ↓
-GET https://sar.domain.com?token=<centriyon_jwt>
-   ↓ app/page.tsx (server) reads ?token=
-   ↓
-GET /auth/token?token=<jwt>
-   ↓ app/auth/token/page.tsx (client) calls loginWithToken(jwt)
-   ↓
-localStorage.access_token = jwt
+Centriyon: user clicks "Open Annual Reporting"
+   ↓ POST {centriyon}/auth/handoff {app:"sar"} → a SAR refresh token (5 min until used)
+GET https://sar.domain.com/auth/token?next=..&company=..&back=..#refresh_token=<rt>
+   ↓ app/auth/token/page.tsx (client) removes the #… from the address bar,
+   ↓ calls loginWithRefreshToken(rt)
+POST {centriyon}/auth/refresh {refresh_token: rt} → new access_token + refresh_token
+   ↓ (rt is now dead, so the copy left in browser history is useless)
+localStorage.access_token / centriton_refresh_token = the new pair
 GET /auth/me → User
-router.push(ROLE_ROUTES[user.role])  // /admin, /pm, /department
+router.replace(next ?? ROLE_ROUTES[user.role])
 ```
 
-### Token lifecycle (`lib/api/client.ts`)
+The old `?token=<jwt>` hand-off (a bare access token) is still accepted from Centriyon builds older than refresh tokens; it can't renew itself. Remove one release after the rollout.
 
-- Only `access_token` is stored (in `localStorage`). There is **no refresh token** — Centriyon mints the JWT, SAR can't refresh it.
+### Token lifecycle (`lib/api/session.ts`, used by `client.ts`, `communications.ts`, `sectionBlocks.ts`)
+
+- Stored in `localStorage`: `access_token` (15 minutes once rolled out) and `centriton_refresh_token` (7 days from last use). The old `refresh_token` key (SAR's retired login) is only cleaned up.
 - Axios attaches `Authorization: Bearer <access_token>` on every request via the request interceptor.
-- On a `401`, the response interceptor:
-  1. **Excludes** `/auth/me` and `/auth/logout` (they're handled by `AuthContext.refreshUser` and `logout` respectively — bouncing here would prevent the "use Centriyon" info card from rendering).
-  2. Otherwise clears `localStorage` and full-page-navigates to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
-- The old single-flight refresh queue (`isRefreshing`, `failedQueue`, `processQueue`) has been removed entirely.
+- On a `401`, the response interceptor first calls `retryOnceAfterRefresh`: it swaps the refresh token at Centriyon (`NEXT_PUBLIC_CENTRION_API_URL` + `/auth/refresh`) and resends the request **once**.
+  - Several 401s at once share one refresh; Web Locks let only one tab refresh at a time (each refresh kills the previous refresh token).
+  - Centriyon refused the refresh token (401/403) → the session is over: clear storage and full-page-navigate to `${NEXT_PUBLIC_CENTRITON_URL}/login` (not for `/auth/me` and `/auth/logout`, which `AuthContext` handles).
+  - Centriyon unreachable (network / 5xx) → the request fails, the session is **kept**.
+- SAR's backend answers **503** (not 401) when its own database fails while checking a valid token, so that never signs anyone out.
 - All other errors are normalised to `{ error, message, status, details }`. Hooks always toast `err?.message || "Failed to …"` so UI code reads `err.message` regardless of FastAPI's response shape (`{message}`, `{detail}`, `{detail:[{msg}]}`).
 
 ### `lib/api/auth.ts`
@@ -276,9 +278,10 @@ Only two methods remain:
 
 Exposes `useAuth()`:
 - `user`, `isAuthenticated`, `isLoading`
-- `loginWithToken(token: string)` — persists the Centriyon JWT, fetches `/auth/me`, then pushes the user to their role home per `ROLE_ROUTES`. Called by `app/auth/token/page.tsx`.
-- `logout()` — best-effort `/auth/logout`, clears `localStorage`, full-page nav to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
-- `refreshUser()` — re-fetches `/auth/me`; on 401 clears `localStorage` so the next render shows the Centriyon info card.
+- `loginWithRefreshToken(refreshToken, opts)` — swaps the hand-off refresh token at Centriyon, then fetches `/auth/me` and routes (`next` or the role home). A link that can't be swapped leaves an existing session alone. Called by `app/auth/token/page.tsx`.
+- `loginWithToken(token, opts)` — the old `?token=` hand-off (no refresh token). Kept for older Centriyon builds.
+- `logout()` — ends the session at Centriyon (`/auth/logout`, fire-and-forget), best-effort SAR `/auth/logout`, clears `localStorage`, full-page nav to `${NEXT_PUBLIC_CENTRITON_URL}/login`.
+- `refreshUser()` — re-fetches `/auth/me`; only a 401 clears the session. On start-up a network/5xx failure is retried after 2, 4 and 6 s before giving up.
 
 The old `login(email, password)` method has been removed.
 
@@ -984,7 +987,7 @@ DEPARTMENT USER
 | `/login` | `app/(public)/login/page.tsx` | "Use Centriyon" info card with a button linking to `${NEXT_PUBLIC_CENTRITON_URL}/login`. No form. |
 | `/forgot-password` | `app/(public)/forgot-password/page.tsx` | "Password reset is handled in Centriyon" info card. |
 | `/reset-password` | `app/(public)/reset-password/page.tsx` | Same treatment as forgot-password. |
-| `/auth/token` | `app/auth/token/page.tsx` | Centriyon SSO landing — reads `?token=`, calls `loginWithToken`, redirects to the role home. Shows a "Signing you in…" loader. |
+| `/auth/token` | `app/auth/token/page.tsx` | Centriyon SSO landing — reads `#refresh_token=` (calls `loginWithRefreshToken`) or the old `?token=` (calls `loginWithToken`), redirects to `next` or the role home. Shows a "Signing you in…" loader. |
 
 ### Profile
 

@@ -5,6 +5,7 @@ import { getActingCompany } from "@/lib/actingCompany"
 import { agentRunPath } from "@/lib/reportReadiness"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { isStillStoredToken, tokenFromAuthHeader } from "@/lib/storedToken"
+import { clearSession, retryOnceAfterRefresh } from "@/lib/api/session"
 
 /**
  * Communication Hub API — threads, threadless reports, members, and messages.
@@ -49,23 +50,30 @@ commClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 })
 
 // Normalize errors to { error, message, status, details } (matching the main
-// client) so components can read `.status`. 401 → bounce to Centriyon login.
+// client) so components can read `.status`. 401 → renew the session and resend
+// once (lib/api/session); only when that is refused, bounce to Centriyon login.
 commClient.interceptors.response.use(
   (response) => {
     checkAiCreditsHeader(response.headers)
     return response
   },
-  (error) => {
+  async (error) => {
     checkAiCreditsHeader(error.response?.headers)
+    let sessionIsOver = true
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      const retried = await retryOnceAfterRefresh(error, commClient)
+      if (retried && typeof retried !== "string") return retried
+      sessionIsOver = retried !== "unavailable"
+    }
     // Only when the request carried the token saved now — an older token's 401
     // must not log out the sign-in that replaced it (see lib/storedToken).
     if (
       error.response?.status === 401 &&
+      sessionIsOver &&
       typeof window !== "undefined" &&
       isStillStoredToken(tokenFromAuthHeader(error.config?.headers?.Authorization))
     ) {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
+      clearSession()
       window.location.href = centriyonLoginUrl()
     }
     const data = error.response?.data

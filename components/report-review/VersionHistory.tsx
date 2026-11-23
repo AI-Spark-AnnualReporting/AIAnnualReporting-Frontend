@@ -94,6 +94,11 @@ export function VersionHistory({
   )
 }
 
+/** "word" for one, "words" otherwise. */
+function wordLabel(count: number): string {
+  return count === 1 ? "word" : "words"
+}
+
 /** One version in the list. The whole row opens its changes. */
 function VersionRow({ version, onOpen }: { version: VersionSummary; onOpen: () => void }) {
   return (
@@ -110,9 +115,9 @@ function VersionRow({ version, onOpen }: { version: VersionSummary; onOpen: () =
           </span>
           {version.added_words !== null && version.deleted_words !== null && (
             <span className="text-xs font-semibold">
-              <span className="text-green-700">+{version.added_words} words</span>
+              <span className="text-green-700">+{version.added_words} {wordLabel(version.added_words)}</span>
               {" · "}
-              <span className="text-red-700">−{version.deleted_words} words</span>
+              <span className="text-red-700">−{version.deleted_words} {wordLabel(version.deleted_words)}</span>
             </span>
           )}
         </span>
@@ -205,9 +210,10 @@ function VersionChanges({
           </Button>
         </div>
         {compare.data && (
-          <div className="flex gap-4 pt-1 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground">
             <span><span className="rounded bg-green-100 px-1.5 font-semibold text-green-900">green</span> added in Version {version.version_no}</span>
             <span><span className="rounded bg-red-100 px-1.5 text-red-800 line-through">red</span> removed in Version {version.version_no}</span>
+            <span><span className="rounded border px-1.5">grey</span> unchanged, shown so you can see where the change sits</span>
           </div>
         )}
         {/* Once, at the top, over the two columns of every section below
@@ -323,9 +329,71 @@ function hasWords(parts: DiffPart[]): boolean {
 /**
  * One changed section, the two versions side by side: the older on the
  * left as it was, the newer on the right with removed words (red) and added
- * words (green) marked, each changed paragraph on the same row. The Arabic reads right to
- * left, so there the older version is on the right.
+ * words (green) marked, each changed paragraph on the same row. The
+ * unchanged paragraphs just before and after each change are shown in grey,
+ * so the reader sees where the change sits (user, 2026-11-18). The Arabic
+ * reads right to left, so there the older version is on the right.
  */
+/** Paragraphs shown together: one paragraph, or the rows of one table that follow each other. */
+type Block = {
+  /** Where the block's first paragraph sits in the section's list. */
+  start: number
+  paragraphs: DiffParagraph[]
+}
+
+/** A row's cells as plain text (for a top row: the table's column names). */
+function cellTexts(row: DiffParagraph): string[] {
+  return row.cells.map((parts) => parts.map((part) => part.text).join("").trim())
+}
+
+/** True when the row is its table's top row and unchanged (a grey neighbour). */
+function isGreyTopRow(row: DiffParagraph): boolean {
+  return row.header == null && row.context === true
+}
+
+/**
+ * The top row a row sits under. A grey top row has no header of its own (it
+ * IS the header), so its own cells count: that lets it join the rows under
+ * it instead of showing as a separate one-row table (ISSUE-8, 2026-11-18).
+ */
+function headerOf(row: DiffParagraph): string[] | null {
+  if (isGreyTopRow(row)) return cellTexts(row)
+  return row.header ?? null
+}
+
+/** True when two rows are in the same table: same name and same top row. */
+function sameTable(a: DiffParagraph, b: DiffParagraph): boolean {
+  const sameTitle = (a.table_title ?? null) === (b.table_title ?? null)
+  const sameHeader = JSON.stringify(headerOf(a)) === JSON.stringify(headerOf(b))
+  return sameTitle && sameHeader
+}
+
+/**
+ * Groups a section's paragraphs into blocks, so the rows of one table show
+ * as one table (name and top row once) instead of one small table per row
+ * (ISSUE-6, 2026-11-18). A gap of left-out paragraphs starts a new block.
+ */
+function toBlocks(paragraphs: DiffParagraph[]): Block[] {
+  const blocks: Block[] = []
+  for (let index = 0; index < paragraphs.length; index++) {
+    const paragraph = paragraphs[index]
+    const last = blocks.length > 0 ? blocks[blocks.length - 1] : null
+    const lastParagraph = last ? last.paragraphs[last.paragraphs.length - 1] : null
+    const joins = last !== null
+      && lastParagraph !== null
+      && paragraph.type === "row"
+      && lastParagraph.type === "row"
+      && (paragraph.skipped_before ?? 0) === 0
+      && sameTable(lastParagraph, paragraph)
+    if (joins && last) {
+      last.paragraphs.push(paragraph)
+    } else {
+      blocks.push({ start: index, paragraphs: [paragraph] })
+    }
+  }
+  return blocks
+}
+
 function ChangedSection({
   section,
   arabic,
@@ -345,13 +413,21 @@ function ChangedSection({
         {section.status === "removed" && <span className="text-xs text-red-700">· removed</span>}
       </div>
       <div className={cn("grid grid-cols-1 md:grid-cols-2", arabic ? "text-right" : "text-left")}>
-        {section.paragraphs.map((paragraph, index) => {
+        {toBlocks(section.paragraphs).map((block) => {
+          const paragraph = block.paragraphs[0]
+          const index = block.start
           // Name the subsection once, above the first changed line in it.
           const place = paragraph.subsection ?? null
           const previous = index > 0 ? (section.paragraphs[index - 1].subsection ?? null) : null
-          const showPlace = place !== null && (index === 0 || place !== previous)
+          // A subheading row (changed or not) already names its subsection,
+          // so no label above it (ISSUE-5) ...
+          const isHeading = paragraph.type === "heading"
+          const showPlace = place !== null && (index === 0 || place !== previous) && !isHeading
+          // ... but it starts a new part, so a line above it, like the labels (ISSUE-3).
+          const ruleAbove = isHeading && index > 0
           return (
             <Fragment key={index}>
+              {(paragraph.skipped_before ?? 0) > 0 && <Skipped count={paragraph.skipped_before ?? 0} />}
               {showPlace && (
                 // Just the subsection's name, in the report's own direction.
                 <p
@@ -363,57 +439,110 @@ function ChangedSection({
                   {place}
                 </p>
               )}
-              <SidePair paragraph={paragraph} fromNo={fromNo} toNo={toNo} first={index === 0 && !showPlace} arabic={arabic} />
+              {paragraph.type === "row" ? (
+                <TablePair rows={block.paragraphs} fromNo={fromNo} toNo={toNo} arabic={arabic} />
+              ) : (
+                <SidePair paragraph={paragraph} fromNo={fromNo} toNo={toNo} arabic={arabic} ruleAbove={ruleAbove} />
+              )}
             </Fragment>
           )
         })}
+        {(section.skipped_after ?? 0) > 0 && <Skipped count={section.skipped_after ?? 0} />}
       </div>
     </section>
   )
 }
 
-/** One changed paragraph's two cells: the older version, then the newer. */
+/** A small grey line standing in for the unchanged paragraphs left out here. */
+function Skipped({ count }: { count: number }) {
+  return (
+    <p dir="ltr" className="px-3 py-1 text-center text-xs text-muted-foreground md:col-span-2">
+      ⋯ {count} unchanged paragraph{count === 1 ? "" : "s"}
+    </p>
+  )
+}
+
+/**
+ * One paragraph's two cells: the older version, then the newer. A change
+ * sits on a soft amber band; its unchanged neighbours are grey. No lines
+ * between rows, so the text reads as one flow (user, 2026-11-18).
+ */
 function SidePair({
   paragraph,
   fromNo,
   toNo,
-  first,
   arabic,
+  ruleAbove,
 }: {
   paragraph: DiffParagraph
   fromNo: number
   toNo: number
-  first: boolean
   arabic: boolean
+  /** A line above the row: a subheading starting a new part. */
+  ruleAbove: boolean
 }) {
-  const cell = cn("min-w-0 px-3 py-2.5", !first && "border-t")
+  const context = paragraph.context === true
+  const cell = cn(
+    "min-w-0 px-3",
+    context ? "py-1 text-muted-foreground" : "bg-amber-50 py-2.5",
+    ruleAbove && "border-t",
+  )
   // The divider sits between the two columns: on the right of the first in
   // English, on its left (the second's right) in Arabic.
   return (
     <>
-      <div className={cn(cell, arabic ? "" : "md:border-r")}>
-        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo} (BEFORE)</p>
+      {/* Stacked (phone), an unchanged neighbour shows once: the two cells are the same. */}
+      <div className={cn(cell, context && "hidden md:block", arabic ? "" : "md:border-r")}>
+        {!context && (
+          <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo} (BEFORE)</p>
+        )}
         <SideParagraph paragraph={paragraph} side="old" emptyText={`— not in Version ${fromNo}`} />
       </div>
-      {/* Stacked (phone), it needs its own top line; side by side, only between rows. */}
-      <div className={cn("min-w-0 border-t px-3 py-2.5", first && "md:border-t-0", arabic ? "md:border-r" : "")}>
-        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo} (AFTER)</p>
+      <div className={cn(cell, arabic ? "md:border-r" : "")}>
+        {!context && (
+          <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo} (AFTER)</p>
+        )}
         <SideParagraph paragraph={paragraph} side="new" emptyText={`— removed in Version ${toNo}`} />
       </div>
     </>
   )
 }
 
-/** A paragraph as one version has it, shown as what it is: heading, bullet, text or table row. */
+/**
+ * Rows of one table, the two versions side by side: the table's name and top
+ * row once, then each row. A changed row is amber, an unchanged one grey.
+ */
+function TablePair({
+  rows,
+  fromNo,
+  toNo,
+  arabic,
+}: {
+  rows: DiffParagraph[]
+  fromNo: number
+  toNo: number
+  arabic: boolean
+}) {
+  const cell = "min-w-0 px-3 py-2"
+  return (
+    <>
+      <div className={cn(cell, arabic ? "" : "md:border-r")}>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {fromNo} (BEFORE)</p>
+        <SideTable rows={rows} side="old" emptyText={`— not in Version ${fromNo}`} />
+      </div>
+      <div className={cn(cell, arabic ? "md:border-r" : "")}>
+        <p dir="ltr" className="mb-1 text-[11px] font-bold tracking-wide text-muted-foreground md:hidden">VERSION {toNo} (AFTER)</p>
+        <SideTable rows={rows} side="new" emptyText={`— removed in Version ${toNo}`} />
+      </div>
+    </>
+  )
+}
+
+/** A paragraph as one version has it, shown as what it is: heading, bullet or text. */
 function SideParagraph({ paragraph, side, emptyText }: { paragraph: DiffParagraph; side: Side; emptyText: string }) {
   // English words, so written left to right even in an Arabic column (else
   // the leading dash jumps to the end); the column still aligns it.
   const empty = <p dir="ltr" className="text-sm italic text-muted-foreground">{emptyText}</p>
-  if (paragraph.type === "row") {
-    const cells = paragraph.cells.map((parts) => sideParts(parts, side))
-    if (!cells.some(hasWords)) return empty
-    return <SideRow header={paragraph.header} cells={cells} title={paragraph.table_title ?? null} />
-  }
   const parts = sideParts(paragraph.parts, side)
   if (!hasWords(parts)) return empty
   const words = parts.map((part, index) => <Words key={index} part={part} />)
@@ -431,20 +560,20 @@ function SideParagraph({ paragraph, side, emptyText }: { paragraph: DiffParagrap
   return <p className="text-sm leading-7">{words}</p>
 }
 
-/** A table row as one version has it, under its table's top row so the numbers have their labels. */
-function SideRow({
-  header,
-  cells,
-  title,
-}: {
-  header: string[] | null
-  cells: DiffPart[][]
-  /** The table's name, from the subheading or "…:" line above it. */
-  title: string | null
-}) {
+/**
+ * Rows of one table as one version has them, under the table's top row
+ * (shown once) so the numbers have their labels. No "Table: <name>" line:
+ * the report has none, and the subheading above already names the table
+ * (ISSUE-7, 2026-11-18).
+ */
+function SideTable({ rows, side, emptyText }: { rows: DiffParagraph[]; side: Side; emptyText: string }) {
+  // A grey top row with rows under it is the table's header: shown once,
+  // as the header, not again as a grey row (ISSUE-8).
+  const topRowIsHeader = isGreyTopRow(rows[0]) && rows.length > 1
+  const header = topRowIsHeader ? cellTexts(rows[0]) : rows[0].header
+  const bodyRows = topRowIsHeader ? rows.slice(1) : rows
   return (
     <div className="overflow-x-auto">
-      {title && <p className="mb-1 text-xs font-semibold text-foreground">Table: {title}</p>}
       <table className="w-full border-collapse text-sm">
         {header && (
           <thead>
@@ -456,25 +585,48 @@ function SideRow({
           </thead>
         )}
         <tbody>
-          <tr>
-            {cells.map((parts, index) => (
-              <td key={index} className="border px-2 py-1 align-top">
-                {parts.map((part, partIndex) => (
-                  <Words key={partIndex} part={part} />
-                ))}
-              </td>
-            ))}
-          </tr>
+          {bodyRows.map((row, rowIndex) => (
+            <SideTableRow key={rowIndex} row={row} side={side} emptyText={emptyText} />
+          ))}
         </tbody>
       </table>
     </div>
   )
 }
 
+/** One table row as one version has it: amber when it changed, grey when it didn't. */
+function SideTableRow({ row, side, emptyText }: { row: DiffParagraph; side: Side; emptyText: string }) {
+  const cells = row.cells.map((parts) => sideParts(parts, side))
+  const rowStyle = row.context === true ? "text-muted-foreground" : "bg-amber-50"
+  if (!cells.some(hasWords)) {
+    return (
+      <tr className={rowStyle}>
+        <td dir="ltr" colSpan={Math.max(cells.length, 1)} className="border px-2 py-1 italic text-muted-foreground">
+          {emptyText}
+        </td>
+      </tr>
+    )
+  }
+  return (
+    <tr className={rowStyle}>
+      {cells.map((parts, index) => (
+        <td key={index} className="border px-2 py-1 align-top">
+          {parts.map((part, partIndex) => (
+            <Words key={partIndex} part={part} />
+          ))}
+        </td>
+      ))}
+    </tr>
+  )
+}
+
 function Words({ part }: { part: DiffPart }) {
   if (part.kind === "same") return <span>{part.text}</span>
   const words = part.text.trimEnd()
-  const space = part.text.slice(words.length)
+  // A removed run with no space after it (a number in a table cell) would
+  // touch the word that replaced it: "2,4562,460". Give it one.
+  const trailing = part.text.slice(words.length)
+  const space = trailing === "" && part.kind === "deleted" ? " " : trailing
   const style = part.kind === "added"
     ? "rounded bg-green-100 font-semibold text-green-900"
     : "rounded bg-red-100 text-red-800 line-through"

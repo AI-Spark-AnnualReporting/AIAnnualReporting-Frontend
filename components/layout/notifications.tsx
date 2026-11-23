@@ -472,7 +472,7 @@ export function NotificationBell({
           if (!n.is_read) markRead.mutate(n.id)
           setOpen(false)
           // NOT router.push: action_url is a Centriton route and a 404 here.
-          // centriyonUrl carries the session across so they land signed in.
+          // Centriyon has its own session in this browser, so they land signed in.
           const token = typeof window !== "undefined"
             ? localStorage.getItem("access_token")
             : null

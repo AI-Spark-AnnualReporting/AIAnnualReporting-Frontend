@@ -1,5 +1,12 @@
 import apiClient from "./client"
 import type { DepartmentClaim } from "./pm"
+import type {
+  KickoffHistoryEntry,
+  ShareEmailStatus,
+  SharePayload,
+  ShareResponsePayload,
+  ShareStatus,
+} from "./share"
 
 // ── HOD (Head of Department) curation API ──────────────────────────────────
 
@@ -10,6 +17,10 @@ export interface HODQuestion {
   question: string
   order: number
   review_status?: ReviewStatus | null
+  /** "hod" or "client" — who wrote it, when not the AI. */
+  added_by?: string | null
+  /** "client" when the client reworded it on their link. */
+  edited_by?: string | null
 }
 
 export interface HODAnswer {
@@ -68,6 +79,40 @@ export interface AssignableUser {
   email?: string | null
 }
 
+// ── The department's questions with the client (Spark-led sessions) ────────
+
+/** One department share, as the HOD's page sees it. */
+export interface DepartmentShare {
+  id: string
+  cycle_id: string
+  session_id: string
+  stage: "department_questions"
+  status: ShareStatus
+  url: string
+  client_email: string
+  email_status: ShareEmailStatus
+  reminder_count: number
+  last_reminded_at?: string | null
+  review_comment?: string | null
+  revision_count: number
+  client_note?: string | null
+  /** What the link shows: the questions, with the client's wording and their own. */
+  payload: SharePayload
+  /** What the client sent: answers, rejected ids, edits. */
+  response: ShareResponsePayload
+  created_at?: string | null
+  responded_at?: string | null
+  approved_at?: string | null
+}
+
+export interface DepartmentShareState {
+  /** True when this user must go through the client before assigning (Spark). */
+  required: boolean
+  share: DepartmentShare | null
+  /** The client email this department used last time. */
+  suggested_email?: string | null
+}
+
 export const hodApi = {
   listSessions: async (status?: string): Promise<HODSession[]> => {
     const { data } = await apiClient.get("/hod/sessions", {
@@ -116,6 +161,40 @@ export const hodApi = {
   ): Promise<HODSession> => {
     const { data } = await apiClient.post(`/hod/sessions/${sessionId}/assign`, body)
     return data.session
+  },
+
+  clientShare: async (sessionId: string): Promise<DepartmentShareState> => {
+    const { data } = await apiClient.get(`/hod/sessions/${sessionId}/client-share`)
+    return data
+  },
+
+  shareWithClient: async (sessionId: string, clientEmail: string): Promise<DepartmentShareState> => {
+    const { data } = await apiClient.post(`/hod/sessions/${sessionId}/client-share`, {
+      client_email: clientEmail,
+    })
+    return data
+  },
+
+  approveClientShare: async (sessionId: string): Promise<DepartmentShareState> => {
+    const { data } = await apiClient.post(`/hod/sessions/${sessionId}/client-share/approve`)
+    return data
+  },
+
+  sendBackClientShare: async (sessionId: string, comment: string): Promise<DepartmentShareState> => {
+    const { data } = await apiClient.post(`/hod/sessions/${sessionId}/client-share/send-back`, {
+      comment,
+    })
+    return data
+  },
+
+  remindClient: async (sessionId: string): Promise<DepartmentShareState> => {
+    const { data } = await apiClient.post(`/hod/sessions/${sessionId}/client-share/remind`)
+    return data
+  },
+
+  clientShareHistory: async (sessionId: string): Promise<KickoffHistoryEntry[]> => {
+    const { data } = await apiClient.get(`/hod/sessions/${sessionId}/client-share/history`)
+    return data.entries ?? []
   },
 
   reviewAnswers: async (
