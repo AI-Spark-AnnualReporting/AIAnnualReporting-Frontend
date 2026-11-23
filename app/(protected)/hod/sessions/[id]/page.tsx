@@ -15,11 +15,11 @@ import {
   HOD_WRITE_KEY,
 } from "@/hooks/useHod"
 import {
-  ClientAnswers,
   DepartmentShareBanner,
   DepartmentShareButton,
 } from "@/components/hod/DepartmentClientShare"
 import { DepartmentHistoryButton } from "@/components/pm/KickoffHistoryPanel"
+import { AddQuestionAfterAssign } from "@/components/hod/AddQuestionAfterAssign"
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
@@ -104,6 +104,14 @@ export default function HODCuratePage() {
   const showShareButton = clientStep && !clientApproved
   // The client rejected every question: nothing left to approve.
   const nothingToApprove = clientShare?.status === "responded" && counts.approved === 0
+  // Once the client has replied, each card shows their answer under the question.
+  // The reply keys answers by the same question ids as the session's questions.
+  const clientReplied = !!clientShare && clientShare.status !== "pending"
+  const clientAnswerById = new Map<string, string>()
+  for (const a of clientShare?.response?.answers ?? []) {
+    clientAnswerById.set(a.question_id, a.answer)
+  }
+  const clientRejectedIds = new Set(clientShare?.response?.rejected_question_ids ?? [])
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div>
@@ -165,7 +173,7 @@ export default function HODCuratePage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl pb-28">
+    <div className="mx-auto max-w-3xl pb-6">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <button onClick={() => router.push("/hod")} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
@@ -213,7 +221,6 @@ export default function HODCuratePage() {
       </div>
 
       {clientShare && <DepartmentShareBanner share={clientShare} />}
-      {clientShare && clientShare.status !== "pending" && <ClientAnswers share={clientShare} />}
 
       {/* Counters */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -279,6 +286,14 @@ export default function HODCuratePage() {
                     <p className={`mt-2 text-sm leading-relaxed ${status === "rejected" ? "text-slate-400 line-through" : "text-[#1A1D2E]"}`}>
                       {question}
                     </p>
+                  )}
+
+                  {clientReplied && !clientRejectedIds.has(q.question_id) && (
+                    <ClientAnswer answer={clientAnswerById.get(q.question_id)} />
+                  )}
+
+                  {clientReplied && clientRejectedIds.has(q.question_id) && (
+                    <p className="mt-1.5 text-[11px] font-semibold text-rose-600">Rejected by the client</p>
                   )}
 
                   {(q.added_by === "client" || q.edited_by === "client") && (
@@ -359,9 +374,10 @@ export default function HODCuratePage() {
       </div>
 
       {/* Sticky assign bar */}
-      <div className="fixed bottom-6 left-1/2 z-20 w-[min(48rem,calc(100%-3rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
-        <div className="flex items-center justify-between gap-3">
-          <p className="flex items-center gap-2 text-xs font-semibold">
+      {/* Sticky, not fixed: it stays inside the page column, so it lines up with the cards. */}
+      <div className="sticky bottom-6 z-20 mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="flex min-w-0 flex-1 basis-60 items-center gap-2 text-xs font-semibold">
             {showShareButton && clientShare ? (
               <><Clock className="h-4 w-4 text-amber-500" /><span className="text-slate-600">
                 {clientShare.status === "pending"
@@ -480,8 +496,8 @@ function SentView({ session, questions, title, mine, historyButton, onBack, onAn
               stage === "reopened"
                 ? "They're being updated."
                 : mine
-                  ? "They can't be changed any more. Answer them in your workspace."
-                  : "They can't be changed any more. They're being answered now.",
+                  ? "Answer them in your workspace. You can still add a question until you approve."
+                  : "They're being answered now. You can still add a question until you approve.",
             button: mine ? "Go to answering →" : "Back to dashboard",
             onClick: mine ? onAnswer : onBack,
           }
@@ -558,6 +574,13 @@ function SentView({ session, questions, title, mine, historyButton, onBack, onAn
           )
         })}
       </div>
+
+      {stage !== "approved" && (
+        <AddQuestionAfterAssign
+          sessionId={session.session_id}
+          deptName={session.departments?.department_name || "the department"}
+        />
+      )}
     </div>
   )
 }
@@ -712,6 +735,19 @@ function AssignModal({ sessionId, approvedCount, onClose, onAssigned }: {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** The client's answer under a question, or a quiet line when they left it blank. */
+function ClientAnswer({ answer }: { answer: string | undefined }) {
+  if (!answer || !answer.trim()) {
+    return <p className="mt-2 text-xs italic text-slate-500">No answer from the client</p>
+  }
+  return (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[10px] font-bold tracking-wider text-slate-500">CLIENT&apos;S ANSWER</p>
+      <p dir={dirOf(answer)} className="mt-0.5 whitespace-pre-line text-sm text-slate-700">{answer}</p>
     </div>
   )
 }
