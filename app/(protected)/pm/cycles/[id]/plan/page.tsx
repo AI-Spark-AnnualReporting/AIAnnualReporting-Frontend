@@ -162,7 +162,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
 
   const planQuery = usePlan(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
-  const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
+  const dashboardQuery = usePMCycleDashboard(cycleId)
+  const pmDataRaw = dashboardQuery.data
   const pmData = pmDataRaw as PMDashboardData | undefined
   // An admin added a department while the PM was here. The dashboard polls,
   // so this turns on by itself; the dialog below explains it.
@@ -184,14 +185,45 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const isSpark = user?.role === "spark_internal"
   const sharesQuery = useCycleShares(isSpark ? cycleId : "")
   const areasShare = sharesQuery.data?.areas
-  // Adding a department also clears the findings consent. Then the dialog
-  // explains it instead of a silent jump to the findings page.
-  const pmLoaded = pmDataRaw !== undefined
+  // Adding a department clears the findings consent. The PM must then see the
+  // dialog, not a silent jump to the findings page, and once that department
+  // is approved (or removed) the PM must go back through the findings page,
+  // where its draft gets analyzed.
+  //
+  // Neither query is guaranteed fresh: the findings only reload when the PM
+  // comes back to this tab, the department list every 5 s. Deciding on one of
+  // them while the other is old either drops the dialog (unsaved picks lost)
+  // or keeps the PM here with consent that no longer exists. So whenever the
+  // consent or the waiting count changes, read both fresh and decide on those:
+  // no consent + nobody waiting -> findings page; somebody waiting -> dialog.
+  const refetchDashboard = dashboardQuery.refetch
+  const refetchFindings = findingsQuery.refetch
+  const waitingCount = waiting.length
   useEffect(() => {
-    if (!findingsQuery.isLoading && !consented && pmLoaded && waiting.length === 0) {
-      router.replace(`/pm/cycles/${cycleId}/findings`)
+    if (findingsQuery.isLoading) return
+    let cancelled = false
+    Promise.all([refetchFindings(), refetchDashboard()]).then(([findings, dashboard]) => {
+      if (cancelled) return
+      const freshConsent = !!findings.data?.locked_at
+      const freshWaiting = departmentsNotApproved(
+        (dashboard.data as PMDashboardData | undefined)?.departments,
+      )
+      if (!freshConsent && freshWaiting.length === 0) {
+        router.replace(`/pm/cycles/${cycleId}/findings`)
+      }
+    })
+    return () => {
+      cancelled = true
     }
-  }, [findingsQuery.isLoading, consented, pmLoaded, waiting.length, router, cycleId])
+  }, [
+    findingsQuery.isLoading,
+    consented,
+    waitingCount,
+    refetchFindings,
+    refetchDashboard,
+    router,
+    cycleId,
+  ])
 
   if (planQuery.isLoading || sectionsQuery.isLoading || findingsQuery.isLoading) {
     return <PageLoader />
