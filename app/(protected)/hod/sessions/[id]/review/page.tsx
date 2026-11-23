@@ -83,6 +83,8 @@ export default function HODReviewPage() {
 
   const answerFor = (qid: string) => (session.answers || []).find((a) => a.question_id === qid)?.answer ?? ""
   const isSubmitted = session.status === "submitted"
+  // After Assign & send and before approval the Lead can still add a question.
+  const canAddQuestion = ["not_started", "in_progress", "reopened", "submitted"].includes(session.status)
   const badge = STATUS_BADGE[session.status]
   const dept = session.departments?.department_name || "Department"
   const cycle = session.reporting_cycles?.cycle_name || "Reporting cycle"
@@ -283,8 +285,8 @@ export default function HODReviewPage() {
 
       {/* Still before approval: the Lead may add a question. That sends the
           answers back with the draft cleared (plan: hod-add-question-after-assign). */}
-      {isSubmitted && (
-        <div className="mb-24">
+      {canAddQuestion && activeTab === "answers" && (
+        <div className={isSubmitted ? "mb-24" : "mb-6"}>
           <AddQuestionAfterAssign sessionId={session.session_id} deptName={dept} />
         </div>
       )}

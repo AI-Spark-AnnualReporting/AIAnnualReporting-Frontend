@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Plus } from "lucide-react"
 import { useAddQuestionAfterAssign } from "@/hooks/useHod"
+import { QUESTION_PLACEHOLDER, TOPIC_PLACEHOLDER, joinQuestion } from "@/lib/questionText"
 
 /* The Lead adds a question after Assign & send, until they approve.
    Answers are kept; the outline and draft are cleared on the server, so the
@@ -14,14 +15,17 @@ export function AddQuestionAfterAssign({
   sessionId: string
   deptName: string
 }) {
+  const [topic, setTopic] = useState("")
   const [text, setText] = useState("")
   const [confirming, setConfirming] = useState(false)
   const add = useAddQuestionAfterAssign(sessionId)
   const cleaned = text.trim()
 
   const submit = () =>
-    add.mutate(cleaned, {
+    // Same "Topic — question" shape as the Review questions box, so it shows a tag.
+    add.mutate(joinQuestion(topic, cleaned), {
       onSuccess: () => {
+        setTopic("")
         setText("")
         setConfirming(false)
       },
@@ -35,6 +39,16 @@ export function AddQuestionAfterAssign({
       <p className="mt-0.5 text-xs text-slate-500">
         You can add questions until you approve this department.
       </p>
+      <input
+        value={topic}
+        onChange={(e) => {
+          setTopic(e.target.value)
+          setConfirming(false)
+        }}
+        disabled={add.isPending}
+        placeholder={TOPIC_PLACEHOLDER}
+        className="mt-3 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-semibold focus:border-[#4040c8] focus:outline-none"
+      />
       <textarea
         value={text}
         onChange={(e) => {
@@ -43,8 +57,8 @@ export function AddQuestionAfterAssign({
         }}
         disabled={add.isPending}
         rows={2}
-        placeholder="e.g. How many employees completed safety training this year?"
-        className="mt-3 w-full rounded-lg border border-slate-200 p-2.5 text-sm focus:border-[#4040c8] focus:outline-none"
+        placeholder={QUESTION_PLACEHOLDER}
+        className="mt-2 w-full rounded-lg border border-slate-200 p-2.5 text-sm focus:border-[#4040c8] focus:outline-none"
       />
       {!confirming ? (
         <button
