@@ -98,6 +98,7 @@ export function QuestionnaireForm({
   undoableQuestionIds,
   onUndoEdit,
   showEditedBy = true,
+  usedIn = "the brief",
   drafts: draftsFromPage,
   onDraftsChange,
   unsavedRejectionIds,
@@ -142,6 +143,10 @@ export function QuestionnaireForm({
   /** Show "Edited by …" under a question. Off on the client's page — who at
    *  Spark changed a question is not theirs to read. */
   showEditedBy?: boolean
+  /** What a rejected question won't be used in, for the "Skipped — …" line.
+   *  "the brief" on the kickoff questionnaire; a department's link says
+   *  "the report". */
+  usedIn?: string
   /** Persist a rejection as it happens. The form still flips it on screen at
    *  once; this records it, so it survives a refresh and says who made it.
    *  Omitted on the client's page, which sends its rejections with the reply. */
@@ -370,8 +375,8 @@ export function QuestionnaireForm({
                       : q.rejected_by
                       ? `Rejected by ${REJECTED_BY_LABEL[q.rejected_by] ?? q.rejected_by}${
                           q.rejected_at ? ` on ${formatRejectedAt(q.rejected_at)}` : ""
-                        } — this question won't be used in the brief.`
-                      : "Skipped — this question won't be used in the brief."}
+                        } — this question won't be used in ${usedIn}.`
+                      : `Skipped — this question won't be used in ${usedIn}.`}
                   </p>
                 )}
                 {!isRejected && !isEditing && undoable.has(q.id) && (

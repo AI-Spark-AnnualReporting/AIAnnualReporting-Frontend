@@ -62,6 +62,8 @@ export interface KickoffHistoryEntry {
     | "refined"
     /** Spark only: the departments were started before the client signed off. */
     | "continued_without_client"
+    /** Department questions: the HOD assigned them; `note` is who to. */
+    | "assigned"
   actor_type: "spark" | "client"
   actor_id?: string | null
   /** A Spark user's name, or the client's email. */
@@ -152,9 +154,12 @@ export interface ShareActionResult {
 
 /** The client's view. Carries no cycle id, company or user — only this one share. */
 export interface ClientShareView {
-  stage: ShareStage
+  /** A kickoff gate, or one department's questions sent by its HOD. */
+  stage: ShareStage | "department_questions"
   status: ShareStatus
   cycle_name: string
+  /** Department links only: whose questions these are, e.g. "HR". */
+  department_name?: string | null
   payload: SharePayload
   response: ShareResponsePayload
   submitted_at?: string | null

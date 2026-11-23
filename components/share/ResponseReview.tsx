@@ -57,13 +57,19 @@ export function QuestionnaireReview({
   value,
   ownQuestionIds,
   documentName,
+  reader = "client",
 }: {
   questions: SurveyQuestion[]
   value: QuestionnaireValue
   /** Questions the client wrote themselves, labelled as theirs. */
   ownQuestionIds: string[]
   documentName: string | null
+  /** Who is reading: the client ("your question") or the team reviewing the
+   *  client's reply ("the client's question"). */
+  reader?: "client" | "team"
 }) {
+  const ownerWord = reader === "client" ? "you" : "the client"
+  const ownTag = reader === "client" ? "(your question)" : "(the client's question)"
   const own = new Set(ownQuestionIds)
   let answered = 0
   let rejected = 0
@@ -74,7 +80,7 @@ export function QuestionnaireReview({
 
   const summary = [`${answered} answered`]
   if (rejected > 0) summary.push(`${rejected} rejected`)
-  if (own.size > 0) summary.push(`${own.size} question${own.size === 1 ? "" : "s"} you added`)
+  if (own.size > 0) summary.push(`${own.size} question${own.size === 1 ? "" : "s"} ${ownerWord} added`)
 
   return (
     <div className="space-y-3">
@@ -99,7 +105,7 @@ export function QuestionnaireReview({
                   <p className="text-sm font-medium text-foreground">
                     {q.text}
                     {own.has(q.id) && (
-                      <span className="ml-1.5 text-xs font-normal text-indigo-600">(your question)</span>
+                      <span className="ml-1.5 text-xs font-normal text-indigo-600">{ownTag}</span>
                     )}
                   </p>
                   {isRejected ? (

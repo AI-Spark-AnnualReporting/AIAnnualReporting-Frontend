@@ -3,13 +3,14 @@
 import { useState } from "react"
 import {
   BellRing, CheckCircle2, History, MessageSquareQuote, Paperclip, Pencil, Send, Sparkles, Undo2,
-  UserRound, Wand2,
+  UserCheck, UserRound, Wand2,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeletons"
 import { useKickoffHistory } from "@/hooks/useShare"
+import { useDeptClientHistory } from "@/hooks/useHod"
 import type { KickoffHistoryEntry, ShareStage } from "@/lib/api/share"
 import { DiffPart, hasChanges, wordDiff } from "@/lib/textDiff"
 import { cn } from "@/lib/utils"
@@ -38,6 +39,8 @@ const ACTION: Record<KickoffHistoryEntry["action"], { icon: LucideIcon; verb: st
   edited: { icon: Pencil, verb: "edited it", tone: "bg-violet-100 text-violet-700" },
   generated: { icon: Sparkles, verb: "AI wrote it", tone: "bg-fuchsia-100 text-fuchsia-700" },
   refined: { icon: Wand2, verb: "Refined with AI", tone: "bg-fuchsia-100 text-fuchsia-700" },
+  // A department's questions handed to the person who answers them (HOD page).
+  assigned: { icon: UserCheck, verb: "assigned it to", tone: "bg-indigo-100 text-indigo-700" },
   continued_without_client: {
     icon: Send,
     verb: "started the departments before the client signed off",
@@ -498,6 +501,18 @@ function EntryChange({ entry, stage }: { entry: KickoffHistoryEntry; stage: Shar
   return <QuestionnaireChange before={entry.before} after={entry.after} />
 }
 
+/** "3 questions handed over · 2 of the client's answers filled in". */
+function AssignedDetail({ after }: { after: Loose }) {
+  const count = Number(after?.questions_count ?? 0)
+  const prefilled = Number(after?.prefilled_count ?? 0)
+  if (!count) return null
+  const parts = [`${count} question${count === 1 ? "" : "s"} handed over`]
+  if (prefilled > 0) {
+    parts.push(`${prefilled} of the client's answer${prefilled === 1 ? "" : "s"} filled in for them`)
+  }
+  return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>
+}
+
 /** One row of the timeline. */
 function Entry({ entry, stage }: { entry: KickoffHistoryEntry; stage: ShareStage }) {
   const action = ACTION[entry.action] ?? ACTION.edited
@@ -527,6 +542,7 @@ function Entry({ entry, stage }: { entry: KickoffHistoryEntry; stage: ShareStage
               </span>{" "}
               {action.verb}
               {entry.action === "shared" && entry.note ? ` with ${entry.note}` : ""}
+              {entry.action === "assigned" && entry.note ? ` ${entry.note}` : ""}
             </p>
           )}
           <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -534,7 +550,8 @@ function Entry({ entry, stage }: { entry: KickoffHistoryEntry; stage: ShareStage
             {grouped && ` – ${timeOnly(entry.updated_at)}`}
           </p>
         </div>
-        {entry.note && entry.action !== "shared" && (
+        {entry.action === "assigned" && <AssignedDetail after={entry.after} />}
+        {entry.note && entry.action !== "shared" && entry.action !== "assigned" && (
           <div className="flex items-start gap-2 rounded-lg bg-muted/50 p-2.5 text-sm">
             <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             <p className="min-w-0 whitespace-pre-line text-foreground">
@@ -604,6 +621,50 @@ export function KickoffHistoryButton({ cycleId, stage }: { cycleId: string; stag
               <ol className="relative pt-2 before:absolute before:bottom-2 before:left-4 before:top-4 before:w-px before:bg-border">
                 {entries.map((entry) => (
                   <Entry key={entry.id} entry={entry} stage={stage} />
+                ))}
+              </ol>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+/** The History button and panel for one department's questions with the
+ *  client (HOD page, Spark-led sessions). Same timeline as the kickoff gates;
+ *  the entries have the questionnaire's shape, so they render as one. */
+export function DepartmentHistoryButton({ sessionId, title }: { sessionId: string; title: string }) {
+  const [open, setOpen] = useState(false)
+  const { data: entries, isLoading, isError } = useDeptClientHistory(sessionId, open)
+
+  return (
+    <>
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} className="shrink-0">
+        <History className="h-4 w-4" /> History
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] flex-col sm:max-w-3xl">
+          <DialogTitle>{title}: history</DialogTitle>
+          <DialogDescription>
+            What the client and Spark did with these questions, and when. Newest first. Edits
+            made within ten minutes of each other show as one.
+          </DialogDescription>
+
+          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+            {isLoading ? (
+              <HistorySkeleton />
+            ) : isError ? (
+              <p className="py-10 text-sm text-destructive">Couldn&apos;t load the history. Try again.</p>
+            ) : !entries || entries.length === 0 ? (
+              <p className="py-10 text-sm text-muted-foreground">
+                Nothing yet. Changes appear here as they happen.
+              </p>
+            ) : (
+              <ol className="relative pt-2 before:absolute before:bottom-2 before:left-4 before:top-4 before:w-px before:bg-border">
+                {entries.map((entry) => (
+                  <Entry key={entry.id} entry={entry} stage="questionnaire" />
                 ))}
               </ol>
             )}
