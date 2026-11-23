@@ -1133,6 +1133,21 @@ export const pmApi = {
     return data
   },
 
+  // Generate questions for ONE department an admin added after kickoff. Same AI
+  // steps as kickoff for one department (documents summary + questions), so it
+  // gets kickoff's long timeout rather than the 30 s default.
+  generateDepartmentQuestions: async (
+    cycleId: string,
+    sessionId: string,
+  ): Promise<{ session_id: string; questions_generated: number }> => {
+    const { data } = await apiClient.post(
+      `/pm/cycles/${cycleId}/sessions/${sessionId}/generate-questions`,
+      {},
+      { timeout: 180000 },
+    )
+    return data
+  },
+
   // Upload a document as the kickoff brief (alternative to text)
   // The backend requires strategic_brief even when uploading a doc (used as a summary/context hint).
   // Field name MUST be "files" — the FastAPI handler is typed `files: List[UploadFile]`.

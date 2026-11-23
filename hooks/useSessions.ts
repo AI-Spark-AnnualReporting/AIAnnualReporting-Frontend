@@ -522,6 +522,28 @@ export function useSubmitKickoff() {
   })
 }
 
+// Generate questions for one department added after kickoff. Refreshes the
+// cycle (status moves to hod_curation) and that department's question list.
+export function useGenerateDepartmentQuestions(cycleId: string) {
+  const qc = useQueryClient()
+  return useMutation<
+    { session_id: string; questions_generated: number },
+    { message?: string; response?: { data?: { detail?: string } } },
+    string
+  >({
+    mutationFn: (sessionId: string) => pmApi.generateDepartmentQuestions(cycleId, sessionId),
+    onSuccess: (data, sessionId) => {
+      qc.invalidateQueries({ queryKey: ["pm", "cycle", cycleId] })
+      qc.invalidateQueries({ queryKey: ["pm", "session", sessionId] })
+      toast.success(`${data.questions_generated} questions generated. The department lead has been told.`)
+    },
+    onError: (err) => {
+      const detail = err?.response?.data?.detail
+      toast.error(detail || err?.message || "Couldn't generate the questions. Try again.")
+    },
+  })
+}
+
 export function useUploadKickoffDoc() {
   const qc = useQueryClient()
   return useMutation<

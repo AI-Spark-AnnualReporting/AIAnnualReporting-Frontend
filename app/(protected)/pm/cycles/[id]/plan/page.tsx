@@ -342,6 +342,22 @@ function PlanShell({ cycleId }: { cycleId: string }) {
         }
       />
 
+      {/* A department joined after this plan was made: its sources were picked
+          without it. Kept as a notice, not a rebuild, so the PM's edits stay. */}
+      {!sectionsLocked && (plan.departments_added_after_plan?.length ?? 0) > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          <p className="font-semibold">
+            {plan.departments_added_after_plan!.join(", ")}{" "}
+            {plan.departments_added_after_plan!.length === 1 ? "was" : "were"} added after this plan was made.
+          </p>
+          <p className="mt-1">
+            Add {plan.departments_added_after_plan!.length === 1 ? "it" : "them"} as a source to the
+            sections {plan.departments_added_after_plan!.length === 1 ? "it" : "they"} should feed.
+            Start Building waits until every department is approved.
+          </p>
+        </div>
+      )}
+
       <StepIndicator
         step={step}
         canAdvance={canLockSections}

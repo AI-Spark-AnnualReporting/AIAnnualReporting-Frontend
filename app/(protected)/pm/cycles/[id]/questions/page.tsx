@@ -2,7 +2,8 @@
 
 import { use, useState } from "react"
 import Link from "next/link"
-import { usePMCycleDashboard, usePMSession } from "@/hooks/useSessions"
+import { useGenerateDepartmentQuestions, usePMCycleDashboard, usePMSession } from "@/hooks/useSessions"
+import { useBuildReadiness } from "@/hooks/useReportBuilder"
 import { PageHeader } from "@/components/ui/page-header"
 import { PageLoader, Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -19,12 +20,19 @@ import { ArrowLeft, ChevronDown, ListChecks, Sparkles } from "lucide-react"
 export default function CycleQuestionsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data, isLoading } = usePMCycleDashboard(id)
+  const { data: readiness } = useBuildReadiness(id)
   const [openId, setOpenId] = useState<string | null>(null)
 
   if (isLoading) return <PageLoader />
 
   const dash = data as { cycle?: { cycle_name?: string }; departments?: SessionSummary[] } | undefined
   const departments = dash?.departments ?? []
+  // A department added after kickoff waits here for the PM to generate its
+  // questions. Kickoff has happened once any department moved past "assigned"
+  // (before that, kickoff writes everyone's questions). Closed once the PM
+  // clicks Start Building — the backend refuses then too.
+  const kickedOff = departments.some((d) => d.status !== "assigned")
+  const canGenerate = kickedOff && !readiness?.plan_locked
 
   return (
     <div className="space-y-6">
@@ -52,7 +60,9 @@ export default function CycleQuestionsPage({ params }: { params: Promise<{ id: s
           {departments.map((d) => (
             <DepartmentQuestions
               key={d.session_id}
+              cycleId={id}
               dept={d}
+              canGenerate={canGenerate && d.status === "assigned"}
               open={openId === d.session_id}
               onToggle={() => setOpenId((prev) => (prev === d.session_id ? null : d.session_id))}
             />
@@ -66,15 +76,21 @@ export default function CycleQuestionsPage({ params }: { params: Promise<{ id: s
 /* One collapsible department card. The question list is fetched only once the
    card is expanded — passing "" disables the query (see usePMSession). */
 function DepartmentQuestions({
+  cycleId,
   dept,
+  canGenerate,
   open,
   onToggle,
 }: {
+  cycleId: string
   dept: SessionSummary
+  /** A department added after kickoff, still without questions. */
+  canGenerate: boolean
   open: boolean
   onToggle: () => void
 }) {
   const { data, isLoading, error } = usePMSession(open ? dept.session_id : "")
+  const generate = useGenerateDepartmentQuestions(cycleId)
   const questions = [...(data?.session?.questions ?? [])].sort(
     (a, b) => (a.order || 0) - (b.order || 0),
   )
@@ -115,6 +131,30 @@ function DepartmentQuestions({
           )}
         />
       </button>
+
+      {/* Outside the toggle button: a button can't sit inside another button. */}
+      {canGenerate && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-5 py-3">
+          <p className="text-sm text-amber-800">
+            {generate.isPending
+              ? "Reading the kickoff documents and writing questions… this can take up to a minute."
+              : "Added after kickoff. This department has no questions yet."}
+          </p>
+          <Button
+            size="sm"
+            onClick={() => generate.mutate(dept.session_id)}
+            disabled={generate.isPending}
+            className="bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            {generate.isPending ? (
+              <Spinner className="mr-1.5 h-4 w-4" />
+            ) : (
+              <Sparkles className="mr-1.5 h-4 w-4" />
+            )}
+            {generate.isPending ? "Generating…" : "Generate questions"}
+          </Button>
+        </div>
+      )}
 
       {open && (
         <div className="border-t bg-muted/20 px-5 py-4">
