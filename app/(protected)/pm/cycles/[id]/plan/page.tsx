@@ -39,6 +39,11 @@ import { useCycleShares } from "@/hooks/useShare"
 import { useAuth } from "@/contexts/AuthContext"
 import { kickedOffWithoutClient } from "@/lib/api/share"
 import { ClientSignoffGate } from "@/components/pm/ClientSignoffGate"
+import {
+  DepartmentAddedDialog,
+  departmentsNotApproved,
+  questionsHref,
+} from "@/components/pm/DepartmentAddedNotice"
 import { pmApi, type AreaOfFocus, type SuggestedTheme } from "@/lib/api/pm"
 import { QUERY_KEYS } from "@/lib/constants"
 import {
@@ -104,7 +109,7 @@ interface PMDashboardData {
     areas_of_focus?: AreaOfFocus[] | null
     suggested_themes?: SuggestedTheme[] | null
   }
-  departments?: Array<{ department_code: string; department_name: string }>
+  departments?: Array<{ department_code: string; department_name: string; status?: string }>
 }
 
 function PlanShell({ cycleId }: { cycleId: string }) {
@@ -135,6 +140,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   // Themes and back with picks still unsaved, and every way out of the page has
   // to warn about them.
   const [pending, setPending] = useState<PendingSources>({})
+  // The "department added" dialog is saving the picks before it moves on.
+  const [leaving, setLeaving] = useState(false)
   const setFeeders = useSetFeeders(cycleId)
   const setSourceMode = useSetSourceMode(cycleId)
 
@@ -155,8 +162,12 @@ function PlanShell({ cycleId }: { cycleId: string }) {
 
   const planQuery = usePlan(cycleId)
   const sectionsQuery = usePMCycleSections(cycleId)
-  const { data: pmDataRaw } = usePMCycleDashboard(cycleId)
+  const dashboardQuery = usePMCycleDashboard(cycleId)
+  const pmDataRaw = dashboardQuery.data
   const pmData = pmDataRaw as PMDashboardData | undefined
+  // An admin added a department while the PM was here. The dashboard polls,
+  // so this turns on by itself; the dialog below explains it.
+  const waiting = departmentsNotApproved(pmData?.departments)
 
   // The builder is reached by consenting on the findings page, which locks the
   // findings. Typing this address would otherwise walk straight past both the
@@ -174,16 +185,50 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const isSpark = user?.role === "spark_internal"
   const sharesQuery = useCycleShares(isSpark ? cycleId : "")
   const areasShare = sharesQuery.data?.areas
+  // Adding a department clears the findings consent. The PM must then see the
+  // dialog, not a silent jump to the findings page, and once that department
+  // is approved (or removed) the PM must go back through the findings page,
+  // where its draft gets analyzed.
+  //
+  // Neither query is guaranteed fresh: the findings only reload when the PM
+  // comes back to this tab, the department list every 5 s. Deciding on one of
+  // them while the other is old either drops the dialog (unsaved picks lost)
+  // or keeps the PM here with consent that no longer exists. So whenever the
+  // consent or the waiting count changes, read both fresh and decide on those:
+  // no consent + nobody waiting -> findings page; somebody waiting -> dialog.
+  const refetchDashboard = dashboardQuery.refetch
+  const refetchFindings = findingsQuery.refetch
+  const waitingCount = waiting.length
   useEffect(() => {
-    if (!findingsQuery.isLoading && !consented) {
-      router.replace(`/pm/cycles/${cycleId}/findings`)
+    if (findingsQuery.isLoading) return
+    let cancelled = false
+    Promise.all([refetchFindings(), refetchDashboard()]).then(([findings, dashboard]) => {
+      if (cancelled) return
+      const freshConsent = !!findings.data?.locked_at
+      const freshWaiting = departmentsNotApproved(
+        (dashboard.data as PMDashboardData | undefined)?.departments,
+      )
+      if (!freshConsent && freshWaiting.length === 0) {
+        router.replace(`/pm/cycles/${cycleId}/findings`)
+      }
+    })
+    return () => {
+      cancelled = true
     }
-  }, [findingsQuery.isLoading, consented, router, cycleId])
+  }, [
+    findingsQuery.isLoading,
+    consented,
+    waitingCount,
+    refetchFindings,
+    refetchDashboard,
+    router,
+    cycleId,
+  ])
 
   if (planQuery.isLoading || sectionsQuery.isLoading || findingsQuery.isLoading) {
     return <PageLoader />
   }
-  if (!consented) return <PageLoader />
+  if (!consented && waiting.length === 0) return <PageLoader />
   if (isSpark && sharesQuery.isLoading) return <PageLoader />
   if (isSpark && areasShare && kickedOffWithoutClient(areasShare)) {
     return <ClientSignoffGate cycleId={cycleId} share={areasShare} />
@@ -236,6 +281,8 @@ function PlanShell({ cycleId }: { cycleId: string }) {
   const canLockSections =
     needsSource === 0 && needsMode === 0 && needsStyle === 0 && sections.length > 0
   const hasUnsaved = Object.keys(pending).length > 0
+  // Once building has started no department can be added, so no dialog.
+  const showDepartmentAdded = !sectionsLocked && waiting.length > 0
 
   const onPendingChange = (
     sectionCode: string,
@@ -329,8 +376,23 @@ function PlanShell({ cycleId }: { cycleId: string }) {
     return !failed
   }
 
+  /** Saves any unsaved source picks, then opens Generated Questions. */
+  const goToQuestions = async () => {
+    setLeaving(true)
+    const saved = await saveSources()
+    if (!saved) {
+      // The failed save already toasted why; the picks stay on screen.
+      setLeaving(false)
+      return
+    }
+    router.push(questionsHref(cycleId))
+  }
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-7">
+      {showDepartmentAdded && (
+        <DepartmentAddedDialog names={waiting} onGo={goToQuestions} going={leaving} />
+      )}
       <PlanHeader
         cycleId={cycleId}
         cycleName={cycleName}
