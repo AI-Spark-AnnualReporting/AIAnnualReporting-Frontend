@@ -1,3 +1,4 @@
+import type { ClientSupportingDocument } from "./share"
 import apiClient from "./client"
 import { DepartmentDashboard, Session, SessionOutline } from "@/types"
 
@@ -256,6 +257,15 @@ export const departmentApi = {
       }
     )
     return data
+  },
+
+  // The supporting documents the client attached when they answered this
+  // department's questions. Empty when there was no client step.
+  getClientDocuments: async (sessionId: string): Promise<ClientSupportingDocument[]> => {
+    const { data } = await apiClient.get<{ documents: ClientSupportingDocument[] }>(
+      `/department/sessions/${sessionId}/client-documents`,
+    )
+    return data.documents ?? []
   },
 
   // Run AI answer-extraction over the session's uploaded documents — drafts an

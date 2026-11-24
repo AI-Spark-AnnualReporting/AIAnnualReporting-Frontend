@@ -20,6 +20,8 @@ import {
 } from "@/components/hod/DepartmentClientShare"
 import { DepartmentHistoryButton } from "@/components/pm/KickoffHistoryPanel"
 import { AddQuestionAfterAssign } from "@/components/hod/AddQuestionAfterAssign"
+import { ClientDocumentsList } from "@/components/share/ClientDocumentsList"
+import type { ClientSupportingDocument } from "@/lib/api/share"
 import { useAuth } from "@/contexts/AuthContext"
 import { QUERY_KEYS } from "@/lib/constants"
 import { formatDateTime } from "@/lib/utils"
@@ -162,6 +164,7 @@ export default function HODCuratePage() {
         questions={questions}
         title={`${deptName} · ${cycleName}`}
         mine={!!me && session.user_id === me.user_id}
+        clientDocuments={clientShare?.payload.documents ?? []}
         historyButton={
           isSpark ? <DepartmentHistoryButton sessionId={id} title={`${deptName} questions`} /> : null
         }
@@ -448,10 +451,14 @@ export default function HODCuratePage() {
 
 /** The page after the questions were sent: read-only, saying to whom and
  *  when, with the way on. */
-function SentView({ session, questions, title, mine, historyButton, onBack, onAnswer, onReview }: {
+function SentView({
+  session, questions, title, mine, clientDocuments, historyButton, onBack, onAnswer, onReview,
+}: {
   session: HODSession
   questions: HODQuestion[]
   title: string
+  /** Supporting documents the client attached (Spark-led sessions). */
+  clientDocuments: ClientSupportingDocument[]
   /** Spark-led sessions: the History stays readable after Assign & send. */
   historyButton?: React.ReactNode
   /** Sent to the person viewing: they answer them next. */
@@ -536,6 +543,15 @@ function SentView({ session, questions, title, mine, historyButton, onBack, onAn
           {bar.button}
         </button>
       </div>
+
+      {clientDocuments.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4">
+          <p className="mb-2 text-sm font-bold text-[#1A1D2E]">
+            Supporting documents from the client ({clientDocuments.length})
+          </p>
+          <ClientDocumentsList documents={clientDocuments} />
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-3">
         <Stat n={sent.length} label="Sent" tone="green" />

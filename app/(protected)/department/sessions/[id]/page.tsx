@@ -8,7 +8,9 @@ import {
   useAdditionalInsights,
   useUploadSessionDocument,
   useExtractAnswers,
+  useClientDocuments,
 } from "@/hooks/useSessions"
+import { ClientDocumentsList } from "@/components/share/ClientDocumentsList"
 import { departmentApi } from "@/lib/api/department"
 import {
   languageMismatchWarning,
@@ -125,6 +127,9 @@ export default function SessionWorkspacePage({
   const hasAdditionalInsights = !!insightsData?.has_content && insightsData.items.length > 0
   const uploadDocument = useUploadSessionDocument()
   const extractAnswers = useExtractAnswers()
+  // Files the client attached when they answered these questions. They are
+  // already stored under this department, so extraction reads them as is.
+  const { data: clientDocuments = [] } = useClientDocuments(id)
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -404,7 +409,14 @@ export default function SessionWorkspacePage({
   // Start Session flow, but stays on this page and refreshes the answers in place.
   const handleUploadDocuments = async () => {
     const files = [...docCheck.files]
-    if (files.length === 0) return
+    if (files.length === 0) {
+      // Nothing new to upload: run the AI over the client's files alone.
+      if (clientDocuments.length === 0) return
+      setUploadOpen(false)
+      await runExtraction()
+      docCheck.reset()
+      return
+    }
 
     // Swap the dialog for the full-screen extraction loader.
     setUploadOpen(false)
@@ -434,8 +446,20 @@ export default function SessionWorkspacePage({
     }
 
     // ── Phase 2: extract answers ───────────────────────────────────────────────
-    // Documents are uploaded. Refetch on success or failure so any drafted
-    // answers (and progress) are reflected in the workspace.
+    try {
+      await runExtraction()
+    } finally {
+      docCheck.reset()
+    }
+  }
+
+  // Run AI answer-extraction over every document on this department (their
+  // own uploads and the client's) behind the full-screen loader. Only empty
+  // answers are filled. Refetch on success or failure so any drafted answers
+  // (and progress) are reflected in the workspace.
+  const runExtraction = async () => {
+    setExtractionResult(null)
+    setUploading(true)
     try {
       const result = await extractAnswers.mutateAsync(id)
       setExtractionResult({
@@ -457,8 +481,6 @@ export default function SessionWorkspacePage({
       )
       await Promise.all([refetch(), wait(1400)])
       setUploading(false)
-    } finally {
-      docCheck.reset()
     }
   }
 
@@ -748,7 +770,7 @@ export default function SessionWorkspacePage({
               title="Upload supporting documents and let AI draft answers"
             >
               <FileUp className="mr-2 h-4 w-4" />
-              Upload Documents
+              Supporting Documents
             </Button>
           )}
 
@@ -815,6 +837,28 @@ export default function SessionWorkspacePage({
             Continue
           </Button>
         </div>
+
+        {/* Row 3 — the client sent supporting documents. They are listed and
+            used in the Supporting Documents pop-up, so this only points there. */}
+        {clientDocuments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-indigo-100 bg-indigo-50/60 px-6 py-2">
+            <Info className="h-4 w-4 shrink-0 text-indigo-600" />
+            <p className="text-sm text-indigo-900">
+              The client sent {clientDocuments.length} supporting document
+              {clientDocuments.length === 1 ? "" : "s"}.
+            </p>
+            <div className="flex-1" />
+            {canEdit && (
+              <Button
+                variant="outline"
+                className="h-8 shrink-0 rounded-lg border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
+                onClick={() => { docCheck.reset(); setUploadOpen(true) }}
+              >
+                Open
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Body ──────────────────────────────────────────────────────────────── */}
@@ -1234,6 +1278,19 @@ export default function SessionWorkspacePage({
           </DialogHeader>
 
           <div className="flex min-h-0 flex-1 flex-col space-y-3">
+            {clientDocuments.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  From the client ({clientDocuments.length})
+                </p>
+                <div className="max-h-48 overflow-y-auto">
+                  <ClientDocumentsList documents={clientDocuments} />
+                </div>
+                <p className="text-xs text-slate-500">
+                  These are always used. Add your own below if you have more.
+                </p>
+              </div>
+            )}
             <LanguageMismatchAlert message={docCheck.warning} />
             <input
               ref={fileInputRef}
@@ -1295,7 +1352,9 @@ export default function SessionWorkspacePage({
             <Button
               className="bg-indigo-600 text-white hover:bg-indigo-700"
               onClick={handleUploadDocuments}
-              disabled={docCheck.docs.length === 0 || docCheck.blocked}
+              disabled={
+                (docCheck.docs.length === 0 && clientDocuments.length === 0) || docCheck.blocked
+              }
             >
               Extract Answers
               <Sparkles className="ml-2 h-4 w-4" />
