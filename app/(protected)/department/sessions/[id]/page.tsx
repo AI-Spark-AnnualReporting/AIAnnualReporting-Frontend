@@ -172,6 +172,8 @@ export default function SessionWorkspacePage({
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
+  // False when Extract Answers runs on the client's files alone (no upload).
+  const [hasNewFiles, setHasNewFiles] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const session = data?.session
@@ -409,6 +411,7 @@ export default function SessionWorkspacePage({
   // Start Session flow, but stays on this page and refreshes the answers in place.
   const handleUploadDocuments = async () => {
     const files = [...docCheck.files]
+    setHasNewFiles(files.length > 0)
     if (files.length === 0) {
       // Nothing new to upload: run the AI over the client's files alone.
       if (clientDocuments.length === 0) return
@@ -502,7 +505,7 @@ export default function SessionWorkspacePage({
 
   // ── Early returns ─────────────────────────────────────────────────────────────
   if (isLoading) return <PageLoader />
-  if (uploading) return <ExtractionLoader result={extractionResult} />
+  if (uploading) return <ExtractionLoader result={extractionResult} hasNewFiles={hasNewFiles} />
   if (!session)
     return <EmptyState title="Session not found" description="This session doesn't exist or you don't have access." />
 

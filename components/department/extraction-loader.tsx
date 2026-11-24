@@ -85,16 +85,27 @@ function extractionSummary(result: ExtractionResult): { title: string; sub: stri
  * Only the wording lives here. The look is the app-wide AiLoadingOverlay, so
  * this wait reads the same as every other in the app.
  */
-export function ExtractionLoader({ result }: { result: ExtractionResult | null }) {
+export function ExtractionLoader({
+  result,
+  hasNewFiles = true,
+}: {
+  result: ExtractionResult | null
+  /** False when nothing is uploaded first (e.g. only the client's files are
+   *  read), so the "Uploading your documents" step is left out. */
+  hasNewFiles?: boolean
+}) {
   // From the NEWLY extracted count, not raw found_count, which also includes
   // answers kept from a previous run.
   const summary = result ? extractionSummary(result) : null
+  // The first step and first tip are about the upload.
+  const stages = hasNewFiles ? STAGES : STAGES.slice(1)
+  const tips = hasNewFiles ? TIPS : TIPS.slice(1)
   return (
     <AiLoadingOverlay
       title="Extracting your answers"
       subtitle="Reading your documents to answer each of your questions."
-      milestones={STAGES}
-      tips={TIPS}
+      milestones={stages}
+      tips={tips}
       estimatedMs={ESTIMATED_MS}
       showProgress={false}
       done={result !== null}
