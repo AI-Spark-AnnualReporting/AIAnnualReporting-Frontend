@@ -57,6 +57,7 @@ export function QuestionnaireReview({
   value,
   ownQuestionIds,
   documentName,
+  documentNames = [],
   reader = "client",
 }: {
   questions: SurveyQuestion[]
@@ -64,6 +65,8 @@ export function QuestionnaireReview({
   /** Questions the client wrote themselves, labelled as theirs. */
   ownQuestionIds: string[]
   documentName: string | null
+  /** Department links: every supporting document, one per line. */
+  documentNames?: string[]
   /** Who is reading: the client ("your question") or the team reviewing the
    *  client's reply ("the client's question"). */
   reader?: "client" | "team"
@@ -81,15 +84,29 @@ export function QuestionnaireReview({
   const summary = [`${answered} answered`]
   if (rejected > 0) summary.push(`${rejected} rejected`)
   if (own.size > 0) summary.push(`${own.size} question${own.size === 1 ? "" : "s"} ${ownerWord} added`)
+  if (documentNames.length > 0) {
+    summary.push(`${documentNames.length} document${documentNames.length === 1 ? "" : "s"} attached`)
+  }
 
   return (
-    <div className="space-y-3">
+    // min-w-0: a long file name must not widen the dialog past its edge.
+    <div className="min-w-0 space-y-3">
       <SummaryLine items={summary} />
       {documentName && (
         <p className="flex items-center gap-2 text-sm text-foreground">
           <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
           <span className="truncate">{documentName}</span>
         </p>
+      )}
+      {documentNames.length > 0 && (
+        <ul className="space-y-1">
+          {documentNames.map((name, i) => (
+            <li key={`${name}-${i}`} className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+              <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
+              <span className="truncate" title={name}>{name}</span>
+            </li>
+          ))}
+        </ul>
       )}
       <ScrollBox>
         <ol className="divide-y divide-border">
