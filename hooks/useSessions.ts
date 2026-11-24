@@ -22,6 +22,16 @@ export function useSession(sessionId: string) {
   })
 }
 
+/** The client's supporting documents for a department session (may be empty). */
+export function useClientDocuments(sessionId: string) {
+  return useQuery({
+    queryKey: ["session", sessionId, "client-documents"],
+    queryFn: () => departmentApi.getClientDocuments(sessionId),
+    enabled: !!sessionId,
+    retry: false,
+  })
+}
+
 /**
  * Load a session from the server into the cache, replacing any older copy.
  *

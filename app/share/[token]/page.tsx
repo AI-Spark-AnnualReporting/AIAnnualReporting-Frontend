@@ -35,7 +35,13 @@ import {
   isComplete,
   valueFromAnswers,
 } from "@/components/pm/QuestionnaireForm"
-import { clientShareApi, ClientShareView, ShareResponsePayload } from "@/lib/api/share"
+import {
+  clientShareApi,
+  ClientShareView,
+  ClientSupportingDocument,
+  MAX_CLIENT_DOCUMENTS,
+  ShareResponsePayload,
+} from "@/lib/api/share"
 import { cn } from "@/lib/utils"
 import {
   roleSelectionComplete,
@@ -188,8 +194,8 @@ function bannerFacts(
       `About ${questionnaireMinutes(questionCount)} minutes`,
     ]
     if (firstRound) facts.push("You can add your own questions")
-    // The kickoff questionnaire only: a department's link has no attachment.
     if (view.stage === "questionnaire") facts.push("You can attach your own brief")
+    if (view.stage === "department_questions") facts.push("You can attach supporting documents")
     return facts
   }
   if (view.stage === "brief") return ["About 5 minutes", "You can add a note"]
@@ -278,6 +284,67 @@ export default function ClientSharePage({
     }
   }
 
+  // Department links: supporting documents the client attaches instead of (or
+  // as well as) answering. Each uploads on pick and is added to the link's list.
+  const [clientDocs, setClientDocs] = useState<ClientSupportingDocument[]>([])
+  // The upload in progress, e.g. "HR.docx (2 of 3)". Null when idle.
+  const [uploadingLabel, setUploadingLabel] = useState<string | null>(null)
+  // Removes still finishing on the server. The file is already off the list.
+  const [removingCount, setRemovingCount] = useState(0)
+  const clientDocsBusy = uploadingLabel !== null
+  const [clientDocsError, setClientDocsError] = useState<string | null>(null)
+  const clientDocsRef = useRef<HTMLInputElement>(null)
+
+  /** Upload the picked files one at a time, up to the limit. */
+  const addClientDocuments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? [])
+    // Cleared so the same filename can be re-picked after a failure.
+    if (clientDocsRef.current) clientDocsRef.current.value = ""
+    if (picked.length === 0) return
+    const room = MAX_CLIENT_DOCUMENTS - clientDocs.length
+    const files = picked.slice(0, room)
+    setClientDocsError(
+      picked.length > room ? `Only ${MAX_CLIENT_DOCUMENTS} documents can be attached.` : null,
+    )
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setUploadingLabel(files.length > 1 ? `${file.name} (${i + 1} of ${files.length})` : file.name)
+      try {
+        const added = await clientShareApi.addSupportingDocument(token, file)
+        setClientDocs((prev) => [...prev, added])
+      } catch (err) {
+        setClientDocsError(
+          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+            `Couldn't upload ${file.name}. PDF, DOCX, DOC or TXT, up to 20 MB.`,
+        )
+      }
+    }
+    setUploadingLabel(null)
+  }
+
+  /** Remove one of their files. It leaves the list at once; the server
+   *  delete finishes in the background. If that fails, the file comes back. */
+  const removeClientDocument = async (documentId: string) => {
+    const index = clientDocs.findIndex((d) => d.id === documentId)
+    const removed = clientDocs[index]
+    if (!removed) return
+    setClientDocsError(null)
+    setClientDocs((prev) => prev.filter((d) => d.id !== documentId))
+    setRemovingCount((n) => n + 1)
+    try {
+      await clientShareApi.removeSupportingDocument(token, documentId)
+    } catch {
+      setClientDocs((prev) => {
+        const next = [...prev]
+        next.splice(Math.min(index, next.length), 0, removed)
+        return next
+      })
+      setClientDocsError(`Couldn't remove ${removed.filename}. Please try again.`)
+    } finally {
+      setRemovingCount((n) => n - 1)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     clientShareApi
@@ -297,6 +364,7 @@ export default function ClientSharePage({
               : emptyQuestionnaireValue,
           )
           setDocName(v.document_name ?? null)
+          setClientDocs(v.payload.documents ?? [])
         } else {
           const src = v.status === "pending" ? v.payload : { ...v.payload, ...v.response }
           setBrief(src.strategic_brief ?? "")
@@ -466,8 +534,17 @@ export default function ClientSharePage({
   // New cycles: every area they keep needs its leading message picked.
   const areasMissingLead = grouped ? areasMissingPrimaryMessage(areas, concepts) : []
 
+  // A department link can go with only some answers, or none at all when
+  // supporting documents are attached. The kickoff questionnaire needs all.
+  const departmentReady =
+    required > 0 &&
+    !clientDocsBusy &&
+    removingCount === 0 &&
+    (answered > 0 || clientDocs.length > 0)
   const canSubmit = editable && !submitting && (
-    view && isQuestionList(view)
+    view?.stage === "department_questions"
+      ? departmentReady
+      : view && isQuestionList(view)
       ? isComplete(questions, answers)
       : view?.stage === "brief"
         ? brief.trim().length > 0
@@ -639,6 +716,16 @@ export default function ClientSharePage({
         {/* ── Questionnaire (kickoff, or a department's questions) ── */}
         {isQuestionList(view) && (
           <>
+            {view.stage === "department_questions" && editable && (
+              <div className="mb-4 flex items-start gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm">
+                <Info className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
+                <p className="text-sm text-indigo-900">
+                  Answer all the questions, just some of them, or attach supporting
+                  documents at the bottom of the page and we&apos;ll take the answers
+                  from them.
+                </p>
+              </div>
+            )}
             <QuestionnaireForm
               questions={questions}
               value={answers}
@@ -809,6 +896,93 @@ export default function ClientSharePage({
                     </Button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Supporting documents, department links only. Up to 10 files,
+                each uploaded on pick. Read-only once sent. */}
+            {view.stage === "department_questions" && (editable || clientDocs.length > 0) && (
+              <div
+                className={cn(
+                  "mt-4 rounded-2xl border border-dashed p-4",
+                  clientDocsError
+                    ? "border-destructive/40 bg-destructive/5"
+                    : "border-indigo-200 bg-indigo-50/30",
+                )}
+              >
+                <input
+                  ref={clientDocsRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.doc,.txt"
+                  className="hidden"
+                  onChange={addClientDocuments}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      Supporting documents{" "}
+                      <span className="font-normal text-muted-foreground">
+                        ({clientDocs.length} of {MAX_CLIENT_DOCUMENTS})
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Rather not answer everything? Attach documents that hold the
+                      answers. PDF, DOCX, DOC or TXT.
+                    </p>
+                  </div>
+                  {editable && (
+                    <Button
+                      type="button"
+                      disabled={clientDocsBusy || clientDocs.length >= MAX_CLIENT_DOCUMENTS}
+                      onClick={() => clientDocsRef.current?.click()}
+                      className="bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      {clientDocsBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      {clientDocsBusy ? "Uploading…" : "Attach files"}
+                    </Button>
+                  )}
+                </div>
+                {(clientDocs.length > 0 || uploadingLabel) && (
+                  <ul className="mt-3 space-y-2">
+                    {clientDocs.map((doc) => (
+                      <li
+                        key={doc.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2"
+                      >
+                        <span className="flex min-w-0 items-center gap-2 text-sm">
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+                          <span className="truncate">{doc.filename}</span>
+                        </span>
+                        {editable && (
+                          <button
+                            type="button"
+                            onClick={() => removeClientDocument(doc.id)}
+                            title={`Remove ${doc.filename}`}
+                            className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                    {uploadingLabel && (
+                      <li className="flex items-center gap-2 rounded-lg border border-dashed border-indigo-200 bg-background px-3 py-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-indigo-600" />
+                        <span className="truncate">Uploading {uploadingLabel}…</span>
+                      </li>
+                    )}
+                  </ul>
+                )}
+                {clientDocsError && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertTriangle className="h-3.5 w-3.5" /> {clientDocsError}
+                  </p>
+                )}
               </div>
             )}
           </>
@@ -1027,7 +1201,13 @@ export default function ClientSharePage({
                 onClick={() => setConfirmSend(true)}
                 disabled={!canSubmit}
                 title={
-                  isQuestionList(view) && !isComplete(questions, answers)
+                  view.stage === "department_questions"
+                    ? departmentReady
+                      ? undefined
+                      : required === 0
+                        ? "You've rejected every question — answer at least one to send"
+                        : "Answer at least one question or attach a document to send"
+                    : isQuestionList(view) && !isComplete(questions, answers)
                     ? required === 0
                       ? "You've rejected every question — answer at least one to send"
                       : "Answer every question to send"
@@ -1073,7 +1253,10 @@ export default function ClientSharePage({
             questions={questions}
             value={answers}
             ownQuestionIds={ownQuestionIds}
-            documentName={docName}
+            documentName={view.stage === "department_questions" ? null : docName}
+            documentNames={
+              view.stage === "department_questions" ? clientDocs.map((d) => d.filename) : []
+            }
           />
         )}
         {view.stage === "brief" && (

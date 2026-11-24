@@ -20,6 +20,7 @@ import {
   useShareWithClient,
 } from "@/hooks/useHod"
 import type { DepartmentShare } from "@/lib/api/hod"
+import { ClientDocumentsList } from "@/components/share/ClientDocumentsList"
 import {
   AlertTriangle, BellRing, Check, CheckCircle2, Clock, Copy, Info, Loader2, Mail,
   MessageSquareQuote, Send, Undo2,
@@ -481,6 +482,7 @@ export function DepartmentShareBanner({ share }: { share: DepartmentShare }) {
       : share.status === "responded"
         ? `The client responded ${fmt(share.responded_at)}. Review their answers below.`
         : `With the client (${share.client_email}) since ${fmt(share.created_at)}. The questions can't be edited here.`
+  const documents = share.payload.documents ?? []
   return (
     <div className={cn("mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border px-4 py-2.5 text-xs font-semibold", tone)}>
       <span>{title}</span>
@@ -489,6 +491,16 @@ export function DepartmentShareBanner({ share }: { share: DepartmentShare }) {
           <MessageSquareQuote className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate" title={share.client_note}>“{share.client_note}”</span>
         </span>
+      )}
+      {/* The client's supporting documents, once they have sent. While the
+          link is open they may still be adding or removing files. */}
+      {documents.length > 0 && share.status !== "pending" && (
+        <div className="w-full pb-1 pt-1.5">
+          <p className="mb-1.5">Supporting documents from the client ({documents.length})</p>
+          <div className="font-normal text-foreground">
+            <ClientDocumentsList documents={documents} />
+          </div>
+        </div>
       )}
     </div>
   )

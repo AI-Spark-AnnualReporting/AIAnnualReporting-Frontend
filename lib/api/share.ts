@@ -94,9 +94,22 @@ export interface ShareResponsePayload {
   concept_messages?: ConceptMessage[]
 }
 
+/** One file a client attached on a department link. Download it with
+ *  documentsApi.getDownloadUrl(id) (signed-in users only). */
+export interface ClientSupportingDocument {
+  id: string
+  filename: string
+}
+
+/** The most supporting documents a client can attach on a department link.
+ *  The server checks the same limit. */
+export const MAX_CLIENT_DOCUMENTS = 10
+
 /** What the client is being asked about. Shape follows the stage. */
 export interface SharePayload {
   questions?: SurveyQuestion[]
+  /** Department links only: the supporting documents the client attached. */
+  documents?: ClientSupportingDocument[]
   strategic_brief?: string
   areas_of_focus?: AreaOfFocus[]
   concept_messages?: ConceptMessage[]
@@ -280,6 +293,25 @@ export const clientShareApi = {
       { headers: { "Content-Type": undefined } },
     )
     return data
+  },
+
+  /** Department links: add one supporting document (up to 10). */
+  addSupportingDocument: async (token: string, file: File): Promise<ClientSupportingDocument> => {
+    const form = new FormData()
+    form.append("file", file)
+    const { data } = await publicClient.post<ClientSupportingDocument>(
+      `/share/${encodeURIComponent(token)}/document`,
+      form,
+      { headers: { "Content-Type": undefined } },
+    )
+    return data
+  },
+
+  /** Department links: remove one of the client's own supporting documents. */
+  removeSupportingDocument: async (token: string, documentId: string): Promise<void> => {
+    await publicClient.delete(
+      `/share/${encodeURIComponent(token)}/documents/${encodeURIComponent(documentId)}`,
+    )
   },
 
   submit: async (
