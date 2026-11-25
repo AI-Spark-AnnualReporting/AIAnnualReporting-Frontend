@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { useEffect, useRef, useState } from "react"
 import {
   useConversations,
@@ -77,6 +79,7 @@ export function ConversationsView() {
 
   const createConv = useCreateConversation()
   const sendMsg = useSendMessage()
+  const chatCredits = useAiStep("annual.chat")
   const renameConv = useRenameConversation()
   const deleteConv = useDeleteConversation()
   const clearHist = useClearHistory()
@@ -105,7 +108,7 @@ export function ConversationsView() {
 
   const handleSend = () => {
     const text = input.trim()
-    if (!text || !selectedId || sendMsg.isPending) return
+    if (!text || !selectedId || sendMsg.isPending || chatCredits.blocked) return
     sendMsg.mutate({ conversationId: selectedId, message: text, useDocuments })
     setInput("")
   }
@@ -348,7 +351,8 @@ export function ConversationsView() {
                   size="icon"
                   className="h-11 w-11 shrink-0 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
                   onClick={handleSend}
-                  disabled={!input.trim() || sendMsg.isPending}
+                  disabled={!input.trim() || sendMsg.isPending || chatCredits.blocked}
+                  title={chatCredits.reason ?? undefined}
                 >
                   {sendMsg.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -357,6 +361,7 @@ export function ConversationsView() {
                   )}
                 </Button>
               </div>
+              <AiCreditsReason step="annual.chat" className="mt-0" />
               <button
                 type="button"
                 onClick={() => setUseDocuments((v) => !v)}

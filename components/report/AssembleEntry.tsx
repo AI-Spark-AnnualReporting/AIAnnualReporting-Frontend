@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -68,6 +69,7 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
   const approvalQuery = useReportApproval(cycleId)
   const router = useRouter()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const assembleCredits = useAiStep("annual.assemble")
   // "running" shows the loader while we poll. "done" lets it finish its
   // animation, then onDone navigates. "failed" swaps it for an error card —
   // the PM leaves that only by clicking, never by being dropped back.
@@ -225,8 +227,9 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
     return (
       <Button
         onClick={() => runAssemble(true)}
+        disabled={assembleCredits.blocked}
         className="shrink-0 bg-amber-500 text-white hover:bg-amber-600"
-        title="A section changed after this report was built — rebuild it to include the change."
+        title={assembleCredits.reason ?? "A section changed after this report was built — rebuild it to include the change."}
       >
         <RefreshCw className="h-4 w-4 mr-1.5" />
         Assemble again
@@ -244,10 +247,10 @@ export function AssembleEntry({ cycleId }: AssembleEntryProps) {
         // Assembling with empty sections is allowed — they are simply left
         // out. The confirm below is what stops that happening silently.
         onClick={() => (missing > 0 ? setConfirmOpen(true) : run())}
-        disabled={!can_assemble}
+        disabled={!can_assemble || assembleCredits.blocked}
         title={
           can_assemble
-            ? undefined
+            ? assembleCredits.reason ?? undefined
             : "Nothing has been written yet — there is no report to assemble."
         }
         className="shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"

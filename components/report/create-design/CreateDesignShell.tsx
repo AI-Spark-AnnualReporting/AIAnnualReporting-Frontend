@@ -18,6 +18,8 @@
  * beside the portrait one.
  */
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import {
   ArrowLeft, Code2, Layers, ListChecks, Loader2, Palette, PanelLeftClose, PanelLeftOpen,
   RefreshCw,
@@ -280,6 +282,9 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [confirmAll, setConfirmAll] = useState(false)
   const [manualRun, setManualRun] = useState<{ force: boolean } | null>(null)
+  // Structuring sections runs the AI: not started (automatically or by hand)
+  // when the company can't afford it; the reason shows under the toolbar.
+  const extractCredits = useAiStep("annual.design.extract")
   const [failures, setFailures] = useState<Record<string, string>>({})
   // Set once the automatic run has had its go. Without it a section that
   // failed would keep `needsRun` true and restart the overlay forever.
@@ -450,7 +455,8 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
   // function of "is there unstructured work", so it unmounts on its own once
   // the run has done it.
   const run =
-    manualRun ?? (!isLoading && needsRun && !autoRunSettled ? { force: false } : null)
+    manualRun ??
+    (!isLoading && needsRun && !autoRunSettled && !extractCredits.blocked ? { force: false } : null)
 
   // Draw every section's page in the background, so clicking one is instant.
   // Mounted here, above the early returns, because hooks cannot sit after a
@@ -694,13 +700,15 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
           size="sm"
           className="h-8"
           onClick={() => setConfirmAll(true)}
-          disabled={extract.isPending}
+          disabled={extract.isPending || extractCredits.blocked}
+          title={extractCredits.reason ?? undefined}
         >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           Re-extract all
         </Button>
       </div>
 
+      <AiCreditsReason step="annual.design.extract" className="px-4" />
       {error && !lostAccess && (
         <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-2">
           <p className="min-w-0 flex-1 text-[11px] text-amber-900">
@@ -897,7 +905,8 @@ export function CreateDesignShell({ cycleId }: { cycleId: string }) {
                     size="sm"
                     className="h-8"
                     onClick={() => reExtract(section.section_code)}
-                    disabled={extract.isPending}
+                    disabled={extract.isPending || extractCredits.blocked}
+                    title={extractCredits.reason ?? undefined}
                   >
                     <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                     Re-extract

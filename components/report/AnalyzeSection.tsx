@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { useState } from "react"
 import Link from "next/link"
 import {
@@ -176,6 +178,8 @@ function NoDataView({
   onRun: () => void
   onEditManually: () => void
 }) {
+  // Analyze writes the findings ("Write a section"); greyed out when the company can't afford it.
+  const runCredits = useAiStep("annual.section")
   return (
     <div className="flex flex-col items-center justify-center text-center py-12 px-4">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
@@ -192,7 +196,7 @@ function NoDataView({
           : "The analyze agent ran but found no data to analyze for this section. Try again once the departments have submitted more, or write the findings yourself."}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button onClick={onRun} disabled={running} variant="outline">
+        <Button onClick={onRun} disabled={running || runCredits.blocked} variant="outline">
           {running ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -205,6 +209,7 @@ function NoDataView({
             </>
           )}
         </Button>
+        <AiCreditsReason step="annual.section" className="w-full text-center" />
         <Button
           onClick={onEditManually}
           disabled={running}
@@ -231,6 +236,8 @@ function PendingView({
   running: boolean
   onRun: () => void
 }) {
+  // Analyze writes the findings ("Write a section"); greyed out when the company can't afford it.
+  const runCredits = useAiStep("annual.section")
   if (!hasFeeders) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-12 px-4">
@@ -274,7 +281,7 @@ function PendingView({
         )}
         {!running && "."}
       </p>
-      <Button onClick={onRun} disabled={running} variant="outline">
+      <Button onClick={onRun} disabled={running || runCredits.blocked} variant="outline">
         {running ? (
           <>
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -287,6 +294,7 @@ function PendingView({
           </>
         )}
       </Button>
+      <AiCreditsReason step="annual.section" />
     </div>
   )
 }
@@ -318,6 +326,8 @@ function DraftingView({
   /** Undo the last change since the validation, beside Edit. */
   undoSlot?: React.ReactNode
 }) {
+  // Analyze writes the findings ("Write a section"); greyed out when the company can't afford it.
+  const runCredits = useAiStep("annual.section")
   const busy = running || refining
 
   return (
@@ -366,7 +376,7 @@ function DraftingView({
             variant="outline"
             size="sm"
             onClick={onRun}
-            disabled={busy}
+            disabled={busy || runCredits.blocked}
             title="Re-run the analyze agent and overwrite current findings"
           >
             {running ? (

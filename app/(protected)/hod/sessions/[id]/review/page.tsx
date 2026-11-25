@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useHODSession, useReviewAnswers } from "@/hooks/useHod"
@@ -44,6 +45,9 @@ export default function HODReviewPage() {
   const router = useRouter()
   const { data: session, isLoading, isError, refetch } = useHODSession(id)
   const review = useReviewAnswers(id)
+  // Approving and sending back both go through an AI step on the server
+  // (it reads the answers), so both wait when the company can't afford it.
+  const reviewCredits = useAiStep("annual.documents")
 
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [notes, setNotes] = useState("")
@@ -284,20 +288,20 @@ export default function HODReviewPage() {
       {isSubmitted ? (
         <div className="fixed bottom-6 left-1/2 z-20 w-[min(48rem,calc(100%-3rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 shadow-lg">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold text-slate-600">
-              Approve to include this in the report, or send it back for changes.
+            <p className={`text-xs font-semibold ${reviewCredits.reason ? "text-amber-700" : "text-slate-600"}`}>
+              {reviewCredits.reason ?? "Approve to include this in the report, or send it back for changes."}
             </p>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setSendBackOpen(true)}
-                disabled={review.isPending}
+                disabled={review.isPending || reviewCredits.blocked}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               >
                 <Send className="h-3.5 w-3.5" /> Send back
               </button>
               <button
                 onClick={approve}
-                disabled={review.isPending}
+                disabled={review.isPending || reviewCredits.blocked}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
               >
                 {review.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}

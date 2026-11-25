@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { use, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
@@ -51,6 +52,7 @@ export default function ValidationPage({ params }: { params: Promise<{ id: strin
 function ValidationView({ cycleId }: { cycleId: string }) {
   const reportQuery = useFinalReport(cycleId)
   const validate = useValidateReport(cycleId)
+  const validateCredits = useAiStep("annual.validate")
   const { data: dash } = usePMCycleDashboard(cycleId)
   const { data: approval } = useReportApproval(cycleId)
   // A signed-off report cannot be edited, so a fresh verdict on it is a cost
@@ -224,9 +226,9 @@ function ValidationView({ cycleId }: { cycleId: string }) {
             <Button
               variant="outline"
               onClick={run}
-              disabled={running || locked || mustFixFirst || savingIgnores}
+              disabled={running || locked || mustFixFirst || savingIgnores || validateCredits.blocked}
               title={
-                locked
+                validateCredits.reason ? validateCredits.reason : locked
                   ? approved
                     ? "This report is approved. Its validation is kept as the record behind the Validation Report page."
                     : "The report was sent to the client, so it is not validated again. Make changes with Edit report."
@@ -292,8 +294,8 @@ function ValidationView({ cycleId }: { cycleId: string }) {
           </div>
           <Button
             onClick={editedCount > 0 ? reassembleAndValidate : run}
-            disabled={mustFixFirst || savingIgnores}
-            title={mustFixFirst ? fixFirstText : undefined}
+            disabled={mustFixFirst || savingIgnores || validateCredits.blocked}
+            title={mustFixFirst ? fixFirstText : validateCredits.reason ?? undefined}
           >
             {mustFixFirst && <Lock className="mr-1.5 h-4 w-4" />}
             {savingIgnores

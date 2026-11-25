@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopNav } from "@/components/layout/TopNav"
+import { AiCreditsBanner } from "@/components/ai/AiCreditsBanner"
 import { PMSidebar } from "@/components/layout/PMSidebar"
 import { PMTopNav } from "@/components/layout/PMTopNav"
 import { DeptSidebar } from "@/components/layout/DeptSidebar"
@@ -41,6 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <PMSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <PMTopNav />
+          <AiCreditsBanner />
           <main className="flex-1 overflow-y-auto">
             <div className="px-8 py-8">{children}</div>
           </main>
@@ -55,6 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <DeptSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <DeptTopNav />
+          <AiCreditsBanner />
           <main className="flex-1 overflow-y-auto">
             <div className="px-8 py-8">{children}</div>
           </main>
@@ -69,6 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <HODSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <DeptTopNav />
+          <AiCreditsBanner />
           <main className="flex-1 overflow-y-auto">
             <div className="px-8 py-8">{children}</div>
           </main>
@@ -82,6 +86,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopNav />
+          <AiCreditsBanner />
         <main className="flex-1 overflow-y-auto">
           <div className="p-6">{children}</div>
         </main>

@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { useState } from "react"
 import Link from "next/link"
 import {
@@ -133,6 +135,7 @@ function PendingView({
   generating: boolean
   onGenerate: () => void
 }) {
+  const credits = useAiStep("annual.section")
   if (!hasFeeders) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-12 px-4">
@@ -171,7 +174,7 @@ function PendingView({
       </p>
       <Button
         onClick={onGenerate}
-        disabled={generating}
+        disabled={generating || credits.blocked}
         size="lg"
         className="bg-indigo-600 text-white hover:bg-indigo-700"
       >
@@ -187,6 +190,7 @@ function PendingView({
           </>
         )}
       </Button>
+      <AiCreditsReason step="annual.section" />
     </div>
   )
 }
@@ -212,6 +216,7 @@ function DraftingView({
   onRefine: (instruction: string) => void
 }) {
   const save = useSaveGenerateContent(cycleId)
+  const sectionCredits = useAiStep("annual.section")
   const [editing, setEditing] = useState(false)
   const busy = regenerating || refining
 
@@ -300,10 +305,11 @@ function DraftingView({
 
           {onRegenerate && (
           <div className="flex items-center justify-end gap-2">
+            <AiCreditsReason step="annual.section" className="mt-0" />
             <Button
               variant="outline"
               onClick={onRegenerate}
-              disabled={busy}
+              disabled={busy || sectionCredits.blocked}
               className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             >
               {regenerating ? (

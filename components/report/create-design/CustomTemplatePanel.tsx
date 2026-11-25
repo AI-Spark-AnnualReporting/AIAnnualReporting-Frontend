@@ -23,6 +23,7 @@
  * closes.
  */
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { AlertTriangle, ArrowLeft, Check, Loader2, PenLine, Sparkles, Undo2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
@@ -295,7 +296,16 @@ export function CustomTemplatePanel({
   const sketchElapsed = pending ? Math.max(0, Math.round((now - pending.startedAt) / 1000)) : 0
   const sketchTimedOut = pending !== null && now - pending.startedAt > SKETCH_GIVE_UP_MS
 
+  // Sketching and designing run the AI: refused here, with the reason, when the
+  // company can't afford it (the same line shows on the request screen).
+  const sketchCredits = useAiStep("annual.design.sketch")
+  const templateCredits = useAiStep("annual.design.custom_template")
+
   const startSketch = async () => {
+    if (sketchCredits.reason) {
+      setSketchError(sketchCredits.reason)
+      return
+    }
     setSketchStarting(true)
     setSketchError(null)
     setReplacedText(null)
@@ -312,6 +322,10 @@ export function CustomTemplatePanel({
 
   const sendNotes = async () => {
     if (!shown) return
+    if (sketchCredits.reason) {
+      setSketchError(sketchCredits.reason)
+      return
+    }
     const layoutIds = shown.sketch.layouts.map((layout) => layout.id)
     const payload = notesPayload(shownNotes?.layouts ?? {}, shownNotes?.allPages ?? "", layoutIds)
     setSketchStarting(true)
@@ -347,6 +361,10 @@ export function CustomTemplatePanel({
   }
 
   const start = async () => {
+    if (templateCredits.reason) {
+      setRequestError(templateCredits.reason)
+      return
+    }
     setStarting(true)
     setRequestError(null)
     setReplacedText(null)
@@ -364,6 +382,10 @@ export function CustomTemplatePanel({
   /** "Build this design": the shown sketch version goes to the full design run. */
   const buildFromSketch = async () => {
     if (!shown) return
+    if (templateCredits.reason) {
+      setSketchError(templateCredits.reason)
+      return
+    }
     setStarting(true)
     setRequestError(null)
     setSketchError(null)
@@ -563,9 +585,14 @@ export function CustomTemplatePanel({
                 <p className="mt-4 text-[12px] text-red-700">{sketchError}</p>
               )}
 
+              {(templateCredits.reason || (hasText && sketchCredits.reason)) && (
+                <p role="status" className="mt-4 text-xs text-amber-700">
+                  {templateCredits.reason ?? sketchCredits.reason}
+                </p>
+              )}
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 {hasText && (
-                  <Button variant="brand" onClick={startSketch} disabled={sketchStarting || starting}>
+                  <Button variant="brand" onClick={startSketch} disabled={sketchStarting || starting || sketchCredits.blocked} title={sketchCredits.reason ?? undefined}>
                     {sketchStarting ? (
                       <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                     ) : (
@@ -579,7 +606,8 @@ export function CustomTemplatePanel({
                   size={hasText ? "sm" : "default"}
                   className={hasText ? "h-8" : undefined}
                   onClick={start}
-                  disabled={starting || sketchStarting}
+                  disabled={starting || sketchStarting || templateCredits.blocked}
+                  title={templateCredits.reason ?? undefined}
                 >
                   {starting ? (
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />

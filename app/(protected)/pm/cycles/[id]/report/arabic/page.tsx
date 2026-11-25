@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { use, useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -210,8 +211,8 @@ function ArabicReportShell({ cycleId }: { cycleId: string }) {
               variant="outline"
               size="sm"
               onClick={() => setConfirmCreate(true)}
-              disabled={!canCreate || sentToClient || createArabic.running}
-              title={createAgainReason}
+              disabled={!canCreate || sentToClient || createArabic.running || !!createArabic.blockedReason}
+              title={createArabic.blockedReason ?? createAgainReason}
               className="h-8"
             >
               <RefreshCw className="h-3.5 w-3.5 mr-1.5" />

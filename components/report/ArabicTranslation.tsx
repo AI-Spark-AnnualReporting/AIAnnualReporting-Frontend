@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { useCallback, useState, type ReactNode } from "react"
 import { Noto_Naskh_Arabic } from "next/font/google"
 import { AlertTriangle, RefreshCw } from "lucide-react"
@@ -198,10 +199,17 @@ function TranslationFailedCard({ message, onRetry, onClose }: TranslationFailedC
 export function useCreateArabic(cycleId: string, onCreated: () => void) {
   const qc = useQueryClient()
   const start = useStartTranslation(cycleId)
+  const credits = useAiStep("annual.translate")
   const [running, setRunning] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
 
   const create = () => {
+    // Several ways in (buttons, a link that asks to create): say why here
+    // rather than start a translation the company can't afford.
+    if (credits.reason) {
+      toast.error("Not enough AI credits", { description: credits.reason })
+      return
+    }
     setJobId(null)
     setRunning(true)
     start.mutate(undefined, {
@@ -231,5 +239,5 @@ export function useCreateArabic(cycleId: string, onCreated: () => void) {
     <TranslationRun jobId={jobId} onFinished={finish} onRetry={create} onClose={close} />
   ) : null
 
-  return { create, running, loader }
+  return { create, running, loader, blockedReason: credits.reason }
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { use, useState, useEffect, useCallback, useRef } from "react"
 import {
   useSession,
@@ -125,6 +127,12 @@ export default function SessionWorkspacePage({
   const hasAdditionalInsights = !!insightsData?.has_content && insightsData.items.length > 0
   const uploadDocument = useUploadSessionDocument()
   const extractAnswers = useExtractAnswers()
+  // AI buttons on this page, greyed out when the company can't afford them.
+  const assistCredits = useAiStep("annual.refine")
+  const draftCredits = useAiStep("annual.department_draft")
+  const readCredits = useAiStep("annual.documents")
+  const extractCredits = useAiStep("annual.extract_answers")
+  const extractBlocked = readCredits.reason ?? extractCredits.reason
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -1052,20 +1060,22 @@ export default function SessionWorkspacePage({
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Ask AI to refine, expand, or rephrase… (Enter)"
                     className="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:opacity-50"
-                    disabled={!canEdit || aiLoading}
+                    disabled={!canEdit || aiLoading || assistCredits.blocked}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && chatInput.trim()) sendRefine(chatInput)
+                      if (e.key === "Enter" && chatInput.trim() && !assistCredits.blocked) sendRefine(chatInput)
                     }}
                   />
                   <Button
                     size="icon" className="h-11 w-11 shrink-0 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
                     onClick={() => sendRefine(chatInput)}
-                    disabled={!canEdit || !chatInput.trim() || aiLoading}
+                    disabled={!canEdit || !chatInput.trim() || aiLoading || assistCredits.blocked}
+                    title={assistCredits.reason ?? undefined}
                   >
                     {aiLoading
                       ? <Loader2 className="h-4 w-4 animate-spin" />
                       : <Send className="h-4 w-4" />}
                   </Button>
+                  <AiCreditsReason step="annual.refine" className="mt-0 max-w-[14rem]" />
                 </div>
               )}
 
@@ -1193,11 +1203,11 @@ export default function SessionWorkspacePage({
                       onClick={handleProceedToSubmit}
                       // Local (not server) answer state here, so the button
                       // tracks typing without waiting for a save to land.
-                      disabled={!canEdit || !meetsAnswerMinimum || generateDraft.isPending}
+                      disabled={!canEdit || !meetsAnswerMinimum || generateDraft.isPending || draftCredits.blocked}
                       title={
                         !meetsAnswerMinimum
                           ? "At least one question needs a real answer — N/A alone isn't enough"
-                          : undefined
+                          : draftCredits.reason ?? undefined
                       }
                     >
                       {generateDraft.isPending
@@ -1289,12 +1299,13 @@ export default function SessionWorkspacePage({
             <Button
               className="bg-indigo-600 text-white hover:bg-indigo-700"
               onClick={handleUploadDocuments}
-              disabled={docCheck.docs.length === 0 || docCheck.blocked}
+              disabled={docCheck.docs.length === 0 || docCheck.blocked || !!extractBlocked}
             >
               Extract Answers
               <Sparkles className="ml-2 h-4 w-4" />
             </Button>
           </DialogFooter>
+          {extractBlocked && <p role="status" className="text-right text-xs text-amber-700">{extractBlocked}</p>}
         </DialogContent>
       </Dialog>
     </div>

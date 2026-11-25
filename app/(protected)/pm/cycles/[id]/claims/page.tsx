@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { use, useState } from "react"
 import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
@@ -30,6 +31,7 @@ export default function CycleClaimsPage({ params }: { params: Promise<{ id: stri
   const { data, isLoading } = useDepartmentClaims(id)
   const { data: dash } = usePMCycleDashboard(id)
   const extract = useExtractDepartmentClaims(id)
+  const factsCredits = useAiStep("annual.validate")
   const [openId, setOpenId] = useState<string | null>(null)
 
   if (isLoading) return <PageLoader />
@@ -66,7 +68,8 @@ export default function CycleClaimsPage({ params }: { params: Promise<{ id: stri
               <Button
                 variant="outline"
                 onClick={() => extract.mutate()}
-                disabled={extract.isPending}
+                disabled={extract.isPending || factsCredits.blocked}
+                title={factsCredits.reason ?? undefined}
               >
                 {extract.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -139,6 +142,7 @@ function DepartmentClaims({
   const missing = !dept.facts_reread && counted >= FACTS_SHORT_AT ? counted : 0
   const qc = useQueryClient()
   const reread = useRetryClaimExtraction()
+  const factsCredits = useAiStep("annual.validate")
   const readAgain = () =>
     reread.mutate(dept.session_id, {
       onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEYS.DEPARTMENT_CLAIMS(cycleId) }),
@@ -174,7 +178,7 @@ function DepartmentClaims({
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             {missing} figure{missing === 1 ? "" : "s"} in the answers {missing === 1 ? "isn't" : "aren't"} in any fact.
           </p>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={readAgain} disabled={reread.isPending}>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={readAgain} disabled={reread.isPending || factsCredits.blocked} title={factsCredits.reason ?? undefined}>
             {reread.isPending && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
             {reread.isPending ? "Reading…" : "Read the facts again"}
           </Button>

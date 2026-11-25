@@ -1,5 +1,6 @@
 "use client";
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -63,6 +64,7 @@ export default function CycleFindingsPage({
   const { data: readiness } = useBuildReadiness(id);
   const { data: dash } = usePMCycleDashboard(id);
   const check = useCheckDrafts(id);
+  const checkCredits = useAiStep("annual.validate");
   // Departments whose fact list looks short: the check trusts it, so their
   // "unsupported claim" findings may be wrong until the facts are re-read.
   const { data: claimsData } = useDepartmentClaims(id);
@@ -145,11 +147,11 @@ export default function CycleFindingsPage({
                 <Button
                   variant="outline"
                   onClick={() => check.mutate()}
-                  disabled={check.isPending || saving || mustHandleFirst}
+                  disabled={check.isPending || saving || mustHandleFirst || checkCredits.blocked}
                   title={
                     mustHandleFirst
                       ? `Handle the ${tally.open} open finding${tally.open === 1 ? "" : "s"} before analyzing again.`
-                      : undefined
+                      : checkCredits.reason ?? undefined
                   }
                 >
                   {check.isPending || saving ? (

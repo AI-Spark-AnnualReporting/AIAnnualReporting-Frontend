@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { use, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -49,6 +51,8 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
   } = useOutline(id)
   const generateOutline = useGenerateOutline()
   const generateDraft = useGenerateDraft()
+  const outlineCredits = useAiStep("annual.outline")
+  const draftCredits = useAiStep("annual.department_draft")
 
   const savingCount = useIsMutating({ mutationKey: OUTLINE_PATCH_KEY })
   const savingRef = useRef(0)
@@ -101,10 +105,12 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
     // generate on a locked session — it would just eat a 409.
     if (!canEditSession(session.status)) return
     if (generateOutline.isPending || genError) return
+    // Not started when the company can't afford it; the reason shows instead.
+    if (outlineCredits.blocked) return
     autoStartedRef.current = true
     runGenerate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionLoading, outlineLoading, session, outline, hasAnswers, genError])
+  }, [sessionLoading, outlineLoading, session, outline, hasAnswers, genError, outlineCredits.blocked])
 
   const handleContinue = async () => {
     // Commit any in-flight rename before deciding whether the draft is stale.
@@ -118,6 +124,10 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
     // outline just opens the existing draft — no needless LLM regeneration, and
     // no clobbering of the user's draft edits.
     const needsDraft = !draftExists || outlineEditedRef.current
+    if (needsDraft && draftCredits.reason) {
+      toast.error("Not enough AI credits", { description: draftCredits.reason })
+      return
+    }
 
     try {
       if (needsDraft) {
@@ -153,7 +163,7 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
   // spin here forever, waiting for a generate that will never fire.
   const showLoader =
     generateOutline.isPending ||
-    (!outline && !genError && hasAnswers && canEditSession(session.status))
+    (!outline && !genError && !outlineCredits.blocked && hasAnswers && canEditSession(session.status))
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -197,14 +207,21 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
         )}
       </div>
 
-      {showLoader ? null : genError && !outline ? (
+      {showLoader ? null : !outline && outlineCredits.blocked && hasAnswers ? (
+        /* ── Not built: the company can't afford the AI step right now ── */
+        <EmptyState
+          icon={AlertTriangle}
+          title="The outline can't be built yet"
+          description={outlineCredits.reason ?? ""}
+        />
+      ) : genError && !outline ? (
         /* ── Generation failed, nothing to show ── */
         <EmptyState
           icon={AlertTriangle}
           title="Couldn't build the outline"
           description="Something went wrong while generating your outline. Please try again."
           action={
-            <Button className="bg-indigo-600 text-white hover:bg-indigo-700" onClick={runGenerate}>
+            <Button className="bg-indigo-600 text-white hover:bg-indigo-700" onClick={runGenerate} disabled={outlineCredits.blocked}>
               <RefreshCw className="mr-2 h-4 w-4" /> Try again
             </Button>
           }
@@ -269,7 +286,8 @@ export default function OutlinePage({ params }: { params: Promise<{ id: string }
                 variant="outline"
                 className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 onClick={() => setRegenOpen(true)}
-                disabled={busyContinue}
+                disabled={busyContinue || outlineCredits.blocked}
+                title={outlineCredits.reason ?? undefined}
               >
                 <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Outline
               </Button>

@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { Loader2, Send } from "lucide-react"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
+import { useAiStep } from "@/hooks/useAiStep"
 
 /**
  * The compact per-card "Refine with AI" instruction box (input + send).
@@ -22,10 +24,13 @@ export function InlineRefineBox({
 }) {
   const [instruction, setInstruction] = useState("")
   const [refining, setRefining] = useState(false)
+  // Every user of this box refines the brief, areas, concept messages or themes.
+  const credits = useAiStep("annual.refine")
+  const off = refining || credits.blocked
 
   const submit = async () => {
     const value = instruction.trim()
-    if (!value || refining) return
+    if (!value || off) return
     setRefining(true)
     try {
       if (await onSubmit(value)) setInstruction("")
@@ -35,7 +40,8 @@ export function InlineRefineBox({
   }
 
   return (
-    <div className="mt-3 flex items-center gap-2">
+    <div className="mt-3">
+    <div className="flex items-center gap-2">
       <input
         type="text"
         value={instruction}
@@ -46,7 +52,7 @@ export function InlineRefineBox({
             submit()
           }
         }}
-        disabled={refining}
+        disabled={off}
         placeholder={placeholder}
         dir={isRtl ? "rtl" : "ltr"}
         className="min-w-0 flex-1 rounded-full border border-indigo-200 bg-white px-3.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400 disabled:opacity-60"
@@ -54,12 +60,14 @@ export function InlineRefineBox({
       <button
         type="button"
         onClick={submit}
-        disabled={refining || !instruction.trim()}
+        disabled={off || !instruction.trim()}
         aria-label="Send instruction"
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:bg-indigo-300"
       >
         {refining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
       </button>
+    </div>
+    <AiCreditsReason step="annual.refine" />
     </div>
   )
 }

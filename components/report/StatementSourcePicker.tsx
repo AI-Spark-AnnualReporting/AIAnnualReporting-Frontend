@@ -53,6 +53,7 @@ export function StatementSourcePicker({
   drafting = false,
   busy = false,
   draftOption = "available",
+  draftBlockedReason = null,
   onChoose,
   onKeep,
 }: {
@@ -60,6 +61,8 @@ export function StatementSourcePicker({
   drafting?: boolean
   busy?: boolean
   draftOption?: DraftOptionState
+  /** Why the AI draft can't start (not enough AI credits), or null. */
+  draftBlockedReason?: string | null
   onChoose: (source: StatementSource) => void
   onKeep?: () => void
 }) {
@@ -109,9 +112,12 @@ export function StatementSourcePicker({
               action="Write a draft"
               pendingAction="Writing the draft…"
               pending={drafting}
-              disabled={disabled}
+              disabled={disabled || !!draftBlockedReason}
               onClick={() => onChoose("draft")}
             />
+          )}
+          {showDraft && draftBlockedReason && (
+            <p role="status" className="-mt-2 text-xs text-amber-700">{draftBlockedReason}</p>
           )}
           <SourceCard
             icon={PenLine}

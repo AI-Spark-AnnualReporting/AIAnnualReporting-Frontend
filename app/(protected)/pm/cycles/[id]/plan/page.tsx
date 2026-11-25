@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { use, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -816,6 +817,9 @@ function StartBuildingAction({
   const router = useRouter()
   const qc = useQueryClient()
   const lockPlan = useLockPlan(cycleId)
+  // Writing the sections is an AI step. Without the credits the plan still
+  // locks and the builder opens (it's the way on); only the auto-writing waits.
+  const sectionCredits = useAiStep("annual.section")
   const alreadyLocked = plan.sections_locked
   // Reads the merged sources, not the saved ones: a section whose department was
   // picked a moment ago but not yet written is still sourced.
@@ -913,7 +917,10 @@ function StartBuildingAction({
 
     // 3. Draft every eligible section.
     const work = eligibleToGenerate
-    if (work.length === 0) {
+    if (work.length > 0 && sectionCredits.reason) {
+      toast.error("Sections weren't written", { description: sectionCredits.reason })
+    }
+    if (work.length === 0 || sectionCredits.blocked) {
       goToBuilder()
       return
     }
@@ -1001,6 +1008,8 @@ function StartBuildingAction({
           ? "Assign a department to each flagged section before building."
           : nothingToDo
             ? "Open the builder — this plan is already locked and drafted"
+            : eligibleToGenerate.length > 0 && sectionCredits.reason
+              ? `Opens the builder without writing the sections: ${sectionCredits.reason}`
             : eligibleToGenerate.length > 0
               ? `Auto-generate ${eligibleToGenerate.length} narrative section${eligibleToGenerate.length === 1 ? "" : "s"} then open the builder`
               : undefined

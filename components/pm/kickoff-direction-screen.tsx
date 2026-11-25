@@ -61,6 +61,8 @@ import { driftSinceResponse } from "@/lib/shareDrift"
 import { ApproveDeadlineDialog } from "@/components/pm/approve-deadline-dialog"
 import { cn, formatDate } from "@/lib/utils"
 import { toast } from "sonner"
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import {
   ArrowLeft, ArrowRight, Check, CheckCircle2, Clock, Eye, Info, Loader2, MailCheck, Megaphone,
   MessageSquareQuote, Pencil, Plus, RefreshCw, Send, ShieldAlert, Sparkles, Target,
@@ -317,6 +319,9 @@ export function KickoffDirectionScreen({
   // client, so the screen has to say so rather than fail on click.
   const { data: shares, isLoading: sharesLoading } = useCycleShares(id)
   const approveShare = useApproveShare(id)
+  // Greyed out before the click when the company can't afford the AI step.
+  const briefCredits = useAiStep("annual.brief")
+  const kickoffCredits = useAiStep("annual.questions")
   const sendBackShare = useSendBackShare(id)
   const generateAreas = useGenerateAreas(id)
 
@@ -1358,13 +1363,17 @@ export function KickoffDirectionScreen({
                   : "Something went wrong contacting the server. Try again."}
               </p>
               {answersRef.current && !briefShared && hardError !== 403 && hardError !== 404 && (
-                <Button
-                  size="sm"
-                  onClick={handleRegenerate}
-                  className="mt-3 bg-red-600 text-white hover:bg-red-700"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" /> Try again
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    onClick={handleRegenerate}
+                    disabled={briefCredits.blocked}
+                    className="mt-3 bg-red-600 text-white hover:bg-red-700"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Try again
+                  </Button>
+                  <AiCreditsReason step="annual.brief" />
+                </>
               )}
             </div>
           </div>
@@ -1380,13 +1389,17 @@ export function KickoffDirectionScreen({
                 This can happen occasionally — try again.
               </p>
               {answersRef.current && !briefShared && (
-                <Button
-                  size="sm"
-                  onClick={handleRegenerate}
-                  className="mt-3 bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" /> Try again
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    onClick={handleRegenerate}
+                    disabled={briefCredits.blocked}
+                    className="mt-3 bg-amber-600 text-white hover:bg-amber-700"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> Try again
+                  </Button>
+                  <AiCreditsReason step="annual.brief" />
+                </>
               )}
             </div>
           </div>
@@ -1561,9 +1574,10 @@ export function KickoffDirectionScreen({
                         area of focus. Write them now.
                       </p>
                     </div>
+                    <AiCreditsReason step="annual.brief" />
                     <Button
                       size="sm"
-                      disabled={generatingMessages}
+                      disabled={generatingMessages || briefCredits.blocked}
                       onClick={generateMessages}
                       className="bg-amber-600 text-white hover:bg-amber-700"
                     >
@@ -1593,9 +1607,10 @@ export function KickoffDirectionScreen({
                       now from the brief your client signed off.
                     </p>
                   </div>
+                  <AiCreditsReason step="annual.brief" />
                   <Button
                     size="sm"
-                    disabled={generateAreas.isPending}
+                    disabled={generateAreas.isPending || briefCredits.blocked}
                     onClick={() => generateAreas.mutate()}
                     className="bg-amber-600 text-white hover:bg-amber-700"
                   >
@@ -1788,6 +1803,10 @@ export function KickoffDirectionScreen({
             </Button>
           </Link>
           <div className="flex items-center gap-3">
+            {step === 2 && <AiCreditsReason step="annual.brief" className="mt-0 max-w-xs" />}
+            {step === 3 && !keptGoingWithoutClient && (
+              <AiCreditsReason step="annual.questions" className="mt-0 max-w-xs" />
+            )}
             {/* Keyed on the BRIEF share, because that is what this rewrites —
                 the server gate is assert_never_shared(BRIEF) on generate-brief.
                 Gone once shared rather than greyed out: from the first share it
@@ -1799,7 +1818,7 @@ export function KickoffDirectionScreen({
                 <Button
                   variant="outline"
                   onClick={handleRegenerate}
-                  disabled={!answersRef.current}
+                  disabled={!answersRef.current || briefCredits.blocked}
                   title={
                     !answersRef.current
                       ? "Answer the questionnaire again to regenerate"
@@ -1831,7 +1850,7 @@ export function KickoffDirectionScreen({
             {splitScreens && step === 2 ? (
               briefNeedsApproval ? (
                 <Button
-                  disabled={approveShare.isPending}
+                  disabled={approveShare.isPending || briefCredits.blocked}
                   onClick={() =>
                     approveShare.mutate("brief", {
                       // Both halves exist server-side now. Clearing the seed
@@ -1880,7 +1899,9 @@ export function KickoffDirectionScreen({
               // never a second kickoff.
               <Button
                 disabled={
-                  approveShare.isPending || (!areasNeedsApproval && !areasApproved)
+                  approveShare.isPending ||
+                  (!areasNeedsApproval && !areasApproved) ||
+                  (!areasApproved && briefCredits.blocked)
                 }
                 onClick={() => {
                   // Already signed off: this is just the way back to the plan.
@@ -1924,7 +1945,7 @@ export function KickoffDirectionScreen({
                 )}
                 {skippingClient ? (
                   <Button
-                    disabled={phase !== "result" || list.length === 0}
+                    disabled={phase !== "result" || list.length === 0 || kickoffCredits.blocked}
                     onClick={openApprove}
                     title={list.length === 0 ? "Generate the concept messages first" : undefined}
                     className="bg-indigo-600 text-white hover:bg-indigo-700"
@@ -1936,6 +1957,7 @@ export function KickoffDirectionScreen({
                 <Button
                   disabled={
                     phase !== "result" ||
+                    kickoffCredits.blocked ||
                     list.length === 0 ||
                     !areaChoiceValid ||
                     areasMissingLead.length > 0 ||
@@ -2137,10 +2159,12 @@ function RefinePanel({
   placeholder: string
 }) {
   const [text, setText] = useState("")
+  const refineCredits = useAiStep("annual.refine")
+  const off = loading || refineCredits.blocked
 
   const submit = async (instruction: string) => {
     const value = instruction.trim()
-    if (!value || loading) return
+    if (!value || off) return
     const ok = await onSubmit(value)
     if (ok) setText("")
   }
@@ -2164,7 +2188,7 @@ function RefinePanel({
           <button
             key={chip}
             type="button"
-            disabled={loading}
+            disabled={off}
             onClick={() => submit(chip)}
             className="rounded-full border border-indigo-200 bg-white px-3.5 py-2 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-50 disabled:opacity-50"
           >
@@ -2185,20 +2209,21 @@ function RefinePanel({
               submit(text)
             }
           }}
-          disabled={loading}
+          disabled={off}
           placeholder={placeholder}
           className="min-w-0 flex-1 rounded-full border border-indigo-200 bg-white px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-indigo-400 disabled:opacity-60"
         />
         <button
           type="button"
           onClick={() => submit(text)}
-          disabled={loading || !text.trim()}
+          disabled={off || !text.trim()}
           aria-label="Send instruction"
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition-colors hover:bg-indigo-700 disabled:bg-indigo-300"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
+      <AiCreditsReason step="annual.refine" />
     </div>
   )
 }

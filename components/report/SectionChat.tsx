@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { useContext, useState } from "react"
 import { Loader2, MessageSquareText, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -42,7 +44,8 @@ export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProp
   }
 
   const trimmed = instruction.trim()
-  const disabled = refining || !trimmed
+  const credits = useAiStep("annual.refine")
+  const disabled = refining || credits.blocked || !trimmed
 
   const send = () => {
     if (disabled) return
@@ -104,7 +107,7 @@ export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProp
           onKeyDown={onKeyDown}
           rows={2}
           placeholder="Try: 'make this more concise' or 'add the cost-reduction figure'"
-          disabled={refining}
+          disabled={refining || credits.blocked}
           // Grows to fit, so a Fix button's long instruction shows in full.
           // field-sizing is Chrome/Edge only; elsewhere it stays 2 rows.
           className="max-h-48 resize-none rounded-xl [field-sizing:content]"
@@ -131,6 +134,7 @@ export function SectionChat({ refining, onRefine, sectionCode }: SectionChatProp
           )}
         </Button>
       </div>
+      <AiCreditsReason step="annual.refine" />
     </div>
   )
 }

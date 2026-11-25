@@ -54,6 +54,8 @@ import { formatDate, deptLeadLabel } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { pickReportBuilderDestination } from "@/lib/reportBuilderDestination"
 import { toast } from "sonner"
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 
 // Shape of the PM cycle dashboard API response
 interface PMCycleDashboardData {
@@ -104,6 +106,10 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
   // Analysing here rather than on the findings page so the PM starts it from
   // the card and lands on the findings once it returns.
   const checkDrafts = useCheckDrafts(id)
+  // Greyed out before the click when the company can't afford the AI step.
+  const kickoffCredits = useAiStep("annual.questions")
+  const reportCredits = useAiStep("annual.assemble")
+  const analyzeCredits = useAiStep("annual.validate")
   const setQuestionsDeadline = useSetQuestionsDeadline(id)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1020,9 +1026,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                 )
               }
               return (
+                <div>
                 <Button
                   onClick={() =>
-                    // onSettled, not onSuccess: this button is the only route
+                    analyzeCredits.blocked
+                      ? router.push(`/pm/cycles/${id}/findings`)
+                      : // onSettled, not onSuccess: this button is the only route
                     // to the builder, so a failed model call must still land
                     // the PM on the findings page — where Analyze again and
                     // Open Report Builder both live. Staying here would leave
@@ -1039,6 +1048,10 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
                   {checkDrafts.isPending ? "Analyzing…" : "Analyze Department Drafts"}
                   {!checkDrafts.isPending && <ArrowRight className="ml-2 h-4 w-4" />}
                 </Button>
+                {/* Not greyed out: this is the only way on to the findings
+                    page, so without credits it just opens it, unanalysed. */}
+                <AiCreditsReason step="annual.validate" />
+                </div>
               )
             }
 
@@ -1650,11 +1663,12 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             </div>
           )}
 
+          <AiCreditsReason step="annual.assemble" />
           <DialogFooter>
             <Button variant="outline" onClick={() => setReportDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={handleGenerateReport}
-              disabled={generatingReport || (selectMode === "pick" && selectedSessionIds.size === 0)}
+              disabled={generatingReport || reportCredits.blocked || (selectMode === "pick" && selectedSessionIds.size === 0)}
               className="bg-primary"
             >
               {generatingReport
@@ -1926,7 +1940,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
             )}
             <Button
               onClick={handleSubmitKickoff}
-              disabled={submittingKickoff || !briefText.trim() || !questionsDeadlineInput || kickoffTimedOut || !kickoffLangOk || docLangChecking || !!docLangWarning}
+              disabled={submittingKickoff || kickoffCredits.blocked || !briefText.trim() || !questionsDeadlineInput || kickoffTimedOut || !kickoffLangOk || docLangChecking || !!docLangWarning}
             >
               {submittingKickoff
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1934,6 +1948,7 @@ export default function PMCyclePage({ params }: { params: Promise<{ id: string }
               {submittingKickoff ? "Generating questions…" : "Submit & Generate Questions"}
             </Button>
           </DialogFooter>
+          <AiCreditsReason step="annual.questions" className="text-right" />
         </DialogContent>
       </Dialog>
 

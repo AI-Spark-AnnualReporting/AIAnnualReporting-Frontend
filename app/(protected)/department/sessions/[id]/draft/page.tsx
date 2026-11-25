@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { use, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -56,6 +58,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
   const { data, isLoading, refetch } = useSession(id)
   const generateDraft = useGenerateDraft()
   const adjustTone = useAdjustTone()
+  const draftCredits = useAiStep("annual.department_draft")
+  const toneCredits = useAiStep("annual.refine")
   const finalizeSession = useFinalizeSession()
   const saveDraft = useSaveDraft()
 
@@ -348,7 +352,8 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
             // Confirms now: draft edits are persisted, so regenerating throws
             // away real work rather than just disposable AI output.
             onClick={() => setConfirm("regenerate")}
-            disabled={!canEdit || generateDraft.isPending}
+            disabled={!canEdit || generateDraft.isPending || draftCredits.blocked}
+            title={draftCredits.reason ?? undefined}
           >
             {generateDraft.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -464,12 +469,13 @@ export default function DraftPage({ params }: { params: Promise<{ id: string }> 
             <p className="text-xs text-slate-500">
               Rewrite the draft in a different style using AI.
             </p>
+            <AiCreditsReason step="annual.refine" className="mb-2" />
             <div className="space-y-2">
               {TONE_OPTIONS.map((tone) => (
                 <button
                   key={tone.value}
                   onClick={() => handleAdjustTone(tone.value)}
-                  disabled={!canEdit || adjusting}
+                  disabled={!canEdit || adjusting || toneCredits.blocked}
                   className={cn(
                     "flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm transition-colors",
                     selectedTone === tone.value

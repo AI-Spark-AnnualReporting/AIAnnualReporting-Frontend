@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { useState } from "react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import {
@@ -167,6 +169,8 @@ export function ContentSection({
   const save = isExtract ? saveExtract : saveManual
   const remove = useRemoveAttachment(cycleId)
   const drafter = useDraftStatement(cycleId)
+  // The statement is a section: drafting it is "Write a section".
+  const draftCredits = useAiStep("annual.section")
 
   // --- the assisted statements' choice of source -------------------------
   // All of this is inert on the other five manual sections and on every extract
@@ -503,6 +507,7 @@ export function ContentSection({
                 hasExisting={hasText || hasDoc}
                 drafting={drafter.isPending}
                 busy={busy}
+                draftBlockedReason={draftCredits.reason}
                 draftOption={draftOption}
                 onChoose={chooseSource}
                 onKeep={() => setView("auto")}
@@ -663,7 +668,8 @@ export function ContentSection({
                           variant="outline"
                           size="sm"
                           onClick={() => chooseSource("draft")}
-                          disabled={busy}
+                          disabled={busy || draftCredits.blocked}
+                          title={draftCredits.reason ?? undefined}
                           className="h-8 gap-1.5 border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                         >
                           {drafter.isPending ? (

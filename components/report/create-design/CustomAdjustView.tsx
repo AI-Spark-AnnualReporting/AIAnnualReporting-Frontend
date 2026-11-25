@@ -18,6 +18,8 @@
  * (TemplateVersions).
  */
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, CircleDashed, Loader2, Plus, Undo2, X,
 } from "lucide-react"
@@ -238,8 +240,10 @@ export function CustomAdjustView({
     onNotesChange({ ...notes, templateNotes: notes.templateNotes.filter((_, i) => i !== index) })
   }
 
+  const adjustCredits = useAiStep("annual.design.adjust")
+
   const apply = async () => {
-    if (!drawn) return
+    if (!drawn || adjustCredits.blocked) return
     setStarting(true)
     setError(null)
     try {
@@ -454,8 +458,9 @@ export function CustomAdjustView({
                 Your notes are too long: at most {MAX_ADJUST_NOTE_CHARS} characters each, and 2,000 together.
               </p>
             )}
+            <AiCreditsReason step="annual.design.adjust" className="mb-2" />
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <Button variant="brand" onClick={apply} disabled={!drawn || count === 0 || tooLong || starting}>
+              <Button variant="brand" onClick={apply} disabled={!drawn || count === 0 || tooLong || starting || adjustCredits.blocked}>
                 {starting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
                 Apply changes{count ? ` (${count})` : ""}
               </Button>

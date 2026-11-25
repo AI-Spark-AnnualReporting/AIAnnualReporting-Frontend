@@ -1,5 +1,6 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
@@ -87,6 +88,10 @@ export default function DepartmentDashboard() {
   const { data, isLoading } = useDepartmentDashboard()
   const uploadDocument = useUploadSessionDocument()
   const extractAnswers = useExtractAnswers()
+  // Reading the documents and extracting answers are AI steps; "Skip" isn't.
+  const readCredits = useAiStep("annual.documents")
+  const extractCredits = useAiStep("annual.extract_answers")
+  const extractBlocked = readCredits.reason ?? extractCredits.reason
   const qc = useQueryClient()
   const router = useRouter()
   const [filter, setFilter] = useState<StatusFilter>("all")
@@ -487,12 +492,15 @@ export default function DepartmentDashboard() {
             <Button
               className="bg-indigo-600 text-white hover:bg-indigo-700"
               onClick={handleStartSession}
-              disabled={docCheck.blocked}
+              disabled={docCheck.blocked || (docCheck.docs.length > 0 && !!extractBlocked)}
             >
               {docCheck.docs.length === 0 ? "Skip" : "Extract Answers & Start"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </DialogFooter>
+          {docCheck.docs.length > 0 && extractBlocked && (
+            <p role="status" className="text-right text-xs text-amber-700">{extractBlocked}</p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

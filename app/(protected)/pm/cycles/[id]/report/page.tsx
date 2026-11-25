@@ -1,5 +1,7 @@
 "use client"
 
+import { useAiStep } from "@/hooks/useAiStep"
+import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { use, useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
@@ -90,6 +92,11 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
   const pmData = pmDataRaw as DashboardData | undefined
   const assemble = useAssembleReport(cycleId)
   const render = useRenderReport(cycleId)
+  // Toolbar buttons: greyed out with the reason on hover when the company
+  // can't afford the AI step.
+  const assembleCredits = useAiStep("annual.assemble")
+  const validateCredits = useAiStep("annual.validate")
+  const translateCredits = useAiStep("annual.translate")
 
   // Sign-off state. `refetch` is stable, so it's safe to hand to the hub panel
   // as its onChanged — an inline arrow there would re-run its loader forever.
@@ -229,8 +236,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                     variant="ghost"
                     size="sm"
                     onClick={() => setReassembleOpen(true)}
-                    disabled={assemble.isPending || render.isPending}
-                    title="A section changed in the Builder after this report was built."
+                    disabled={assemble.isPending || render.isPending || assembleCredits.blocked}
+                    title={assembleCredits.reason ?? "A section changed in the Builder after this report was built."}
                     className="h-8"
                   >
                     {assemble.isPending ? (
@@ -314,7 +321,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                         router.push(`/pm/cycles/${cycleId}/validation`),
                     })
                   }}
-                  disabled={validate.isPending}
+                  disabled={validate.isPending || (!hasValidation && validateCredits.blocked)}
+                  title={!hasValidation ? validateCredits.reason ?? undefined : undefined}
                   className="h-8"
                 >
                   {validate.isPending ? (
@@ -365,8 +373,8 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
                 // Greyed only before the first answer: a re-check (e.g. on
                 // returning to the tab) puts a "not found" back to loading,
                 // which made the button blink. errorUpdateCount survives that.
-                disabled={!locked || (arabicQuery.isLoading && arabicQuery.errorUpdateCount === 0)}
-                title={locked ? undefined : "The client approves the report first, then the Arabic version can be created."}
+                disabled={!locked || translateCredits.blocked || (arabicQuery.isLoading && arabicQuery.errorUpdateCount === 0)}
+                title={locked ? translateCredits.reason ?? undefined : "The client approves the report first, then the Arabic version can be created."}
                 className="h-8"
               >
                 <Languages className="h-3.5 w-3.5 mr-1.5" />
@@ -588,6 +596,7 @@ function FinalReportShell({ cycleId }: { cycleId: string }) {
 
 function EmptyReport({ cycleId }: { cycleId: string }) {
   const assemble = useAssembleReport(cycleId)
+  const credits = useAiStep("annual.assemble")
   return (
     <div className="flex flex-1 items-center justify-center p-8 min-h-[60vh]">
       <div className="max-w-md text-center">
@@ -601,10 +610,11 @@ function EmptyReport({ cycleId }: { cycleId: string }) {
           Once all sections are locked, assemble the report to produce the
           final document.
         </p>
+        <AiCreditsReason step="annual.assemble" className="mb-3" />
         <div className="flex items-center justify-center gap-2">
           <Button
             onClick={() => assemble.mutate({})}
-            disabled={assemble.isPending}
+            disabled={assemble.isPending || credits.blocked}
             size="lg"
           >
             {assemble.isPending ? (
