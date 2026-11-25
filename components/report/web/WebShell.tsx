@@ -11,8 +11,6 @@
  * the server has. Comparing the two is the "unsaved changes" check.
  */
 
-import { useAiStep } from "@/hooks/useAiStep"
-import { AiCreditsReason } from "@/components/ai/AiCreditsReason"
 import { ArrowLeft, Globe, Loader2, RefreshCw, Save } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -34,7 +32,6 @@ export function WebShell({ cycleId }: { cycleId: string }) {
   const router = useRouter()
   const query = useWebSitemap(cycleId)
   const createDraft = useCreateSitemapDraft(cycleId)
-  const sitemapCredits = useAiStep("annual.sitemap")
   const save = useSaveSitemap(cycleId)
 
   const saved = query.data?.sitemap ?? null
@@ -100,8 +97,7 @@ export function WebShell({ cycleId }: { cycleId: string }) {
               size="sm"
               className="h-8"
               onClick={() => setReplaceOpen(true)}
-              disabled={createDraft.isPending || save.isPending || sitemapCredits.blocked}
-              title={sitemapCredits.reason ?? undefined}
+              disabled={createDraft.isPending || save.isPending}
             >
               {createDraft.isPending ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -153,10 +149,9 @@ export function WebShell({ cycleId }: { cycleId: string }) {
                   Turn the report&apos;s sections into the pages and menu of a microsite. You
                   can change everything afterwards.
                 </p>
-                <Button variant="brand" onClick={() => createDraft.mutate()} disabled={sitemapCredits.blocked}>
+                <Button variant="brand" onClick={() => createDraft.mutate()}>
                   Create sitemap
                 </Button>
-                <AiCreditsReason step="annual.sitemap" />
               </>
             )}
           </div>

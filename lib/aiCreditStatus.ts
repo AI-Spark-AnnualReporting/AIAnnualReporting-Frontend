@@ -5,7 +5,7 @@
 /** One AI step's key, e.g. "annual.design.custom_template". */
 export type AiStep =
   | "annual.brief" | "annual.questions" | "annual.outline" | "annual.section" | "annual.department_draft"
-  | "annual.sitemap" | "annual.refine"
+  | "annual.refine"
   | "annual.assemble" | "annual.translate" | "annual.validate" | "annual.design.extract"
   | "annual.design.sketch" | "annual.design.custom_template" | "annual.design.adjust"
   | "annual.documents" | "annual.extract_answers" | "annual.chat"
