@@ -49,7 +49,7 @@ export function BackToCentritonButton({ className }: { className?: string }) {
         )}
       >
         <ArrowLeftRight className="h-3.5 w-3.5" />
-        {isSpark ? "Go back" : "Back to Centriton Dashboard"}
+        {isSpark ? "Go back" : "Back to Centriyon Dashboard"}
       </Button>
     </a>
   )

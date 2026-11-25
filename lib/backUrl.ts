@@ -2,7 +2,7 @@
  * Where a Spark (`spark_internal`) session should return to in Centriyon.
  *
  * Spark staff open a client's workspace here from a specific cycle page, and
- * "Back to Centriton Dashboard" would land them on that CLIENT's dashboard —
+ * "Back to Centriyon Dashboard" would land them on that CLIENT's dashboard —
  * a page they must never see. So the cycle page sends its own URL along on the
  * handoff and the nav button returns there instead.
  *

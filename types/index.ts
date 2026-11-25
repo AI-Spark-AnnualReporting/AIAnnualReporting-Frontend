@@ -54,7 +54,7 @@ export interface User {
   department_id?: string | null
   // Which platforms this user can access, e.g. ["spark_studio", "centriton_dashboard"].
   // "spark_studio" (this app) is effectively always present; "centriton_dashboard" is
-  // conditional per user and gates the "Back to Centriton Dashboard" nav button.
+  // conditional per user and gates the "Back to Centriyon Dashboard" nav button.
   apps?: string[]
   phone?: string | null
   created_at?: string
