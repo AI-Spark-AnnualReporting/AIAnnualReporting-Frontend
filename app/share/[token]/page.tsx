@@ -2,6 +2,7 @@
 
 import { use, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
+import { MAX_CLIENT_FILE_MB, fileTooBigMessage, uploadErrorMessage } from "@/lib/clientUpload"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { PageLoader } from "@/components/ui/spinner"
@@ -269,6 +270,13 @@ export default function ClientSharePage({
     // Cleared so the same filename can be re-picked after a failure.
     if (fileRef.current) fileRef.current.value = ""
     if (!file) return
+    // Too big: say so at once, without sending it.
+    const tooBig = fileTooBigMessage(file)
+    if (tooBig) {
+      setDocError(tooBig)
+      setDocState("error")
+      return
+    }
     setDocState("uploading")
     setDocError(null)
     try {
@@ -276,10 +284,7 @@ export default function ClientSharePage({
       setDocName(res.filename)
       setDocState("idle")
     } catch (err) {
-      setDocError(
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          "Couldn't upload that file. PDF, DOCX, DOC or TXT, up to 20 MB.",
-      )
+      setDocError(uploadErrorMessage(err, file.name))
       setDocState("error")
     }
   }
@@ -308,15 +313,18 @@ export default function ClientSharePage({
     )
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
+      // Too big: skip it with a clear message; the others still upload.
+      const tooBig = fileTooBigMessage(file)
+      if (tooBig) {
+        setClientDocsError(tooBig)
+        continue
+      }
       setUploadingLabel(files.length > 1 ? `${file.name} (${i + 1} of ${files.length})` : file.name)
       try {
         const added = await clientShareApi.addSupportingDocument(token, file)
         setClientDocs((prev) => [...prev, added])
       } catch (err) {
-        setClientDocsError(
-          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-            `Couldn't upload ${file.name}. PDF, DOCX, DOC or TXT, up to 20 MB.`,
-        )
+        setClientDocsError(uploadErrorMessage(err, file.name))
       }
     }
     setUploadingLabel(null)
@@ -880,7 +888,7 @@ export default function ClientSharePage({
                             ? docError
                             : docName
                               ? "Attached — this will guide the draft."
-                              : "Already have one? Upload it — PDF, DOCX, DOC or TXT."}
+                              : `Already have one? Upload it — PDF, DOCX, DOC or TXT, one file up to ${MAX_CLIENT_FILE_MB} MB.`}
                       </p>
                     </div>
                   </div>
@@ -928,7 +936,7 @@ export default function ClientSharePage({
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Rather not answer everything? Attach documents that hold the
-                      answers. PDF, DOCX, DOC or TXT.
+                      answers. PDF, DOCX, DOC or TXT, up to {MAX_CLIENT_FILE_MB} MB each.
                     </p>
                   </div>
                   {editable && (

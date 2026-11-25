@@ -1,3 +1,4 @@
+import { CLIENT_UPLOAD_TIMEOUT_MS } from "@/lib/clientUpload"
 import axios from "axios"
 import { checkAiCreditsHeader } from "@/lib/aiCreditsToast"
 import { apiClient } from "@/lib/api/client"
@@ -289,8 +290,9 @@ export const clientShareApi = {
       `/share/${encodeURIComponent(token)}/document`,
       form,
       // Let the browser set the multipart boundary; the instance default of
-      // application/json would make the server reject the body.
-      { headers: { "Content-Type": undefined } },
+      // application/json would make the server reject the body. A longer wait
+      // than the 30 s default: sending up to 20 MB on a slow line takes time.
+      { headers: { "Content-Type": undefined }, timeout: CLIENT_UPLOAD_TIMEOUT_MS },
     )
     return data
   },
@@ -302,7 +304,7 @@ export const clientShareApi = {
     const { data } = await publicClient.post<ClientSupportingDocument>(
       `/share/${encodeURIComponent(token)}/document`,
       form,
-      { headers: { "Content-Type": undefined } },
+      { headers: { "Content-Type": undefined }, timeout: CLIENT_UPLOAD_TIMEOUT_MS },
     )
     return data
   },
