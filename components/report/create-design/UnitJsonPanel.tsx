@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import type { DesignUnit } from "@/lib/api/createDesign"
+import { copyTextToClipboard } from "@/lib/copyText"
 
 export function UnitJsonPanel({
   unit,
@@ -35,13 +36,11 @@ export function UnitJsonPanel({
 
   const copy = async () => {
     if (!unit) return
-    try {
-      await navigator.clipboard.writeText(json)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard is blocked in some contexts; the JSON is selectable anyway.
-    }
+    const ok = await copyTextToClipboard(json)
+    // If both copy methods fail, the JSON is selectable anyway.
+    if (!ok) return
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
   }
 
   return (

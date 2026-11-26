@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { BTN_PRIMARY, BTN_SECONDARY, CARD, RAIL_LABEL } from "@/components/communication/review/shared"
 import { Skeleton } from "@/components/ui/skeletons"
 import { formatDateTime } from "@/lib/utils"
+import { copyTextToClipboard } from "@/lib/copyText"
 import type { ReportReviewState, ReportShare, VersionSummary } from "@/lib/api/reportReview"
 import { useResendReportLink } from "@/hooks/useReportReview"
 import { jumpToReportSection } from "@/components/report/FinalReportView"
@@ -83,12 +84,12 @@ export function ClientReviewCard({
 
   const copyLink = async () => {
     if (!share?.url) return
-    try {
-      await navigator.clipboard.writeText(share.url)
+    const ok = await copyTextToClipboard(share.url)
+    if (ok) {
       toast.success("Link copied.")
-    } catch {
-      toast.error("Couldn't copy. Select the link and copy it by hand.")
+      return
     }
+    toast.error("Couldn't copy. Select the link and copy it by hand.")
   }
 
   return (

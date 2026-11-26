@@ -17,6 +17,7 @@ import {
   isLanguageAcceptable,
 } from "@/lib/lang"
 import { canEditSession, isSessionSubmitted } from "@/lib/session"
+import { copyTextToClipboard } from "@/lib/copyText"
 import { useDocLanguageCheck } from "@/hooks/useDocLanguageCheck"
 import { DocFileRow } from "@/components/ui/doc-file-row"
 import { LanguageMismatchAlert } from "@/components/ui/language-mismatch-alert"
@@ -104,6 +105,16 @@ function extractAiText(res: unknown): string | null {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+/** Copy an answer and say whether it worked. "Copied" only shows when it really copied. */
+async function copyAnswerText(text: string): Promise<void> {
+  const ok = await copyTextToClipboard(text)
+  if (ok) {
+    toast.success("Copied")
+    return
+  }
+  toast.error("Couldn't copy. Select the text and copy it by hand.")
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -1017,7 +1028,7 @@ export default function SessionWorkspacePage({
                             <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
                           </button>
                           <button
-                            onClick={() => { navigator.clipboard.writeText(aiResult); toast.success("Copied") }}
+                            onClick={() => copyAnswerText(aiResult)}
                             className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
                           >
                             <Copy className="h-3 w-3" /> Copy
@@ -1067,10 +1078,7 @@ export default function SessionWorkspacePage({
                             <ArrowUpRight className="h-3.5 w-3.5" /> Use as answer
                           </button>
                           <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(storedAnswer ?? "")
-                              toast.success("Copied")
-                            }}
+                            onClick={() => copyAnswerText(storedAnswer ?? "")}
                             className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
                           >
                             <Copy className="h-3 w-3" /> Copy

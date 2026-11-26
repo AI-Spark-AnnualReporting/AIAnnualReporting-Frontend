@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { copyTextToClipboard } from "@/lib/copyText"
 import {
   useApproveClientShare,
   useRemindClient,
@@ -138,12 +139,12 @@ export function DepartmentShareButton({
 
   const copyLink = async () => {
     if (!share) return
-    try {
-      await navigator.clipboard.writeText(share.url)
+    const ok = await copyTextToClipboard(share.url)
+    if (ok) {
       toast.success("Link copied.")
-    } catch {
-      toast.error("Couldn't copy — select the link and copy it manually.")
+      return
     }
+    toast.error("Couldn't copy — select the link and copy it manually.")
   }
 
   const send = () =>

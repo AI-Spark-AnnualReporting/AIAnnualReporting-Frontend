@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useShareReportWithClient } from "@/hooks/useReportReview"
+import { copyTextToClipboard } from "@/lib/copyText"
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -67,12 +68,12 @@ export function ShareWithClientDialog({
 
   const copyLink = async () => {
     if (!sentUrl) return
-    try {
-      await navigator.clipboard.writeText(sentUrl)
+    const ok = await copyTextToClipboard(sentUrl)
+    if (ok) {
       toast.success("Link copied.")
-    } catch {
-      toast.error("Couldn't copy. Select the link and copy it by hand.")
+      return
     }
+    toast.error("Couldn't copy. Select the link and copy it by hand.")
   }
 
   return (

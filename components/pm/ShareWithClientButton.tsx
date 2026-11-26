@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { copyTextToClipboard } from "@/lib/copyText"
 import {
   useApproveShare,
   useCreateShare,
@@ -185,14 +186,14 @@ export function ShareWithClientButton({
 
   const copyLink = async () => {
     if (!share) return
-    try {
-      await navigator.clipboard.writeText(share.url)
+    const ok = await copyTextToClipboard(share.url)
+    if (ok) {
       toast.success("Link copied.")
-    } catch {
-      // Clipboard access needs a secure context; without it the link is still
-      // readable on screen, so don't pretend the copy worked.
-      toast.error("Couldn't copy — select the link and copy it manually.")
+      return
     }
+    // Both copy methods failed; the link is still readable on screen, so
+    // don't pretend the copy worked.
+    toast.error("Couldn't copy — select the link and copy it manually.")
   }
 
   const send = () =>
